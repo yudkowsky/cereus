@@ -1,0 +1,135 @@
+#include <windows.h>
+#include <stdbool.h>
+#include "win32_renderer_bridge.h"
+#include "win32_cereus_bridge.h"
+
+#define local_persist static
+#define global_variable static 
+#define internal static
+
+TickInput tick_input = {0};
+
+LRESULT CALLBACK windowMessageProcessor(
+    HWND window_handle, 
+    UINT message_id,
+    WPARAM wParam, 
+    LPARAM lParam)
+{
+    switch (message_id)
+    {
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+
+        case WM_KEYDOWN:
+            switch (wParam)
+            {
+                case 'W':
+                    tick_input.w_press = true; 
+                    break;
+                case 'A':
+                    tick_input.a_press = true; 
+                    break;
+                case 'S':
+                    tick_input.s_press = true; 
+                    break;
+                case 'D':
+                    tick_input.d_press = true; 
+                    break;
+            }
+            break;
+        case WM_KEYUP:
+            switch (wParam)
+            {
+            	case 'W':
+                    tick_input.w_press = false; 
+                    break;
+            	case 'A':
+                    tick_input.a_press = false; 
+                    break;
+                case 'S':
+                    tick_input.s_press = false; 
+                    break;
+                case 'D':
+                    tick_input.d_press = false; 
+                    break;
+            }
+    }
+    return DefWindowProcW(window_handle, message_id, wParam, lParam);
+}
+
+int CALLBACK WinMain(
+	HINSTANCE module_handle,
+	HINSTANCE _,
+	LPSTR     command_line,
+	int       initial_show_state)
+{
+	(void)_;
+    (void)command_line;
+
+	WNDCLASSEXW window_class = {0};
+
+	window_class.cbSize = sizeof(window_class);
+	window_class.lpfnWndProc = windowMessageProcessor;
+	window_class.hInstance = module_handle;
+	window_class.hCursor = LoadCursor(0, IDC_ARROW); // NOTE(spike): remove when want custom cursor
+	window_class.lpszClassName = L"standard_window_class";
+
+    RegisterClassExW(&window_class);
+
+	HWND window_handle = CreateWindowExW(
+		0,
+		L"standard_window_class",
+		L"Window Name",
+		WS_OVERLAPPEDWINDOW,
+		CW_USEDEFAULT,
+		CW_USEDEFAULT,
+		CW_USEDEFAULT,
+		CW_USEDEFAULT,
+		0,
+		0,
+		module_handle, 
+		0);
+
+    ShowWindow(window_handle, initial_show_state);
+
+    LARGE_INTEGER ticks_per_second;
+    LARGE_INTEGER last_tick_time;
+    QueryPerformanceFrequency(&ticks_per_second);
+    QueryPerformanceCounter(&last_tick_time);
+    double seconds_per_tick = 1.0 / ticks_per_second.QuadPart;
+
+    MSG queued_message = {0};
+    bool running = true;
+	
+    RendererPlatformHandles platform_handles = { .module_handle = module_handle, .window_handle = window_handle};
+    rendererInitialise(platform_handles);
+
+    gameInitialise(); 
+
+    while (running)
+    {
+		// OutputDebugStringA("hello running loop\n");
+
+		while (PeekMessageW(&queued_message, 0, 0, 0, PM_REMOVE))
+        {
+            if (queued_message.message == WM_QUIT) 
+			{
+                running = false;
+                break;
+            }
+            DispatchMessage(&queued_message);
+        }
+
+        LARGE_INTEGER current_tick_time;
+        QueryPerformanceCounter(&current_tick_time);
+        double delta_time = (current_tick_time.QuadPart - last_tick_time.QuadPart) * seconds_per_tick;
+
+        last_tick_time = current_tick_time;
+
+        gameFrame(delta_time, tick_input); 
+		rendererDraw();
+    }
+
+    return (int)queued_message.wParam;
+}
