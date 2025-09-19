@@ -51,7 +51,7 @@ void gameInitialise(void)
 	makeVertex(vertex3_pos, vertex3_color, &vertices[2]);
 
 	makeTriangle(vertices, &game_state.current_world_state.triangle);
-	game_state.previous_world_state = game_state.current_world_state; // bootstrap snapshots
+    game_state.previous_world_state = game_state.current_world_state; // bootstrap snapshots
 }
 
 void gameFrame(double delta_time, TickInput tick_input)
@@ -62,11 +62,37 @@ void gameFrame(double delta_time, TickInput tick_input)
 	game_state.accumulator += delta_time;
     while (game_state.accumulator >= PHYSICS_INCREMENT)
     {
-      	game_state.previous_world_state = game_state.current_world_state;
-
-        // change current world state
+        game_state.previous_world_state = game_state.current_world_state;
 
         game_state.accumulator -= PHYSICS_INCREMENT;
+    }
+
+    if (tick_input.w_press)
+    {
+        game_state.current_world_state.triangle.point1.pos[1] += 0.01f;
+        game_state.current_world_state.triangle.point2.pos[1] += 0.01f;
+        game_state.current_world_state.triangle.point3.pos[1] += 0.01f;
+    }
+
+    if (tick_input.a_press)
+    {
+        game_state.current_world_state.triangle.point1.pos[0] -= 0.01f;
+        game_state.current_world_state.triangle.point2.pos[0] -= 0.01f;
+        game_state.current_world_state.triangle.point3.pos[0] -= 0.01f;
+    }
+
+    if (tick_input.s_press)
+    {
+        game_state.current_world_state.triangle.point1.pos[1] -= 0.01f;
+        game_state.current_world_state.triangle.point2.pos[1] -= 0.01f;
+        game_state.current_world_state.triangle.point3.pos[1] -= 0.01f;
+    }
+
+    if (tick_input.d_press)
+    {
+        game_state.current_world_state.triangle.point1.pos[0] += 0.01f;
+        game_state.current_world_state.triangle.point2.pos[0] += 0.01f;
+        game_state.current_world_state.triangle.point3.pos[0] += 0.01f;
     }
 
     double interpolation_fraction = game_state.accumulator / PHYSICS_INCREMENT;
