@@ -7,10 +7,8 @@
 #define internal static
 
 const double PHYSICS_INCREMENT = 1.0/60.0;
-
-// const IntCoords SCREEN_RESOLUTION = { 1920, 1080 };
-// const double NORMALIZED_X_CONVERSION = 2.0 / SCREEN_RESOLUTION.x;
-// const double NORMALIZED_Y_CONVERSION = 2.0 / SCREEN_RESOLUTION.y;
+const NormalizedCoords NORMALIZED_CONVERSION = { 2.0 / 1920.0, 2.0 / 1080.0 };
+const NormalizedCoords DEFAULT_SCALE = {6, 6};
 
 WorldState current_world_state = {0};
 double accumulator = 0.0;
@@ -19,8 +17,8 @@ char* grid_tile_path = "data/sprites/grid.png";
 
 TextureToLoad textures_to_load[128] = {0};
 
-// modifies textures_to_load
-void drawSprite(char* texture_path, NormalizedCoords origin)
+// modifies textures_to_load. scale input is pixels/pixel, output is multiplied 2 / screen resolution (fits in [-1, 1])
+void drawSprite(char* texture_path, NormalizedCoords origin, NormalizedCoords scale)
 {
     int32 texture_location = -1;
     // load has not been attempted here; find next free in textures_to_load
@@ -41,15 +39,14 @@ void drawSprite(char* texture_path, NormalizedCoords origin)
             break;
         }
     }
-	textures_to_load[texture_location].origin[textures_to_load[texture_location].instance_count].x = origin.x;
-	textures_to_load[texture_location].origin[textures_to_load[texture_location].instance_count].y = origin.y;
+    scale = (NormalizedCoords){ scale.x * NORMALIZED_CONVERSION.x, scale.y * NORMALIZED_CONVERSION.y };
+
+	textures_to_load[texture_location].origin[textures_to_load[texture_location].instance_count] = origin;
+    textures_to_load[texture_location].scale[textures_to_load[texture_location].instance_count] = scale;
     textures_to_load[texture_location].instance_count++;
 }
 
-void gameInitialise(void)
-{
-    current_world_state.pixel_size  = 6;
-}
+void gameInitialise(void) {}
 
 NormalizedCoords dummy_coords = { 0.0, 0.0 };
 
@@ -61,9 +58,9 @@ void gameFrame(double delta_time, TickInput tick_input)
 	accumulator += delta_time;
     while (accumulator >= PHYSICS_INCREMENT)
     {
-        drawSprite(grid_tile_path, dummy_coords);
+        drawSprite(grid_tile_path, dummy_coords, DEFAULT_SCALE);
         accumulator -= PHYSICS_INCREMENT;
-        rendererSubmitFrame(current_world_state, textures_to_load);
+        rendererSubmitFrame(textures_to_load);
         memset(textures_to_load, 0, sizeof(textures_to_load)); // clear textures_to_load
     }
     rendererDraw();

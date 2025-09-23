@@ -5,5 +5,5 @@
 
 void gameInitialise(void);
 void gameFrame(double, TickInput);
-void rendererSubmitFrame(WorldState current_world_state, TextureToLoad textures[128]);
+void rendererSubmitFrame(TextureToLoad textures_to_load[128]);
 void rendererDraw();

@@ -7,6 +7,9 @@
 
 #include "stb_image.h" // TODO(spike): make a png parser, is probably fun. alternatively look at sean's c libraries
 
+const IntCoords SCREEN_RESOLUTION = { 1920, 1080 };
+const float PIXEL_SCALE = 6.0f;
+
 typedef struct Vertex
 {
     float x, y;
@@ -30,6 +33,7 @@ typedef struct TextureToDraw
 {
     uint32 place_in_cache;
     NormalizedCoords origin[64];
+    NormalizedCoords scale[64];
     uint32 instance_count;
 }
 TextureToDraw;
@@ -899,7 +903,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	VkPushConstantRange push_constant_range = {0}; 
     push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     push_constant_range.offset = 0;
-    push_constant_range.size = sizeof(NormalizedCoords); // the only metainformation encoded here is the position.
+    push_constant_range.size = sizeof(NormalizedCoords) * 2; // information: position (x,y) and width / height of texture in absolute coords
 
     // a graphics pipeline is a big bundle of stuff the GPU needs to turn vertices into pixels for a specific render pass.
     // contains great things like: shaders: which vertex/fragment programs to run; input assembly: how to interpret vertices (e.g. this is a triangle); rasterisation rules, color blend...
@@ -932,16 +936,6 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	graphics_pipeline_creation_info.basePipelineIndex = -1;
 
 	vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &graphics_pipeline_creation_info, 0, &renderer_state.graphics_pipeline_handle);
-
-    // temporary bootstrap
-    Vertex quad[6] = {
-      // { -0.5f, -0.5f }, { 0.5f, -0.5f }, { 0.5f, 0.5f },
-      // { -0.5f, -0.5f }, { 0.5f, 0.5f }, { -0.5f, 0.5f },
-      { -1.0f, -1.0f, 1.0f, 0.0f, 0.0f }, { 1.0f, -1.0f, 1.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f, 0.0f, 0.0f },
-      { -1.0f, -1.0f, 1.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f, 0.0f, 0.0f }, { -1.0f, 1.0f, 1.0f, 0.0f, 0.0f },
-    };
-    memcpy(frame_vertex_stash, quad, sizeof(quad));
-    frame_vertex_count = 6;
 }
 
 int16 loadTexture(TextureToLoad texture)
@@ -1146,7 +1140,7 @@ int16 loadTexture(TextureToLoad texture)
     return renderer_state.texture_cache_count - 1;
 }
 
-void rendererSubmitFrame(WorldState current_world_state, TextureToLoad textures_to_load[128])
+void rendererSubmitFrame(TextureToLoad textures_to_load[128])
 {
     memset(textures_to_draw, 0, sizeof(textures_to_draw)); // clear textures to draw only when new submit happens
                                                            // otherwise we will keep drawing these in draw, with only slight changes for interpolation, maybe, which will happen on renderer layer (?, ?)
@@ -1177,14 +1171,27 @@ void rendererSubmitFrame(WorldState current_world_state, TextureToLoad textures_
             }
         }
         textures_to_draw[texture_index].place_in_cache = place_in_cache;
-        textures_to_draw[texture_index].instance_count = textures_to_load[texture_index].instance_count; // see below comment
+        textures_to_draw[texture_index].instance_count = textures_to_load[texture_index].instance_count;
 
        	for (uint32 texture_instance_index = 0; texture_instance_index < textures_to_draw[texture_index].instance_count; texture_instance_index++) 
         {
-            // TODO(spike): temporary fix. i probably shouldn't even have the separate to_draw and to_load structs - they are very similar - just add place_in_cache
-            // field to to_load, pass it through and modify local? or at least memcpy over, instead of for looping like this, probably slow.
-            textures_to_draw[texture_index].origin[texture_instance_index].x = textures_to_load[texture_index].origin[texture_instance_index].x;
-            textures_to_draw[texture_index].origin[texture_instance_index].y = textures_to_load[texture_index].origin[texture_instance_index].y;
+            textures_to_draw[texture_index].origin[texture_instance_index] = textures_to_load[texture_index].origin[texture_instance_index];
+            textures_to_draw[texture_index].scale[texture_instance_index] = textures_to_load[texture_index].scale[texture_instance_index];
+
+            // put vertices into buffer here
+            float quad_width = (16 * textures_to_draw[texture_index].scale[texture_instance_index].x); 
+            float quad_height = (16 * textures_to_draw[texture_index].scale[texture_instance_index].y); 
+
+            Vertex quad[6] = {
+              { 0.0f, 		0.0f, }, 
+              { quad_width, 0.0f, }, 
+              { quad_width, quad_height, },
+              { 0.0f, 		0.0f, },
+              { quad_width, quad_height, }, 
+              { 0.0f, 		quad_height, },
+            };
+            memcpy(frame_vertex_stash, quad, sizeof(quad));
+            frame_vertex_count += 6;
         }
     }
 }
@@ -1292,11 +1299,16 @@ void rendererDraw(void)
 
         for (uint32 texture_instance = 0; texture_instance < textures_to_draw[texture_index].instance_count; texture_instance++)
         {
+			NormalizedCoords push_data[2];
+            push_data[0] = textures_to_draw[texture_index].origin[texture_instance];
+            push_data[1].x = 16.0 * textures_to_draw[texture_index].scale[texture_instance].x;
+            push_data[1].y = 16.0 * textures_to_draw[texture_index].scale[texture_instance].y;
+
             vkCmdPushConstants(command_buffer, 
                                renderer_state.graphics_pipeline_layout, 
                                VK_SHADER_STAGE_VERTEX_BIT, 0, 
-                               sizeof(NormalizedCoords), 
-                               &textures_to_draw[texture_index].origin[texture_instance]);
+                               sizeof(push_data), 
+                               push_data);
             vkCmdDraw(command_buffer, frame_vertex_count, 1, 0, 0);
         }
     }
