@@ -1,25 +1,34 @@
 #pragma once
 
-typedef struct Vertex 
-{
-    float pos[2];
-    float color[3];
-} 
-Vertex;
+#include "types.h"
 
-typedef struct Triangle
+typedef struct NormalizedCoords // [-1, 1]
 {
-	Vertex point1;
-    Vertex point2;
-    Vertex point3;
+    double x, y;
 }
-Triangle;
+NormalizedCoords;
+
+typedef struct IntCoords
+{
+    int16 x, y;
+}
+IntCoords;
 
 typedef struct WorldState 
 {
-   Triangle triangle; 
+    int pixel_size;
+
+    IntCoords player_position;
 }
 WorldState;
+
+typedef struct TextureToLoad
+{
+	char* path;
+	NormalizedCoords origin[64];
+    uint32 instance_count;
+}
+TextureToLoad;
 
 typedef struct TickInput
 {

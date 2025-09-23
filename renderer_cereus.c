@@ -1,11 +1,39 @@
 #define VK_USE_PLATFORM_WIN32_KHR
+#define STB_IMAGE_IMPLEMENTATION
 
 #include <stdio.h>
 #include "win32_renderer_bridge.h"
 #include <vulkan/vulkan.h>
 
-internal Vertex frame_vertex_stash[1024];
-internal uint32 frame_vertex_count = 0;
+#include "stb_image.h" // TODO(spike): make a png parser, is probably fun. alternatively look at sean's c libraries
+
+typedef struct Vertex
+{
+    float x, y;
+    float r, g ,b;
+}
+Vertex;
+
+Vertex frame_vertex_stash[1024];
+uint32 frame_vertex_count = 0;
+
+typedef struct 
+{
+	VkImage image;
+    VkDeviceMemory memory;
+    VkImageView view;
+    char path[256];
+}
+CachedTexture;
+
+typedef struct TextureToDraw
+{
+    uint32 place_in_cache;
+    NormalizedCoords origin[64];
+    uint32 instance_count;
+}
+TextureToDraw;
+TextureToDraw textures_to_draw[256];
 
 typedef struct
 {
@@ -45,6 +73,14 @@ typedef struct
     VkShaderModule fragment_shader_module_handle;
     VkPipelineLayout graphics_pipeline_layout; 
     VkPipeline graphics_pipeline_handle;
+
+    VkSampler pixel_art_sampler;
+    CachedTexture texture_cache[256];
+    uint32 texture_cache_count;
+
+    VkDescriptorSetLayout descriptor_set_layout;
+    VkDescriptorPool descriptor_pool;
+    VkDescriptorSet descriptor_sets[256];
 }
 RendererState;
 RendererState renderer_state;
@@ -53,11 +89,11 @@ internal uint32 findMemoryType(uint32 type_bits, VkMemoryPropertyFlags property_
 {
     VkPhysicalDeviceMemoryProperties memory_properties = {0};
     vkGetPhysicalDeviceMemoryProperties(renderer_state.physical_device_handle, &memory_properties); // TODO(spike): could remove dependency on renderer_state here by passing it, but probably not an issue (read only)
-    for (uint32 memory_type_count_increment = 0; memory_properties.memoryTypeCount; memory_type_count_increment++)
+    for (uint32 memory_type_count_increment = 0; memory_type_count_increment < memory_properties.memoryTypeCount; memory_type_count_increment++)
     {
         bool is_compatible = (type_bits & (1u << memory_type_count_increment)) != 0;
         bool has_properties = (memory_properties.memoryTypes[memory_type_count_increment].propertyFlags & property_flags) == property_flags;
-        if (is_compatible && has_properties) return 1;
+        if (is_compatible && has_properties) return memory_type_count_increment;
     }
     return UINT32_MAX;
 }
@@ -75,7 +111,7 @@ internal bool readEntireFile(char* path, void** out_data, size_t* out_size) // T
         fclose(file);
         return false;
     }
-    size_t bytes_read = fread(file_bytes, 1, file_size_bytes, file); // TODO(spike): another size_t here
+    size_t bytes_read = fread(file_bytes, 1, file_size_bytes, file);
 	if (bytes_read != file_size_bytes)
     {
         fclose(file);
@@ -295,7 +331,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     // i.e., if present family differs from graphics family, and so we have two queues
     bool graphics_present_families_same = (renderer_state.present_family_index == renderer_state.graphics_family_index);
 
-    if (graphics_present_families_same)
+    if (!graphics_present_families_same)
     {
         VkDeviceQueueCreateInfo present_queue_info = {0};
         present_queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -375,7 +411,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
    	swapchain_creation_info.clipped = VK_TRUE;
     swapchain_creation_info.oldSwapchain = VK_NULL_HANDLE;
 
-    if (graphics_present_families_same == false) 
+    if (graphics_present_families_same) 
     {
         swapchain_creation_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
         // queueFamilyIndexCount and pQueueFamilyIndices are ignored on exclusive sharing mode
@@ -719,13 +755,13 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     vertex_attribute_pos.location = 0;
     vertex_attribute_pos.binding = 0;
     vertex_attribute_pos.format = VK_FORMAT_R32G32_SFLOAT; // two 32-bit floats, matching vec2 position
-	vertex_attribute_pos.offset = offsetof(Vertex, pos);
+	vertex_attribute_pos.offset = offsetof(Vertex, x);
 
     VkVertexInputAttributeDescription vertex_attribute_color = {0};
     vertex_attribute_color.location = 1;
     vertex_attribute_color.binding = 0;
     vertex_attribute_color.format = VK_FORMAT_R32G32B32_SFLOAT; // three 32-bit floats, matching vec3 color
-	vertex_attribute_color.offset = offsetof(Vertex, color);
+	vertex_attribute_color.offset = offsetof(Vertex, r);
 
 	VkVertexInputBindingDescription bindings[] = { vertex_binding };
     VkVertexInputAttributeDescription attributes[] = { vertex_attribute_pos, vertex_attribute_color };
@@ -811,13 +847,71 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	depth_stencil_state_creation_info.front = (VkStencilOpState){0};
 	depth_stencil_state_creation_info.back = (VkStencilOpState){0};
 
+    VkSamplerCreateInfo sampler_creation_info = {0};
+    sampler_creation_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO; // TODO(spike): double check all this info at some point
+    sampler_creation_info.magFilter = VK_FILTER_NEAREST;
+    sampler_creation_info.minFilter = VK_FILTER_NEAREST;
+    sampler_creation_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_creation_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_creation_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    sampler_creation_info.anisotropyEnable = VK_FALSE;
+    sampler_creation_info.maxAnisotropy = 1.0f;
+    sampler_creation_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    sampler_creation_info.unnormalizedCoordinates = VK_FALSE;
+    sampler_creation_info.compareEnable = VK_FALSE;
+    sampler_creation_info.compareOp = VK_COMPARE_OP_ALWAYS;
+    sampler_creation_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    sampler_creation_info.mipLodBias = 0.0f;
+    sampler_creation_info.minLod = 0.0f;
+    sampler_creation_info.maxLod = 0.0f;
+
+    vkCreateSampler(renderer_state.logical_device_handle, &sampler_creation_info, 0, &renderer_state.pixel_art_sampler);
+
+    // descriptor sets let the fragment shader look up the texture it needs from gpu memory. one descriptor set per texture in texture cache.
+	VkDescriptorSetLayoutBinding descriptor_set_binding = {0};
+	descriptor_set_binding.binding = 0;
+    descriptor_set_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptor_set_binding.descriptorCount = 1;
+    descriptor_set_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo descriptor_set_layout_creation_info = {0};
+    descriptor_set_layout_creation_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descriptor_set_layout_creation_info.bindingCount = 1;
+    descriptor_set_layout_creation_info.pBindings = &descriptor_set_binding;
+
+    vkCreateDescriptorSetLayout(renderer_state.logical_device_handle, &descriptor_set_layout_creation_info, 0, &renderer_state.descriptor_set_layout);
+
+    // descriptor pool allocates memory for all descriptor sets
+    VkDescriptorPoolSize descriptor_pool_size = {0};
+    descriptor_pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptor_pool_size.descriptorCount = 256;
+    
+    VkDescriptorPoolCreateInfo descriptor_pool_creation_info = {0};
+    descriptor_pool_creation_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    descriptor_pool_creation_info.poolSizeCount = 1;
+    descriptor_pool_creation_info.pPoolSizes = &descriptor_pool_size;
+    descriptor_pool_creation_info.maxSets = 256;
+
+    vkCreateDescriptorPool(renderer_state.logical_device_handle, &descriptor_pool_creation_info, 0, &renderer_state.descriptor_pool);
+
+	// a push constant is some piece of data that the gpu needs in addition to the raw pixel data
+    // range here means the byte window which the shader is supposed to read
+	VkPushConstantRange push_constant_range = {0}; 
+    push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    push_constant_range.offset = 0;
+    push_constant_range.size = sizeof(NormalizedCoords); // the only metainformation encoded here is the position.
+
     // a graphics pipeline is a big bundle of stuff the GPU needs to turn vertices into pixels for a specific render pass.
     // contains great things like: shaders: which vertex/fragment programs to run; input assembly: how to interpret vertices (e.g. this is a triangle); rasterisation rules, color blend...
 
-    VkPipelineLayoutCreateInfo pipeline_layout_creation_info = {0}; // create empty pipeline for now
-    pipeline_layout_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    VkPipelineLayoutCreateInfo graphics_pipeline_layout_creation_info = {0}; // create empty pipeline for now
+    graphics_pipeline_layout_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    graphics_pipeline_layout_creation_info.setLayoutCount = 1;
+    graphics_pipeline_layout_creation_info.pSetLayouts = &renderer_state.descriptor_set_layout;
+    graphics_pipeline_layout_creation_info.pushConstantRangeCount = 1;
+    graphics_pipeline_layout_creation_info.pPushConstantRanges = &push_constant_range;
 
-	vkCreatePipelineLayout(renderer_state.logical_device_handle, &pipeline_layout_creation_info, 0, &renderer_state.graphics_pipeline_layout);
+    vkCreatePipelineLayout(renderer_state.logical_device_handle, &graphics_pipeline_layout_creation_info, 0, &renderer_state.graphics_pipeline_layout);
 
    	VkGraphicsPipelineCreateInfo graphics_pipeline_creation_info = {0}; // struct that points to all those sub-blocks we just defined; it actually builds the pipeline object
 	graphics_pipeline_creation_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -837,28 +931,267 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	graphics_pipeline_creation_info.basePipelineHandle = VK_NULL_HANDLE; // not deriving from another pipeline.
 	graphics_pipeline_creation_info.basePipelineIndex = -1;
 
-	VkResult graphics_pipeline_creation_result = vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &graphics_pipeline_creation_info, 0, &renderer_state.graphics_pipeline_handle);
-    if (graphics_pipeline_creation_result != VK_SUCCESS)
-    {
-        return;
-        // TODO(spike): various frees here
-    }
+	vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &graphics_pipeline_creation_info, 0, &renderer_state.graphics_pipeline_handle);
+
+    // temporary bootstrap
+    Vertex quad[6] = {
+      // { -0.5f, -0.5f }, { 0.5f, -0.5f }, { 0.5f, 0.5f },
+      // { -0.5f, -0.5f }, { 0.5f, 0.5f }, { -0.5f, 0.5f },
+      { -1.0f, -1.0f, 1.0f, 0.0f, 0.0f }, { 1.0f, -1.0f, 1.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f, 0.0f, 0.0f },
+      { -1.0f, -1.0f, 1.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f, 0.0f, 0.0f }, { -1.0f, 1.0f, 1.0f, 0.0f, 0.0f },
+    };
+    memcpy(frame_vertex_stash, quad, sizeof(quad));
+    frame_vertex_count = 6;
 }
 
-void rendererSubmitFrame(WorldState* previous_world_state, WorldState* current_world_state, double interpolation_fraction)
+int16 loadTexture(TextureToLoad texture)
 {
-	(void)previous_world_state; // not using these yet
-    (void)interpolation_fraction;
-    Vertex vertices[3] = {current_world_state->triangle.point1, current_world_state->triangle.point2, current_world_state->triangle.point3}; // variable for readability
-    uint32 vertex_num = 3;
-    // if (vertex_num > 1024) vertex_num = 1024;
-    memcpy(frame_vertex_stash, vertices, vertex_num * sizeof(Vertex));
-    frame_vertex_count = vertex_num;
+    int width, height, channels;
+    uint8* pixels = (uint8*)stbi_load(texture.path, &width, &height, &channels, STBI_rgb_alpha); // it wants unsigned char here instead of uint8
+    if (!pixels) return -1;
+
+    VkDeviceSize image_size_bytes = width * height * 4; // 4 bytes per pixel
+    VkBuffer staging_buffer;
+    VkDeviceMemory staging_buffer_memory;
+
+    VkBufferCreateInfo buffer_info = {0}; // TODO(spike): when doing better memory management, see what i should do here to put this memory in the right place
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size = image_size_bytes;
+    buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    vkCreateBuffer(renderer_state.logical_device_handle, &buffer_info, 0, &staging_buffer);
+
+    VkMemoryRequirements cpu_memory_requirements;
+	vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, staging_buffer, &cpu_memory_requirements);
+
+    VkMemoryAllocateInfo cpu_memory_allocation_info = {0};
+    cpu_memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    cpu_memory_allocation_info.allocationSize = cpu_memory_requirements.size;
+    cpu_memory_allocation_info.memoryTypeIndex = findMemoryType(cpu_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    vkAllocateMemory(renderer_state.logical_device_handle, &cpu_memory_allocation_info, 0, &staging_buffer_memory);
+    vkBindBufferMemory(renderer_state.logical_device_handle, staging_buffer, staging_buffer_memory, 0);
+
+    void* gpu_memory_pointer; // starts as CPU pointer
+    vkMapMemory(renderer_state.logical_device_handle, staging_buffer_memory, 0, image_size_bytes, 0, &gpu_memory_pointer); // data now points to GPU-visible memory
+    memcpy(gpu_memory_pointer, pixels, (size_t)image_size_bytes); // writes from pixels to data
+    vkUnmapMemory(renderer_state.logical_device_handle, staging_buffer_memory); // removes CPU access
+
+    stbi_image_free(pixels);
+
+    VkImage texture_image;
+    VkDeviceMemory texture_image_memory;
+
+    VkImageCreateInfo image_info = {0};
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.extent.width = width;
+    image_info.extent.height = height;
+    image_info.extent.depth = 1;
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1; 
+    image_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    image_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+
+    vkCreateImage(renderer_state.logical_device_handle, &image_info, 0, &texture_image);
+
+	VkMemoryRequirements gpu_memory_requirements;
+    vkGetImageMemoryRequirements(renderer_state.logical_device_handle, texture_image, &gpu_memory_requirements);
+
+    VkMemoryAllocateInfo gpu_memory_allocation_info = {0};
+    gpu_memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    gpu_memory_allocation_info.allocationSize = gpu_memory_requirements.size;
+	gpu_memory_allocation_info.memoryTypeIndex = findMemoryType(gpu_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    vkAllocateMemory(renderer_state.logical_device_handle, &gpu_memory_allocation_info, 0, &texture_image_memory);
+    vkBindImageMemory(renderer_state.logical_device_handle, texture_image, texture_image_memory, 0);
+
+    VkCommandBufferAllocateInfo command_buffer_allocation_info = {0};
+    command_buffer_allocation_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    command_buffer_allocation_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    command_buffer_allocation_info.commandPool = renderer_state.graphics_command_pool_handle;
+    command_buffer_allocation_info.commandBufferCount = 1;
+
+    VkCommandBuffer command_buffer;
+    vkAllocateCommandBuffers(renderer_state.logical_device_handle, &command_buffer_allocation_info, &command_buffer);
+
+    VkCommandBufferBeginInfo command_buffer_begin_info = {0};
+    command_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    command_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
+
+    // transition image to transfer
+    VkImageMemoryBarrier to_transfer_barrier = {0}; // synchronization point - wait until image is written to transfer
+    to_transfer_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_transfer_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    to_transfer_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; // arranged for fast writing
+	to_transfer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	to_transfer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	to_transfer_barrier.image = texture_image;
+	to_transfer_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	to_transfer_barrier.subresourceRange.baseMipLevel = 0;
+	to_transfer_barrier.subresourceRange.levelCount = 1;
+	to_transfer_barrier.subresourceRange.baseArrayLayer = 0;
+	to_transfer_barrier.subresourceRange.layerCount = 1;
+	to_transfer_barrier.srcAccessMask = 0; // no memory operations need to complete (we don't care about previous data here)
+	to_transfer_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    VkPipelineStageFlags to_transfer_source_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    VkPipelineStageFlags to_transfer_destination_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    
+    vkCmdPipelineBarrier(command_buffer, to_transfer_source_stage, to_transfer_destination_stage, 0, 0, 0, 0, 0, 1, &to_transfer_barrier);
+
+    // copy from staging buffer to image
+    VkBufferImageCopy copy_region = {0};
+    copy_region.bufferOffset = 0;
+    copy_region.bufferRowLength = 0;
+    copy_region.bufferImageHeight = 0;
+    copy_region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy_region.imageSubresource.mipLevel = 0;
+    copy_region.imageSubresource.baseArrayLayer = 0;
+    copy_region.imageSubresource.layerCount = 1;
+    copy_region.imageOffset = (VkOffset3D){ 0, 0, 0 }; // 3rd dimension is depth
+    copy_region.imageExtent = (VkExtent3D){ width, height, 1};
+
+    vkCmdCopyBufferToImage(command_buffer, staging_buffer, texture_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
+
+    // transition image to shader reading
+	VkImageMemoryBarrier to_shader_barrier = {0};
+    to_shader_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_shader_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to_shader_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // optimised for fragment shader reading (probably not entirely sequential)
+    to_shader_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_shader_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_shader_barrier.image = texture_image;
+	to_shader_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	to_shader_barrier.subresourceRange.baseMipLevel = 0;
+	to_shader_barrier.subresourceRange.levelCount = 1;
+	to_shader_barrier.subresourceRange.baseArrayLayer = 0;
+    to_shader_barrier.subresourceRange.layerCount = 1;
+    to_shader_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; // wait for transfer writes to complete
+    to_shader_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT; // make memory available for shader reads
+
+    VkPipelineStageFlags to_shader_source_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    VkPipelineStageFlags to_shader_destination_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+
+    vkCmdPipelineBarrier(command_buffer, to_shader_source_stage, to_shader_destination_stage, 0, 0, 0, 0, 0, 1, &to_shader_barrier);
+
+    vkEndCommandBuffer(command_buffer);
+
+    // submit and execute commands
+	VkSubmitInfo submit_info = {0};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &command_buffer;
+
+    vkQueueSubmit(renderer_state.graphics_queue_handle, 1, &submit_info, VK_NULL_HANDLE);
+    vkQueueWaitIdle(renderer_state.graphics_queue_handle); // blocks until the GPU finishes 
+
+    vkFreeCommandBuffers(renderer_state.logical_device_handle, renderer_state.graphics_command_pool_handle, 1, &command_buffer);
+    vkDestroyBuffer(renderer_state.logical_device_handle, staging_buffer, 0);
+    vkFreeMemory(renderer_state.logical_device_handle, staging_buffer_memory, 0);
+
+	VkImageView texture_image_view;
+
+    VkImageViewCreateInfo image_view_info = {0};
+    image_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    image_view_info.image = texture_image;
+    image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    image_view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    image_view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    image_view_info.subresourceRange.baseMipLevel = 0;
+    image_view_info.subresourceRange.levelCount = 1;
+    image_view_info.subresourceRange.baseArrayLayer = 0;
+    image_view_info.subresourceRange.layerCount = 1;
+
+    vkCreateImageView(renderer_state.logical_device_handle, &image_view_info, 0, &texture_image_view);
+
+    // allocate desciptor sets to current position in texture_cache_count
+	VkDescriptorSetAllocateInfo descriptor_set_allocation_info = {0};
+    descriptor_set_allocation_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descriptor_set_allocation_info.descriptorPool = renderer_state.descriptor_pool;
+    descriptor_set_allocation_info.descriptorSetCount = 1;
+    descriptor_set_allocation_info.pSetLayouts = &renderer_state.descriptor_set_layout;
+
+    vkAllocateDescriptorSets(renderer_state.logical_device_handle, &descriptor_set_allocation_info, &renderer_state.descriptor_sets[renderer_state.texture_cache_count]);
+
+    VkDescriptorImageInfo descriptor_image_info = {0};
+    descriptor_image_info.sampler = renderer_state.pixel_art_sampler;
+    descriptor_image_info.imageView = texture_image_view;
+    descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	VkWriteDescriptorSet descriptor_set_write = {0};
+    descriptor_set_write.sType= VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptor_set_write.dstSet = renderer_state.descriptor_sets[renderer_state.texture_cache_count];
+	descriptor_set_write.dstBinding = 0;
+    descriptor_set_write.descriptorCount = 1;
+	descriptor_set_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptor_set_write.pImageInfo = &descriptor_image_info;
+
+    vkUpdateDescriptorSets(renderer_state.logical_device_handle, 1, &descriptor_set_write, 0, 0);
+
+    renderer_state.texture_cache[renderer_state.texture_cache_count].image = texture_image;
+    renderer_state.texture_cache[renderer_state.texture_cache_count].memory = texture_image_memory;
+    renderer_state.texture_cache[renderer_state.texture_cache_count].view = texture_image_view;
+    strcpy(renderer_state.texture_cache[renderer_state.texture_cache_count].path, texture.path);
+
+    renderer_state.texture_cache_count++;
+
+    return renderer_state.texture_cache_count - 1;
+}
+
+void rendererSubmitFrame(WorldState current_world_state, TextureToLoad textures_to_load[128])
+{
+    memset(textures_to_draw, 0, sizeof(textures_to_draw)); // clear textures to draw only when new submit happens
+                                                           // otherwise we will keep drawing these in draw, with only slight changes for interpolation, maybe, which will happen on renderer layer (?, ?)
+                                                           // actually, maybe we should pass some sort of variable to rendererDraw ( will have to for interpolation anyway ) - either way,
+                                                           // i guess its possible to handle the interpolation stuff on game layer... but would have to load in rendererDraw.
+    for (uint32 texture_index = 0; texture_index < 128; texture_index++)
+    {
+        if (textures_to_load[texture_index].path == 0) break;
+
+		int32 place_in_cache = -1;
+
+        for (uint32 texture_cache_increment = 0; texture_cache_increment < renderer_state.texture_cache_count; texture_cache_increment++)
+        {
+            if (strcmp(renderer_state.texture_cache[texture_cache_increment].path, textures_to_load[texture_index].path) == 0)
+            {
+                place_in_cache = texture_cache_increment; // this could be any number not -1; i just also use this as a check to see if it's loaded later
+                break;
+            }
+        }
+        if (place_in_cache == -1) // if -1 texture not loaded yet 
+        {
+            place_in_cache = loadTexture(textures_to_load[texture_index]);
+         	if (place_in_cache == -1) // still -1 means load failed
+            {
+                // load failed!
+                OutputDebugStringA("oh no, load failed!");
+                continue;
+            }
+        }
+        textures_to_draw[texture_index].place_in_cache = place_in_cache;
+        textures_to_draw[texture_index].instance_count = textures_to_load[texture_index].instance_count; // see below comment
+
+       	for (uint32 texture_instance_index = 0; texture_instance_index < textures_to_draw[texture_index].instance_count; texture_instance_index++) 
+        {
+            // TODO(spike): temporary fix. i probably shouldn't even have the separate to_draw and to_load structs - they are very similar - just add place_in_cache
+            // field to to_load, pass it through and modify local? or at least memcpy over, instead of for looping like this, probably slow.
+            textures_to_draw[texture_index].origin[texture_instance_index].x = textures_to_load[texture_index].origin[texture_instance_index].x;
+            textures_to_draw[texture_index].origin[texture_instance_index].y = textures_to_load[texture_index].origin[texture_instance_index].y;
+        }
+    }
 }
 
 void rendererDraw(void)
 {
-    // THROTTLE TO N FRAMES-IN FLIGHT
+    // THROTTLE TO N FRAMES IN FLIGHT
 
     // blocks until the previous GPU submission that used this slot has finised. if GPU is still using that slot, CPU must wait (i.e. you cannot get more than N frames ahead)
 	vkWaitForFences(renderer_state.logical_device_handle, 1, &renderer_state.in_flight_fences[renderer_state.current_frame], VK_TRUE, UINT64_MAX);
@@ -896,7 +1229,7 @@ void rendererDraw(void)
 
     vkResetFences(renderer_state.logical_device_handle, 1, &renderer_state.in_flight_fences[renderer_state.current_frame]);
 
-	// TRIANGLE TIME
+    // triangles
 
     if (frame_vertex_count)
     {
@@ -925,7 +1258,8 @@ void rendererDraw(void)
 
     // dynamic pipeline state (same baked graphics pipeline, but change viewport / scissor whenever we change what's in frame. for now we don't really use this though)
 
-    VkViewport viewport = {
+    VkViewport viewport = 
+    {
         .x = 0.0f,
         .y = (float)renderer_state.swapchain_extent.height,
         .width = (float)renderer_state.swapchain_extent.width,
@@ -946,15 +1280,27 @@ void rendererDraw(void)
     VkDeviceSize vertex_buffer_offset = 0;
     vkCmdBindVertexBuffers(command_buffer, 0, 1, &renderer_state.vertex_buffer_handle, &vertex_buffer_offset); // for binding 0, use this VkBuffer, starting at offset 0.
 
-	if (command_buffer != renderer_state.swapchain_command_buffers[swapchain_image_index]) { return; }
-    if (command_buffer == VK_NULL_HANDLE) { return; }
-    if (renderer_state.graphics_pipeline_handle == VK_NULL_HANDLE) { return; }
-    if (renderer_state.vertex_buffer_handle     == VK_NULL_HANDLE) { return; }
-    if (renderer_state.render_pass_handle       == VK_NULL_HANDLE) { return; }
-    if (renderer_state.swapchain_framebuffers[swapchain_image_index] == VK_NULL_HANDLE) { return; }
+	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_handle);	
+	
+	for (uint32 texture_index = 0; texture_index < 128; texture_index++)
+ 	{
+		if (textures_to_draw[texture_index].instance_count == 0) break;
+    	vkCmdBindDescriptorSets(command_buffer, 
+     	          				VK_PIPELINE_BIND_POINT_GRAPHICS, 
+                                renderer_state.graphics_pipeline_layout, 0, 1, 
+                                &renderer_state.descriptor_sets[textures_to_draw[texture_index].place_in_cache], 0, 0);
 
-    vkCmdDraw(command_buffer, frame_vertex_count, 1, 0, 0); // draws frame_vertex_count vertices, 1 instance, starting at vertex 0.
-
+        for (uint32 texture_instance = 0; texture_instance < textures_to_draw[texture_index].instance_count; texture_instance++)
+        {
+            vkCmdPushConstants(command_buffer, 
+                               renderer_state.graphics_pipeline_layout, 
+                               VK_SHADER_STAGE_VERTEX_BIT, 0, 
+                               sizeof(NormalizedCoords), 
+                               &textures_to_draw[texture_index].origin[texture_instance]);
+            vkCmdDraw(command_buffer, frame_vertex_count, 1, 0, 0);
+        }
+    }
+    
     vkCmdEndRenderPass(command_buffer);
     vkEndCommandBuffer(command_buffer);
 

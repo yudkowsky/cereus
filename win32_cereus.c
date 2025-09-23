@@ -93,18 +93,18 @@ int CALLBACK WinMain(
 
     ShowWindow(window_handle, initial_show_state);
 
+    RendererPlatformHandles platform_handles = { .module_handle = module_handle, .window_handle = window_handle};
+    rendererInitialise(platform_handles);
+
     LARGE_INTEGER ticks_per_second;
-    LARGE_INTEGER last_tick_time;
+    LARGE_INTEGER last_tick;
     QueryPerformanceFrequency(&ticks_per_second);
-    QueryPerformanceCounter(&last_tick_time);
+    QueryPerformanceCounter(&last_tick);
     double seconds_per_tick = 1.0 / ticks_per_second.QuadPart;
 
     MSG queued_message = {0};
     bool running = true;
 	
-    RendererPlatformHandles platform_handles = { .module_handle = module_handle, .window_handle = window_handle};
-    rendererInitialise(platform_handles);
-
     gameInitialise(); 
 
     while (running)
@@ -121,14 +121,13 @@ int CALLBACK WinMain(
             DispatchMessage(&queued_message);
         }
 
-        LARGE_INTEGER current_tick_time;
-        QueryPerformanceCounter(&current_tick_time);
-        double delta_time = (current_tick_time.QuadPart - last_tick_time.QuadPart) * seconds_per_tick;
+        LARGE_INTEGER current_tick;
+        QueryPerformanceCounter(&current_tick);
+        double delta_time = (current_tick.QuadPart - last_tick.QuadPart) * seconds_per_tick;
 
-        last_tick_time = current_tick_time;
+        last_tick = current_tick;
 
         gameFrame(delta_time, tick_input); 
-		rendererDraw();
     }
 
     return (int)queued_message.wParam;

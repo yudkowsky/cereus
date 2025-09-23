@@ -1,101 +1,70 @@
 #include "win32_cereus_bridge.h"
 #include "worldstate_structs.h"
+#include <string.h> // TODO(spike): temporary, for memset
 
 #define local_persist static
 #define global_variable static
 #define internal static
 
-internal const double PHYSICS_INCREMENT = 1.0/60.0;
+const double PHYSICS_INCREMENT = 1.0/60.0;
 
-typedef struct GameState
+// const IntCoords SCREEN_RESOLUTION = { 1920, 1080 };
+// const double NORMALIZED_X_CONVERSION = 2.0 / SCREEN_RESOLUTION.x;
+// const double NORMALIZED_Y_CONVERSION = 2.0 / SCREEN_RESOLUTION.y;
+
+WorldState current_world_state = {0};
+double accumulator = 0.0;
+
+char* grid_tile_path = "data/sprites/grid.png";
+
+TextureToLoad textures_to_load[128] = {0};
+
+// modifies textures_to_load
+void drawSprite(char* texture_path, NormalizedCoords origin)
 {
-    WorldState previous_world_state, current_world_state;
-    double accumulator;
-}
-GameState;
-internal GameState game_state;
-
-void makeVertex(float pos[2], float color[3], Vertex* out)
-{
-	out->pos[0] = pos[0];
-    out->pos[1] = pos[1];
-
-    out->color[0] = color[0];
-    out->color[1] = color[1];
-    out->color[2] = color[2];
-}
-
-void makeTriangle(Vertex vertices[3], Triangle* out)
-{
-    out->point1 = vertices[0];
-    out->point2 = vertices[1];
-    out->point3 = vertices[2];
+    int32 texture_location = -1;
+    // load has not been attempted here; find next free in textures_to_load
+    for (uint32 texture_index = 0; texture_index < 128; texture_index++)
+    {
+        char* current_path = textures_to_load[texture_index].path;
+        if (current_path == texture_path)
+        {
+            // already loaded - continue to loading coordinates.
+            texture_location = texture_index;
+            break;
+        }
+        if (current_path == 0)
+        {
+            // end of list - queue the path to load, 
+            textures_to_load[texture_index].path = texture_path;
+            texture_location = texture_index;
+            break;
+        }
+    }
+	textures_to_load[texture_location].origin[textures_to_load[texture_location].instance_count].x = origin.x;
+	textures_to_load[texture_location].origin[textures_to_load[texture_location].instance_count].y = origin.y;
+    textures_to_load[texture_location].instance_count++;
 }
 
 void gameInitialise(void)
 {
-    game_state.accumulator = 0.0;
-
-	float vertex1_pos[2] = { 0.5f, 0.2f };
-    float vertex1_color[3] = { 0.0f, 1.0f, 0.0f };
-
-	float vertex2_pos[2] = { 0.2f, 0.5f };
-    float vertex2_color[3] = { 0.0f, 0.0f, 1.0f };
-
-	float vertex3_pos[2] = { 0.5f, 0.8f };
-    float vertex3_color[3] = { 1.0f, 0.0f, 0.0f };
-
-    Vertex vertices[3] = {0};
-	makeVertex(vertex1_pos, vertex1_color, &vertices[0]);
-	makeVertex(vertex2_pos, vertex2_color, &vertices[1]);
-	makeVertex(vertex3_pos, vertex3_color, &vertices[2]);
-
-	makeTriangle(vertices, &game_state.current_world_state.triangle);
-    game_state.previous_world_state = game_state.current_world_state; // bootstrap snapshots
+    current_world_state.pixel_size  = 6;
 }
+
+NormalizedCoords dummy_coords = { 0.0, 0.0 };
 
 void gameFrame(double delta_time, TickInput tick_input)
 {	
    	// clamp for stalls or breakpoints
 	if (delta_time > 0.1) delta_time = 0.1;
 
-	game_state.accumulator += delta_time;
-    while (game_state.accumulator >= PHYSICS_INCREMENT)
+	accumulator += delta_time;
+    while (accumulator >= PHYSICS_INCREMENT)
     {
-        game_state.previous_world_state = game_state.current_world_state;
-
-        game_state.accumulator -= PHYSICS_INCREMENT;
+        drawSprite(grid_tile_path, dummy_coords);
+        accumulator -= PHYSICS_INCREMENT;
+        rendererSubmitFrame(current_world_state, textures_to_load);
+        memset(textures_to_load, 0, sizeof(textures_to_load)); // clear textures_to_load
     }
-
-    if (tick_input.w_press)
-    {
-        game_state.current_world_state.triangle.point1.pos[1] += 0.01f;
-        game_state.current_world_state.triangle.point2.pos[1] += 0.01f;
-        game_state.current_world_state.triangle.point3.pos[1] += 0.01f;
-    }
-
-    if (tick_input.a_press)
-    {
-        game_state.current_world_state.triangle.point1.pos[0] -= 0.01f;
-        game_state.current_world_state.triangle.point2.pos[0] -= 0.01f;
-        game_state.current_world_state.triangle.point3.pos[0] -= 0.01f;
-    }
-
-    if (tick_input.s_press)
-    {
-        game_state.current_world_state.triangle.point1.pos[1] -= 0.01f;
-        game_state.current_world_state.triangle.point2.pos[1] -= 0.01f;
-        game_state.current_world_state.triangle.point3.pos[1] -= 0.01f;
-    }
-
-    if (tick_input.d_press)
-    {
-        game_state.current_world_state.triangle.point1.pos[0] += 0.01f;
-        game_state.current_world_state.triangle.point2.pos[0] += 0.01f;
-        game_state.current_world_state.triangle.point3.pos[0] += 0.01f;
-    }
-
-    double interpolation_fraction = game_state.accumulator / PHYSICS_INCREMENT;
-
-	rendererSubmitFrame(&game_state.previous_world_state, &game_state.current_world_state, interpolation_fraction);
+    rendererDraw();
 }

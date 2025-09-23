@@ -14,7 +14,7 @@ typedef struct
 RendererPlatformHandles;
 
 void rendererInitialise(RendererPlatformHandles handles);
-void rendererSubmitFrame(WorldState* previous_world_state, WorldState* current_world_state, double interpolation_fraction);
+void rendererSubmitFrame(WorldState current_world_state, TextureToLoad textures[128]); // are these two needed?
 void rendererDraw(void);
 void rendererResize(uint32 width, uint32 height);
 void rendererShutdown(void);
