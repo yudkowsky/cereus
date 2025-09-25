@@ -52,7 +52,8 @@ void drawSprite(char* texture_path, NormalizedCoords origin, NormalizedCoords sc
 
 void gameInitialise(void) {}
 
-NormalizedCoords dummy_coords = { 0.5, 0.5 };
+NormalizedCoords dummy_coords = { -0.3, 0 };
+NormalizedCoords dummy_coords_2 = { 0, 0.2 };
 
 void gameFrame(double delta_time, TickInput tick_input)
 {	
@@ -63,6 +64,7 @@ void gameFrame(double delta_time, TickInput tick_input)
     while (accumulator >= PHYSICS_INCREMENT)
     {
         drawSprite(grid_tile_path, dummy_coords, DEFAULT_SCALE);
+        drawSprite(grid_tile_path, dummy_coords_2, DEFAULT_SCALE);
         accumulator -= PHYSICS_INCREMENT;
         rendererSubmitFrame(textures_to_load, loaded_textures);
         memset(textures_to_load, 0, sizeof(textures_to_load)); // clear textures_to_load

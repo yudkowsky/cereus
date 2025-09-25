@@ -905,7 +905,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	VkPushConstantRange push_constant_range = {0}; 
     push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     push_constant_range.offset = 0;
-    push_constant_range.size = sizeof(NormalizedCoords) * 2; // information: position (x,y) and width / height of texture in absolute coords
+    push_constant_range.size = sizeof(NormalizedCoords); // information: position (x,y) and width / height of texture in absolute coords
 
     // a graphics pipeline is a big bundle of stuff the GPU needs to turn vertices into pixels for a specific render pass.
     // contains great things like: shaders: which vertex/fragment programs to run; input assembly: how to interpret vertices (e.g. this is a triangle); rasterisation rules, color blend...
@@ -1144,12 +1144,12 @@ int16 loadTexture(TextureToLoad texture)
 
 void rendererSubmitFrame(TextureToLoad textures_to_load[128], char* loaded_textures[128])
 {
-    if (first_submit_since_draw)
-    {
-        memset(textures_to_draw, 0, sizeof(textures_to_draw));
-        frame_vertex_count = 0;
-        first_submit_since_draw = false;
-    }
+    // if (first_submit_since_draw)
+    // {
+    memset(textures_to_draw, 0, sizeof(textures_to_draw));
+    frame_vertex_count = 0;
+    // first_submit_since_draw = false;
+    //}
 
     for (uint32 texture_index = 0; texture_index < 128; texture_index++)
     {
@@ -1310,16 +1310,13 @@ void rendererDraw(void)
 
         for (uint32 texture_instance = 0; texture_instance < textures_to_draw[texture_index].instance_count; texture_instance++)
         {
-			NormalizedCoords push_data[2];
-            push_data[0] = textures_to_draw[texture_index].origin[texture_instance];
-            push_data[1].x = 16.0 * textures_to_draw[texture_index].scale[texture_instance].x;
-            push_data[1].y = 16.0 * textures_to_draw[texture_index].scale[texture_instance].y;
+			NormalizedCoords push_data = textures_to_draw[texture_index].origin[texture_instance];
 
             vkCmdPushConstants(command_buffer, 
                                renderer_state.graphics_pipeline_layout, 
                                VK_SHADER_STAGE_VERTEX_BIT, 0, 
-                               sizeof(push_data), 
-                               push_data);
+                               sizeof(NormalizedCoords), 
+                               &push_data);
             vkCmdDraw(command_buffer, 6, 1, texture_instance * 6, 0);
         }
     }

@@ -4,7 +4,7 @@
 
 typedef struct NormalizedCoords // [-1, 1]
 {
-    double x, y;
+    float x, y;
 }
 NormalizedCoords;
 
