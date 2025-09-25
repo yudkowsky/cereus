@@ -16,6 +16,7 @@ double accumulator = 0.0;
 char* grid_tile_path = "data/sprites/grid.png";
 
 TextureToLoad textures_to_load[128] = {0};
+char* loaded_textures[128] = {0};
 
 // modifies textures_to_load. scale input is pixels/pixel, output is multiplied 2 / screen resolution (fits in [-1, 1])
 void drawSprite(char* texture_path, NormalizedCoords origin, NormalizedCoords scale)
@@ -24,23 +25,26 @@ void drawSprite(char* texture_path, NormalizedCoords origin, NormalizedCoords sc
     // load has not been attempted here; find next free in textures_to_load
     for (uint32 texture_index = 0; texture_index < 128; texture_index++)
     {
-        char* current_path = textures_to_load[texture_index].path;
-        if (current_path == texture_path)
+        if (loaded_textures[texture_index] == texture_path)
         {
-            // already loaded - continue to loading coordinates.
+            // already loaded
+			textures_to_load[texture_index].path = texture_path;
             texture_location = texture_index;
             break;
         }
-        if (current_path == 0)
+        if (textures_to_load[texture_index].path == 0)
         {
             // end of list - queue the path to load, 
             textures_to_load[texture_index].path = texture_path;
+            loaded_textures[texture_index] = texture_path;
             texture_location = texture_index;
             break;
         }
     }
+    // adjust scale to [-1, 1] expected by graphics api
     scale = (NormalizedCoords){ scale.x * NORMALIZED_CONVERSION.x, scale.y * NORMALIZED_CONVERSION.y };
 
+    // use instance count to go to next free slot here
 	textures_to_load[texture_location].origin[textures_to_load[texture_location].instance_count] = origin;
     textures_to_load[texture_location].scale[textures_to_load[texture_location].instance_count] = scale;
     textures_to_load[texture_location].instance_count++;
@@ -48,7 +52,7 @@ void drawSprite(char* texture_path, NormalizedCoords origin, NormalizedCoords sc
 
 void gameInitialise(void) {}
 
-NormalizedCoords dummy_coords = { 0.0, 0.0 };
+NormalizedCoords dummy_coords = { 0.5, 0.5 };
 
 void gameFrame(double delta_time, TickInput tick_input)
 {	
@@ -60,7 +64,7 @@ void gameFrame(double delta_time, TickInput tick_input)
     {
         drawSprite(grid_tile_path, dummy_coords, DEFAULT_SCALE);
         accumulator -= PHYSICS_INCREMENT;
-        rendererSubmitFrame(textures_to_load);
+        rendererSubmitFrame(textures_to_load, loaded_textures);
         memset(textures_to_load, 0, sizeof(textures_to_load)); // clear textures_to_load
     }
     rendererDraw();

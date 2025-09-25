@@ -10,6 +10,8 @@
 const IntCoords SCREEN_RESOLUTION = { 1920, 1080 };
 const float PIXEL_SCALE = 6.0f;
 
+bool first_submit_since_draw = true;
+
 typedef struct Vertex
 {
     float x, y;
@@ -20,7 +22,7 @@ Vertex;
 Vertex frame_vertex_stash[1024];
 uint32 frame_vertex_count = 0;
 
-typedef struct 
+typedef struct CachedTexture
 {
 	VkImage image;
     VkDeviceMemory memory;
@@ -37,7 +39,7 @@ typedef struct TextureToDraw
     uint32 instance_count;
 }
 TextureToDraw;
-TextureToDraw textures_to_draw[256];
+TextureToDraw textures_to_draw[128];
 
 typedef struct
 {
@@ -1140,36 +1142,45 @@ int16 loadTexture(TextureToLoad texture)
     return renderer_state.texture_cache_count - 1;
 }
 
-void rendererSubmitFrame(TextureToLoad textures_to_load[128])
+void rendererSubmitFrame(TextureToLoad textures_to_load[128], char* loaded_textures[128])
 {
-    memset(textures_to_draw, 0, sizeof(textures_to_draw)); // clear textures to draw only when new submit happens
-                                                           // otherwise we will keep drawing these in draw, with only slight changes for interpolation, maybe, which will happen on renderer layer (?, ?)
-                                                           // actually, maybe we should pass some sort of variable to rendererDraw ( will have to for interpolation anyway ) - either way,
-                                                           // i guess its possible to handle the interpolation stuff on game layer... but would have to load in rendererDraw.
+    if (first_submit_since_draw)
+    {
+        memset(textures_to_draw, 0, sizeof(textures_to_draw));
+        frame_vertex_count = 0;
+        first_submit_since_draw = false;
+    }
+
     for (uint32 texture_index = 0; texture_index < 128; texture_index++)
     {
         if (textures_to_load[texture_index].path == 0) break;
 
 		int32 place_in_cache = -1;
 
-        for (uint32 texture_cache_increment = 0; texture_cache_increment < renderer_state.texture_cache_count; texture_cache_increment++)
+        // checks all loaded textures in texture_cache to see if the path is already present. if it is, set place_in_cache
+		for (uint32 loaded_texture_index = 0; loaded_texture_index < renderer_state.texture_cache_count; loaded_texture_index++)
         {
-            if (strcmp(renderer_state.texture_cache[texture_cache_increment].path, textures_to_load[texture_index].path) == 0)
+			if (strcmp(textures_to_load[texture_index].path, renderer_state.texture_cache[loaded_texture_index].path) == 0) 
             {
-                place_in_cache = texture_cache_increment; // this could be any number not -1; i just also use this as a check to see if it's loaded later
+				// texture already loaded - skip to filling textures_to_draw
+                place_in_cache = loaded_texture_index;
                 break;
             }
         }
-        if (place_in_cache == -1) // if -1 texture not loaded yet 
+
+        // load, if not already.
+		if (place_in_cache == -1)
         {
             place_in_cache = loadTexture(textures_to_load[texture_index]);
+
          	if (place_in_cache == -1) // still -1 means load failed
             {
-                // load failed!
+                // load failed! deal with this when required
                 OutputDebugStringA("oh no, load failed!");
                 continue;
             }
         }
+
         textures_to_draw[texture_index].place_in_cache = place_in_cache;
         textures_to_draw[texture_index].instance_count = textures_to_load[texture_index].instance_count;
 
@@ -1179,8 +1190,8 @@ void rendererSubmitFrame(TextureToLoad textures_to_load[128])
             textures_to_draw[texture_index].scale[texture_instance_index] = textures_to_load[texture_index].scale[texture_instance_index];
 
             // put vertices into buffer here
-            float quad_width = (16 * textures_to_draw[texture_index].scale[texture_instance_index].x); 
-            float quad_height = (16 * textures_to_draw[texture_index].scale[texture_instance_index].y); 
+            float quad_width = 16 * textures_to_draw[texture_index].scale[texture_instance_index].x;
+            float quad_height = 16 * textures_to_draw[texture_index].scale[texture_instance_index].y;
 
             Vertex quad[6] = {
               { 0.0f, 		0.0f, }, 
@@ -1190,7 +1201,7 @@ void rendererSubmitFrame(TextureToLoad textures_to_load[128])
               { quad_width, quad_height, }, 
               { 0.0f, 		quad_height, },
             };
-            memcpy(frame_vertex_stash, quad, sizeof(quad));
+            memcpy(&frame_vertex_stash[frame_vertex_count], quad, sizeof(quad));
             frame_vertex_count += 6;
         }
     }
@@ -1236,7 +1247,7 @@ void rendererDraw(void)
 
     vkResetFences(renderer_state.logical_device_handle, 1, &renderer_state.in_flight_fences[renderer_state.current_frame]);
 
-    // triangles
+    // actual things happening
 
     if (frame_vertex_count)
     {
@@ -1309,12 +1320,14 @@ void rendererDraw(void)
                                VK_SHADER_STAGE_VERTEX_BIT, 0, 
                                sizeof(push_data), 
                                push_data);
-            vkCmdDraw(command_buffer, frame_vertex_count, 1, 0, 0);
+            vkCmdDraw(command_buffer, 6, 1, texture_instance * 6, 0);
         }
     }
     
     vkCmdEndRenderPass(command_buffer);
     vkEndCommandBuffer(command_buffer);
+
+	first_submit_since_draw = true;
 
     // SUBMIT THE PRE-RECORDED CB FOR THAT IMAGE
 

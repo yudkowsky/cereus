@@ -5,5 +5,5 @@
 
 void gameInitialise(void);
 void gameFrame(double, TickInput);
-void rendererSubmitFrame(TextureToLoad textures_to_load[128]);
+void rendererSubmitFrame(TextureToLoad textures_to_load[128], char* loaded_textures[128]);
 void rendererDraw();
