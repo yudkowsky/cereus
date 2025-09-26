@@ -16,9 +16,7 @@ IntCoords;
 
 typedef struct WorldState 
 {
-    int pixel_size;
-
-    IntCoords player_position;
+    NormalizedCoords player_coords;
 }
 WorldState;
 

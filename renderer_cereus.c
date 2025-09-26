@@ -828,7 +828,13 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 
 	VkPipelineColorBlendAttachmentState color_blend_attachment_state = {0}; // controls per-render-target blending, i.e., how the fragment shader's output color is combined with what's already there. for now, just write RGBA
     color_blend_attachment_state.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    color_blend_attachment_state.blendEnable = VK_FALSE;
+    color_blend_attachment_state.blendEnable = VK_TRUE;
+    color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
+    color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
 
 	VkPipelineColorBlendStateCreateInfo color_blend_state_creation_info = {0}; // pipeline-level color blend state (not blending, all fields are pretty much default)
     color_blend_state_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -940,7 +946,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &graphics_pipeline_creation_info, 0, &renderer_state.graphics_pipeline_handle);
 }
 
-int16 loadTexture(TextureToLoad texture)
+int32 loadTexture(TextureToLoad texture)
 {
     int width, height, channels;
     uint8* pixels = (uint8*)stbi_load(texture.path, &width, &height, &channels, STBI_rgb_alpha); // it wants unsigned char here instead of uint8
@@ -1139,10 +1145,10 @@ int16 loadTexture(TextureToLoad texture)
 
     renderer_state.texture_cache_count++;
 
-    return renderer_state.texture_cache_count - 1;
+    return (int32)(renderer_state.texture_cache_count - 1);
 }
 
-void rendererSubmitFrame(TextureToLoad textures_to_load[128], char* loaded_textures[128])
+void rendererSubmitFrame(TextureToLoad textures_to_load[128])
 {
     // if (first_submit_since_draw)
     // {
