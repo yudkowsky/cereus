@@ -17,6 +17,7 @@ IntCoords;
 typedef struct WorldState 
 {
     NormalizedCoords player_coords;
+    NormalizedCoords camera_coords;
 }
 WorldState;
 
@@ -35,5 +36,9 @@ typedef struct TickInput
 	bool a_press;
     bool s_press;
     bool d_press;
+    bool i_press;
+	bool j_press;
+    bool k_press;
+    bool l_press;
 }
 TickInput;

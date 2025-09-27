@@ -36,6 +36,18 @@ LRESULT CALLBACK windowMessageProcessor(
                 case 'D':
                     tick_input.d_press = true; 
                     break;
+                case 'I':
+                    tick_input.i_press = true;
+                    break;
+                case 'J':
+                    tick_input.j_press = true;
+                	break;
+                case 'K':
+                    tick_input.k_press = true;
+                	break;
+                case 'L':
+                    tick_input.l_press = true;
+                	break;
             }
             break;
         case WM_KEYUP:
@@ -53,6 +65,18 @@ LRESULT CALLBACK windowMessageProcessor(
                 case 'D':
                     tick_input.d_press = false; 
                     break;
+                case 'I':
+                    tick_input.i_press = false;
+                    break;
+                case 'J':
+                    tick_input.j_press = false;
+                	break;
+                case 'K':
+                    tick_input.k_press = false;
+                	break;
+                case 'L':
+                    tick_input.l_press = false;
+                	break;
             }
     }
     return DefWindowProcW(window_handle, message_id, wParam, lParam);
