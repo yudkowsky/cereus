@@ -25,7 +25,7 @@ typedef struct TextureToLoad
 {
 	char* path;
 	NormalizedCoords origin[64];
-    NormalizedCoords scale[64];
+    NormalizedCoords dimensions[64];
     uint32 instance_count;
 }
 TextureToLoad;

@@ -101,15 +101,16 @@ int CALLBACK WinMain(
 
     RegisterClassExW(&window_class);
 
+	int screen_width  = GetSystemMetrics(SM_CXSCREEN);
+	int screen_height = GetSystemMetrics(SM_CYSCREEN);
+
 	HWND window_handle = CreateWindowExW(
-		0,
+		WS_EX_TOPMOST,
 		L"standard_window_class",
 		L"Window Name",
 		WS_OVERLAPPEDWINDOW,
-		CW_USEDEFAULT,
-		CW_USEDEFAULT,
-		CW_USEDEFAULT,
-		CW_USEDEFAULT,
+        0, 0,
+		screen_width, screen_height,
 		0,
 		0,
 		module_handle, 

@@ -35,7 +35,7 @@ typedef struct TextureToDraw
 {
     uint32 place_in_cache;
     NormalizedCoords origin[64];
-    NormalizedCoords scale[64];
+    NormalizedCoords dimensions[64];
     uint32 instance_count;
 }
 TextureToDraw;
@@ -1150,12 +1150,8 @@ int32 loadTexture(TextureToLoad texture)
 
 void rendererSubmitFrame(TextureToLoad textures_to_load[128])
 {
-    // if (first_submit_since_draw)
-    // {
     memset(textures_to_draw, 0, sizeof(textures_to_draw));
     frame_vertex_count = 0;
-    // first_submit_since_draw = false;
-    //}
 
     for (uint32 texture_index = 0; texture_index < 128; texture_index++)
     {
@@ -1193,11 +1189,11 @@ void rendererSubmitFrame(TextureToLoad textures_to_load[128])
        	for (uint32 texture_instance_index = 0; texture_instance_index < textures_to_draw[texture_index].instance_count; texture_instance_index++) 
         {
             textures_to_draw[texture_index].origin[texture_instance_index] = textures_to_load[texture_index].origin[texture_instance_index];
-            textures_to_draw[texture_index].scale[texture_instance_index] = textures_to_load[texture_index].scale[texture_instance_index];
+            textures_to_draw[texture_index].dimensions[texture_instance_index]  = textures_to_load[texture_index].dimensions[texture_instance_index];
 
             // put vertices into buffer here
-            float quad_width = 16 * textures_to_draw[texture_index].scale[texture_instance_index].x;
-            float quad_height = 16 * textures_to_draw[texture_index].scale[texture_instance_index].y;
+            float quad_width  =  textures_to_draw[texture_index].dimensions[texture_instance_index].x;
+            float quad_height =  textures_to_draw[texture_index].dimensions[texture_instance_index].y;
 
             Vertex quad[6] = {
               { 0.0f, 		0.0f, }, 
@@ -1282,21 +1278,19 @@ void rendererDraw(void)
 
     // dynamic pipeline state (same baked graphics pipeline, but change viewport / scissor whenever we change what's in frame. for now we don't really use this though)
 
-    VkViewport viewport = 
-    {
-        .x = 0.0f,
-        .y = (float)renderer_state.swapchain_extent.height,
-        .width = (float)renderer_state.swapchain_extent.width,
-        .height = -(float)renderer_state.swapchain_extent.height, // negative for y-up
-		.minDepth = 0.0f,
-        .maxDepth = 1.0f
-    };
+    VkViewport viewport = {0};
+    viewport.x = 0.0f;
+    viewport.y = (float)renderer_state.swapchain_extent.height;
+    viewport.width = (float)renderer_state.swapchain_extent.width;
+    viewport.height = -(float)renderer_state.swapchain_extent.height; // negative for y-up
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    
 	vkCmdSetViewport(command_buffer, 0, 1, &viewport); // TODO(spike): look at this more
-	VkRect2D scissor =
-    {
-        .offset = { 0,0 },
-        .extent = renderer_state.swapchain_extent
-    };
+	VkRect2D scissor = {0};
+    scissor.offset.x = 0;
+    scissor.offset.y = 0;
+    scissor.extent = renderer_state.swapchain_extent;
     vkCmdSetScissor(command_buffer, 0, 1, &scissor); // TODO(spike): look at this more
 
 	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_handle); // selects which baked pipeline the GPU will use for subsequent draw calls on this command buffer
@@ -1306,6 +1300,7 @@ void rendererDraw(void)
 
 	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_handle);	
 	
+    uint32 vertex_offset = 0;
 	for (uint32 texture_index = 0; texture_index < 128; texture_index++)
  	{
 		if (textures_to_draw[texture_index].instance_count == 0) break;
@@ -1323,7 +1318,8 @@ void rendererDraw(void)
                                VK_SHADER_STAGE_VERTEX_BIT, 0, 
                                sizeof(NormalizedCoords), 
                                &push_data);
-            vkCmdDraw(command_buffer, 6, 1, texture_instance * 6, 0);
+            vkCmdDraw(command_buffer, 6, 1, vertex_offset, 0);
+            vertex_offset += 6;
         }
     }
     
