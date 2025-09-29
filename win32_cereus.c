@@ -48,6 +48,9 @@ LRESULT CALLBACK windowMessageProcessor(
                 case 'L':
                     tick_input.l_press = true;
                 	break;
+                case 'Z':
+                    tick_input.z_press = true;
+                	break;
             }
             break;
         case WM_KEYUP:
@@ -76,6 +79,9 @@ LRESULT CALLBACK windowMessageProcessor(
                 	break;
                 case 'L':
                     tick_input.l_press = false;
+                	break;
+                case 'Z':
+                    tick_input.z_press = false;
                 	break;
             }
     }

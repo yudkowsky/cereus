@@ -14,10 +14,20 @@ typedef struct IntCoords
 }
 IntCoords;
 
+typedef struct Rect
+{
+	NormalizedCoords origin;
+    NormalizedCoords dimensions;
+}
+Rect;
+
 typedef struct WorldState 
 {
     NormalizedCoords player_coords;
+    NormalizedCoords player_velocity;
     NormalizedCoords camera_coords;
+    Rect collision_boxes[64];
+    int8 collision_box_count;
 }
 WorldState;
 
@@ -36,6 +46,8 @@ typedef struct TickInput
 	bool a_press;
     bool s_press;
     bool d_press;
+    bool z_press;
+
     bool i_press;
 	bool j_press;
     bool k_press;
