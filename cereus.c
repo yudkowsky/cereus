@@ -18,15 +18,21 @@ double accumulator = 0.0;
 
 char* grid_tile_path = "data/sprites/grid.png";
 IntCoords grid_tile_dim_int = { .x = 16, .y = 16 };
+NormalizedCoords grid_tile_dim_norm = {0};
 
 char* player_path = "data/sprites/player.png";
 IntCoords player_dim_int = { .x = 16, .y = 16 };
+NormalizedCoords player_dim_norm = {0};
 
 char* floor_tile_path = "data/sprites/floor.png";
 IntCoords floor_tile_dim_int = { .x = 48 , .y = 32 };
+NormalizedCoords floor_tile_dim_norm = {0};
 
 TextureToLoad textures_to_load[128] = {0};
 char* loaded_textures[128] = {0};
+
+Rect collision_boxes[64] = {0};
+int32 collision_box_count = 0;
 
 // input is amount of pixels in game space, output fits in [-1, 1]
 float xPixelsToNorm(float pixels)
@@ -86,7 +92,7 @@ void drawSprite(char* texture_path, NormalizedCoords origin, NormalizedCoords di
 	// don't pass to textures_to_load if entire tetxure is outside of norm space
     if (origin.x > CAMERA_CLIPPING_RADIUS ||
         origin.y > CAMERA_CLIPPING_RADIUS ||
-        origin.x + dimensions.x < -CAMERA_CLIPPING_RADIUS || // norm space
+        origin.x + dimensions.x < -CAMERA_CLIPPING_RADIUS ||
         origin.y + dimensions.y < -CAMERA_CLIPPING_RADIUS)
     {
         return;
@@ -103,17 +109,21 @@ void drawSprite(char* texture_path, NormalizedCoords origin, NormalizedCoords di
 // expects origin and dimensions in norm space
 void createCollisionBox(NormalizedCoords origin, NormalizedCoords dimensions)
 {
-    current_world_state.collision_boxes[current_world_state.collision_box_count].origin     = origin;
-    current_world_state.collision_boxes[current_world_state.collision_box_count].dimensions = dimensions;
-    current_world_state.collision_box_count++;
+    collision_boxes[collision_box_count].origin.x   = origin.x;
+    collision_boxes[collision_box_count].origin.y   = origin.y;
+    collision_boxes[collision_box_count].dimensions = dimensions;
+    collision_box_count++;
 }
 
 void gameInitialise(void) 
-{
-    current_world_state.player_coords   = (NormalizedCoords){ 0.0f, 0.0f };
+{	
+    player_dim_norm     = nearestPixelFloorToNorm(player_dim_int, DEFAULT_SCALE);
+    grid_tile_dim_norm  = nearestPixelFloorToNorm(grid_tile_dim_int, DEFAULT_SCALE);
+    floor_tile_dim_norm = nearestPixelFloorToNorm(floor_tile_dim_int, DEFAULT_SCALE);
+
+    current_world_state.player_coords   = (NormalizedCoords){ -0.5f, -0.2f };
     current_world_state.player_velocity = (NormalizedCoords){ 0.0f, 0.0f };
 	current_world_state.camera_coords   = (NormalizedCoords){ 0.0f, 0.0f };
-
 }
 
 void gameFrame(double delta_time, TickInput tick_input)
@@ -132,53 +142,84 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (tick_input.k_press) current_world_state.camera_coords.y -= CAMERA_MOVEMENT_SPEED;
         if (tick_input.l_press) current_world_state.camera_coords.x += CAMERA_MOVEMENT_SPEED;
 
-        if (tick_input.w_press) next_player_coords.y += yPixelsToNorm(1);
-        if (tick_input.a_press) next_player_coords.x -= xPixelsToNorm(1);
-        if (tick_input.s_press) next_player_coords.y -= yPixelsToNorm(1);
-        if (tick_input.d_press) next_player_coords.x += xPixelsToNorm(1);
-
-		if (tick_input.z_press) current_world_state.player_velocity.y = yPixelsToNorm(2);
+        if (tick_input.w_press) next_player_coords.y += yPixelsToNorm(1.5);
+        if (tick_input.a_press) next_player_coords.x -= xPixelsToNorm(1.5);
+        if (tick_input.s_press) next_player_coords.y -= yPixelsToNorm(1.5);
+        if (tick_input.d_press) next_player_coords.x += xPixelsToNorm(1.5);
 
 		// draw floor
-        for (int16 i = 0; i < 7; i++)
+        for (int16 i = 0; i < 4; i++)
         {
-            IntCoords floor_coords_int = { i * floor_tile_dim_int.x - 96, -32 };
-            NormalizedCoords floor_coords_norm = nearestPixelFloorToNorm(floor_coords_int, DEFAULT_SCALE);
-            NormalizedCoords floor_tile_dim_norm = pixelsToNorm(floor_tile_dim_int, DEFAULT_SCALE);
-            drawSprite(floor_tile_path, floor_coords_norm, floor_tile_dim_norm); // TODO(spike): change drawSprite and createCollisionBox to take in the same prenormalized variable
-                                                                                           // for dimensions. is this not just the pixelsToNorm function?
-            // createCollisionBox(floor_coords_norm, floor_tile_dim_norm);
+            IntCoords floor_coords_int = { i * floor_tile_dim_int.x - 96, -48 };
+            NormalizedCoords floor_coords_norm   = nearestPixelFloorToNorm(floor_coords_int, DEFAULT_SCALE);
+            drawSprite(floor_tile_path, floor_coords_norm, floor_tile_dim_norm);
+
+            createCollisionBox(floor_coords_norm, floor_tile_dim_norm);
         }
-
-		// gravity
-        current_world_state.player_velocity.y -= yPixelsToNorm(0.1f);
-
-		// apply velocity
-        next_player_coords.x += current_world_state.player_velocity.x;
-        next_player_coords.y += current_world_state.player_velocity.y;
 
         // collision detection
-        // loop over all instances of all textures in textures_to_load
-        /*
-        for (int16 texture_i = 0; texture_i < 128; texture_i++)
-        {
-            if (textures_to_load[texture_i].path == 0) break;
 
-            for (int16 instance_i = 0; instance_i < textures_to_load[texture_i].instance_count; instance_i++)
+        // handle x collision
+		NormalizedCoords test_x_collision = current_world_state.player_coords;
+        test_x_collision.x = next_player_coords.x;
+
+        for (int i = 0; i < collision_box_count; i++)
+        {
+			if (collision_boxes[i].origin.x < test_x_collision.x + player_dim_norm.x && test_x_collision.x < collision_boxes[i].origin.x + collision_boxes[i].dimensions.x &&
+			    collision_boxes[i].origin.y < test_x_collision.y + player_dim_norm.y && test_x_collision.y < collision_boxes[i].origin.y + collision_boxes[i].dimensions.y)
             {
-				if (next_player_coords.y <)
+                // collision on x axis occurs; check from which direction
+                if (next_player_coords.x - current_world_state.player_coords.x > 0)
+                {
+                    // moving right
+                    next_player_coords.x = collision_boxes[i].origin.x - player_dim_norm.x;
+                    break;
+                }
+                else
+                {
+                    // moving left
+                    next_player_coords.x = collision_boxes[i].origin.x + collision_boxes[i].dimensions.x;
+                    break;
+                }
             }
         }
-		if (next_player_coords.y )
-		*/
 
-		current_world_state.player_coords = next_player_coords;
+        // handle y collision
+        NormalizedCoords test_y_collision = current_world_state.player_coords;
+        test_y_collision.y = next_player_coords.y;
+
+        for (int i = 0; i < collision_box_count; i++)
+        {
+			if (collision_boxes[i].origin.x < test_y_collision.x + player_dim_norm.x && test_y_collision.x < collision_boxes[i].origin.x + collision_boxes[i].dimensions.x &&
+			    collision_boxes[i].origin.y < test_y_collision.y + player_dim_norm.y && test_y_collision.y < collision_boxes[i].origin.y + collision_boxes[i].dimensions.y)
+            {
+                // work out from above or below
+                if (next_player_coords.y - current_world_state.player_coords.y > 0)
+                {
+                    // moving up
+                    next_player_coords.y = collision_boxes[i].origin.y - player_dim_norm.y;
+                    break;
+                }
+                else
+                {
+                    // moving down
+                    next_player_coords.y = collision_boxes[i].origin.y + collision_boxes[i].dimensions.y;
+                    break;
+                }
+            }
+        }
 
 		// draw player
+        current_world_state.player_coords = next_player_coords;
         drawSprite(player_path, nearestPixelFloor(current_world_state.player_coords, DEFAULT_SCALE), nearestPixelFloorToNorm(player_dim_int, DEFAULT_SCALE));
 
         rendererSubmitFrame(textures_to_load);
+
+        // zero the per-frame arrays
         memset(textures_to_load, 0, sizeof(textures_to_load));
+        memset(collision_boxes, 0, sizeof(collision_boxes));
+        collision_box_count = 0;
+
         accumulator -= PHYSICS_INCREMENT;
     }
 
