@@ -2,7 +2,7 @@
 
 #include "types.h"
 
-typedef struct NormalizedCoords // [-1, 1]
+typedef struct NormalizedCoords
 {
     float x, y;
 }
@@ -16,18 +16,34 @@ IntCoords;
 
 typedef struct Rect
 {
-	NormalizedCoords origin;
+    NormalizedCoords origin;
     NormalizedCoords dimensions;
 }
 Rect;
+
+typedef struct Entity
+{
+	NormalizedCoords origin;
+	int16 id;
+}
+Entity;
 
 typedef struct WorldState 
 {
     NormalizedCoords player_coords;
     NormalizedCoords player_velocity;
     NormalizedCoords camera_coords;
-    Rect collision_boxes[64];
-    int8 collision_box_count;
+
+    int8 w_time_until_allowed;
+    int8 a_time_until_allowed;
+    int8 s_time_until_allowed;
+    int8 d_time_until_allowed;
+
+    Entity walls[64];
+    int16 wall_count;
+
+    Entity boxes[64];
+    int16 box_count;
 }
 WorldState;
 
