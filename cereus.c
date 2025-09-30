@@ -12,6 +12,7 @@ NormalizedCoords NORM_DISTANCE_PER_SCREEN_PIXEL = { 2.0f / 1920.0f, 2.0f / 1080.
 IntCoords DEFAULT_SCALE = {6, 6};
 float CAMERA_MOVEMENT_SPEED = 0.01f; // arbitrary movement per frame; temporary anyway, will want to use variable for this
 float CAMERA_CLIPPING_RADIUS = 1.0f;
+float PIXEL_MOVEMENT_PER_FRAME = 1.0f;
 
 WorldState current_world_state = {0};
 double accumulator = 0.0;
@@ -107,16 +108,18 @@ void drawSprite(char* texture_path, NormalizedCoords origin, NormalizedCoords di
     textures_to_load[texture_location].instance_count++;
 }
 
-// expects origin and dimensions in norm space
-/*
-void createCollisionBox(NormalizedCoords origin, NormalizedCoords dimensions)
+bool checkCollision(NormalizedCoords object_1_origin, NormalizedCoords object_1_dimension, NormalizedCoords object_2_origin, NormalizedCoords object_2_dimension)
 {
-    collision_boxes[collision_box_count].origin.x   = origin.x;
-    collision_boxes[collision_box_count].origin.y   = origin.y;
-    collision_boxes[collision_box_count].dimensions = dimensions;
-    collision_box_count++;
+    if (object_1_origin.x < object_2_origin.x + object_2_dimension.x && object_2_origin.x < object_1_origin.x + object_1_dimension.x &&
+        object_1_origin.y < object_2_origin.y + object_2_dimension.y && object_2_origin.y < object_1_origin.y + object_1_dimension.y)
+    {
+        return true;
+    }
+    else
+    {
+        return false;
+    }
 }
-*/
 
 void gameInitialise(void) 
 {	
@@ -179,39 +182,39 @@ void gameFrame(double delta_time, TickInput tick_input)
         // handle movement 
         if (tick_input.w_press) 
         {
-			if (current_world_state.w_time_until_allowed == 0 && current_world_state.s_time_until_allowed == 0) current_world_state.w_time_until_allowed = 5; 
+			if (current_world_state.w_time_until_allowed == 0 && current_world_state.s_time_until_allowed == 0) current_world_state.w_time_until_allowed = 8; 
         }
         if (tick_input.a_press) 
         {
-			if (current_world_state.a_time_until_allowed == 0 && current_world_state.d_time_until_allowed == 0) current_world_state.a_time_until_allowed = 5; 
+			if (current_world_state.a_time_until_allowed == 0 && current_world_state.d_time_until_allowed == 0) current_world_state.a_time_until_allowed = 8; 
         }
         if (tick_input.s_press) 
         {
-			if (current_world_state.s_time_until_allowed == 0 && current_world_state.w_time_until_allowed == 0) current_world_state.s_time_until_allowed = 5; 
+			if (current_world_state.s_time_until_allowed == 0 && current_world_state.w_time_until_allowed == 0) current_world_state.s_time_until_allowed = 8; 
         }
         if (tick_input.d_press) 
         {
-			if (current_world_state.d_time_until_allowed == 0 && current_world_state.a_time_until_allowed == 0) current_world_state.d_time_until_allowed = 5; 
+			if (current_world_state.d_time_until_allowed == 0 && current_world_state.a_time_until_allowed == 0) current_world_state.d_time_until_allowed = 8; 
         }
 
         if (current_world_state.w_time_until_allowed != 0) 
         {
-            next_player_coords.y += yPixelsToNorm(1.6f);
+            next_player_coords.y += yPixelsToNorm(PIXEL_MOVEMENT_PER_FRAME);
             current_world_state.w_time_until_allowed--;
         }
         if (current_world_state.a_time_until_allowed != 0) 
         {
-            next_player_coords.x -= xPixelsToNorm(1.6f);
+            next_player_coords.x -= xPixelsToNorm(PIXEL_MOVEMENT_PER_FRAME);
             current_world_state.a_time_until_allowed--;
         }
         if (current_world_state.s_time_until_allowed != 0) 
         {
-            next_player_coords.y -= yPixelsToNorm(1.6f);
+            next_player_coords.y -= yPixelsToNorm(PIXEL_MOVEMENT_PER_FRAME);
             current_world_state.s_time_until_allowed--;
         }
         if (current_world_state.d_time_until_allowed != 0) 
         {
-            next_player_coords.x += xPixelsToNorm(1.6f);
+            next_player_coords.x += xPixelsToNorm(PIXEL_MOVEMENT_PER_FRAME);
             current_world_state.d_time_until_allowed--;
         }
 
@@ -223,14 +226,13 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // collision detection
 
-        // handle x collision
-		NormalizedCoords test_x_collision = current_world_state.player_coords;
-        test_x_collision.x = next_player_coords.x;
+        // handle x wall collision
+		NormalizedCoords test_x_wall_collision = current_world_state.player_coords;
+        test_x_wall_collision.x = next_player_coords.x;
 
         for (int i = 0; i < current_world_state.wall_count; i++)
         {
-			if (current_world_state.walls[i].origin.x < test_x_collision.x + player_dim_norm.x && test_x_collision.x < current_world_state.walls[i].origin.x + wall_tile_dim_norm.x &&
-			    current_world_state.walls[i].origin.y < test_x_collision.y + player_dim_norm.y && test_x_collision.y < current_world_state.walls[i].origin.y + wall_tile_dim_norm.y)
+            if (checkCollision(current_world_state.walls[i].origin, wall_tile_dim_norm, nearestPixelFloor(test_x_wall_collision, DEFAULT_SCALE), player_dim_norm))
             {
                 // collision on x axis occurs; check from which direction
                 if (next_player_coords.x - current_world_state.player_coords.x > 0)
@@ -248,14 +250,13 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-        // handle y collision
-        NormalizedCoords test_y_collision = current_world_state.player_coords;
-        test_y_collision.y = next_player_coords.y;
+        // handle y wall collision
+        NormalizedCoords test_y_wall_collision = current_world_state.player_coords;
+        test_y_wall_collision.y = next_player_coords.y;
 
         for (int i = 0; i < current_world_state.wall_count; i++)
         {
-			if (current_world_state.walls[i].origin.x < test_y_collision.x + player_dim_norm.x && test_y_collision.x < current_world_state.walls[i].origin.x + wall_tile_dim_norm.x &&
-			    current_world_state.walls[i].origin.y < test_y_collision.y + player_dim_norm.y && test_y_collision.y < current_world_state.walls[i].origin.y + wall_tile_dim_norm.y)
+            if (checkCollision(current_world_state.walls[i].origin, wall_tile_dim_norm, nearestPixelFloor(test_y_wall_collision, DEFAULT_SCALE), player_dim_norm))
             {
                 // work out from above or below
                 if (next_player_coords.y - current_world_state.player_coords.y > 0)
@@ -273,6 +274,54 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
+        // check x box collision
+        NormalizedCoords test_x_box_collision = current_world_state.player_coords;
+        test_x_box_collision.x = next_player_coords.x;
+
+        for (int i = 0; i < current_world_state.box_count; i++)
+        {
+            if (checkCollision(current_world_state.boxes[i].origin, box_dim_norm, nearestPixelFloor(test_x_box_collision, DEFAULT_SCALE), player_dim_norm))
+            {
+				// work out if pushing to left or right
+                if (next_player_coords.x - current_world_state.player_coords.x > 0)
+                {
+                    // push to the right
+					current_world_state.boxes[i].origin.x += xPixelsToNorm(8);
+                    break;
+                }
+                else
+                {
+                    // push to the left
+                    current_world_state.boxes[i].origin.x -= xPixelsToNorm(8);
+                    break;
+                }
+            }
+        }
+
+        // check y box collision
+        NormalizedCoords test_y_box_collision = current_world_state.player_coords;
+        test_y_box_collision.y = next_player_coords.y;
+
+        for (int i = 0; i < current_world_state.box_count; i++)
+        {
+            if (checkCollision(current_world_state.boxes[i].origin, box_dim_norm, nearestPixelFloor(test_y_box_collision, DEFAULT_SCALE), player_dim_norm))
+            {
+				// work out if pushing to left or right
+                if (next_player_coords.y - current_world_state.player_coords.y > 0)
+                {
+                    // push to the right
+					current_world_state.boxes[i].origin.y += yPixelsToNorm(8);
+                    break;
+                }
+                else
+                {
+                    // push to the left
+                    current_world_state.boxes[i].origin.y -= yPixelsToNorm(8);
+                    break;
+                }
+            }
+        }
+
         // draw boxes 
         for (int16 box_index = 0; box_index < current_world_state.box_count; box_index++)
         {
@@ -284,8 +333,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         drawSprite(player_path, nearestPixelFloor(current_world_state.player_coords, DEFAULT_SCALE), nearestPixelFloorToNorm(player_dim_int, DEFAULT_SCALE));
 
         rendererSubmitFrame(textures_to_load);
-
-        // zero the per-frame arrays
         memset(textures_to_load, 0, sizeof(textures_to_load));
 
         accumulator -= PHYSICS_INCREMENT;
