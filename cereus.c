@@ -35,9 +35,6 @@ NormalizedCoords player_dim_norm = {0};
 TextureToLoad textures_to_load[128] = {0};
 char* loaded_textures[128] = {0};
 
-Rect collision_boxes[64] = {0};
-int32 collision_box_count = 0;
-
 // input is amount of pixels in game space, output fits in [-1, 1]
 float xPixelsToNorm(float pixels)
 {
@@ -53,7 +50,7 @@ NormalizedCoords pixelsToNorm(IntCoords coords, IntCoords scale)
     return normalized_coords;
 }
 
-// adjusts a very small amount, to lie perfectly on a pixel boundary
+// adjusts a very small amount, to lie perfectly in the middle of a pixel (minimizes floating point error)
 NormalizedCoords nearestPixelFloor(NormalizedCoords coords_input, IntCoords scale)
 {
 	NormalizedCoords corrected_coords = {0};
@@ -111,6 +108,7 @@ void drawSprite(char* texture_path, NormalizedCoords origin, NormalizedCoords di
 }
 
 // expects origin and dimensions in norm space
+/*
 void createCollisionBox(NormalizedCoords origin, NormalizedCoords dimensions)
 {
     collision_boxes[collision_box_count].origin.x   = origin.x;
@@ -118,6 +116,7 @@ void createCollisionBox(NormalizedCoords origin, NormalizedCoords dimensions)
     collision_boxes[collision_box_count].dimensions = dimensions;
     collision_box_count++;
 }
+*/
 
 void gameInitialise(void) 
 {	
@@ -220,7 +219,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         for (int16 wall_index = 0; wall_index < current_world_state.wall_count; wall_index++)
         {
 			drawSprite(wall_tile_path, current_world_state.walls[wall_index].origin, wall_tile_dim_norm);
-            createCollisionBox(current_world_state.walls[wall_index].origin, wall_tile_dim_norm);
         }
 
         // collision detection
@@ -229,22 +227,22 @@ void gameFrame(double delta_time, TickInput tick_input)
 		NormalizedCoords test_x_collision = current_world_state.player_coords;
         test_x_collision.x = next_player_coords.x;
 
-        for (int i = 0; i < collision_box_count; i++)
+        for (int i = 0; i < current_world_state.wall_count; i++)
         {
-			if (collision_boxes[i].origin.x < test_x_collision.x + player_dim_norm.x && test_x_collision.x < collision_boxes[i].origin.x + collision_boxes[i].dimensions.x &&
-			    collision_boxes[i].origin.y < test_x_collision.y + player_dim_norm.y && test_x_collision.y < collision_boxes[i].origin.y + collision_boxes[i].dimensions.y)
+			if (current_world_state.walls[i].origin.x < test_x_collision.x + player_dim_norm.x && test_x_collision.x < current_world_state.walls[i].origin.x + wall_tile_dim_norm.x &&
+			    current_world_state.walls[i].origin.y < test_x_collision.y + player_dim_norm.y && test_x_collision.y < current_world_state.walls[i].origin.y + wall_tile_dim_norm.y)
             {
                 // collision on x axis occurs; check from which direction
                 if (next_player_coords.x - current_world_state.player_coords.x > 0)
                 {
                     // moving right
-                    next_player_coords.x = collision_boxes[i].origin.x - player_dim_norm.x;
+                    next_player_coords.x = current_world_state.walls[i].origin.x - player_dim_norm.x;
                     break;
                 }
                 else
                 {
                     // moving left
-                    next_player_coords.x = collision_boxes[i].origin.x + collision_boxes[i].dimensions.x;
+                    next_player_coords.x = current_world_state.walls[i].origin.x + wall_tile_dim_norm.x;
                     break;
                 }
             }
@@ -254,22 +252,22 @@ void gameFrame(double delta_time, TickInput tick_input)
         NormalizedCoords test_y_collision = current_world_state.player_coords;
         test_y_collision.y = next_player_coords.y;
 
-        for (int i = 0; i < collision_box_count; i++)
+        for (int i = 0; i < current_world_state.wall_count; i++)
         {
-			if (collision_boxes[i].origin.x < test_y_collision.x + player_dim_norm.x && test_y_collision.x < collision_boxes[i].origin.x + collision_boxes[i].dimensions.x &&
-			    collision_boxes[i].origin.y < test_y_collision.y + player_dim_norm.y && test_y_collision.y < collision_boxes[i].origin.y + collision_boxes[i].dimensions.y)
+			if (current_world_state.walls[i].origin.x < test_y_collision.x + player_dim_norm.x && test_y_collision.x < current_world_state.walls[i].origin.x + wall_tile_dim_norm.x &&
+			    current_world_state.walls[i].origin.y < test_y_collision.y + player_dim_norm.y && test_y_collision.y < current_world_state.walls[i].origin.y + wall_tile_dim_norm.y)
             {
                 // work out from above or below
                 if (next_player_coords.y - current_world_state.player_coords.y > 0)
                 {
                     // moving up
-                    next_player_coords.y = collision_boxes[i].origin.y - player_dim_norm.y;
+                    next_player_coords.y = current_world_state.walls[i].origin.y - player_dim_norm.y;
                     break;
                 }
                 else
                 {
                     // moving down
-                    next_player_coords.y = collision_boxes[i].origin.y + collision_boxes[i].dimensions.y;
+                    next_player_coords.y = current_world_state.walls[i].origin.y + wall_tile_dim_norm.y;
                     break;
                 }
             }
@@ -279,7 +277,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         for (int16 box_index = 0; box_index < current_world_state.box_count; box_index++)
         {
 			drawSprite(box_path, current_world_state.boxes[box_index].origin, box_dim_norm);
-            createCollisionBox(current_world_state.boxes[box_index].origin, box_dim_norm);
         }
 
 		// draw player
@@ -290,8 +287,6 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // zero the per-frame arrays
         memset(textures_to_load, 0, sizeof(textures_to_load));
-        memset(collision_boxes, 0, sizeof(collision_boxes));
-        collision_box_count = 0;
 
         accumulator -= PHYSICS_INCREMENT;
     }
