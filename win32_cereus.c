@@ -107,10 +107,10 @@ int CALLBACK WinMain(
 
     RegisterClassExW(&window_class);
 
-	int screen_width  = GetSystemMetrics(SM_CXSCREEN);
-	int screen_height = GetSystemMetrics(SM_CYSCREEN);
-    //int screen_width = 800;
-    //int screen_height = 450;
+	//int screen_width  = GetSystemMetrics(SM_CXSCREEN);
+	//int screen_height = GetSystemMetrics(SM_CYSCREEN);
+    int screen_width = 800;
+    int screen_height = 450;
 
 	HWND window_handle = CreateWindowExW(
 		WS_EX_TOPMOST,
