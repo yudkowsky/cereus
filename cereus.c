@@ -128,7 +128,8 @@ void gameInitialise(void)
     box_dim_norm        = nearestPixelFloorToNorm(box_dim_int, DEFAULT_SCALE);
     player_dim_norm     = nearestPixelFloorToNorm(player_dim_int, DEFAULT_SCALE);
 
-    current_world_state.player_coords   = (NormalizedCoords){ 0.0f, 0.0f };
+    IntCoords player_coords_int = {-16, 16};
+    current_world_state.player_coords   = nearestPixelFloorToNorm(player_coords_int, DEFAULT_SCALE);
     current_world_state.player_velocity = (NormalizedCoords){ 0.0f, 0.0f };
 	current_world_state.camera_coords   = (NormalizedCoords){ 0.0f, 0.0f };
 
@@ -153,7 +154,7 @@ void gameInitialise(void)
     }
 
     // set up boxes
-	IntCoords box_coords_int[64] = { {0, 16}, {64, 0} };
+	IntCoords box_coords_int[64] = { {16, 0}, {16, 16} };
 
     current_world_state.box_count = 2;
     for (int16 box_index = 0; box_index < current_world_state.box_count; box_index++)
@@ -178,6 +179,8 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (tick_input.j_press) current_world_state.camera_coords.x -= CAMERA_MOVEMENT_SPEED;
         if (tick_input.k_press) current_world_state.camera_coords.y -= CAMERA_MOVEMENT_SPEED;
         if (tick_input.l_press) current_world_state.camera_coords.x += CAMERA_MOVEMENT_SPEED;
+
+		// tick_input.d_press = true;
 
         // movement input
         if (tick_input.w_press) 
@@ -272,7 +275,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         // check x box collision
         NormalizedCoords test_x_box_collision = { next_player_coords.x, current_world_state.player_coords.y};
         bool full_break = false;
-        bool half_break = false;
 
         for (int initial_collision_index = 0; initial_collision_index < current_world_state.box_count; initial_collision_index++)
         {
@@ -289,39 +291,45 @@ void gameFrame(double delta_time, TickInput tick_input)
                 {
                     // pushing to the right
 					
-
-					// for (all boxes; index = place_in_box_chain)
-                    	// for (all walls; index = wall_index)
-                        	// if (next_box_position, box_dim_norm, current_world_state.walls[wall_index].origin, wall_tile_dim_norm))
-                            	// there is collision; 
+					for (int place_in_box_chain = 0; place_in_box_chain < current_world_state.box_count; place_in_box_chain++)
+                    {
+                        continue_chain = false;
+                    	for (int wall_index = 0; wall_index < current_world_state.wall_count; wall_index++)
+                        {
+                        	if (checkCollision(next_box_position, box_dim_norm, current_world_state.walls[wall_index].origin, wall_tile_dim_norm))
+                            {
+                            	// collision with a wall
                                 // player pos back to initial collision index box +- some dimension factor
+                                next_player_coords.x = current_world_state.boxes[initial_collision_index].origin.x - box_dim_norm.x;
                                 // break out of ALL loops (even top one)
-                                // full_break = true;
-                                // break;
-                        // if (full_break) break;
+                                full_break = true;
+                                break;
+                        	}
+                        }
+                        if (full_break) break;
 
-                        // for (all boxes; index = box_index)
-                    		// if (checkCollision(next_box_position, box_dim_norm, current_world_state.boxes[box_index].origin, box_dim_norm))
-                    			// if (boxes_to_move_ids[boxes_to_move_count - 1] == current_world_state.boxes[box_index].id) continue;
-								// boxes_to_move_ids[boxes_to_move_count] = current_world_state.boxes[box_index].id;
-                                // boxes_to_move_count++;
-                                // next_box_position = { current_world_state.boxes[box_index].origin.x + xPixelsToNorm(8), current_world_state.boxes[box_index].origin.y };
-                                // continue_chain = true;
-                                // break;
-                        // if (continue_chain) continue;
+                        for (int box_index = 0; box_index < current_world_state.box_count; box_index++)
+                        {
+                    		if (checkCollision(next_box_position, box_dim_norm, current_world_state.boxes[box_index].origin, box_dim_norm))
+                            {
+                    			if (boxes_to_move_ids[boxes_to_move_count - 1] == current_world_state.boxes[box_index].id) continue;
+								boxes_to_move_ids[boxes_to_move_count] = current_world_state.boxes[box_index].id;
+                                boxes_to_move_count++;
+                                next_box_position = (NormalizedCoords){ current_world_state.boxes[box_index].origin.x + xPixelsToNorm(8), current_world_state.boxes[box_index].origin.y };
+                                continue_chain = true;
+                                break;
+                        	}
+                        }
+                        if (continue_chain) continue;
 
-                        // if here, then there is air in front of us, so we can move!
-                        // for (box_to_move_count; index = box_to_move_index)
-                        	// for (box_in_state_index)
-                            	// if (current_world_state.boxes[box_in_state_index].id == box_to_move[box_to_move_index])
-                                	// current_world_state.boxes[box_in_state_index].origin.x += xPixelsToNorm(8); 
-                                    // break;
-                            // break out of all loops EXCEPT the top one
-                            // half_break = true;
-                            // break;
-                        // if (half_break) break;
-
-
+                        // if here, then there is air in front of us, so we can move
+                        for (int box_to_move_index = 0; box_to_move_index < boxes_to_move_count; box_to_move_index++)
+                        {
+                            // use the fact that .id = index
+                            current_world_state.boxes[boxes_to_move_ids[box_to_move_index]].origin.x += xPixelsToNorm(8);
+                        }
+                        break;
+					}
                 }
                 else
                 {
