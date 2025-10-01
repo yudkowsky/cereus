@@ -39,6 +39,8 @@ typedef struct WorldState
     int8 s_time_until_allowed;
     int8 d_time_until_allowed;
 
+    int8 time_until_allowed;
+
     Entity walls[64];
     int16 wall_count;
 
