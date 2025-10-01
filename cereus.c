@@ -88,8 +88,8 @@ void drawSprite(char* texture_path, NormalizedCoords origin, NormalizedCoords di
         }
     }
 	// adjust origin based on camera location
-	origin.x += current_world_state.camera_coords.x;
-	origin.y += current_world_state.camera_coords.y;
+	origin.x -= current_world_state.camera_coords.x;
+	origin.y -= current_world_state.camera_coords.y;
 
 	// don't pass to textures_to_load if entire tetxure is outside of norm space
     if (origin.x > CAMERA_CLIPPING_RADIUS ||
@@ -147,28 +147,6 @@ void collisionBoxSystem(NormalizedCoords next_player_coords, float distance, boo
             boxes_to_move_count++;
         }
     }
-
-    /*
-    for (int location_check_index = 0; location_check_index < boxes_to_move_count; location_check_index++)
-    {
-        int8 axis = 0; // 0 = pushing down, 1 = pushing up, 2 = pushing left, 3 = pushing right
-        if (distance > 0) axis += 1;
-        if (x_direction)  axis += 2;
-        
-        float dx = current_world_state.boxes[boxes_to_move_ids[location_check_index]].origin.x - current_world_state.player_coords.x;
-        float dy = current_world_state.boxes[boxes_to_move_ids[location_check_index]].origin.y - current_world_state.player_coords.y;
-        
-        bool mostly_right = fabs(dx) > fabs(dy) && dx > 0;
-        bool mostly_left  = fabs(dx) > fabs(dy) && dx < 0;
-        bool mostly_above = fabs(dy) > fabs(dx) && dy > 0;
-        bool mostly_below = fabs(dy) > fabs(dx) && dy < 0;
-        
-        if (axis == 0 && !mostly_below) return;  // pushing down
-        if (axis == 1 && !mostly_above) return;  // pushing up
-        if (axis == 2 && !mostly_left)  return;  // pushing left
-        if (axis == 3 && !mostly_right) return;  // pushing right
-    }
-    */
 
     if (boxes_to_move_count > 0)	
     {
@@ -388,11 +366,23 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-		collisionBoxSystem(next_player_coords, xPixelsToNorm( 8), true);
-		collisionBoxSystem(next_player_coords, xPixelsToNorm(-8), true);
-		collisionBoxSystem(next_player_coords, yPixelsToNorm( 8), false);
-		collisionBoxSystem(next_player_coords, yPixelsToNorm(-8), false);
-		
+        if (current_world_state.d_time_until_allowed != 0) 
+        {
+            collisionBoxSystem(next_player_coords, xPixelsToNorm( 8), true);
+        }
+        if (current_world_state.a_time_until_allowed != 0) 
+        {
+			collisionBoxSystem(next_player_coords, xPixelsToNorm(-8), true);
+        }
+        if (current_world_state.w_time_until_allowed != 0) 
+        {
+			collisionBoxSystem(next_player_coords, yPixelsToNorm( 8), false);
+        }
+        if (current_world_state.s_time_until_allowed != 0) 
+        {
+			collisionBoxSystem(next_player_coords, yPixelsToNorm(-8), false);
+        }
+
         // draw walls
         for (int16 wall_index = 0; wall_index < current_world_state.wall_count; wall_index++)
         {
