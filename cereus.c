@@ -154,9 +154,9 @@ void gameInitialise(void)
     }
 
     // set up boxes
-	IntCoords box_coords_int[64] = { {16, 0}, {16, 16} };
+	IntCoords box_coords_int[64] = { {16, 0}, {16, 16}, {0, 0}};
 
-    current_world_state.box_count = 2;
+    current_world_state.box_count = 3;
     for (int16 box_index = 0; box_index < current_world_state.box_count; box_index++)
     {
         current_world_state.boxes[box_index].origin = nearestPixelFloorToNorm(box_coords_int[box_index], DEFAULT_SCALE);
@@ -274,15 +274,17 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // check x box collision
         NormalizedCoords test_x_box_collision = { next_player_coords.x, current_world_state.player_coords.y};
-        bool full_break = false;
+        bool wall_collision = false;
+
+        int32 boxes_to_move_ids[64] = {0};
+        int32 boxes_to_move_count = 0;
 
         for (int initial_collision_index = 0; initial_collision_index < current_world_state.box_count; initial_collision_index++)
         {
             if (checkCollision(current_world_state.boxes[initial_collision_index].origin, box_dim_norm, nearestPixelFloor(test_x_box_collision, DEFAULT_SCALE), player_dim_norm))
             {
-                int32 boxes_to_move_ids[64] = {0};
                 boxes_to_move_ids[0] = current_world_state.boxes[initial_collision_index].id; 
-                int32 boxes_to_move_count = 1;
+                boxes_to_move_count = 1;
                 NormalizedCoords next_box_position = { current_world_state.boxes[initial_collision_index].origin.x + xPixelsToNorm(8), current_world_state.boxes[initial_collision_index].origin.y };
 				bool continue_chain = false;
 
@@ -299,14 +301,13 @@ void gameFrame(double delta_time, TickInput tick_input)
                         	if (checkCollision(next_box_position, box_dim_norm, current_world_state.walls[wall_index].origin, wall_tile_dim_norm))
                             {
                             	// collision with a wall
-                                // player pos back to initial collision index box +- some dimension factor
                                 next_player_coords.x = current_world_state.boxes[initial_collision_index].origin.x - box_dim_norm.x;
                                 // break out of ALL loops (even top one)
-                                full_break = true;
+                                wall_collision = true;
                                 break;
                         	}
                         }
-                        if (full_break) break;
+                        if (wall_collision) break;
 
                         for (int box_index = 0; box_index < current_world_state.box_count; box_index++)
                         {
@@ -323,11 +324,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         if (continue_chain) continue;
 
                         // if here, then there is air in front of us, so we can move
-                        for (int box_to_move_index = 0; box_to_move_index < boxes_to_move_count; box_to_move_index++)
-                        {
-                            // use the fact that .id = index
-                            current_world_state.boxes[boxes_to_move_ids[box_to_move_index]].origin.x += xPixelsToNorm(8);
-                        }
+                        // do after entire loop, because we still might have a wall collision, when pushing two boxes at once
                         break;
 					}
                 }
@@ -335,9 +332,23 @@ void gameFrame(double delta_time, TickInput tick_input)
                 {
                     // pushing left
                 }
-                if (full_break == true) break;
+            }
+            if (wall_collision) break;
+        }
+		
+        // modifies global state
+        if (!wall_collision)
+        {
+            for (int box_to_move_index = 0; box_to_move_index < boxes_to_move_count; box_to_move_index++)
+            {
+                // use the fact that .id = index
+                current_world_state.boxes[boxes_to_move_ids[box_to_move_index]].origin.x += xPixelsToNorm(8);
             }
         }
+
+
+
+
 
         // check y box collision
         NormalizedCoords test_y_box_collision = current_world_state.player_coords;
