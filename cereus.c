@@ -153,7 +153,7 @@ void gameInitialise(void)
     }
 
     // set up boxes
-	IntCoords box_coords_int[64] = { { 0, 16}, {64, 0} };
+	IntCoords box_coords_int[64] = { {0, 16}, {64, 0} };
 
     current_world_state.box_count = 2;
     for (int16 box_index = 0; box_index < current_world_state.box_count; box_index++)
@@ -179,7 +179,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (tick_input.k_press) current_world_state.camera_coords.y -= CAMERA_MOVEMENT_SPEED;
         if (tick_input.l_press) current_world_state.camera_coords.x += CAMERA_MOVEMENT_SPEED;
 
-        // handle movement 
+        // movement input
         if (tick_input.w_press) 
         {
 			if (current_world_state.w_time_until_allowed == 0 && current_world_state.s_time_until_allowed == 0) current_world_state.w_time_until_allowed = 8; 
@@ -197,6 +197,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 			if (current_world_state.d_time_until_allowed == 0 && current_world_state.a_time_until_allowed == 0) current_world_state.d_time_until_allowed = 8; 
         }
 
+        // handle movement
         if (current_world_state.w_time_until_allowed != 0) 
         {
             next_player_coords.y += yPixelsToNorm(PIXEL_MOVEMENT_PER_FRAME);
@@ -216,12 +217,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             next_player_coords.x += xPixelsToNorm(PIXEL_MOVEMENT_PER_FRAME);
             current_world_state.d_time_until_allowed--;
-        }
-
-        // draw walls
-        for (int16 wall_index = 0; wall_index < current_world_state.wall_count; wall_index++)
-        {
-			drawSprite(wall_tile_path, current_world_state.walls[wall_index].origin, wall_tile_dim_norm);
         }
 
         // collision detection
@@ -275,26 +270,64 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // check x box collision
-        NormalizedCoords test_x_box_collision = current_world_state.player_coords;
-        test_x_box_collision.x = next_player_coords.x;
+        NormalizedCoords test_x_box_collision = { next_player_coords.x, current_world_state.player_coords.y};
+        bool full_break = false;
+        bool half_break = false;
 
-        for (int i = 0; i < current_world_state.box_count; i++)
+        for (int initial_collision_index = 0; initial_collision_index < current_world_state.box_count; initial_collision_index++)
         {
-            if (checkCollision(current_world_state.boxes[i].origin, box_dim_norm, nearestPixelFloor(test_x_box_collision, DEFAULT_SCALE), player_dim_norm))
+            if (checkCollision(current_world_state.boxes[initial_collision_index].origin, box_dim_norm, nearestPixelFloor(test_x_box_collision, DEFAULT_SCALE), player_dim_norm))
             {
+                int32 boxes_to_move_ids[64] = {0};
+                boxes_to_move_ids[0] = current_world_state.boxes[initial_collision_index].id; 
+                int32 boxes_to_move_count = 1;
+                NormalizedCoords next_box_position = { current_world_state.boxes[initial_collision_index].origin.x + xPixelsToNorm(8), current_world_state.boxes[initial_collision_index].origin.y };
+				bool continue_chain = false;
+
 				// work out if pushing to left or right
                 if (next_player_coords.x - current_world_state.player_coords.x > 0)
                 {
-                    // push to the right
-					current_world_state.boxes[i].origin.x += xPixelsToNorm(8);
-                    break;
+                    // pushing to the right
+					
+
+					// for (all boxes; index = place_in_box_chain)
+                    	// for (all walls; index = wall_index)
+                        	// if (next_box_position, box_dim_norm, current_world_state.walls[wall_index].origin, wall_tile_dim_norm))
+                            	// there is collision; 
+                                // player pos back to initial collision index box +- some dimension factor
+                                // break out of ALL loops (even top one)
+                                // full_break = true;
+                                // break;
+                        // if (full_break) break;
+
+                        // for (all boxes; index = box_index)
+                    		// if (checkCollision(next_box_position, box_dim_norm, current_world_state.boxes[box_index].origin, box_dim_norm))
+                    			// if (boxes_to_move_ids[boxes_to_move_count - 1] == current_world_state.boxes[box_index].id) continue;
+								// boxes_to_move_ids[boxes_to_move_count] = current_world_state.boxes[box_index].id;
+                                // boxes_to_move_count++;
+                                // next_box_position = { current_world_state.boxes[box_index].origin.x + xPixelsToNorm(8), current_world_state.boxes[box_index].origin.y };
+                                // continue_chain = true;
+                                // break;
+                        // if (continue_chain) continue;
+
+                        // if here, then there is air in front of us, so we can move!
+                        // for (box_to_move_count; index = box_to_move_index)
+                        	// for (box_in_state_index)
+                            	// if (current_world_state.boxes[box_in_state_index].id == box_to_move[box_to_move_index])
+                                	// current_world_state.boxes[box_in_state_index].origin.x += xPixelsToNorm(8); 
+                                    // break;
+                            // break out of all loops EXCEPT the top one
+                            // half_break = true;
+                            // break;
+                        // if (half_break) break;
+
+
                 }
                 else
                 {
-                    // push to the left
-                    current_world_state.boxes[i].origin.x -= xPixelsToNorm(8);
-                    break;
+                    // pushing left
                 }
+                if (full_break == true) break;
             }
         }
 
@@ -306,20 +339,22 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             if (checkCollision(current_world_state.boxes[i].origin, box_dim_norm, nearestPixelFloor(test_y_box_collision, DEFAULT_SCALE), player_dim_norm))
             {
-				// work out if pushing to left or right
+				// work out if pushing up or down
                 if (next_player_coords.y - current_world_state.player_coords.y > 0)
                 {
-                    // push to the right
-					current_world_state.boxes[i].origin.y += yPixelsToNorm(8);
-                    break;
+                    // pushing up
                 }
                 else
                 {
-                    // push to the left
-                    current_world_state.boxes[i].origin.y -= yPixelsToNorm(8);
-                    break;
+                    // pushing down
                 }
             }
+        }
+
+        // draw walls
+        for (int16 wall_index = 0; wall_index < current_world_state.wall_count; wall_index++)
+        {
+			drawSprite(wall_tile_path, current_world_state.walls[wall_index].origin, wall_tile_dim_norm);
         }
 
         // draw boxes 
