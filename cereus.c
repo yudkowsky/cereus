@@ -131,7 +131,6 @@ bool checkCollision(NormalizedCoords object_1_origin, NormalizedCoords object_1_
 
 void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bool x_direction)
 {
-    // towards the right collision detection (box only)
     int32 boxes_to_move_ids[64] = {0};
     int32 boxes_to_move_count = 0;
 
@@ -140,6 +139,9 @@ void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bo
     {
         if (checkCollision(*next_player_coords, player_dim_norm, current_world_state.boxes[box_id].origin, box_dim_norm))
         {
+            float abs_dy = fabs(current_world_state.player_coords.y - current_world_state.boxes[box_id].origin.y);
+            if (abs_dy >= box_dim_norm.y - yPixelsToNorm(0.1) && x_direction == true) return;
+
             boxes_to_move_ids[boxes_to_move_count] = box_id;
             boxes_to_move_count++;
         }
@@ -359,6 +361,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             if (checkCollision(current_world_state.walls[i].origin, wall_tile_dim_norm, test_x_wall_collision, player_dim_norm))
             {
+                x_collision = true;
                 // collision on x axis occurs; check from which direction
                 if (next_player_coords.x - current_world_state.player_coords.x > 0)
                 {
@@ -372,7 +375,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                     next_player_coords.x = current_world_state.walls[i].origin.x + wall_tile_dim_norm.x;
                     break;
                 }
-                x_collision = true;
             }
         }
 
@@ -384,6 +386,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             if (checkCollision(current_world_state.walls[i].origin, wall_tile_dim_norm, test_y_wall_collision, player_dim_norm))
             {
+                y_collision = true;
                 // work out from above or below
                 if (next_player_coords.y - current_world_state.player_coords.y > 0)
                 {
@@ -397,7 +400,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                     next_player_coords.y = current_world_state.walls[i].origin.y + wall_tile_dim_norm.y;
                     break;
                 }
-                y_collision = true;
             }
         }
 
@@ -414,8 +416,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-
         // box collision calculations
+        
         if (current_world_state.d_time_until_allowed != 0) {
             collisionBoxSystem(&next_player_coords, xPixelsToNorm(8), true);
         }
