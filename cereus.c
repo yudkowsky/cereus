@@ -131,8 +131,8 @@ bool checkCollision(NormalizedCoords object_1_origin, NormalizedCoords object_1_
 
 void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bool x_direction)
 {
-    int32 boxes_to_move_ids[64] = {0};
-    int32 boxes_to_move_count = 0;
+    bool boxes_to_move_bools[64] = {false};
+    int32 first_box_id = -1;
 
     // populate boxes_to_move_ids and count with first 1 or 2 boxes to move 
     for (int box_id = 0; box_id < current_world_state.box_count; box_id++)
@@ -142,29 +142,30 @@ void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bo
             float abs_dy = (float)fabs(current_world_state.player_coords.y - current_world_state.boxes[box_id].origin.y);
             if (abs_dy >= box_dim_norm.y - yPixelsToNorm(0.1f) && x_direction == true) continue;
 
-            boxes_to_move_ids[boxes_to_move_count] = box_id;
-            boxes_to_move_count++;
+            if (first_box_id == -1) first_box_id = box_id;
+            boxes_to_move_bools[box_id] = true;
         }
     }
 
-    if (boxes_to_move_count > 0)	
+    if (first_box_id != -1)	
     {
         // main loop with a growing boxes_to_move_ids array
         for (int pass_nr = 0; pass_nr < 64; pass_nr++)
         {
             bool new_box_added_this_pass = false;
-            for (int boxes_to_move_index = 0; boxes_to_move_index < boxes_to_move_count; boxes_to_move_index++)
+            for (int boxes_to_move_index = 0; boxes_to_move_index < current_world_state.box_count; boxes_to_move_index++)
             {
+                if (boxes_to_move_bools[boxes_to_move_index] == false) continue;
                 NormalizedCoords box_position_after_move = {0};
                 if (x_direction)
                 {
-                    box_position_after_move = (NormalizedCoords){ current_world_state.boxes[boxes_to_move_ids[boxes_to_move_index]].origin.x + distance, 
-                                                                  current_world_state.boxes[boxes_to_move_ids[boxes_to_move_index]].origin.y };
+                    box_position_after_move = (NormalizedCoords){ current_world_state.boxes[boxes_to_move_index].origin.x + distance, 
+                                                                  current_world_state.boxes[boxes_to_move_index].origin.y };
                 }
                 else
                 {
-                    box_position_after_move = (NormalizedCoords){ current_world_state.boxes[boxes_to_move_ids[boxes_to_move_index]].origin.x, 
-                                                                  current_world_state.boxes[boxes_to_move_ids[boxes_to_move_index]].origin.y + distance };
+                    box_position_after_move = (NormalizedCoords){ current_world_state.boxes[boxes_to_move_index].origin.x, 
+                                                                  current_world_state.boxes[boxes_to_move_index].origin.y + distance };
                 }
 
 				for (int wall_id = 0; wall_id < current_world_state.wall_count; wall_id++)
@@ -175,12 +176,12 @@ void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bo
                         {
 							if (distance > 0) 
                             {
-                                (*next_player_coords).x = current_world_state.boxes[boxes_to_move_ids[0]].origin.x - player_dim_norm.x;
+                                (*next_player_coords).x = current_world_state.boxes[first_box_id].origin.x - player_dim_norm.x;
                                 current_world_state.d_time_until_allowed = 0;
                             }
 							else 
                             {
-                                (*next_player_coords).x = current_world_state.boxes[boxes_to_move_ids[0]].origin.x + box_dim_norm.x;
+                                (*next_player_coords).x = current_world_state.boxes[first_box_id].origin.x + box_dim_norm.x;
                                 current_world_state.a_time_until_allowed = 0;
                             }
                         }
@@ -188,12 +189,12 @@ void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bo
                         {
 							if (distance > 0) 
                             {
-                                (*next_player_coords).y = current_world_state.boxes[boxes_to_move_ids[0]].origin.y - player_dim_norm.y;
+                                (*next_player_coords).y = current_world_state.boxes[first_box_id].origin.y - player_dim_norm.y;
                                 current_world_state.w_time_until_allowed = 0;
                             }
 							else 
                             {
-                                (*next_player_coords).y = current_world_state.boxes[boxes_to_move_ids[0]].origin.y + box_dim_norm.y;
+                                (*next_player_coords).y = current_world_state.boxes[first_box_id].origin.y + box_dim_norm.y;
                                 current_world_state.s_time_until_allowed = 0;
                             }
                         }
@@ -205,22 +206,8 @@ void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bo
                 {
                     if (checkCollision(current_world_state.boxes[box_id].origin, box_dim_norm, box_position_after_move, box_dim_norm))
                     {
-                        bool already_present = false;
-                        for (int box_already_present_index = 0; box_already_present_index < boxes_to_move_count; box_already_present_index++)
-                        {
-                            if (boxes_to_move_ids[box_already_present_index] == box_id) 
-                            {
-                                already_present = true;
-                                break;
-                            }
-                        }
-                        if (!already_present)
-                        {
-                            boxes_to_move_ids[boxes_to_move_count] = box_id;
-                            boxes_to_move_count++;
-                            new_box_added_this_pass = true;
-                            break;
-                        }
+						boxes_to_move_bools[box_id] = true;
+						new_box_added_this_pass = true;
                     }
                 }
             }
@@ -228,10 +215,11 @@ void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bo
         }
         
         // modify global state: move boxes in boxes_to_move_ids
-        for (int box_to_move_index = 0; box_to_move_index < boxes_to_move_count; box_to_move_index++)
+        for (int boxes_to_move_index = 0; boxes_to_move_index < current_world_state.box_count; boxes_to_move_index++)
         {
-            if (x_direction) current_world_state.boxes[boxes_to_move_ids[box_to_move_index]].origin.x += distance;
-            else 			 current_world_state.boxes[boxes_to_move_ids[box_to_move_index]].origin.y += distance;
+            if (boxes_to_move_bools[boxes_to_move_index] == false) continue;
+            if (x_direction) current_world_state.boxes[boxes_to_move_index].origin.x += distance;
+            else 			 current_world_state.boxes[boxes_to_move_index].origin.y += distance;
         }
     }
 }
