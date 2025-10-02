@@ -139,8 +139,8 @@ void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bo
     {
         if (checkCollision(*next_player_coords, player_dim_norm, current_world_state.boxes[box_id].origin, box_dim_norm))
         {
-            float abs_dy = fabs(current_world_state.player_coords.y - current_world_state.boxes[box_id].origin.y);
-            if (abs_dy >= box_dim_norm.y - yPixelsToNorm(0.1) && x_direction == true) return;
+            float abs_dy =(float)fabs(current_world_state.player_coords.y - current_world_state.boxes[box_id].origin.y);
+            if (abs_dy >= box_dim_norm.y - yPixelsToNorm(0.1f) && x_direction == true) return;
 
             boxes_to_move_ids[boxes_to_move_count] = box_id;
             boxes_to_move_count++;
@@ -173,13 +173,29 @@ void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bo
                     {
                         if (x_direction)
                         {
-							if (distance > 0) (*next_player_coords).x = current_world_state.boxes[boxes_to_move_ids[0]].origin.x - player_dim_norm.x;
-							else              (*next_player_coords).x = current_world_state.boxes[boxes_to_move_ids[0]].origin.x + box_dim_norm.x;
+							if (distance > 0) 
+                            {
+                                (*next_player_coords).x = current_world_state.boxes[boxes_to_move_ids[0]].origin.x - player_dim_norm.x;
+                                current_world_state.d_time_until_allowed = 0;
+                            }
+							else 
+                            {
+                                (*next_player_coords).x = current_world_state.boxes[boxes_to_move_ids[0]].origin.x + box_dim_norm.x;
+                                current_world_state.a_time_until_allowed = 0;
+                            }
                         }
                         else
                         {
-							if (distance > 0) (*next_player_coords).y = current_world_state.boxes[boxes_to_move_ids[0]].origin.y - player_dim_norm.y;
-							else              (*next_player_coords).y = current_world_state.boxes[boxes_to_move_ids[0]].origin.y + box_dim_norm.y;
+							if (distance > 0) 
+                            {
+                                (*next_player_coords).y = current_world_state.boxes[boxes_to_move_ids[0]].origin.y - player_dim_norm.y;
+                                current_world_state.w_time_until_allowed = 0;
+                            }
+							else 
+                            {
+                                (*next_player_coords).y = current_world_state.boxes[boxes_to_move_ids[0]].origin.y + box_dim_norm.y;
+                                current_world_state.s_time_until_allowed = 0;
+                            }
                         }
 						return;
                     }
