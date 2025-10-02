@@ -30,16 +30,23 @@ Entity;
 
 typedef struct WorldState 
 {
+	char* level_path;
+
     NormalizedCoords player_coords;
-    NormalizedCoords player_velocity;
+    NormalizedCoords player_spawn_point;
     NormalizedCoords camera_coords;
 
     int8 w_time_until_allowed;
     int8 a_time_until_allowed;
     int8 s_time_until_allowed;
     int8 d_time_until_allowed;
-
     int8 time_until_allowed;
+
+	Entity voids[64];
+    int16 void_count;
+
+    Entity grids[64];
+    int16 grid_count;
 
     Entity walls[64];
     int16 wall_count;

@@ -1,7 +1,8 @@
 #include "win32_cereus_bridge.h"
 #include "worldstate_structs.h"
 #include <string.h> // TODO(spike): temporary, for memset
-#include <math.h> //TODO(spike): also temporary, for floor
+#include <math.h> // TODO(spike): also temporary, for floor
+#include <stdio.h> // TODO(spike): "temporary", for fopen 
 
 #define local_persist static
 #define global_variable static
@@ -10,27 +11,41 @@
 double PHYSICS_INCREMENT = 1.0/60.0;
 NormalizedCoords NORM_DISTANCE_PER_SCREEN_PIXEL = { 2.0f / 1920.0f, 2.0f / 1080.0f };
 IntCoords DEFAULT_SCALE = {8, 8};
-float CAMERA_MOVEMENT_SPEED = 0.01f; // arbitrary movement per frame; temporary anyway, will want to use variable for this
+float CAMERA_MOVEMENT_SPEED = 0.02f; // arbitrary movement per frame; temporary anyway, will want to use variable for this
 float CAMERA_CLIPPING_RADIUS = 1.0f;
 
 WorldState current_world_state = {0};
 double accumulator = 0.0;
 
-char* wall_tile_path = "data/sprites/wall.png";
-IntCoords wall_tile_dim_int = { .x = 16, .y = 16 };
-NormalizedCoords wall_tile_dim_norm = {0};
+char* void_path = "data/sprites/void.png";
+IntCoords void_dim_int = { 16, 16 };
+NormalizedCoords void_dim_norm = {0};
 
-char* floor_tile_path = "data/sprites/floor.png";
-IntCoords floor_tile_dim_int = { .x = 48 , .y = 32 };
-NormalizedCoords floor_tile_dim_norm = {0};
+char* grid_path = "data/sprites/grid.png";
+IntCoords grid_dim_int = { 16, 16 };
+NormalizedCoords grid_dim_norm = {0};
+
+char* wall_path = "data/sprites/wall.png";
+IntCoords wall_dim_int = { 16, 16 };
+NormalizedCoords wall_dim_norm = {0};
 
 char* box_path = "data/sprites/box.png";
-IntCoords box_dim_int = { .x = 16, .y = 16};
+IntCoords box_dim_int = { 16, 16};
 NormalizedCoords box_dim_norm = {0};
 
 char* player_path = "data/sprites/player.png";
-IntCoords player_dim_int = { .x = 16, .y = 16 };
+IntCoords player_dim_int = { 16, 16 };
 NormalizedCoords player_dim_norm = {0};
+
+typedef enum 
+{
+    TILE_VOID = 0,
+    TILE_GRID = 1,
+    TILE_WALL = 2,
+    TILE_BOX= 3,
+    TILE_PLAYER = 5
+}
+TileType;
 
 TextureToLoad textures_to_load[128] = {0};
 char* loaded_textures[128] = {0};
@@ -62,6 +77,13 @@ NormalizedCoords nearestPixelFloor(NormalizedCoords coords_input, IntCoords scal
 NormalizedCoords nearestPixelFloorToNorm(IntCoords coords, IntCoords scale)
 {
 	return nearestPixelFloor(pixelsToNorm(coords, scale), scale);
+}
+
+bool normCoordsIsEqual(NormalizedCoords coords_1, NormalizedCoords coords_2)
+{
+    float dx = coords_1.x - coords_2.x;
+    float dy = coords_1.y - coords_2.y;
+    return (fabs(dx) < xPixelsToNorm(0.05f) && fabs(dy) < yPixelsToNorm(0.05f));
 }
 
 // modifies textures_to_load, expects origin and dimensions in norm space. scale input is pixels/pixel, output is norm space scale 
@@ -170,7 +192,7 @@ void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bo
 
 				for (int wall_id = 0; wall_id < current_world_state.wall_count; wall_id++)
                 {
-                    if (checkCollision(current_world_state.walls[wall_id].origin, wall_tile_dim_norm, box_position_after_move, box_dim_norm))
+                    if (checkCollision(current_world_state.walls[wall_id].origin, wall_dim_norm, box_position_after_move, box_dim_norm))
                     {
                         if (x_direction)
                         {
@@ -224,48 +246,79 @@ void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bo
     }
 }
 
+NormalizedCoords tileIndexToNormCoords(int16 tile_index, IntCoords level_dimensions)
+{
+	IntCoords position_int = { 16 * (tile_index % level_dimensions.x), (level_dimensions.y - tile_index / level_dimensions.x) * 16 };
+    return nearestPixelFloorToNorm(position_int, DEFAULT_SCALE);
+}
+
 void gameInitialise(void) 
 {	
-    wall_tile_dim_norm  = nearestPixelFloorToNorm(wall_tile_dim_int, DEFAULT_SCALE);
-    floor_tile_dim_norm = nearestPixelFloorToNorm(floor_tile_dim_int, DEFAULT_SCALE);
-    box_dim_norm        = nearestPixelFloorToNorm(box_dim_int, DEFAULT_SCALE);
-    player_dim_norm     = nearestPixelFloorToNorm(player_dim_int, DEFAULT_SCALE);
+    void_dim_norm   = nearestPixelFloorToNorm(void_dim_int, DEFAULT_SCALE);
+    grid_dim_norm   = nearestPixelFloorToNorm(grid_dim_int, DEFAULT_SCALE);
+    wall_dim_norm   = nearestPixelFloorToNorm(wall_dim_int, DEFAULT_SCALE);
+    box_dim_norm    = nearestPixelFloorToNorm(box_dim_int, DEFAULT_SCALE);
+    player_dim_norm = nearestPixelFloorToNorm(player_dim_int, DEFAULT_SCALE);
 
-    IntCoords player_coords_int = {16, 16};
-    current_world_state.player_coords   = nearestPixelFloorToNorm(player_coords_int, DEFAULT_SCALE);
-    current_world_state.player_velocity = (NormalizedCoords){ 0.0f, 0.0f };
-	current_world_state.camera_coords   = (NormalizedCoords){ 0.0f, 0.0f };
+	current_world_state.level_path = "data/levels/level_1.txt";
+	current_world_state.camera_coords      = (NormalizedCoords){ 0.7f, 1.0f };
 
 	current_world_state.w_time_until_allowed = 0;
 	current_world_state.a_time_until_allowed = 0;
 	current_world_state.s_time_until_allowed = 0;
 	current_world_state.d_time_until_allowed = 0;
 
-    // set up walls
-    IntCoords wall_coords_int[64] = { {-32,  48}, {-16,  48}, { 0 ,  48}, { 16,  48}, { 32,  48}, { 48,  48},
-        						    //{-32,  32},                                                 { 48,  32},
-        							  {-32,  16}, 								                  { 48,  16},
-                                      {-32,  0 }, 								                  { 48,  0 },
-                                      {-32, -16}, 								                  { 48, -16},
-                                      {-32, -32}, {-16, -32}, { 0 , -32}, { 16, -32}, { 32, -32}, { 48, -32}  };
+    // need to fill various current_world_state structs based on level
+    FILE *level_file = fopen(current_world_state.level_path, "rb");
+    unsigned char byte = 0;
 
-    current_world_state.wall_count = 18;
-    for (int16 wall_index = 0; wall_index < current_world_state.wall_count; wall_index++)
+	IntCoords level_dimensions = {0};
+    fread(&byte, 1, 1, level_file);
+    level_dimensions.x = byte;
+    fread(&byte, 1, 1, level_file);
+    level_dimensions.y = byte;
+
+    for (int16 tile_index = 0; tile_index < level_dimensions.x * level_dimensions.y; tile_index++)
     {
-        current_world_state.walls[wall_index].origin = nearestPixelFloorToNorm(wall_coords_int[wall_index], DEFAULT_SCALE);
-        current_world_state.walls[wall_index].id = wall_index;
-    }
+        fread(&byte, 1, 1, level_file);
+		switch (byte)
+        {
+        	case TILE_VOID:
+                current_world_state.voids[current_world_state.void_count].origin = tileIndexToNormCoords(tile_index, level_dimensions);
+                current_world_state.voids[current_world_state.void_count].id = current_world_state.void_count;
+                current_world_state.void_count++;
+                break;
+            case TILE_GRID:
+                current_world_state.grids[current_world_state.grid_count].origin = tileIndexToNormCoords(tile_index, level_dimensions);
+                current_world_state.grids[current_world_state.grid_count].id = current_world_state.grid_count;
+                current_world_state.grid_count++;
+            	break;
+            case TILE_WALL:
+                current_world_state.walls[current_world_state.wall_count].origin = tileIndexToNormCoords(tile_index, level_dimensions);
+                current_world_state.walls[current_world_state.wall_count].id = current_world_state.wall_count;
+                current_world_state.wall_count++;
+            	break;
+            case TILE_BOX:
+                current_world_state.boxes[current_world_state.box_count].origin = tileIndexToNormCoords(tile_index, level_dimensions);
+                current_world_state.boxes[current_world_state.box_count].id = current_world_state.box_count;
+                current_world_state.box_count++;
 
-    // set up boxes
-	IntCoords box_coords_int[64] = { { 32,  64}, { 16,  72}, { 0 ,  64}, {-16,  72}, {-32,  64}, {-48,  72},
-									 { 32,  80}, { 16,  96}, { 0 ,  80},             {-32,  80}  };
+                current_world_state.grids[current_world_state.grid_count].origin = tileIndexToNormCoords(tile_index, level_dimensions);
+                current_world_state.grids[current_world_state.grid_count].id = current_world_state.grid_count;
+                current_world_state.grid_count++;
+            	break;
+            case TILE_PLAYER:
+                current_world_state.player_coords = tileIndexToNormCoords(tile_index, level_dimensions);
 
-    current_world_state.box_count = 10;
-    for (int16 box_index = 0; box_index < current_world_state.box_count; box_index++)
-    {
-        current_world_state.boxes[box_index].origin = nearestPixelFloorToNorm(box_coords_int[box_index], DEFAULT_SCALE);
-        current_world_state.boxes[box_index].id = box_index;
+                current_world_state.grids[current_world_state.grid_count].origin = tileIndexToNormCoords(tile_index, level_dimensions);
+                current_world_state.grids[current_world_state.grid_count].id = current_world_state.grid_count;
+                current_world_state.grid_count++;
+            	break;
+            default:
+            	break;
+        }
     }
+    current_world_state.player_spawn_point = current_world_state.player_coords; 
 }
 
 void gameFrame(double delta_time, TickInput tick_input)
@@ -285,7 +338,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (tick_input.l_press) current_world_state.camera_coords.x += CAMERA_MOVEMENT_SPEED;
 
         // movement input - this entire section is terrible
-
 		if (tick_input.w_press && tick_input.a_press && current_world_state.time_until_allowed == 0)
         {
             current_world_state.w_time_until_allowed = 8;
@@ -363,7 +415,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         for (int i = 0; i < current_world_state.wall_count; i++)
         {
-            if (checkCollision(current_world_state.walls[i].origin, wall_tile_dim_norm, test_x_wall_collision, player_dim_norm))
+            if (checkCollision(current_world_state.walls[i].origin, wall_dim_norm, test_x_wall_collision, player_dim_norm))
             {
                 x_collision = true;
                 // collision on x axis occurs; check from which direction
@@ -376,7 +428,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 else
                 {
                     // moving left
-                    next_player_coords.x = current_world_state.walls[i].origin.x + wall_tile_dim_norm.x;
+                    next_player_coords.x = current_world_state.walls[i].origin.x + wall_dim_norm.x;
                     break;
                 }
             }
@@ -388,7 +440,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         for (int i = 0; i < current_world_state.wall_count; i++)
         {
-            if (checkCollision(current_world_state.walls[i].origin, wall_tile_dim_norm, test_y_wall_collision, player_dim_norm))
+            if (checkCollision(current_world_state.walls[i].origin, wall_dim_norm, test_y_wall_collision, player_dim_norm))
             {
                 y_collision = true;
                 // work out from above or below
@@ -401,7 +453,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 else
                 {
                     // moving down
-                    next_player_coords.y = current_world_state.walls[i].origin.y + wall_tile_dim_norm.y;
+                    next_player_coords.y = current_world_state.walls[i].origin.y + wall_dim_norm.y;
                     break;
                 }
             }
@@ -412,7 +464,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             for (int i = 0; i < current_world_state.wall_count; i++)
             {
-                if (checkCollision(current_world_state.walls[i].origin, wall_tile_dim_norm, next_player_coords, player_dim_norm))
+                if (checkCollision(current_world_state.walls[i].origin, wall_dim_norm, next_player_coords, player_dim_norm))
                 {
                     next_player_coords = current_world_state.player_coords; // block movement entirely
                     break;
@@ -421,7 +473,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // box collision calculations
-        
         if (current_world_state.d_time_until_allowed != 0) {
             collisionBoxSystem(&next_player_coords, xPixelsToNorm(8), true);
         }
@@ -435,21 +486,56 @@ void gameFrame(double delta_time, TickInput tick_input)
             collisionBoxSystem(&next_player_coords, yPixelsToNorm(-8), false);
         }
 
+		bool player_in_void = true;
+
+        // draw voids; and check if equal to player or some box
+        for (int16 void_index = 0; void_index < current_world_state.void_count; void_index++)
+        {
+			drawSprite(void_path, current_world_state.voids[void_index].origin, void_dim_norm);
+        }
+
+        // draw grids, and void player
+        for (int16 grid_index = 0; grid_index < current_world_state.grid_count; grid_index++)
+        {
+			drawSprite(grid_path, current_world_state.grids[grid_index].origin, grid_dim_norm);
+            if (checkCollision(current_world_state.grids[grid_index].origin, grid_dim_norm, next_player_coords, player_dim_norm)) player_in_void = false;
+        }
+
         // draw walls
         for (int16 wall_index = 0; wall_index < current_world_state.wall_count; wall_index++)
         {
-			drawSprite(wall_tile_path, current_world_state.walls[wall_index].origin, wall_tile_dim_norm);
+			drawSprite(wall_path, current_world_state.walls[wall_index].origin, wall_dim_norm);
         }
 
-        // draw boxes 
+        // draw boxes, and void some
         for (int16 box_index = 0; box_index < current_world_state.box_count; box_index++)
         {
+            if (current_world_state.boxes[box_index].id == -1) continue; // if voided
+            bool delete_box = true;
+            for (int16 grid_index = 0; grid_index < current_world_state.grid_count; grid_index++)
+            {
+				if (checkCollision(current_world_state.grids[grid_index].origin, grid_dim_norm, current_world_state.boxes[box_index].origin, box_dim_norm)) 
+                {
+                    delete_box = false;
+                	break;
+                }
+            }
+
+            if (delete_box == true) 
+            {
+                current_world_state.boxes[box_index].id = -1;
+                continue;
+            }
 			drawSprite(box_path, current_world_state.boxes[box_index].origin, box_dim_norm);
         }
 
 		// draw player
-        current_world_state.player_coords = next_player_coords;
-        drawSprite(player_path, nearestPixelFloor(current_world_state.player_coords, DEFAULT_SCALE), nearestPixelFloorToNorm(player_dim_int, DEFAULT_SCALE));
+        if (player_in_void == true) current_world_state.player_coords = current_world_state.player_spawn_point;
+        else 
+        {
+            current_world_state.player_coords = next_player_coords;
+            drawSprite(player_path, nearestPixelFloor(current_world_state.player_coords, DEFAULT_SCALE), nearestPixelFloorToNorm(player_dim_int, DEFAULT_SCALE));
+        }
 
         rendererSubmitFrame(textures_to_load);
         memset(textures_to_load, 0, sizeof(textures_to_load));

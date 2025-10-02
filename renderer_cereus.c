@@ -578,7 +578,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	VkCommandBufferBeginInfo command_buffer_begin_info = {0}; // container for how a command buffer begins recording (unused for us, no flags needed)
 	command_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-    VkClearValue clear_color = { .color = { .float32 = { 0.02f, 0.2f, 0.03f, 1.0f } } };
+    VkClearValue clear_color = { .color = { .float32 = { 0.0f, 0.0f, 0.0f, 1.0f } } }; // isn't actually used
     
 	VkRenderPassBeginInfo render_pass_begin_info = {0}; // describes which render pass, framebuffer, render area, and clear values to use when we begin the render pass
     render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1263,7 +1263,7 @@ void rendererDraw(void)
 	command_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // submit once, reset next frame
 	vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
 
-    VkClearValue clear_color = { .color = {{ 0.1f, 0.1f, 0.1f, 1.0f }} };
+    VkClearValue clear_color = { .color = {{ 0.005f, 0.008f, 0.02, 1.0f }} };
 
     VkRenderPassBeginInfo render_pass_begin_info = {0};
     render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
