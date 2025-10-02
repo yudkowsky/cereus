@@ -139,8 +139,8 @@ void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bo
     {
         if (checkCollision(*next_player_coords, player_dim_norm, current_world_state.boxes[box_id].origin, box_dim_norm))
         {
-            float abs_dy =(float)fabs(current_world_state.player_coords.y - current_world_state.boxes[box_id].origin.y);
-            if (abs_dy >= box_dim_norm.y - yPixelsToNorm(0.1f) && x_direction == true) return;
+            float abs_dy = (float)fabs(current_world_state.player_coords.y - current_world_state.boxes[box_id].origin.y);
+            if (abs_dy >= box_dim_norm.y - yPixelsToNorm(0.1f) && x_direction == true) continue;
 
             boxes_to_move_ids[boxes_to_move_count] = box_id;
             boxes_to_move_count++;
