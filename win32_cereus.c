@@ -113,7 +113,7 @@ int CALLBACK WinMain(
     //int screen_height = 450;
 
 	HWND window_handle = CreateWindowExW(
-		WS_EX_TOPMOST,
+		0,
 		L"standard_window_class",
 		L"Window Name",
 		WS_OVERLAPPEDWINDOW,

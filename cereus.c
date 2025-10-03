@@ -3,6 +3,7 @@
 #include <string.h> // TODO(spike): temporary, for memset
 #include <math.h> // TODO(spike): also temporary, for floor
 #include <stdio.h> // TODO(spike): "temporary", for fopen 
+#include <windows.h> // TODO(spike): ok, actually temporary this time, for outputdebugstring
 
 #define local_persist static
 #define global_variable static
@@ -11,10 +12,16 @@
 double PHYSICS_INCREMENT = 1.0/60.0;
 NormalizedCoords NORM_DISTANCE_PER_SCREEN_PIXEL = { 2.0f / 1920.0f, 2.0f / 1080.0f };
 IntCoords DEFAULT_SCALE = {8, 8};
-float CAMERA_MOVEMENT_SPEED = 0.02f; // arbitrary movement per frame; temporary anyway, will want to use variable for this
+float CAMERA_MOVEMENT_SPEED = 0.02f;
 float CAMERA_CLIPPING_RADIUS = 1.0f;
+int32 UNDO_BUFFER_SIZE = 256;
 
 WorldState current_world_state = {0};
+
+WorldState undo_buffer[256] = {0};
+int32 undo_buffer_position = 0;
+int32 z_time_until_allowed = 0;
+
 double accumulator = 0.0;
 
 char* void_path = "data/sprites/void.png";
@@ -156,9 +163,10 @@ void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bo
     bool boxes_to_move_bools[64] = {false};
     int32 first_box_id = -1;
 
-    // populate boxes_to_move_ids and count with first 1 or 2 boxes to move 
+    // populate boxes_to_move_ids and count with first boxes to move (built with 1/2 tile movement in mind, but is still useful for diagonal movement.)
     for (int box_id = 0; box_id < current_world_state.box_count; box_id++)
     {
+        if (current_world_state.boxes[box_id].id == -1) continue;
         if (checkCollision(*next_player_coords, player_dim_norm, current_world_state.boxes[box_id].origin, box_dim_norm))
         {
             float abs_dy = (float)fabs(current_world_state.player_coords.y - current_world_state.boxes[box_id].origin.y);
@@ -177,7 +185,7 @@ void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bo
             bool new_box_added_this_pass = false;
             for (int boxes_to_move_index = 0; boxes_to_move_index < current_world_state.box_count; boxes_to_move_index++)
             {
-                if (boxes_to_move_bools[boxes_to_move_index] == false) continue;
+                if (boxes_to_move_bools[boxes_to_move_index] == false || current_world_state.boxes[boxes_to_move_index].id == -1) continue;
                 NormalizedCoords box_position_after_move = {0};
                 if (x_direction)
                 {
@@ -226,6 +234,7 @@ void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bo
 
                 for (int box_id = 0; box_id < current_world_state.box_count; box_id++)
                 {
+                    if (current_world_state.boxes[box_id].id == -1) continue;
                     if (checkCollision(current_world_state.boxes[box_id].origin, box_dim_norm, box_position_after_move, box_dim_norm))
                     {
 						boxes_to_move_bools[box_id] = true;
@@ -252,6 +261,14 @@ NormalizedCoords tileIndexToNormCoords(int16 tile_index, IntCoords level_dimensi
     return nearestPixelFloorToNorm(position_int, DEFAULT_SCALE);
 }
 
+void recordStateForUndo(bool *state_recorded)
+{
+    if (*state_recorded == true) return;
+    undo_buffer[undo_buffer_position] = current_world_state;
+    undo_buffer_position = (undo_buffer_position + 1) % UNDO_BUFFER_SIZE;
+    *state_recorded = true;
+}
+
 void gameInitialise(void) 
 {	
     void_dim_norm   = nearestPixelFloorToNorm(void_dim_int, DEFAULT_SCALE);
@@ -261,7 +278,7 @@ void gameInitialise(void)
     player_dim_norm = nearestPixelFloorToNorm(player_dim_int, DEFAULT_SCALE);
 
 	current_world_state.level_path = "data/levels/level_1.txt";
-	current_world_state.camera_coords      = (NormalizedCoords){ 0.7f, 1.0f };
+	current_world_state.camera_coords = (NormalizedCoords){ 0.7f, 1.0f };
 
 	current_world_state.w_time_until_allowed = 0;
 	current_world_state.a_time_until_allowed = 0;
@@ -330,7 +347,24 @@ void gameFrame(double delta_time, TickInput tick_input)
 
     while (accumulator >= PHYSICS_INCREMENT)
     {
-		NormalizedCoords next_player_coords = current_world_state.player_coords; // prevents garbage data in global state
+    	if (tick_input.z_press && z_time_until_allowed == 0)
+        {
+            OutputDebugStringA("z just got pressed!");
+            z_time_until_allowed = 8;
+
+            // undo
+            int32 next_undo_buffer_position;
+            if (undo_buffer_position != 0) next_undo_buffer_position = undo_buffer_position - 1;
+            else next_undo_buffer_position = UNDO_BUFFER_SIZE - 1;
+
+            if (undo_buffer[next_undo_buffer_position].level_path != 0)
+            {
+            	current_world_state = undo_buffer[next_undo_buffer_position]; 
+                memset(&undo_buffer[undo_buffer_position], 0, sizeof(WorldState));
+            	undo_buffer_position = next_undo_buffer_position;
+            }
+            // else: no more undos to perform
+        }
 
         if (tick_input.i_press) current_world_state.camera_coords.y += CAMERA_MOVEMENT_SPEED;
         if (tick_input.j_press) current_world_state.camera_coords.x -= CAMERA_MOVEMENT_SPEED;
@@ -338,73 +372,93 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (tick_input.l_press) current_world_state.camera_coords.x += CAMERA_MOVEMENT_SPEED;
 
         // movement input - this entire section is terrible
+		bool state_recorded = false;
+
+		NormalizedCoords next_player_coords = current_world_state.player_coords; // prevents garbage data in global state
+
 		if (tick_input.w_press && tick_input.a_press && current_world_state.time_until_allowed == 0)
         {
+            recordStateForUndo(&state_recorded);
+
             current_world_state.w_time_until_allowed = 8;
             current_world_state.a_time_until_allowed = 8;
             current_world_state.time_until_allowed = 8;
         }
+		if (tick_input.d_press && tick_input.w_press && current_world_state.time_until_allowed == 0)
+        {
+            recordStateForUndo(&state_recorded);
+
+            current_world_state.d_time_until_allowed = 8;
+            current_world_state.w_time_until_allowed = 8;
+            current_world_state.time_until_allowed = 8;
+        }
 		if (tick_input.a_press && tick_input.s_press && current_world_state.time_until_allowed == 0)
         {
+            recordStateForUndo(&state_recorded);
+
             current_world_state.a_time_until_allowed = 8;
             current_world_state.s_time_until_allowed = 8;
             current_world_state.time_until_allowed = 8;
         }
 		if (tick_input.s_press && tick_input.d_press && current_world_state.time_until_allowed == 0)
         {
+            recordStateForUndo(&state_recorded);
+
             current_world_state.s_time_until_allowed = 8;
             current_world_state.d_time_until_allowed = 8;
-            current_world_state.time_until_allowed = 8;
-        }
-		if (tick_input.d_press && tick_input.w_press && current_world_state.time_until_allowed == 0)
-        {
-            current_world_state.d_time_until_allowed = 8;
-            current_world_state.w_time_until_allowed = 8;
             current_world_state.time_until_allowed = 8;
         }
 
         if (tick_input.w_press && current_world_state.time_until_allowed == 0)
         {
+            recordStateForUndo(&state_recorded);
+
             current_world_state.w_time_until_allowed = 8;
             current_world_state.time_until_allowed = 8;
         }
         if (tick_input.a_press && current_world_state.time_until_allowed == 0) 
         {
+            recordStateForUndo(&state_recorded);
+
             current_world_state.a_time_until_allowed = 8;
             current_world_state.time_until_allowed = 8;
         }
         if (tick_input.s_press && current_world_state.time_until_allowed == 0)
         {
+            recordStateForUndo(&state_recorded);
+
             current_world_state.s_time_until_allowed = 8;
             current_world_state.time_until_allowed = 8;
         }
         if (tick_input.d_press && current_world_state.time_until_allowed == 0)
         {
+            recordStateForUndo(&state_recorded);
+
             current_world_state.d_time_until_allowed = 8;
             current_world_state.time_until_allowed = 8;
         }
 
         if (current_world_state.w_time_until_allowed != 0)
         {
-            if (current_world_state.w_time_until_allowed % 2 == 0) next_player_coords.y += yPixelsToNorm(2);
+            if (current_world_state.w_time_until_allowed != 0) next_player_coords.y += yPixelsToNorm(2);
             current_world_state.w_time_until_allowed--;
         }
         if (current_world_state.a_time_until_allowed != 0)
         {
-            if (current_world_state.a_time_until_allowed % 2 == 0) next_player_coords.x -= xPixelsToNorm(2);
+            if (current_world_state.a_time_until_allowed != 0) next_player_coords.x -= xPixelsToNorm(2);
             current_world_state.a_time_until_allowed--;
         }
         if (current_world_state.s_time_until_allowed != 0)
         {
-            if (current_world_state.s_time_until_allowed % 2 == 0) next_player_coords.y -= yPixelsToNorm(2);
+            if (current_world_state.s_time_until_allowed != 0) next_player_coords.y -= yPixelsToNorm(2);
             current_world_state.s_time_until_allowed--;
         }
         if (current_world_state.d_time_until_allowed != 0)
         {
-            if (current_world_state.d_time_until_allowed % 2 == 0) next_player_coords.x += xPixelsToNorm(2);
+            if (current_world_state.d_time_until_allowed != 0) next_player_coords.x += xPixelsToNorm(2);
             current_world_state.d_time_until_allowed--;
         }
-
+        if (z_time_until_allowed != 0) z_time_until_allowed--;
 		if (current_world_state.time_until_allowed != 0) current_world_state.time_until_allowed--;
 
         // collision detection

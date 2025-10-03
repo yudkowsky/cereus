@@ -1263,7 +1263,7 @@ void rendererDraw(void)
 	command_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // submit once, reset next frame
 	vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
 
-    VkClearValue clear_color = { .color = {{ 0.005f, 0.008f, 0.02, 1.0f }} };
+    VkClearValue clear_color = { .color = {{ 0.005f, 0.008f, 0.02f, 1.0f }} };
 
     VkRenderPassBeginInfo render_pass_begin_info = {0};
     render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
