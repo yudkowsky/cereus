@@ -37,8 +37,12 @@ IntCoords wall_dim_int = { 16, 16 };
 NormalizedCoords wall_dim_norm = {0};
 
 char* box_path = "data/sprites/box.png";
-IntCoords box_dim_int = { 16, 16};
+IntCoords box_dim_int = { 16, 16 };
 NormalizedCoords box_dim_norm = {0};
+
+char* pack_path = "data/sprites/pack.png";
+IntCoords pack_dim_int = { 16, 16 };
+NormalizedCoords pack_dim_norm = {0};
 
 char* player_path = "data/sprites/player.png";
 IntCoords player_dim_int = { 16, 16 };
@@ -207,12 +211,12 @@ void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bo
 							if (distance > 0) 
                             {
                                 (*next_player_coords).x = current_world_state.boxes[first_box_id].origin.x - player_dim_norm.x;
-                                current_world_state.d_time_until_allowed = 0;
+                                current_world_state.time_until_input_allowed = 0;
                             }
 							else 
                             {
                                 (*next_player_coords).x = current_world_state.boxes[first_box_id].origin.x + box_dim_norm.x;
-                                current_world_state.a_time_until_allowed = 0;
+                                current_world_state.time_until_input_allowed = 0;
                             }
                         }
                         else
@@ -220,12 +224,12 @@ void collisionBoxSystem(NormalizedCoords* next_player_coords, float distance, bo
 							if (distance > 0) 
                             {
                                 (*next_player_coords).y = current_world_state.boxes[first_box_id].origin.y - player_dim_norm.y;
-                                current_world_state.w_time_until_allowed = 0;
+                                current_world_state.time_until_input_allowed = 0;
                             }
 							else 
                             {
                                 (*next_player_coords).y = current_world_state.boxes[first_box_id].origin.y + box_dim_norm.y;
-                                current_world_state.s_time_until_allowed = 0;
+                                current_world_state.time_until_input_allowed = 0;
                             }
                         }
 						return;
@@ -261,12 +265,75 @@ NormalizedCoords tileIndexToNormCoords(int16 tile_index, IntCoords level_dimensi
     return nearestPixelFloorToNorm(position_int, DEFAULT_SCALE);
 }
 
-void recordStateForUndo(bool *state_recorded)
+void recordStateForUndo()
 {
-    if (*state_recorded == true) return;
     undo_buffer[undo_buffer_position] = current_world_state;
     undo_buffer_position = (undo_buffer_position + 1) % UNDO_BUFFER_SIZE;
-    *state_recorded = true;
+}
+
+NormalizedCoords getPackCoords(NormalizedCoords player_coords, Direction player_facing)
+{
+    NormalizedCoords pack_coords = player_coords;
+    switch (player_facing)
+    {
+        case NORTH: 
+            pack_coords.y = player_coords.y -= yPixelsToNorm(16);
+            break;
+        case WEST:  
+            pack_coords.x = player_coords.x += xPixelsToNorm(16);
+            break;
+        case SOUTH: 
+            pack_coords.y = player_coords.y += yPixelsToNorm(16);
+			break;
+        case EAST:  
+            pack_coords.x = player_coords.x -= xPixelsToNorm(16);
+            break;
+    }
+    return pack_coords;
+}
+
+void handleInput(Direction input_direction, NormalizedCoords *next_player_position, Direction *next_player_direction, bool *moved_this_frame)
+{
+	// input is allowed (already checked for time)
+    
+	// check direction player is facing. if opposite, do nothing. if same, add to the direction and move. if one off, turn.
+    switch (abs(input_direction - current_world_state.player_direction))
+    {
+    	case 0:
+			// move in direction pressed
+            recordStateForUndo();
+
+			switch (input_direction)
+            {
+                case (NORTH):
+                    (*next_player_position).y += yPixelsToNorm(16);
+                    break;
+                case (WEST):
+                    (*next_player_position).x -= xPixelsToNorm(16);
+                    break;
+                case (SOUTH):
+                    (*next_player_position).y -= yPixelsToNorm(16);
+                    break;
+                case (EAST):
+                    (*next_player_position).x += xPixelsToNorm(16);
+                    break;
+            }
+            *moved_this_frame = true;
+            break;
+        case 2:
+            // input_direction is opposite to player_direction, do nothing
+            break;
+        default:
+            // turn to direction presed
+            recordStateForUndo();
+
+			*next_player_direction = input_direction;
+
+            *moved_this_frame = true;
+        	break;
+    }
+
+	current_world_state.time_until_input_allowed = 8;
 }
 
 void gameInitialise(void) 
@@ -274,16 +341,14 @@ void gameInitialise(void)
     void_dim_norm   = nearestPixelFloorToNorm(void_dim_int, DEFAULT_SCALE);
     grid_dim_norm   = nearestPixelFloorToNorm(grid_dim_int, DEFAULT_SCALE);
     wall_dim_norm   = nearestPixelFloorToNorm(wall_dim_int, DEFAULT_SCALE);
-    box_dim_norm    = nearestPixelFloorToNorm(box_dim_int, DEFAULT_SCALE);
+    box_dim_norm    = nearestPixelFloorToNorm(box_dim_int,  DEFAULT_SCALE);
+    pack_dim_norm   = nearestPixelFloorToNorm(pack_dim_int, DEFAULT_SCALE);
     player_dim_norm = nearestPixelFloorToNorm(player_dim_int, DEFAULT_SCALE);
 
 	current_world_state.level_path = "data/levels/level_1.txt";
+    current_world_state.player_direction = NORTH;
 	current_world_state.camera_coords = (NormalizedCoords){ 0.7f, 1.0f };
-
-	current_world_state.w_time_until_allowed = 0;
-	current_world_state.a_time_until_allowed = 0;
-	current_world_state.s_time_until_allowed = 0;
-	current_world_state.d_time_until_allowed = 0;
+    current_world_state.time_until_input_allowed = 0;
 
     // need to fill various current_world_state structs based on level
     FILE *level_file = fopen(current_world_state.level_path, "rb");
@@ -371,95 +436,21 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (tick_input.k_press) current_world_state.camera_coords.y -= CAMERA_MOVEMENT_SPEED;
         if (tick_input.l_press) current_world_state.camera_coords.x += CAMERA_MOVEMENT_SPEED;
 
-        // movement input - this entire section is terrible
-		bool state_recorded = false;
+        // movement system
 
 		NormalizedCoords next_player_coords = current_world_state.player_coords; // prevents garbage data in global state
+        Direction next_player_direction = current_world_state.player_direction;
 
-		if (tick_input.w_press && tick_input.a_press && current_world_state.time_until_allowed == 0)
-        {
-            recordStateForUndo(&state_recorded);
+        bool moved_this_frame = false;
+        
+        Direction input_direction = NORTH;
+		if (tick_input.w_press && current_world_state.time_until_input_allowed == 0) handleInput(input_direction = NORTH, &next_player_coords, &next_player_direction, &moved_this_frame);
+		if (tick_input.a_press && current_world_state.time_until_input_allowed == 0) handleInput(input_direction = WEST,  &next_player_coords, &next_player_direction, &moved_this_frame);
+		if (tick_input.s_press && current_world_state.time_until_input_allowed == 0) handleInput(input_direction = SOUTH, &next_player_coords, &next_player_direction, &moved_this_frame);
+		if (tick_input.d_press && current_world_state.time_until_input_allowed == 0) handleInput(input_direction = EAST,  &next_player_coords, &next_player_direction, &moved_this_frame);
 
-            current_world_state.w_time_until_allowed = 8;
-            current_world_state.a_time_until_allowed = 8;
-            current_world_state.time_until_allowed = 8;
-        }
-		if (tick_input.d_press && tick_input.w_press && current_world_state.time_until_allowed == 0)
-        {
-            recordStateForUndo(&state_recorded);
-
-            current_world_state.d_time_until_allowed = 8;
-            current_world_state.w_time_until_allowed = 8;
-            current_world_state.time_until_allowed = 8;
-        }
-		if (tick_input.a_press && tick_input.s_press && current_world_state.time_until_allowed == 0)
-        {
-            recordStateForUndo(&state_recorded);
-
-            current_world_state.a_time_until_allowed = 8;
-            current_world_state.s_time_until_allowed = 8;
-            current_world_state.time_until_allowed = 8;
-        }
-		if (tick_input.s_press && tick_input.d_press && current_world_state.time_until_allowed == 0)
-        {
-            recordStateForUndo(&state_recorded);
-
-            current_world_state.s_time_until_allowed = 8;
-            current_world_state.d_time_until_allowed = 8;
-            current_world_state.time_until_allowed = 8;
-        }
-
-        if (tick_input.w_press && current_world_state.time_until_allowed == 0)
-        {
-            recordStateForUndo(&state_recorded);
-
-            current_world_state.w_time_until_allowed = 8;
-            current_world_state.time_until_allowed = 8;
-        }
-        if (tick_input.a_press && current_world_state.time_until_allowed == 0) 
-        {
-            recordStateForUndo(&state_recorded);
-
-            current_world_state.a_time_until_allowed = 8;
-            current_world_state.time_until_allowed = 8;
-        }
-        if (tick_input.s_press && current_world_state.time_until_allowed == 0)
-        {
-            recordStateForUndo(&state_recorded);
-
-            current_world_state.s_time_until_allowed = 8;
-            current_world_state.time_until_allowed = 8;
-        }
-        if (tick_input.d_press && current_world_state.time_until_allowed == 0)
-        {
-            recordStateForUndo(&state_recorded);
-
-            current_world_state.d_time_until_allowed = 8;
-            current_world_state.time_until_allowed = 8;
-        }
-
-        if (current_world_state.w_time_until_allowed != 0)
-        {
-            if (current_world_state.w_time_until_allowed != 0) next_player_coords.y += yPixelsToNorm(2);
-            current_world_state.w_time_until_allowed--;
-        }
-        if (current_world_state.a_time_until_allowed != 0)
-        {
-            if (current_world_state.a_time_until_allowed != 0) next_player_coords.x -= xPixelsToNorm(2);
-            current_world_state.a_time_until_allowed--;
-        }
-        if (current_world_state.s_time_until_allowed != 0)
-        {
-            if (current_world_state.s_time_until_allowed != 0) next_player_coords.y -= yPixelsToNorm(2);
-            current_world_state.s_time_until_allowed--;
-        }
-        if (current_world_state.d_time_until_allowed != 0)
-        {
-            if (current_world_state.d_time_until_allowed != 0) next_player_coords.x += xPixelsToNorm(2);
-            current_world_state.d_time_until_allowed--;
-        }
         if (z_time_until_allowed != 0) z_time_until_allowed--;
-		if (current_world_state.time_until_allowed != 0) current_world_state.time_until_allowed--;
+		if (current_world_state.time_until_input_allowed != 0) current_world_state.time_until_input_allowed--;
 
         // collision detection
 
@@ -513,20 +504,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-		// if no collisions, check if the combined diagonal movement causes collision
-        if (!x_collision && !y_collision)
-        {
-            for (int i = 0; i < current_world_state.wall_count; i++)
-            {
-                if (checkCollision(current_world_state.walls[i].origin, wall_dim_norm, next_player_coords, player_dim_norm))
-                {
-                    next_player_coords = current_world_state.player_coords; // block movement entirely
-                    break;
-                }
-            }
-        }
-
         // box collision calculations
+        /*
         if (current_world_state.d_time_until_allowed != 0) {
             collisionBoxSystem(&next_player_coords, xPixelsToNorm(8), true);
         }
@@ -539,6 +518,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (current_world_state.s_time_until_allowed != 0) {
             collisionBoxSystem(&next_player_coords, yPixelsToNorm(-8), false);
         }
+        */
 
 		bool player_in_void = true;
 
@@ -584,12 +564,20 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
 		// draw player
-        if (player_in_void == true) current_world_state.player_coords = current_world_state.player_spawn_point;
+        if (player_in_void == true) 
+        {
+            current_world_state.player_coords = current_world_state.player_spawn_point;
+            current_world_state.player_direction = NORTH;
+        }
         else 
         {
-            current_world_state.player_coords = next_player_coords;
+         	current_world_state.player_coords = next_player_coords;
+            current_world_state.player_direction = next_player_direction;
             drawSprite(player_path, nearestPixelFloor(current_world_state.player_coords, DEFAULT_SCALE), nearestPixelFloorToNorm(player_dim_int, DEFAULT_SCALE));
         }
+
+        // draw pack behind player
+        drawSprite(pack_path, getPackCoords(current_world_state.player_coords, current_world_state.player_direction), nearestPixelFloorToNorm(pack_dim_int, DEFAULT_SCALE));
 
         rendererSubmitFrame(textures_to_load);
         memset(textures_to_load, 0, sizeof(textures_to_load));

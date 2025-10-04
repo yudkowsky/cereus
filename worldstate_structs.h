@@ -28,19 +28,26 @@ typedef struct Entity
 }
 Entity;
 
+typedef enum
+{
+	NORTH = 0,
+    WEST  = 1,
+    SOUTH = 2,
+    EAST  = 3,
+}
+Direction;
+
 typedef struct WorldState 
 {
 	char* level_path;
 
     NormalizedCoords player_coords;
+	Direction player_direction;
     NormalizedCoords player_spawn_point;
+
     NormalizedCoords camera_coords;
 
-    int8 w_time_until_allowed;
-    int8 a_time_until_allowed;
-    int8 s_time_until_allowed;
-    int8 d_time_until_allowed;
-    int8 time_until_allowed;
+    int8 time_until_input_allowed;
 
 	Entity voids[64];
     int16 void_count;
