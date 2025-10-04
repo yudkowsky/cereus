@@ -301,44 +301,43 @@ void rotationMovement(bool clockwise, Direction input_direction, NormalizedCoord
     {
 		switch(input_direction)
         {
-            case (NORTH):
-                diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                                                                      next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
-                diagonal_push_direction = SOUTH;
+        case (NORTH):
+            diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                  next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+            diagonal_push_direction = SOUTH;
 
-                orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x, 
-                                                                        next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS)};
-                orthogonal_push_direction = WEST;
-                break;
-            case (WEST):
-                diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                                                                      next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
-                diagonal_push_direction = EAST;
+            orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x, 
+                                                                    next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS)};
+            orthogonal_push_direction = WEST;
+            break;
+        case (WEST):
+            diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                  next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+            diagonal_push_direction = EAST;
 
-                orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS),
-                                                                        next_player_coords->y }; 
-                orthogonal_push_direction = SOUTH;
-                break;
-            case (SOUTH):
-                diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                                                                      next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
-                diagonal_push_direction = NORTH;
+            orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS),
+                                                                    next_player_coords->y }; 
+            orthogonal_push_direction = SOUTH;
+            break;
+        case (SOUTH):
+            diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                  next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+            diagonal_push_direction = NORTH;
 
-                orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x, 
-                                                                        next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS)};
-                orthogonal_push_direction = EAST;
-                break;
-            case (EAST):
-                diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                                                                      next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
-                diagonal_push_direction = WEST;
+            orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x, 
+                                                                    next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS)};
+            orthogonal_push_direction = EAST;
+            break;
+        case (EAST):
+            diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                  next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+            diagonal_push_direction = WEST;
 
-                orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS),
-                                                                        next_player_coords->y };
-                orthogonal_push_direction = NORTH;
-                break;
+            orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS),
+                                                                    next_player_coords->y };
+            orthogonal_push_direction = NORTH;
+            break;
         }
-
     }
 	else
     {
@@ -397,6 +396,52 @@ void rotationMovement(bool clockwise, Direction input_direction, NormalizedCoord
     }
 }
 
+void forwardMovement(Direction input_direction, NormalizedCoords *next_player_coords, bool *moved_this_frame)
+{
+    switch (input_direction)
+    {
+        case (NORTH):
+            next_player_coords->y += yPixelsToNorm(16);
+            break;
+        case (WEST):
+            next_player_coords->x -= xPixelsToNorm(16);
+            break;
+        case (SOUTH):
+            next_player_coords->y -= yPixelsToNorm(16);
+            break;
+        case (EAST):
+            next_player_coords->x += xPixelsToNorm(16);
+            break;
+    }
+
+    for (int wall_index = 0; wall_index < current_world_state.wall_count; wall_index++)
+    {
+        if (checkCollision(current_world_state.walls[wall_index].origin, wall_dim_norm, *next_player_coords, player_dim_norm))
+        {
+            switch (input_direction)
+            {
+                case NORTH:
+                    next_player_coords->y = current_world_state.walls[wall_index].origin.y - player_dim_norm.y;
+                    *moved_this_frame = false;
+                    break;
+                case WEST:
+                    next_player_coords->x = current_world_state.walls[wall_index].origin.x + wall_dim_norm.x;
+                    *moved_this_frame = false;
+                    break;
+                case SOUTH:
+                    next_player_coords->y = current_world_state.walls[wall_index].origin.y + wall_dim_norm.y;
+                    *moved_this_frame = false;
+                    break;
+                case EAST:
+                    next_player_coords->x = current_world_state.walls[wall_index].origin.x - player_dim_norm.x;
+                    *moved_this_frame = false;
+                    break;
+            }
+        }
+    }
+}
+
+
 void handleInput(Direction input_direction, NormalizedCoords *next_player_coords, Direction *next_player_direction, bool *moved_this_frame)
 {
 	// input is allowed (already checked for time)
@@ -409,22 +454,7 @@ void handleInput(Direction input_direction, NormalizedCoords *next_player_coords
     {
     	case 0:
         {
-			// move in direction pressed
-			switch (input_direction)
-            {
-                case (NORTH):
-                    next_player_coords->y += yPixelsToNorm(16);
-                    break;
-                case (WEST):
-                    next_player_coords->x -= xPixelsToNorm(16);
-                    break;
-                case (SOUTH):
-                    next_player_coords->y -= yPixelsToNorm(16);
-                    break;
-                case (EAST):
-                    next_player_coords->x += xPixelsToNorm(16);
-                    break;
-            }
+			forwardMovement(input_direction, next_player_coords, moved_this_frame);
             *moved_this_frame = true;
             break;
         }
@@ -569,58 +599,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // PLAYER WALL COLLISION DETECTION
 
         // handle x wall collision
-		NormalizedCoords test_x_wall_collision = { next_player_coords.x, current_world_state.player_coords.y };
-        bool x_collision = false;
-
-        for (int i = 0; i < current_world_state.wall_count; i++)
-        {
-            if (checkCollision(current_world_state.walls[i].origin, wall_dim_norm, test_x_wall_collision, player_dim_norm))
-            {
-                x_collision = true;
-                // collision on x axis occurs; check from which direction
-                if (next_player_coords.x - current_world_state.player_coords.x > 0)
-                {
-                    // trying to move right
-                    next_player_coords.x = current_world_state.walls[i].origin.x - player_dim_norm.x;
-                    moved_this_frame = false;
-                    break;
-                }
-                else
-                {
-                    // trying to move left
-                    next_player_coords.x = current_world_state.walls[i].origin.x + wall_dim_norm.x;
-                    moved_this_frame = false;
-                    break;
-                }
-            }
-        }
-
         // handle y wall collision
-        NormalizedCoords test_y_wall_collision = { current_world_state.player_coords.x, next_player_coords.y };
-        bool y_collision = false;
-
-        for (int i = 0; i < current_world_state.wall_count; i++)
-        {
-            if (checkCollision(current_world_state.walls[i].origin, wall_dim_norm, test_y_wall_collision, player_dim_norm))
-            {
-                y_collision = true;
-                // work out from above or below
-                if (next_player_coords.y - current_world_state.player_coords.y > 0)
-                {
-                    // trying to move up
-                    next_player_coords.y = current_world_state.walls[i].origin.y - player_dim_norm.y;
-                    moved_this_frame = false;
-                    break;
-                }
-                else
-                {
-                    // trying to move down
-                    next_player_coords.y = current_world_state.walls[i].origin.y + wall_dim_norm.y;
-                    moved_this_frame = false;
-                    break;
-                }
-            }
-        }
 
 		// DRAW SPRITES
 
