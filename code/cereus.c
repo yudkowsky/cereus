@@ -163,9 +163,8 @@ bool checkCollision(NormalizedCoords object_1_origin, NormalizedCoords object_1_
     }
 }
 
-bool boxPush(NormalizedCoords collision_point, Direction direction)
+bool canBoxPush(NormalizedCoords collision_point, Direction direction, bool boxes_to_move_bools[64])
 {
-    bool boxes_to_move_bools[64] = {false};
     int32 first_box_id = -1;
 
     // populate 
@@ -234,28 +233,31 @@ bool boxPush(NormalizedCoords collision_point, Direction direction)
             if (!new_box_added_this_pass) break;
         }
         
-        // modify global state: move boxes in boxes_to_move_ids
-        for (int boxes_to_move_index = 0; boxes_to_move_index < current_world_state.box_count; boxes_to_move_index++)
-        {
-            if (boxes_to_move_bools[boxes_to_move_index] == false) continue;
-            switch (direction)
-            {
-                case NORTH:
-                    current_world_state.boxes[boxes_to_move_index].origin.y += yPixelsToNorm((float)TILE_SIZE_PIXELS);
-                    break;
-                case WEST:
-                    current_world_state.boxes[boxes_to_move_index].origin.x -= xPixelsToNorm((float)TILE_SIZE_PIXELS);
-                    break;
-                case SOUTH:
-                    current_world_state.boxes[boxes_to_move_index].origin.y -= yPixelsToNorm((float)TILE_SIZE_PIXELS);
-                    break;
-                case EAST:
-                    current_world_state.boxes[boxes_to_move_index].origin.x += xPixelsToNorm((float)TILE_SIZE_PIXELS);
-                    break;
-            }
-        }
     }
     return true;
+}
+
+void doBoxPush(bool *boxes_to_move_bools, Direction direction)
+{
+    for (int boxes_to_move_index = 0; boxes_to_move_index < current_world_state.box_count; boxes_to_move_index++)
+    {
+        if (boxes_to_move_bools[boxes_to_move_index] == false) continue;
+        switch (direction)
+        {
+            case NORTH:
+                current_world_state.boxes[boxes_to_move_index].origin.y += yPixelsToNorm((float)TILE_SIZE_PIXELS);
+                break;
+            case WEST:
+                current_world_state.boxes[boxes_to_move_index].origin.x -= xPixelsToNorm((float)TILE_SIZE_PIXELS);
+                break;
+            case SOUTH:
+                current_world_state.boxes[boxes_to_move_index].origin.y -= yPixelsToNorm((float)TILE_SIZE_PIXELS);
+                break;
+            case EAST:
+                current_world_state.boxes[boxes_to_move_index].origin.x += xPixelsToNorm((float)TILE_SIZE_PIXELS);
+                break;
+        }
+    }
 }
 
 NormalizedCoords tileIndexToNormCoords(int16 tile_index, IntCoords level_dimensions)
@@ -291,11 +293,108 @@ NormalizedCoords getPackCoords(NormalizedCoords player_coords, Direction player_
     return pack_coords;
 }
 
-int32 spikeModInt(int32 dividend, int32 modulus)
+void rotationMovement(bool clockwise, Direction input_direction, NormalizedCoords *next_player_coords, Direction *next_player_direction, bool *moved_this_frame)
 {
-    int32 residue = dividend % modulus;
-    if (residue < 0) residue += modulus;
-    return residue;
+    NormalizedCoords diagonal_potential_box_position = {0}, orthogonal_potential_box_position = {0};
+    Direction 		 diagonal_push_direction = 0,           orthogonal_push_direction = 0;
+	if (clockwise)
+    {
+		switch(input_direction)
+        {
+            case (NORTH):
+                diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                      next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+                diagonal_push_direction = SOUTH;
+
+                orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x, 
+                                                                        next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS)};
+                orthogonal_push_direction = WEST;
+                break;
+            case (WEST):
+                diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                      next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+                diagonal_push_direction = EAST;
+
+                orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS),
+                                                                        next_player_coords->y }; 
+                orthogonal_push_direction = SOUTH;
+                break;
+            case (SOUTH):
+                diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                      next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+                diagonal_push_direction = NORTH;
+
+                orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x, 
+                                                                        next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS)};
+                orthogonal_push_direction = EAST;
+                break;
+            case (EAST):
+                diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                      next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+                diagonal_push_direction = WEST;
+
+                orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS),
+                                                                        next_player_coords->y };
+                orthogonal_push_direction = NORTH;
+                break;
+        }
+
+    }
+	else
+    {
+        switch (input_direction)
+        {
+        case (NORTH):
+            diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                  next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+            diagonal_push_direction = SOUTH;
+
+            orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x,
+                                                                    next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS)};
+            orthogonal_push_direction = EAST;
+            break;
+        case (WEST):
+            diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                  next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+            diagonal_push_direction = EAST;
+
+            orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS),
+                                                                    next_player_coords->y };
+            orthogonal_push_direction = NORTH;
+            break;
+        case (SOUTH):
+            diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                  next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+            diagonal_push_direction = NORTH;
+
+            orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x,
+                                                                    next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS)};
+            orthogonal_push_direction = WEST;
+            break;
+        case (EAST):
+            diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                  next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+            diagonal_push_direction = WEST;
+
+            orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS),
+                                                                    next_player_coords->y };
+            orthogonal_push_direction = SOUTH;
+            break;
+        }
+
+    }
+    bool diagonal_boxes_to_move_bools[64] = {false};
+    bool diagonal_push = canBoxPush(diagonal_potential_box_position, diagonal_push_direction, diagonal_boxes_to_move_bools);
+    bool orthogonal_boxes_to_move_bools[64] = {false};
+    bool orthogonal_push = canBoxPush(orthogonal_potential_box_position, orthogonal_push_direction, orthogonal_boxes_to_move_bools);
+
+    if (diagonal_push && orthogonal_push)
+    {
+        doBoxPush(diagonal_boxes_to_move_bools, diagonal_push_direction);
+        doBoxPush(orthogonal_boxes_to_move_bools, orthogonal_push_direction);
+        *next_player_direction = input_direction;
+        *moved_this_frame = true;
+    }
 }
 
 void handleInput(Direction input_direction, NormalizedCoords *next_player_coords, Direction *next_player_direction, bool *moved_this_frame)
@@ -303,7 +402,10 @@ void handleInput(Direction input_direction, NormalizedCoords *next_player_coords
 	// input is allowed (already checked for time)
     
 	// check direction player is facing. if opposite, do nothing. if same, add to the direction and move. if one off, turn.
-    switch (spikeModInt(input_direction - current_world_state.player_direction, 4))
+    int32 direction_switch = (input_direction - current_world_state.player_direction) % 4;
+    if (direction_switch < 0) direction_switch += 4;
+
+    switch (direction_switch)
     {
     	case 0:
         {
@@ -328,58 +430,8 @@ void handleInput(Direction input_direction, NormalizedCoords *next_player_coords
         }
         case 1:
         {
-            // turn ACW
-			NormalizedCoords diagonal_potential_box_position = {0}, orthogonal_potential_box_position = {0};
-    		Direction 		 diagonal_push_direction = 0,           orthogonal_push_direction = 0;
-			switch (input_direction)
-            {
-                case (NORTH):
-                    diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                        												  next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
-                    diagonal_push_direction = SOUTH;
-
-                    orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x,
-																			next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS)};
-                    orthogonal_push_direction = EAST;
-                    break;
-                case (WEST):
-                    diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                        												  next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
-                    diagonal_push_direction = EAST;
-
-                    orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS),
-																			next_player_coords->y };
-                    orthogonal_push_direction = NORTH;
-                    break;
-                case (SOUTH):
-                    diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-																		  next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
-                    diagonal_push_direction = NORTH;
-
-                    orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x,
-																			next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS)};
-                    orthogonal_push_direction = WEST;
-                    break;
-                case (EAST):
-                    diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                        												  next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
-                    diagonal_push_direction = WEST;
-
-                    orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS),
-																			next_player_coords->y };
-                    orthogonal_push_direction = SOUTH;
-                    break;
-            }
-			// diagonal push happens even if orthogonal fails...
-
-			bool diagonal_push = boxPush(diagonal_potential_box_position, diagonal_push_direction);
-            bool orthogonal_push = boxPush(orthogonal_potential_box_position, orthogonal_push_direction);
-
-            if (diagonal_push && orthogonal_push)
-            {
-                *next_player_direction = input_direction;
-                *moved_this_frame = true;
-            }
+            bool clockwise = false;
+            rotationMovement(clockwise, input_direction, next_player_coords, next_player_direction, moved_this_frame);
             break;
         }
         case 2:
@@ -389,58 +441,8 @@ void handleInput(Direction input_direction, NormalizedCoords *next_player_coords
         }
         case 3:
         {
-            // turn CW
-			NormalizedCoords diagonal_potential_box_position = {0}, orthogonal_potential_box_position = {0};
-    		Direction 		 diagonal_push_direction = 0,           orthogonal_push_direction = 0;
-			switch (input_direction)
-            {
-                case (NORTH):
-                    diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                        												  next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
-                    diagonal_push_direction = SOUTH;
-
-                    orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x, 
-																			next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS)};
-                    orthogonal_push_direction = WEST;
-                    break;
-                case (WEST):
-                    diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                        												  next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
-                    diagonal_push_direction = EAST;
-
-                    orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS),
-																			next_player_coords->y }; 
-                    orthogonal_push_direction = SOUTH;
-                    break;
-                case (SOUTH):
-                    diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                        												  next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
-                    diagonal_push_direction = NORTH;
-
-                    orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x, 
-																			next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS)};
-                    orthogonal_push_direction = EAST;
-                    break;
-                case (EAST):
-                    diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                        												  next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
-                    diagonal_push_direction = WEST;
-
-                    orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS),
-																			next_player_coords->y };
-                    orthogonal_push_direction = NORTH;
-                    break;
-            }
-			// diagonal push happens even if orthogonal fails...
-
-			bool diagonal_push = boxPush(diagonal_potential_box_position, diagonal_push_direction);
-            bool orthogonal_push = boxPush(orthogonal_potential_box_position, orthogonal_push_direction);
-
-            if (diagonal_push && orthogonal_push)
-            {
-                *next_player_direction = input_direction;
-                *moved_this_frame = true;
-            }
+            bool clockwise = true;
+            rotationMovement(clockwise, input_direction, next_player_coords, next_player_direction, moved_this_frame);
             break;
         }
     }
@@ -665,6 +667,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 			drawSprite(box_path, current_world_state.boxes[box_index].origin, box_dim_norm);
         }
 
+        if (moved_this_frame) recordStateForUndo();
 		// draw player
         if (player_in_void) 
         {
@@ -675,7 +678,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             if (moved_this_frame)
             {
-                recordStateForUndo();
                 current_world_state.player_coords = next_player_coords;
                 current_world_state.player_direction = next_player_direction;
             }
