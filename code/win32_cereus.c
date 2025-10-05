@@ -7,6 +7,11 @@
 #define global_variable static 
 #define internal static
 
+int screen_width = 1920;
+int screen_height = 1080;
+//int screen_width = 800;
+//int screen_height = 450;
+
 TickInput tick_input = {0};
 
 LRESULT CALLBACK windowMessageProcessor(
@@ -20,6 +25,33 @@ LRESULT CALLBACK windowMessageProcessor(
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
+
+        case WM_MOUSEMOVE:
+            RECT client_rect;
+            GetClientRect(window_handle, &client_rect);
+            int client_width = client_rect.right - client_rect.left;
+            int client_height = client_rect.bottom - client_rect.top;
+			tick_input.mouse_norm.x = (LOWORD(lParam) * 2.0f / client_width) - 1.0f;
+            tick_input.mouse_norm.y = 1.0f - (HIWORD(lParam) * 2.0f / client_height);
+            break;
+        case WM_LBUTTONDOWN:
+            tick_input.left_mouse_press = true;
+            break;
+        case WM_LBUTTONUP:
+            tick_input.left_mouse_press = false;
+            break;
+        case WM_RBUTTONDOWN:
+            tick_input.right_mouse_press = true;
+            break;
+        case WM_RBUTTONUP:
+            tick_input.right_mouse_press = false;
+            break;
+        case WM_MBUTTONDOWN:
+            tick_input.middle_mouse_press = true;
+            break;
+        case WM_MBUTTONUP:
+            tick_input.middle_mouse_press = false;
+            break;
 
         case WM_KEYDOWN:
             switch (wParam)
@@ -41,6 +73,9 @@ LRESULT CALLBACK windowMessageProcessor(
                 	break;
                 case 'R':
                     tick_input.r_press = true;
+                	break;
+                case 'E':
+                    tick_input.e_press = true;
                 	break;
                 case 'I':
                     tick_input.i_press = true;
@@ -77,6 +112,9 @@ LRESULT CALLBACK windowMessageProcessor(
                 case 'R':
                     tick_input.r_press = false;
                 	break;
+                case 'E':
+                    tick_input.e_press = false;
+                	break;
                 case 'I':
                     tick_input.i_press = false;
                     break;
@@ -90,6 +128,7 @@ LRESULT CALLBACK windowMessageProcessor(
                     tick_input.l_press = false;
                 	break;
             }
+            break;
     }
     return DefWindowProcW(window_handle, message_id, wParam, lParam);
 }
@@ -112,11 +151,6 @@ int CALLBACK WinMain(
 	window_class.lpszClassName = L"standard_window_class";
 
     RegisterClassExW(&window_class);
-
-	int screen_width  = GetSystemMetrics(SM_CXSCREEN);
-	int screen_height = GetSystemMetrics(SM_CYSCREEN);
-    //int screen_width = 800;
-    //int screen_height = 450;
 
 	HWND window_handle = CreateWindowExW(
 		0,
@@ -148,8 +182,6 @@ int CALLBACK WinMain(
 
     while (running)
     {
-		// OutputDebugStringA("hello running loop\n");
-
 		while (PeekMessageW(&queued_message, 0, 0, 0, PM_REMOVE))
         {
             if (queued_message.message == WM_QUIT) 

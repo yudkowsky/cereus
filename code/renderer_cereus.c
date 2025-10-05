@@ -19,7 +19,7 @@ typedef struct Vertex
 }
 Vertex;
 
-Vertex frame_vertex_stash[1024];
+Vertex frame_vertex_stash[65536];
 uint32 frame_vertex_count = 0;
 
 typedef struct CachedTexture
@@ -34,12 +34,12 @@ CachedTexture;
 typedef struct TextureToDraw
 {
     uint32 place_in_cache;
-    NormalizedCoords origin[64];
-    NormalizedCoords dimensions[64];
+    NormalizedCoords origin[256];
+    NormalizedCoords dimensions[256];
     uint32 instance_count;
 }
 TextureToDraw;
-TextureToDraw textures_to_draw[128];
+TextureToDraw textures_to_draw[256];
 
 typedef struct
 {
@@ -652,7 +652,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     renderer_state.images_in_flight = calloc(renderer_state.swapchain_image_count, sizeof(VkFence)); // calloc because we want these to start at VK_NULL_HANDLE, i.e. 0.
 
 	// triangle time (should all be mostly temporary) TODO(spike): re-evaluate this after i've set up a fixed-size memory block for the entire game
-    VkDeviceSize dynamic_vertex_stream_bytes = 1024 * sizeof(Vertex);
+    VkDeviceSize dynamic_vertex_stream_bytes = 65536 * sizeof(Vertex);
 
     VkBufferCreateInfo buffer_creation_info = {0};
     buffer_creation_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -1148,12 +1148,12 @@ int32 loadTexture(TextureToLoad texture)
     return (int32)(renderer_state.texture_cache_count - 1);
 }
 
-void rendererSubmitFrame(TextureToLoad textures_to_load[128])
+void rendererSubmitFrame(TextureToLoad textures_to_load[256])
 {
     memset(textures_to_draw, 0, sizeof(textures_to_draw));
     frame_vertex_count = 0;
 
-    for (uint32 texture_index = 0; texture_index < 128; texture_index++)
+    for (uint32 texture_index = 0; texture_index < 256; texture_index++)
     {
         if (textures_to_load[texture_index].path == 0) break;
 
@@ -1301,7 +1301,7 @@ void rendererDraw(void)
 	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_handle);	
 	
     uint32 vertex_offset = 0;
-	for (uint32 texture_index = 0; texture_index < 128; texture_index++)
+	for (uint32 texture_index = 0; texture_index < 256; texture_index++)
  	{
 		if (textures_to_draw[texture_index].instance_count == 0) break;
     	vkCmdBindDescriptorSets(command_buffer, 

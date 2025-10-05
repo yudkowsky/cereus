@@ -45,20 +45,18 @@ typedef struct WorldState
 	Direction player_direction;
     NormalizedCoords player_spawn_point;
 
-    NormalizedCoords camera_coords;
-
     int8 time_until_input_allowed;
 
-	Entity voids[64];
+	Entity voids[256];
     int16 void_count;
 
-    Entity grids[64];
+    Entity grids[256];
     int16 grid_count;
 
-    Entity walls[64];
+    Entity walls[256];
     int16 wall_count;
 
-    Entity boxes[64];
+    Entity boxes[256];
     int16 box_count;
 }
 WorldState;
@@ -66,8 +64,8 @@ WorldState;
 typedef struct TextureToLoad
 {
 	char* path;
-	NormalizedCoords origin[64];
-    NormalizedCoords dimensions[64];
+	NormalizedCoords origin[256];
+    NormalizedCoords dimensions[256];
     uint32 instance_count;
 }
 TextureToLoad;
@@ -78,12 +76,20 @@ typedef struct TickInput
 	bool a_press;
     bool s_press;
     bool d_press;
+
     bool z_press;
     bool r_press;
+
+	bool e_press;
 
     bool i_press;
 	bool j_press;
     bool k_press;
     bool l_press;
+
+    NormalizedCoords mouse_norm;
+    bool left_mouse_press;
+    bool right_mouse_press;
+    bool middle_mouse_press;
 }
 TickInput;
