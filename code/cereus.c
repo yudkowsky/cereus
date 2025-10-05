@@ -163,7 +163,7 @@ bool checkCollision(NormalizedCoords object_1_origin, NormalizedCoords object_1_
     }
 }
 
-bool canBoxPush(NormalizedCoords collision_point, Direction direction, bool boxes_to_move_bools[64])
+bool canBoxPush(NormalizedCoords collision_point, Direction direction, bool boxes_to_move[64])
 {
     int32 first_box_id = -1;
 
@@ -174,7 +174,7 @@ bool canBoxPush(NormalizedCoords collision_point, Direction direction, bool boxe
         if (checkCollision(collision_point, player_dim_norm, current_world_state.boxes[box_id].origin, box_dim_norm))
         {
             first_box_id = box_id;
-            boxes_to_move_bools[box_id] = true;
+            boxes_to_move[box_id] = true;
             break;
         }
     }
@@ -187,7 +187,7 @@ bool canBoxPush(NormalizedCoords collision_point, Direction direction, bool boxe
             bool new_box_added_this_pass = false;
             for (int boxes_to_move_index = 0; boxes_to_move_index < current_world_state.box_count; boxes_to_move_index++)
             {
-                if (boxes_to_move_bools[boxes_to_move_index] == false || current_world_state.boxes[boxes_to_move_index].id == -1) continue;
+                if (boxes_to_move[boxes_to_move_index] == false || current_world_state.boxes[boxes_to_move_index].id == -1) continue;
                 NormalizedCoords box_position_after_move = {0};
                 switch (direction)
                 {
@@ -222,10 +222,10 @@ bool canBoxPush(NormalizedCoords collision_point, Direction direction, bool boxe
                 for (int box_id = 0; box_id < current_world_state.box_count; box_id++)
                 {
                     if (current_world_state.boxes[box_id].id == -1) continue;
-                    if (boxes_to_move_bools[box_id] == true) continue; // already loaded
+                    if (boxes_to_move[box_id] == true) continue; // already loaded
                     if (checkCollision(current_world_state.boxes[box_id].origin, box_dim_norm, box_position_after_move, box_dim_norm))
                     {
-						boxes_to_move_bools[box_id] = true;
+						boxes_to_move[box_id] = true;
 						new_box_added_this_pass = true;
                     }
                 }
@@ -237,11 +237,11 @@ bool canBoxPush(NormalizedCoords collision_point, Direction direction, bool boxe
     return true;
 }
 
-void doBoxPush(bool *boxes_to_move_bools, Direction direction)
+void doBoxPush(bool *boxes_to_move, Direction direction)
 {
     for (int boxes_to_move_index = 0; boxes_to_move_index < current_world_state.box_count; boxes_to_move_index++)
     {
-        if (boxes_to_move_bools[boxes_to_move_index] == false) continue;
+        if (boxes_to_move[boxes_to_move_index] == false) continue;
         switch (direction)
         {
             case NORTH:
@@ -382,15 +382,24 @@ void rotationMovement(bool clockwise, Direction input_direction, NormalizedCoord
         }
 
     }
-    bool diagonal_boxes_to_move_bools[64] = {false};
-    bool diagonal_push = canBoxPush(diagonal_potential_box_position, diagonal_push_direction, diagonal_boxes_to_move_bools);
-    bool orthogonal_boxes_to_move_bools[64] = {false};
-    bool orthogonal_push = canBoxPush(orthogonal_potential_box_position, orthogonal_push_direction, orthogonal_boxes_to_move_bools);
+    for (int wall_index = 0; wall_index < current_world_state.wall_count; wall_index++)
+    {    
+		if (checkCollision(diagonal_potential_box_position,   box_dim_norm, current_world_state.walls[wall_index].origin, wall_dim_norm) || 
+            checkCollision(orthogonal_potential_box_position, box_dim_norm, current_world_state.walls[wall_index].origin, wall_dim_norm))
+        {
+			return;
+        }
+    }
+
+    bool diagonal_boxes_to_move[64] = {false};
+    bool diagonal_push = canBoxPush(diagonal_potential_box_position, diagonal_push_direction, diagonal_boxes_to_move);
+    bool orthogonal_boxes_to_move[64] = {false};
+    bool orthogonal_push = canBoxPush(orthogonal_potential_box_position, orthogonal_push_direction, orthogonal_boxes_to_move);
 
     if (diagonal_push && orthogonal_push)
     {
-        doBoxPush(diagonal_boxes_to_move_bools, diagonal_push_direction);
-        doBoxPush(orthogonal_boxes_to_move_bools, orthogonal_push_direction);
+        doBoxPush(diagonal_boxes_to_move, diagonal_push_direction);
+        doBoxPush(orthogonal_boxes_to_move, orthogonal_push_direction);
         *next_player_direction = input_direction;
         *moved_this_frame = true;
     }
@@ -423,20 +432,31 @@ void forwardMovement(Direction input_direction, NormalizedCoords *next_player_co
                 case NORTH:
                     next_player_coords->y = current_world_state.walls[wall_index].origin.y - player_dim_norm.y;
                     *moved_this_frame = false;
-                    break;
+                    return;
                 case WEST:
                     next_player_coords->x = current_world_state.walls[wall_index].origin.x + wall_dim_norm.x;
                     *moved_this_frame = false;
-                    break;
+                    return;
                 case SOUTH:
                     next_player_coords->y = current_world_state.walls[wall_index].origin.y + wall_dim_norm.y;
                     *moved_this_frame = false;
-                    break;
+                    return;
                 case EAST:
                     next_player_coords->x = current_world_state.walls[wall_index].origin.x - player_dim_norm.x;
                     *moved_this_frame = false;
-                    break;
+                    return;
             }
+        }
+    }
+
+    for (int box_index = 0; box_index < current_world_state.box_count; box_index++)
+    {
+        if (checkCollision(current_world_state.boxes[box_index].origin, box_dim_norm, *next_player_coords, player_dim_norm))
+        {
+            bool boxes_to_push[64] = {0};
+            if (canBoxPush(*next_player_coords, input_direction, boxes_to_push)) doBoxPush(boxes_to_push, input_direction);
+            else *moved_this_frame = false;
+            return; // can only ever push one box per forward movement
         }
     }
 }
@@ -595,11 +615,6 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         if (z_time_until_allowed != 0) z_time_until_allowed--;
 		if (current_world_state.time_until_input_allowed != 0) current_world_state.time_until_input_allowed--;
-
-        // PLAYER WALL COLLISION DETECTION
-
-        // handle x wall collision
-        // handle y wall collision
 
 		// DRAW SPRITES
 
