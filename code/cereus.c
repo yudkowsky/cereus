@@ -21,7 +21,7 @@ WorldState current_world_state = {0};
 
 WorldState undo_buffer[256] = {0};
 int32 undo_buffer_position = 0;
-int32 z_time_until_allowed = 0;
+int32 time_until_meta_input_allowed = 0;
 
 double accumulator = 0.0;
 
@@ -118,11 +118,10 @@ void drawSprite(char* texture_path, NormalizedCoords origin, NormalizedCoords di
             break;
         }
     }
-	// adjust origin based on camera location
+
 	origin.x -= current_world_state.camera_coords.x;
 	origin.y -= current_world_state.camera_coords.y;
 
-	// don't pass to textures_to_load if entire tetxure is outside of norm space
     if (origin.x > CAMERA_CLIPPING_RADIUS ||
         origin.y > CAMERA_CLIPPING_RADIUS ||
         origin.x + dimensions.x < -CAMERA_CLIPPING_RADIUS ||
@@ -166,8 +165,6 @@ bool checkCollision(NormalizedCoords object_1_origin, NormalizedCoords object_1_
 bool canBoxPush(NormalizedCoords collision_point, Direction direction, bool boxes_to_move[64])
 {
     int32 first_box_id = -1;
-
-    // populate 
     for (int box_id = 0; box_id < current_world_state.box_count; box_id++)
     {
         if (current_world_state.boxes[box_id].id == -1) continue;
@@ -302,8 +299,8 @@ void rotationMovement(bool clockwise, Direction input_direction, NormalizedCoord
 		switch(input_direction)
         {
         case (NORTH):
-            diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                                                                  next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+            diagonal_potential_box_position   = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                  	next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
             diagonal_push_direction = SOUTH;
 
             orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x, 
@@ -311,8 +308,8 @@ void rotationMovement(bool clockwise, Direction input_direction, NormalizedCoord
             orthogonal_push_direction = WEST;
             break;
         case (WEST):
-            diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                                                                  next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+            diagonal_potential_box_position   = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                  	next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
             diagonal_push_direction = EAST;
 
             orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS),
@@ -320,8 +317,8 @@ void rotationMovement(bool clockwise, Direction input_direction, NormalizedCoord
             orthogonal_push_direction = SOUTH;
             break;
         case (SOUTH):
-            diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                                                                  next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+            diagonal_potential_box_position   = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                  	next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
             diagonal_push_direction = NORTH;
 
             orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x, 
@@ -329,8 +326,8 @@ void rotationMovement(bool clockwise, Direction input_direction, NormalizedCoord
             orthogonal_push_direction = EAST;
             break;
         case (EAST):
-            diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                                                                  next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+            diagonal_potential_box_position   = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                  	next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
             diagonal_push_direction = WEST;
 
             orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS),
@@ -344,8 +341,8 @@ void rotationMovement(bool clockwise, Direction input_direction, NormalizedCoord
         switch (input_direction)
         {
         case (NORTH):
-            diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                                                                  next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+            diagonal_potential_box_position   = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                  	next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
             diagonal_push_direction = SOUTH;
 
             orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x,
@@ -353,8 +350,8 @@ void rotationMovement(bool clockwise, Direction input_direction, NormalizedCoord
             orthogonal_push_direction = EAST;
             break;
         case (WEST):
-            diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                                                                  next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+            diagonal_potential_box_position   = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                  	next_player_coords->y - yPixelsToNorm((float)TILE_SIZE_PIXELS) };
             diagonal_push_direction = EAST;
 
             orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS),
@@ -362,8 +359,8 @@ void rotationMovement(bool clockwise, Direction input_direction, NormalizedCoord
             orthogonal_push_direction = NORTH;
             break;
         case (SOUTH):
-            diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                                                                  next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+            diagonal_potential_box_position   = (NormalizedCoords){ next_player_coords->x + xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                  	next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
             diagonal_push_direction = NORTH;
 
             orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x,
@@ -371,8 +368,8 @@ void rotationMovement(bool clockwise, Direction input_direction, NormalizedCoord
             orthogonal_push_direction = WEST;
             break;
         case (EAST):
-            diagonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
-                                                                  next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
+            diagonal_potential_box_position   = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS), 
+                                                                  	next_player_coords->y + yPixelsToNorm((float)TILE_SIZE_PIXELS) };
             diagonal_push_direction = WEST;
 
             orthogonal_potential_box_position = (NormalizedCoords){ next_player_coords->x - xPixelsToNorm((float)TILE_SIZE_PIXELS),
@@ -449,23 +446,25 @@ void forwardMovement(Direction input_direction, NormalizedCoords *next_player_co
         }
     }
 
-    for (int box_index = 0; box_index < current_world_state.box_count; box_index++)
-    {
-        if (checkCollision(current_world_state.boxes[box_index].origin, box_dim_norm, *next_player_coords, player_dim_norm))
-        {
+//    for (int box_index = 0; box_index < current_world_state.box_count; box_index++)
+//    {
+//        if (checkCollision(current_world_state.boxes[box_index].origin, box_dim_norm, *next_player_coords, player_dim_norm))
+//        {
             bool boxes_to_push[64] = {0};
-            if (canBoxPush(*next_player_coords, input_direction, boxes_to_push)) doBoxPush(boxes_to_push, input_direction);
+            if (canBoxPush(*next_player_coords, input_direction, boxes_to_push)) 
+            {
+                doBoxPush(boxes_to_push, input_direction);
+				*moved_this_frame = true;
+            }
             else *moved_this_frame = false;
             return; // can only ever push one box per forward movement
-        }
-    }
+//        }
+//    }
 }
 
 
 void handleInput(Direction input_direction, NormalizedCoords *next_player_coords, Direction *next_player_direction, bool *moved_this_frame)
 {
-	// input is allowed (already checked for time)
-    
 	// check direction player is facing. if opposite, do nothing. if same, add to the direction and move. if one off, turn.
     int32 direction_switch = (input_direction - current_world_state.player_direction) % 4;
     if (direction_switch < 0) direction_switch += 4;
@@ -475,7 +474,6 @@ void handleInput(Direction input_direction, NormalizedCoords *next_player_coords
     	case 0:
         {
 			forwardMovement(input_direction, next_player_coords, moved_this_frame);
-            *moved_this_frame = true;
             break;
         }
         case 1:
@@ -484,11 +482,7 @@ void handleInput(Direction input_direction, NormalizedCoords *next_player_coords
             rotationMovement(clockwise, input_direction, next_player_coords, next_player_direction, moved_this_frame);
             break;
         }
-        case 2:
-        {
-            // input_direction is opposite to player_direction, do nothing
-            break;
-        }
+        case 2: break;
         case 3:
         {
             bool clockwise = true;
@@ -500,22 +494,9 @@ void handleInput(Direction input_direction, NormalizedCoords *next_player_coords
 	current_world_state.time_until_input_allowed = 8;
 }
 
-void gameInitialise(void) 
-{	
-    void_dim_norm   = nearestPixelFloorToNorm(void_dim_int, DEFAULT_SCALE);
-    grid_dim_norm   = nearestPixelFloorToNorm(grid_dim_int, DEFAULT_SCALE);
-    wall_dim_norm   = nearestPixelFloorToNorm(wall_dim_int, DEFAULT_SCALE);
-    box_dim_norm    = nearestPixelFloorToNorm(box_dim_int,  DEFAULT_SCALE);
-    pack_dim_norm   = nearestPixelFloorToNorm(pack_dim_int, DEFAULT_SCALE);
-    player_dim_norm = nearestPixelFloorToNorm(player_dim_int, DEFAULT_SCALE);
-
-	current_world_state.level_path = "data/levels/boxes.txt";
-    current_world_state.player_direction = NORTH;
-	current_world_state.camera_coords = (NormalizedCoords){ 0.7f, 1.2f };
-    current_world_state.time_until_input_allowed = 0;
-
-    // need to fill various current_world_state structs based on level
-    FILE *level_file = fopen(current_world_state.level_path, "rb");
+void loadFileAsLevel(char* level_path) 
+{
+    FILE *level_file = fopen(level_path, "rb");
     unsigned char byte = 0;
 
 	IntCoords level_dimensions = {0};
@@ -523,6 +504,15 @@ void gameInitialise(void)
     level_dimensions.x = byte;
     fread(&byte, 1, 1, level_file);
     level_dimensions.y = byte;
+
+    memset(current_world_state.voids, 0, sizeof(current_world_state.voids));
+    current_world_state.void_count = 0;
+    memset(current_world_state.grids, 0, sizeof(current_world_state.grids));
+    current_world_state.grid_count = 0;
+    memset(current_world_state.walls, 0, sizeof(current_world_state.walls));
+    current_world_state.wall_count = 0;
+    memset(current_world_state.boxes, 0, sizeof(current_world_state.boxes));
+    current_world_state.box_count = 0;
 
     for (int16 tile_index = 0; tile_index < level_dimensions.x * level_dimensions.y; tile_index++)
     {
@@ -565,6 +555,24 @@ void gameInitialise(void)
         }
     }
     current_world_state.player_spawn_point = current_world_state.player_coords; 
+	current_world_state.level_path = level_path;
+}
+
+void gameInitialise(void) 
+{	
+    void_dim_norm   = nearestPixelFloorToNorm(void_dim_int, DEFAULT_SCALE);
+    grid_dim_norm   = nearestPixelFloorToNorm(grid_dim_int, DEFAULT_SCALE);
+    wall_dim_norm   = nearestPixelFloorToNorm(wall_dim_int, DEFAULT_SCALE);
+    box_dim_norm    = nearestPixelFloorToNorm(box_dim_int,  DEFAULT_SCALE);
+    pack_dim_norm   = nearestPixelFloorToNorm(pack_dim_int, DEFAULT_SCALE);
+    player_dim_norm = nearestPixelFloorToNorm(player_dim_int, DEFAULT_SCALE);
+
+    char* level_path_to_load = "data/levels/boxes.txt";
+    current_world_state.player_direction = NORTH;
+	current_world_state.camera_coords = (NormalizedCoords){ 0.7f, 1.2f };
+    current_world_state.time_until_input_allowed = 0;
+
+    loadFileAsLevel(level_path_to_load);
 }
 
 void gameFrame(double delta_time, TickInput tick_input)
@@ -576,16 +584,14 @@ void gameFrame(double delta_time, TickInput tick_input)
 
     while (accumulator >= PHYSICS_INCREMENT)
     {
-		// HANDLE UNDO PRESS
-
-    	if (tick_input.z_press && z_time_until_allowed == 0)
+		// undo 
+    	if (tick_input.z_press && time_until_meta_input_allowed == 0)
         {
-            z_time_until_allowed = 8;
+            time_until_meta_input_allowed = 8;
 
             int32 next_undo_buffer_position;
             if (undo_buffer_position != 0) next_undo_buffer_position = undo_buffer_position - 1;
             else next_undo_buffer_position = UNDO_BUFFER_SIZE - 1;
-
             if (undo_buffer[next_undo_buffer_position].level_path != 0)
             {
             	current_world_state = undo_buffer[next_undo_buffer_position]; 
@@ -595,12 +601,20 @@ void gameFrame(double delta_time, TickInput tick_input)
             // else: no more undos in buffer (either back to start point, or run out of undo buffer space)
         }
 
+        // restart level
+        if (tick_input.r_press && time_until_meta_input_allowed == 0)
+        {
+            time_until_meta_input_allowed = 8;
+			recordStateForUndo();
+			loadFileAsLevel(current_world_state.level_path);
+        }
+
         if (tick_input.i_press) current_world_state.camera_coords.y += CAMERA_MOVEMENT_SPEED;
         if (tick_input.j_press) current_world_state.camera_coords.x -= CAMERA_MOVEMENT_SPEED;
         if (tick_input.k_press) current_world_state.camera_coords.y -= CAMERA_MOVEMENT_SPEED;
         if (tick_input.l_press) current_world_state.camera_coords.x += CAMERA_MOVEMENT_SPEED;
 
-        // MOVEMENT SYSTEM
+        // MOVEMENT SYSTEM -> COLLISION HANDLER
 
 		NormalizedCoords next_player_coords = current_world_state.player_coords; 
         Direction next_player_direction = current_world_state.player_direction;
@@ -613,20 +627,19 @@ void gameFrame(double delta_time, TickInput tick_input)
 		if (tick_input.s_press && current_world_state.time_until_input_allowed == 0) handleInput(input_direction = SOUTH, &next_player_coords, &next_player_direction, &moved_this_frame);
 		if (tick_input.d_press && current_world_state.time_until_input_allowed == 0) handleInput(input_direction = EAST,  &next_player_coords, &next_player_direction, &moved_this_frame);
 
-        if (z_time_until_allowed != 0) z_time_until_allowed--;
+        if (time_until_meta_input_allowed != 0) time_until_meta_input_allowed--;
 		if (current_world_state.time_until_input_allowed != 0) current_world_state.time_until_input_allowed--;
 
 		// DRAW SPRITES
 
         // draw voids; and check if equal to player or some box
-		bool player_in_void = true;
-
         for (int16 void_index = 0; void_index < current_world_state.void_count; void_index++)
         {
 			drawSprite(void_path, current_world_state.voids[void_index].origin, void_dim_norm);
         }
 
         // draw grids, and void player
+		bool player_in_void = true;
         for (int16 grid_index = 0; grid_index < current_world_state.grid_count; grid_index++)
         {
 			drawSprite(grid_path, current_world_state.grids[grid_index].origin, grid_dim_norm);

@@ -79,6 +79,7 @@ typedef struct TickInput
     bool s_press;
     bool d_press;
     bool z_press;
+    bool r_press;
 
     bool i_press;
 	bool j_press;

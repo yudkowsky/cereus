@@ -36,6 +36,12 @@ LRESULT CALLBACK windowMessageProcessor(
                 case 'D':
                     tick_input.d_press = true; 
                     break;
+                case 'Z':
+                    tick_input.z_press = true;
+                	break;
+                case 'R':
+                    tick_input.r_press = true;
+                	break;
                 case 'I':
                     tick_input.i_press = true;
                     break;
@@ -47,9 +53,6 @@ LRESULT CALLBACK windowMessageProcessor(
                 	break;
                 case 'L':
                     tick_input.l_press = true;
-                	break;
-                case 'Z':
-                    tick_input.z_press = true;
                 	break;
             }
             break;
@@ -68,6 +71,12 @@ LRESULT CALLBACK windowMessageProcessor(
                 case 'D':
                     tick_input.d_press = false; 
                     break;
+                case 'Z':
+                    tick_input.z_press = false;
+                	break;
+                case 'R':
+                    tick_input.r_press = false;
+                	break;
                 case 'I':
                     tick_input.i_press = false;
                     break;
@@ -79,9 +88,6 @@ LRESULT CALLBACK windowMessageProcessor(
                 	break;
                 case 'L':
                     tick_input.l_press = false;
-                	break;
-                case 'Z':
-                    tick_input.z_press = false;
                 	break;
             }
     }
