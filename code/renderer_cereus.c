@@ -20,62 +20,71 @@ typedef struct Vertex
 }
 Vertex;
 
-Vertex frame_vertex_stash[65536];
-uint32 frame_vertex_count = 0;
+typedef struct Cube 
+{
+	uint32 asset_index ; // index into asset_cache
+    Vec3 coords;
+    Vec3 scale;
+    Vec4 quaternion;
+}
+Cube;
 
-typedef struct CachedTexture
+typedef struct CachedAsset
 {
 	VkImage image;
     VkDeviceMemory memory;
     VkImageView view;
     char path[256];
 }
-CachedTexture;
+CachedAsset;
 
-typedef struct TextureToDraw
-{
-    uint32 place_in_cache;
-    Vec2 origin[256];
-    Vec2 dimensions[256];
-    uint32 instance_count;
-}
-TextureToDraw;
-TextureToDraw textures_to_draw[256];
+Cube cube_instances[1024];
+uint32 cube_instance_count = 0;
+
+Vertex frame_vertex_stash[65536];
+uint32 frame_vertex_count = 0;
 
 // unit cube (-0.5..+0.5), y-up, right-handed.
-static const Vertex CUBE_VERTICES[24] = {
-    { +0.5f, -0.5f, -0.5f,  0.0f, 1.0f,   1,0,0 },
-    { +0.5f, +0.5f, -0.5f,  0.0f, 0.0f,   1,0,0 },
-    { +0.5f, +0.5f, +0.5f,  1.0f, 0.0f,   1,0,0 },
-    { +0.5f, -0.5f, +0.5f,  1.0f, 1.0f,   1,0,0 },
+static const Vertex CUBE_VERTICES[] = {
+    // front
+    { -0.5f, -0.5f,  0.5f,   0.0f, 0.0f,   1,1,1 },
+    {  0.5f, -0.5f,  0.5f,   1.0f, 0.0f,   1,1,1 },
+    {  0.5f,  0.5f,  0.5f,   1.0f, 1.0f,   1,1,1 },
+    { -0.5f,  0.5f,  0.5f,   0.0f, 1.0f,   1,1,1 },
 
-    { -0.5f, -0.5f, +0.5f,  0.0f, 1.0f,   0,1,0 },
-    { -0.5f, +0.5f, +0.5f,  0.0f, 0.0f,   0,1,0 },
-    { -0.5f, +0.5f, -0.5f,  1.0f, 0.0f,   0,1,0 },
-    { -0.5f, -0.5f, -0.5f,  1.0f, 1.0f,   0,1,0 },
+    // back
+    {  0.5f, -0.5f, -0.5f,   0.0f, 0.0f,   1,1,1 },
+    { -0.5f, -0.5f, -0.5f,   1.0f, 0.0f,   1,1,1 },
+    { -0.5f,  0.5f, -0.5f,   1.0f, 1.0f,   1,1,1 },
+    {  0.5f,  0.5f, -0.5f,   0.0f, 1.0f,   1,1,1 },
 
-    { -0.5f, +0.5f, -0.5f,  0.0f, 1.0f,   0,0,1 },
-    { -0.5f, +0.5f, +0.5f,  0.0f, 0.0f,   0,0,1 },
-    { +0.5f, +0.5f, +0.5f,  1.0f, 0.0f,   0,0,1 },
-    { +0.5f, +0.5f, -0.5f,  1.0f, 1.0f,   0,0,1 },
+    // left
+    { -0.5f, -0.5f, -0.5f,   0.0f, 0.0f,   1,1,1 },
+    { -0.5f, -0.5f,  0.5f,   1.0f, 0.0f,   1,1,1 },
+    { -0.5f,  0.5f,  0.5f,   1.0f, 1.0f,   1,1,1 },
+    { -0.5f,  0.5f, -0.5f,   0.0f, 1.0f,   1,1,1 },
 
-    { -0.5f, -0.5f, +0.5f,  0.0f, 1.0f,   1,1,0 },
-    { -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,   1,1,0 },
-    { +0.5f, -0.5f, -0.5f,  1.0f, 0.0f,   1,1,0 },
-    { +0.5f, -0.5f, +0.5f,  1.0f, 1.0f,   1,1,0 },
+    // right
+    {  0.5f, -0.5f,  0.5f,   0.0f, 0.0f,   1,1,1 },
+    {  0.5f, -0.5f, -0.5f,   1.0f, 0.0f,   1,1,1 },
+    {  0.5f,  0.5f, -0.5f,   1.0f, 1.0f,   1,1,1 },
+    {  0.5f,  0.5f,  0.5f,   0.0f, 1.0f,   1,1,1 },
 
-    { -0.5f, -0.5f, +0.5f,  0.0f, 1.0f,   1,0,1 },
-    { +0.5f, -0.5f, +0.5f,  1.0f, 1.0f,   1,0,1 },
-    { +0.5f, +0.5f, +0.5f,  1.0f, 0.0f,   1,0,1 },
-    { -0.5f, +0.5f, +0.5f,  0.0f, 0.0f,   1,0,1 },
+    // top
+    { -0.5f,  0.5f,  0.5f,   0.0f, 0.0f,   1,1,1 },
+    {  0.5f,  0.5f,  0.5f,   1.0f, 0.0f,   1,1,1 },
+    {  0.5f,  0.5f, -0.5f,   1.0f, 1.0f,   1,1,1 },
+    { -0.5f,  0.5f, -0.5f,   0.0f, 1.0f,   1,1,1 },
 
-    { +0.5f, -0.5f, -0.5f,  0.0f, 1.0f,   0,1,1 },
-    { -0.5f, -0.5f, -0.5f,  1.0f, 1.0f,   0,1,1 },
-    { -0.5f, +0.5f, -0.5f,  1.0f, 0.0f,   0,1,1 },
-    { +0.5f, +0.5f, -0.5f,  0.0f, 0.0f,   0,1,1 },
+    // bottom
+    { -0.5f, -0.5f, -0.5f,   0.0f, 0.0f,   1,1,1 },
+    {  0.5f, -0.5f, -0.5f,   1.0f, 0.0f,   1,1,1 },
+    {  0.5f, -0.5f,  0.5f,   1.0f, 1.0f,   1,1,1 }, 
+    { -0.5f, -0.5f,  0.5f,   0.0f, 1.0f,   1,1,1 }
 };
 
-static const uint32 CUBE_INDICES[36] = {
+static const uint32 CUBE_INDICES[36] = 
+{
     0, 1, 2,  0, 2, 3,
     4, 5, 6,  4, 6, 7,
     8, 9,10,  8,10,11,
@@ -124,8 +133,8 @@ typedef struct
     VkPipeline graphics_pipeline_handle;
 
     VkSampler pixel_art_sampler;
-    CachedTexture texture_cache[256];
-    uint32 texture_cache_count;
+    CachedAsset asset_cache[256];
+    uint32 asset_cache_count;
 
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
@@ -145,7 +154,7 @@ typedef struct
 RendererState;
 RendererState renderer_state;
 
-static void mat4Identity(float matrix[16]) 
+void mat4Identity(float matrix[16]) 
 {
 	memset(matrix, 0, sizeof(float) * 16);
     matrix[0] = 1.0f;
@@ -155,7 +164,7 @@ static void mat4Identity(float matrix[16])
 }
 
 // can use an actually optimised matrix mult algorithm here. 
-static void mat4Multiply(float output_matrix[16], float a[16], float b[16])
+void mat4Multiply(float output_matrix[16], float a[16], float b[16])
 {
     float temporary_matrix[16]; // required if output_matrix = a or b
 	for (int column = 0; column < 4; column++)
@@ -166,46 +175,70 @@ static void mat4Multiply(float output_matrix[16], float a[16], float b[16])
         }
     }
     memcpy(output_matrix, temporary_matrix, sizeof(temporary_matrix));
-
 }
 
-static void mat4BuildTranslation(float output_matrix[16], float x, float y, float z) 
+void mat4BuildTranslation(float output_matrix[16], Vec3 translation) 
 {
     mat4Identity(output_matrix);
-	output_matrix[12] = x;
-    output_matrix[13] = y;
-    output_matrix[14] = z;
+	output_matrix[12] = translation.x;
+    output_matrix[13] = translation.y;
+    output_matrix[14] = translation.z;
 }
 
-static void mat4BuildRotateX(float output_matrix[16], float radians) 
+void mat4BuildScale(float output_matrix[16], Vec3 scale)
 {
-	mat4Identity(output_matrix);
-    output_matrix[5]  = cos(radians);
-    output_matrix[6]  = -sin(radians);
-    output_matrix[9]  = sin(radians);
-	output_matrix[10] = cos(radians);
+    memset(output_matrix, 0, sizeof(float) * 16);
+	output_matrix[0] = scale.x;
+    output_matrix[5] = scale.y;
+    output_matrix[10] = scale.z;
+    output_matrix[15] = 1.0f;
 }
 
-static void mat4BuildRotateY(float output_matrix[16], float radians) 
+void mat4BuildRotation(float output_matrix[16], Vec4 quaternion)
 {
-	mat4Identity(output_matrix);
-    output_matrix[0]  = cos(radians);
-    output_matrix[2]  = sin(radians);
-    output_matrix[8]  = -sin(radians);
-	output_matrix[10] = cos(radians);
+    float x = quaternion.x, y = quaternion.y, z = quaternion.z, w = quaternion.w;
+    float length_squared = x*x + y*y + z*z + w*w;
+    if (length_squared < 1e-8f)
+    {
+        mat4Identity(output_matrix);
+        return;
+    }
+    float inv_length = 1.0f / sqrtf(length_squared);
+	x *= inv_length;
+	y *= inv_length;
+	z *= inv_length;
+	w *= inv_length;
+
+    output_matrix[0]  = 1.0f - 2.0f*(y*y + z*z);
+    output_matrix[1]  = 2.0f*(x*y + w*z);
+    output_matrix[2]  = 2.0f*(x*z - w*y);
+    output_matrix[3]  = 0.0f;
+    output_matrix[4]  = 2.0f*(x*y - w*z);
+    output_matrix[5]  = 1.0f - 2.0f*(x*x + z*z);
+    output_matrix[6]  = 2.0f*(y*z + w*x);
+    output_matrix[7]  = 0.0f;
+    output_matrix[8]  = 2.0f*(w*x + w*y);
+    output_matrix[9]  = 2.0f*(y*z - w*x);
+    output_matrix[10] = 1.0f - 2.0f*(x*x + y*y);
+    output_matrix[11] = 0.0f;
+    output_matrix[12] = 0.0f;
+    output_matrix[13] = 0.0f;
+    output_matrix[14] = 0.0f;
+    output_matrix[15] = 1.0f;
 }
 
-static void mat4BuildRotateZ(float output_matrix[16], float radians) 
+void mat4BuildTRS(float output_matrix[16], Vec3 translation, Vec4 quaternion, Vec3 scale)
 {
-    mat4Identity(output_matrix);
-    output_matrix[0]  = cos(radians);
-    output_matrix[1]  = -sin(radians);
-    output_matrix[4]  = sin(radians);
-	output_matrix[5]  = cos(radians);
+    float translation_matrix[16], rotation_matrix[16], scale_matrix[16], translation_rotation_matrix[16];
+    mat4BuildTranslation(translation_matrix, translation);
+    mat4BuildRotation(rotation_matrix, quaternion);
+	mat4BuildScale(scale_matrix, scale);
+    mat4Multiply(translation_rotation_matrix, translation_matrix, rotation_matrix);
+    mat4Multiply(output_matrix, translation_rotation_matrix, scale_matrix);
 }
 
 // right handed, zero to one depth
-static void mat4BuildPerspective(float output_matrix[16], float fov_y_radians, float aspect, float z_near, float z_far) 
+void mat4BuildPerspective(float output_matrix[16], float fov_y_radians, float aspect, float z_near, float z_far) 
 {
 	float cotan = 1.0f / tanf(0.5f * fov_y_radians);
     memset(output_matrix, 0, sizeof(float) * 16);
@@ -256,6 +289,222 @@ internal bool readEntireFile(char* path, void** out_data, size_t* out_size)
     *out_data = file_bytes;
     *out_size = file_size_bytes;
     return true;
+}
+
+// TODO(spike): some stuff here is still called 'texture' instead of asset. change this after actually generalising to 3d models
+int32 loadAsset(char* path)
+{
+    int width, height, channels;
+    uint8* pixels = (uint8*)stbi_load(path, &width, &height, &channels, STBI_rgb_alpha);
+    if (!pixels) return -1;
+
+    VkDeviceSize image_size_bytes = width * height * 4; // 4 bytes per pixel
+    VkBuffer staging_buffer;
+    VkDeviceMemory staging_buffer_memory;
+
+    VkBufferCreateInfo buffer_info = {0};
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size = image_size_bytes;
+    buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    vkCreateBuffer(renderer_state.logical_device_handle, &buffer_info, 0, &staging_buffer);
+
+    VkMemoryRequirements cpu_memory_requirements;
+	vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, staging_buffer, &cpu_memory_requirements);
+
+    VkMemoryAllocateInfo cpu_memory_allocation_info = {0};
+    cpu_memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    cpu_memory_allocation_info.allocationSize = cpu_memory_requirements.size;
+    cpu_memory_allocation_info.memoryTypeIndex = findMemoryType(cpu_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    vkAllocateMemory(renderer_state.logical_device_handle, &cpu_memory_allocation_info, 0, &staging_buffer_memory);
+    vkBindBufferMemory(renderer_state.logical_device_handle, staging_buffer, staging_buffer_memory, 0);
+
+    void* gpu_memory_pointer; // starts as CPU pointer
+    vkMapMemory(renderer_state.logical_device_handle, staging_buffer_memory, 0, image_size_bytes, 0, &gpu_memory_pointer); // data now points to GPU-visible memory
+    memcpy(gpu_memory_pointer, pixels, (size_t)image_size_bytes); // writes from pixels to data
+    vkUnmapMemory(renderer_state.logical_device_handle, staging_buffer_memory); // removes CPU access
+
+    stbi_image_free(pixels);
+
+    VkImage texture_image;
+    VkDeviceMemory texture_image_memory;
+
+    VkImageCreateInfo image_info = {0};
+    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType = VK_IMAGE_TYPE_2D;
+    image_info.extent.width = width;
+    image_info.extent.height = height;
+    image_info.extent.depth = 1;
+    image_info.mipLevels = 1;
+    image_info.arrayLayers = 1; 
+    image_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    image_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+
+    vkCreateImage(renderer_state.logical_device_handle, &image_info, 0, &texture_image);
+
+	VkMemoryRequirements gpu_memory_requirements;
+    vkGetImageMemoryRequirements(renderer_state.logical_device_handle, texture_image, &gpu_memory_requirements);
+
+    VkMemoryAllocateInfo gpu_memory_allocation_info = {0};
+    gpu_memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    gpu_memory_allocation_info.allocationSize = gpu_memory_requirements.size;
+	gpu_memory_allocation_info.memoryTypeIndex = findMemoryType(gpu_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    vkAllocateMemory(renderer_state.logical_device_handle, &gpu_memory_allocation_info, 0, &texture_image_memory);
+    vkBindImageMemory(renderer_state.logical_device_handle, texture_image, texture_image_memory, 0);
+
+    VkCommandBufferAllocateInfo command_buffer_allocation_info = {0};
+    command_buffer_allocation_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    command_buffer_allocation_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    command_buffer_allocation_info.commandPool = renderer_state.graphics_command_pool_handle;
+    command_buffer_allocation_info.commandBufferCount = 1;
+
+    VkCommandBuffer command_buffer;
+    vkAllocateCommandBuffers(renderer_state.logical_device_handle, &command_buffer_allocation_info, &command_buffer);
+
+    VkCommandBufferBeginInfo command_buffer_begin_info = {0};
+    command_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    command_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
+
+    // transition image to transfer
+    VkImageMemoryBarrier to_transfer_barrier = {0}; // synchronization point - wait until image is written to transfer
+    to_transfer_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_transfer_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    to_transfer_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; // arranged for fast writing
+	to_transfer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	to_transfer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	to_transfer_barrier.image = texture_image;
+	to_transfer_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	to_transfer_barrier.subresourceRange.baseMipLevel = 0;
+	to_transfer_barrier.subresourceRange.levelCount = 1;
+	to_transfer_barrier.subresourceRange.baseArrayLayer = 0;
+	to_transfer_barrier.subresourceRange.layerCount = 1;
+	to_transfer_barrier.srcAccessMask = 0; // no memory operations need to complete (we don't care about previous data here)
+	to_transfer_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+    VkPipelineStageFlags to_transfer_source_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    VkPipelineStageFlags to_transfer_destination_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    
+    vkCmdPipelineBarrier(command_buffer, to_transfer_source_stage, to_transfer_destination_stage, 0, 0, 0, 0, 0, 1, &to_transfer_barrier);
+
+    // copy from staging buffer to image
+    VkBufferImageCopy copy_region = {0};
+    copy_region.bufferOffset = 0;
+    copy_region.bufferRowLength = 0;
+    copy_region.bufferImageHeight = 0;
+    copy_region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy_region.imageSubresource.mipLevel = 0;
+    copy_region.imageSubresource.baseArrayLayer = 0;
+    copy_region.imageSubresource.layerCount = 1;
+    copy_region.imageOffset = (VkOffset3D){ 0, 0, 0 }; // 3rd dimension is depth
+    copy_region.imageExtent = (VkExtent3D){ width, height, 1};
+
+    vkCmdCopyBufferToImage(command_buffer, staging_buffer, texture_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
+
+    // transition image to shader reading
+	VkImageMemoryBarrier to_shader_barrier = {0};
+    to_shader_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    to_shader_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to_shader_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // optimised for fragment shader reading (probably not entirely sequential)
+    to_shader_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_shader_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_shader_barrier.image = texture_image;
+	to_shader_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	to_shader_barrier.subresourceRange.baseMipLevel = 0;
+	to_shader_barrier.subresourceRange.levelCount = 1;
+	to_shader_barrier.subresourceRange.baseArrayLayer = 0;
+    to_shader_barrier.subresourceRange.layerCount = 1;
+    to_shader_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; // wait for transfer writes to complete
+    to_shader_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT; // make memory available for shader reads
+
+    VkPipelineStageFlags to_shader_source_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    VkPipelineStageFlags to_shader_destination_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+
+    vkCmdPipelineBarrier(command_buffer, to_shader_source_stage, to_shader_destination_stage, 0, 0, 0, 0, 0, 1, &to_shader_barrier);
+
+    vkEndCommandBuffer(command_buffer);
+
+    // submit and execute commands
+	VkSubmitInfo submit_info = {0};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &command_buffer;
+
+    vkQueueSubmit(renderer_state.graphics_queue_handle, 1, &submit_info, VK_NULL_HANDLE);
+    vkQueueWaitIdle(renderer_state.graphics_queue_handle); // blocks until the GPU finishes 
+
+    vkFreeCommandBuffers(renderer_state.logical_device_handle, renderer_state.graphics_command_pool_handle, 1, &command_buffer);
+    vkDestroyBuffer(renderer_state.logical_device_handle, staging_buffer, 0);
+    vkFreeMemory(renderer_state.logical_device_handle, staging_buffer_memory, 0);
+
+	VkImageView texture_image_view;
+
+    VkImageViewCreateInfo image_view_info = {0};
+    image_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    image_view_info.image = texture_image;
+    image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    image_view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    image_view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    image_view_info.subresourceRange.baseMipLevel = 0;
+    image_view_info.subresourceRange.levelCount = 1;
+    image_view_info.subresourceRange.baseArrayLayer = 0;
+    image_view_info.subresourceRange.layerCount = 1;
+
+    vkCreateImageView(renderer_state.logical_device_handle, &image_view_info, 0, &texture_image_view);
+
+	VkDescriptorSetAllocateInfo descriptor_set_allocation_info = {0};
+    descriptor_set_allocation_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descriptor_set_allocation_info.descriptorPool = renderer_state.descriptor_pool;
+    descriptor_set_allocation_info.descriptorSetCount = 1;
+    descriptor_set_allocation_info.pSetLayouts = &renderer_state.descriptor_set_layout;
+
+    vkAllocateDescriptorSets(renderer_state.logical_device_handle, &descriptor_set_allocation_info, &renderer_state.descriptor_sets[renderer_state.asset_cache_count]);
+
+    VkDescriptorImageInfo descriptor_image_info = {0};
+    descriptor_image_info.sampler = renderer_state.pixel_art_sampler;
+    descriptor_image_info.imageView = texture_image_view;
+    descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+	VkWriteDescriptorSet descriptor_set_write = {0};
+    descriptor_set_write.sType= VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    descriptor_set_write.dstSet = renderer_state.descriptor_sets[renderer_state.asset_cache_count];
+	descriptor_set_write.dstBinding = 0;
+    descriptor_set_write.descriptorCount = 1;
+	descriptor_set_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptor_set_write.pImageInfo = &descriptor_image_info;
+
+    vkUpdateDescriptorSets(renderer_state.logical_device_handle, 1, &descriptor_set_write, 0, 0);
+
+    renderer_state.asset_cache[renderer_state.asset_cache_count].image = texture_image;
+    renderer_state.asset_cache[renderer_state.asset_cache_count].memory = texture_image_memory;
+    renderer_state.asset_cache[renderer_state.asset_cache_count].view = texture_image_view;
+    strcpy(renderer_state.asset_cache[renderer_state.asset_cache_count].path, path);
+
+    renderer_state.asset_cache_count++;
+
+    return (int32)(renderer_state.asset_cache_count - 1);
+}
+
+int32 getOrLoadAsset(char* path)
+{
+    // check if already loaded
+    for (uint32 asset_cache_index = 0; asset_cache_index < renderer_state.asset_cache_count; asset_cache_index++)
+    {
+        if (strcmp(renderer_state.asset_cache[asset_cache_index].path, path) == 0)
+        {
+            return (int32)asset_cache_index;
+        }
+
+    }
+    return loadAsset(path); // not found
 }
 
 void rendererInitialise(RendererPlatformHandles platform_handles)
@@ -1215,7 +1464,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 
 	VkPipelineColorBlendAttachmentState color_blend_attachment_state = {0}; // controls per-render-target blending, i.e., how the fragment shader's output color is combined with what's already there. for now, just write RGBA
     color_blend_attachment_state.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    color_blend_attachment_state.blendEnable = VK_TRUE;
+    color_blend_attachment_state.blendEnable = VK_FALSE;
     color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
     color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
     color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
@@ -1324,272 +1573,28 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &graphics_pipeline_creation_info, 0, &renderer_state.graphics_pipeline_handle);
 }
 
-/*
-int32 loadTexture(AssetToLoad asset)
-{
-    int width, height, channels;
-    uint8* pixels = (uint8*)stbi_load(asset.path, &width, &height, &channels, STBI_rgb_alpha); // it wants unsigned char here instead of uint8
-    if (!pixels) return -1;
-
-    VkDeviceSize image_size_bytes = width * height * 4; // 4 bytes per pixel
-    VkBuffer staging_buffer;
-    VkDeviceMemory staging_buffer_memory;
-
-    VkBufferCreateInfo buffer_info = {0}; // TODO(spike): when doing better memory management, see what i should do here to put this memory in the right place
-    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_info.size = image_size_bytes;
-    buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    vkCreateBuffer(renderer_state.logical_device_handle, &buffer_info, 0, &staging_buffer);
-
-    VkMemoryRequirements cpu_memory_requirements;
-	vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, staging_buffer, &cpu_memory_requirements);
-
-    VkMemoryAllocateInfo cpu_memory_allocation_info = {0};
-    cpu_memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    cpu_memory_allocation_info.allocationSize = cpu_memory_requirements.size;
-    cpu_memory_allocation_info.memoryTypeIndex = findMemoryType(cpu_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    vkAllocateMemory(renderer_state.logical_device_handle, &cpu_memory_allocation_info, 0, &staging_buffer_memory);
-    vkBindBufferMemory(renderer_state.logical_device_handle, staging_buffer, staging_buffer_memory, 0);
-
-    void* gpu_memory_pointer; // starts as CPU pointer
-    vkMapMemory(renderer_state.logical_device_handle, staging_buffer_memory, 0, image_size_bytes, 0, &gpu_memory_pointer); // data now points to GPU-visible memory
-    memcpy(gpu_memory_pointer, pixels, (size_t)image_size_bytes); // writes from pixels to data
-    vkUnmapMemory(renderer_state.logical_device_handle, staging_buffer_memory); // removes CPU access
-
-    stbi_image_free(pixels);
-
-    VkImage texture_image;
-    VkDeviceMemory texture_image_memory;
-
-    VkImageCreateInfo image_info = {0};
-    image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    image_info.imageType = VK_IMAGE_TYPE_2D;
-    image_info.extent.width = width;
-    image_info.extent.height = height;
-    image_info.extent.depth = 1;
-    image_info.mipLevels = 1;
-    image_info.arrayLayers = 1; 
-    image_info.format = VK_FORMAT_R8G8B8A8_SRGB;
-    image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    image_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    image_info.samples = VK_SAMPLE_COUNT_1_BIT;
-
-    vkCreateImage(renderer_state.logical_device_handle, &image_info, 0, &texture_image);
-
-	VkMemoryRequirements gpu_memory_requirements;
-    vkGetImageMemoryRequirements(renderer_state.logical_device_handle, texture_image, &gpu_memory_requirements);
-
-    VkMemoryAllocateInfo gpu_memory_allocation_info = {0};
-    gpu_memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    gpu_memory_allocation_info.allocationSize = gpu_memory_requirements.size;
-	gpu_memory_allocation_info.memoryTypeIndex = findMemoryType(gpu_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    vkAllocateMemory(renderer_state.logical_device_handle, &gpu_memory_allocation_info, 0, &texture_image_memory);
-    vkBindImageMemory(renderer_state.logical_device_handle, texture_image, texture_image_memory, 0);
-
-    VkCommandBufferAllocateInfo command_buffer_allocation_info = {0};
-    command_buffer_allocation_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    command_buffer_allocation_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    command_buffer_allocation_info.commandPool = renderer_state.graphics_command_pool_handle;
-    command_buffer_allocation_info.commandBufferCount = 1;
-
-    VkCommandBuffer command_buffer;
-    vkAllocateCommandBuffers(renderer_state.logical_device_handle, &command_buffer_allocation_info, &command_buffer);
-
-    VkCommandBufferBeginInfo command_buffer_begin_info = {0};
-    command_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    command_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
-
-    // transition image to transfer
-    VkImageMemoryBarrier to_transfer_barrier = {0}; // synchronization point - wait until image is written to transfer
-    to_transfer_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    to_transfer_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    to_transfer_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; // arranged for fast writing
-	to_transfer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	to_transfer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	to_transfer_barrier.image = texture_image;
-	to_transfer_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	to_transfer_barrier.subresourceRange.baseMipLevel = 0;
-	to_transfer_barrier.subresourceRange.levelCount = 1;
-	to_transfer_barrier.subresourceRange.baseArrayLayer = 0;
-	to_transfer_barrier.subresourceRange.layerCount = 1;
-	to_transfer_barrier.srcAccessMask = 0; // no memory operations need to complete (we don't care about previous data here)
-	to_transfer_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-    VkPipelineStageFlags to_transfer_source_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    VkPipelineStageFlags to_transfer_destination_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    
-    vkCmdPipelineBarrier(command_buffer, to_transfer_source_stage, to_transfer_destination_stage, 0, 0, 0, 0, 0, 1, &to_transfer_barrier);
-
-    // copy from staging buffer to image
-    VkBufferImageCopy copy_region = {0};
-    copy_region.bufferOffset = 0;
-    copy_region.bufferRowLength = 0;
-    copy_region.bufferImageHeight = 0;
-    copy_region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    copy_region.imageSubresource.mipLevel = 0;
-    copy_region.imageSubresource.baseArrayLayer = 0;
-    copy_region.imageSubresource.layerCount = 1;
-    copy_region.imageOffset = (VkOffset3D){ 0, 0, 0 }; // 3rd dimension is depth
-    copy_region.imageExtent = (VkExtent3D){ width, height, 1};
-
-    vkCmdCopyBufferToImage(command_buffer, staging_buffer, texture_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
-
-    // transition image to shader reading
-	VkImageMemoryBarrier to_shader_barrier = {0};
-    to_shader_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    to_shader_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    to_shader_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // optimised for fragment shader reading (probably not entirely sequential)
-    to_shader_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    to_shader_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    to_shader_barrier.image = texture_image;
-	to_shader_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	to_shader_barrier.subresourceRange.baseMipLevel = 0;
-	to_shader_barrier.subresourceRange.levelCount = 1;
-	to_shader_barrier.subresourceRange.baseArrayLayer = 0;
-    to_shader_barrier.subresourceRange.layerCount = 1;
-    to_shader_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; // wait for transfer writes to complete
-    to_shader_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT; // make memory available for shader reads
-
-    VkPipelineStageFlags to_shader_source_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    VkPipelineStageFlags to_shader_destination_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-
-    vkCmdPipelineBarrier(command_buffer, to_shader_source_stage, to_shader_destination_stage, 0, 0, 0, 0, 0, 1, &to_shader_barrier);
-
-    vkEndCommandBuffer(command_buffer);
-
-    // submit and execute commands
-	VkSubmitInfo submit_info = {0};
-    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &command_buffer;
-
-    vkQueueSubmit(renderer_state.graphics_queue_handle, 1, &submit_info, VK_NULL_HANDLE);
-    vkQueueWaitIdle(renderer_state.graphics_queue_handle); // blocks until the GPU finishes 
-
-    vkFreeCommandBuffers(renderer_state.logical_device_handle, renderer_state.graphics_command_pool_handle, 1, &command_buffer);
-    vkDestroyBuffer(renderer_state.logical_device_handle, staging_buffer, 0);
-    vkFreeMemory(renderer_state.logical_device_handle, staging_buffer_memory, 0);
-
-	VkImageView texture_image_view;
-
-    VkImageViewCreateInfo image_view_info = {0};
-    image_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    image_view_info.image = texture_image;
-    image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    image_view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
-    image_view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    image_view_info.subresourceRange.baseMipLevel = 0;
-    image_view_info.subresourceRange.levelCount = 1;
-    image_view_info.subresourceRange.baseArrayLayer = 0;
-    image_view_info.subresourceRange.layerCount = 1;
-
-    vkCreateImageView(renderer_state.logical_device_handle, &image_view_info, 0, &texture_image_view);
-
-    // allocate desciptor sets to current position in texture_cache_count
-	VkDescriptorSetAllocateInfo descriptor_set_allocation_info = {0};
-    descriptor_set_allocation_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptor_set_allocation_info.descriptorPool = renderer_state.descriptor_pool;
-    descriptor_set_allocation_info.descriptorSetCount = 1;
-    descriptor_set_allocation_info.pSetLayouts = &renderer_state.descriptor_set_layout;
-
-    vkAllocateDescriptorSets(renderer_state.logical_device_handle, &descriptor_set_allocation_info, &renderer_state.descriptor_sets[renderer_state.texture_cache_count]);
-
-    VkDescriptorImageInfo descriptor_image_info = {0};
-    descriptor_image_info.sampler = renderer_state.pixel_art_sampler;
-    descriptor_image_info.imageView = texture_image_view;
-    descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-	VkWriteDescriptorSet descriptor_set_write = {0};
-    descriptor_set_write.sType= VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    descriptor_set_write.dstSet = renderer_state.descriptor_sets[renderer_state.texture_cache_count];
-	descriptor_set_write.dstBinding = 0;
-    descriptor_set_write.descriptorCount = 1;
-	descriptor_set_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    descriptor_set_write.pImageInfo = &descriptor_image_info;
-
-    vkUpdateDescriptorSets(renderer_state.logical_device_handle, 1, &descriptor_set_write, 0, 0);
-
-    renderer_state.texture_cache[renderer_state.texture_cache_count].image = texture_image;
-    renderer_state.texture_cache[renderer_state.texture_cache_count].memory = texture_image_memory;
-    renderer_state.texture_cache[renderer_state.texture_cache_count].view = texture_image_view;
-    strcpy(renderer_state.texture_cache[renderer_state.texture_cache_count].path, asset.path);
-
-    renderer_state.texture_cache_count++;
-
-    return (int32)(renderer_state.texture_cache_count - 1);
-}
-*/
-
 void rendererSubmitFrame(AssetToLoad assets_to_load[256])
-{
-    (void)assets_to_load; // not using
-    /*
-    memset(textures_to_draw, 0, sizeof(textures_to_draw));
-    frame_vertex_count = 0;
+{  
+	cube_instance_count = 0;
 
-    for (uint32 texture_index = 0; texture_index < 256; texture_index++)
+    for (int asset_index = 0; asset_index < 256; asset_index++)
     {
-        if (textures_to_load[texture_index].path == 0) break;
+        char* path = assets_to_load[asset_index].path;
+        if (path == 0) break;
+        if (assets_to_load[asset_index].type != CUBE_3D) continue;
 
-		int32 place_in_cache = -1;
-
-        // checks all loaded textures in texture_cache to see if the path is already present. if it is, set place_in_cache
-		for (uint32 loaded_texture_index = 0; loaded_texture_index < renderer_state.texture_cache_count; loaded_texture_index++)
+        int32 asset_cache_index = getOrLoadAsset(path);
+        if (asset_cache_index == -1) continue;
+		
+        for (int32 asset_instance_index = 0; asset_instance_index < assets_to_load[asset_index].asset_count; asset_instance_index++)
         {
-			if (strcmp(textures_to_load[texture_index].path, renderer_state.texture_cache[loaded_texture_index].path) == 0) 
-            {
-				// texture already loaded - skip to filling textures_to_draw
-                place_in_cache = loaded_texture_index;
-                break;
-            }
-        }
-
-        // load, if not already.
-		if (place_in_cache == -1)
-        {
-            place_in_cache = loadTexture(textures_to_load[texture_index]);
-
-         	if (place_in_cache == -1) // still -1 means load failed
-            {
-                // load failed! deal with this when required
-                OutputDebugStringA("oh no, load failed!");
-                continue;
-            }
-        }
-
-        textures_to_draw[texture_index].place_in_cache = place_in_cache;
-        textures_to_draw[texture_index].instance_count = textures_to_load[texture_index].instance_count;
-
-       	for (uint32 texture_instance_index = 0; texture_instance_index < textures_to_draw[texture_index].instance_count; texture_instance_index++) 
-        {
-            textures_to_draw[texture_index].origin[texture_instance_index] = textures_to_load[texture_index].origin[texture_instance_index];
-            textures_to_draw[texture_index].dimensions[texture_instance_index]  = textures_to_load[texture_index].dimensions[texture_instance_index];
-
-            // put vertices into buffer here
-            float quad_width  =  textures_to_draw[texture_index].dimensions[texture_instance_index].x;
-            float quad_height =  textures_to_draw[texture_index].dimensions[texture_instance_index].y;
-
-            Vertex quad[6] = {
-              { 0.0f, 		0.0f, }, 
-              { quad_width, 0.0f, }, 
-              { quad_width, quad_height, },
-              { 0.0f, 		0.0f, },
-              { quad_width, quad_height, }, 
-              { 0.0f, 		quad_height, },
-            };
-            memcpy(&frame_vertex_stash[frame_vertex_count], quad, sizeof(quad));
-            frame_vertex_count += 6;
+			Cube* cube_instance = &cube_instances[cube_instance_count++];
+            cube_instance->asset_index = (uint32)asset_cache_index;
+            cube_instance->coords      = assets_to_load[asset_index].coords[asset_instance_index];
+            cube_instance->scale       = assets_to_load[asset_index].scale[asset_instance_index];
+            cube_instance->quaternion = assets_to_load[asset_index].quaternion[asset_instance_index];
         }
     }
-    */
 }
 
 void rendererDraw(void)
@@ -1688,35 +1693,38 @@ void rendererDraw(void)
     // bind the cube index buffer (uint32 indices)
     vkCmdBindIndexBuffer(command_buffer, renderer_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-    if (renderer_state.texture_cache_count > 0) {
-        vkCmdBindDescriptorSets(
-            command_buffer,
-            VK_PIPELINE_BIND_POINT_GRAPHICS,
-            renderer_state.graphics_pipeline_layout,
-            0,
-            1,
-            &renderer_state.descriptor_sets[0],
-            0,
-            0
-        );
+    if (renderer_state.asset_cache_count > 0)
+    {
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_layout, 0, 1, &renderer_state.descriptor_sets[0], 0, 0);
     }
 
-	local_persist float angle = 0.0f;
-    angle += 0.02;
+	// cube logics
 
     float aspect = (float)renderer_state.swapchain_extent.width / (float)renderer_state.swapchain_extent.height;
-    float projection[16], view[16], model[16], temp[16], mvp[16], rotation_x[16], rotation_y[16];
+	float projection_matrix[16], view_matrix[16];
+    mat4BuildPerspective(projection_matrix, 60.0f * (6.2831831f/360.0f), aspect, 0.1f, 100.0f);
+    Vec3 temp_camera = { 0.0f, 0.0f, -3.0f };
+    mat4BuildTranslation(view_matrix, temp_camera);
 
-    mat4BuildPerspective(projection, 60.0f * (6.2831831f/360.0f), aspect, 0.1f, 100.0f); // TODO(spike): really need to walk through this function call properly
-    mat4BuildTranslation(view, 0.0f, 0.0f, -3.0f);
-    mat4BuildRotateX(rotation_x, angle + 0.5f);
-    mat4BuildRotateY(rotation_y, angle * 0.5f);
-	mat4Multiply(model, rotation_y, rotation_x);
-    mat4Multiply(temp, view, model);
-	mat4Multiply(mvp, projection, temp);
+    int32 last_asset = -1;
+    for (uint32 cube_instance_index = 0; cube_instance_index < cube_instance_count; cube_instance_index++)
+    {
+        Cube* cube_instance = &cube_instances[cube_instance_index];
 
-    vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(mvp), mvp);
-    vkCmdDrawIndexed(command_buffer, renderer_state.cube_index_count, 1, 0, 0, 0);
+        if ((int32)cube_instance->asset_index != last_asset)
+        {
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_layout, 0, 1, &renderer_state.descriptor_sets[cube_instance->asset_index], 0, 0);
+            last_asset = (int32)cube_instance->asset_index;
+        }
+
+        float model_matrix[16], projection_view_matrix[16], mvp_matrix[16];
+        mat4BuildTRS(model_matrix, cube_instance->coords, cube_instance->quaternion, cube_instance->scale);
+        mat4Multiply(projection_view_matrix, projection_matrix, view_matrix);
+        mat4Multiply(mvp_matrix, projection_view_matrix, model_matrix);
+
+        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(mvp_matrix), mvp_matrix);
+        vkCmdDrawIndexed(command_buffer, renderer_state.cube_index_count, 1, 0, 0, 0);
+    }
 
     vkCmdEndRenderPass(command_buffer);
     vkEndCommandBuffer(command_buffer);

@@ -1,9 +1,10 @@
 #version 450
 
-layout(location = 0) in vec3 vColor;
-layout(location = 0) out vec4 outColor;
+layout(set=0, binding=0) uniform sampler2D input_texture; 
+layout(location = 0) in vec2 uv;
+layout(location = 0) out vec4 out_color;
 
 void main()
 {
-    outColor = vec4(vColor, 1.0);
+    out_color = texture(input_texture, uv);
 }

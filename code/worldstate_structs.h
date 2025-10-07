@@ -14,15 +14,40 @@ typedef struct Vec3
 }
 Vec3;
 
+typedef struct Vec4
+{
+    float x, y, z, w;
+}
+Vec4;
+
 typedef struct Int2
 {
     int32 x, y;
 }
 Int2;
 
+typedef struct Int3
+{
+    int32 x, y, z;
+}
+Int3;
+
+typedef enum 
+{
+	SPRITE_2D = 0,
+    MODEL_3D = 1,
+    CUBE_3D = 2
+}
+AssetType;
+
 typedef struct AssetToLoad 
 {
-	bool _;
+    char* path;
+	AssetType type;
+    Vec3 coords[256];
+	Vec3 scale[256];
+    Vec4 quaternion[256];
+    int32 asset_count;
 }
 AssetToLoad;
 
