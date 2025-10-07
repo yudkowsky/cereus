@@ -25,7 +25,7 @@ typedef struct Cube
 	uint32 asset_index ; // index into asset_cache
     Vec3 coords;
     Vec3 scale;
-    Vec4 quaternion;
+    Vec4 rotation;
 }
 Cube;
 
@@ -37,61 +37,6 @@ typedef struct CachedAsset
     char path[256];
 }
 CachedAsset;
-
-Cube cube_instances[1024];
-uint32 cube_instance_count = 0;
-
-Vertex frame_vertex_stash[65536];
-uint32 frame_vertex_count = 0;
-
-// unit cube (-0.5..+0.5), y-up, right-handed.
-static const Vertex CUBE_VERTICES[] = {
-    // front
-    { -0.5f, -0.5f,  0.5f,   0.0f, 0.0f,   1,1,1 },
-    {  0.5f, -0.5f,  0.5f,   1.0f, 0.0f,   1,1,1 },
-    {  0.5f,  0.5f,  0.5f,   1.0f, 1.0f,   1,1,1 },
-    { -0.5f,  0.5f,  0.5f,   0.0f, 1.0f,   1,1,1 },
-
-    // back
-    {  0.5f, -0.5f, -0.5f,   0.0f, 0.0f,   1,1,1 },
-    { -0.5f, -0.5f, -0.5f,   1.0f, 0.0f,   1,1,1 },
-    { -0.5f,  0.5f, -0.5f,   1.0f, 1.0f,   1,1,1 },
-    {  0.5f,  0.5f, -0.5f,   0.0f, 1.0f,   1,1,1 },
-
-    // left
-    { -0.5f, -0.5f, -0.5f,   0.0f, 0.0f,   1,1,1 },
-    { -0.5f, -0.5f,  0.5f,   1.0f, 0.0f,   1,1,1 },
-    { -0.5f,  0.5f,  0.5f,   1.0f, 1.0f,   1,1,1 },
-    { -0.5f,  0.5f, -0.5f,   0.0f, 1.0f,   1,1,1 },
-
-    // right
-    {  0.5f, -0.5f,  0.5f,   0.0f, 0.0f,   1,1,1 },
-    {  0.5f, -0.5f, -0.5f,   1.0f, 0.0f,   1,1,1 },
-    {  0.5f,  0.5f, -0.5f,   1.0f, 1.0f,   1,1,1 },
-    {  0.5f,  0.5f,  0.5f,   0.0f, 1.0f,   1,1,1 },
-
-    // top
-    { -0.5f,  0.5f,  0.5f,   0.0f, 0.0f,   1,1,1 },
-    {  0.5f,  0.5f,  0.5f,   1.0f, 0.0f,   1,1,1 },
-    {  0.5f,  0.5f, -0.5f,   1.0f, 1.0f,   1,1,1 },
-    { -0.5f,  0.5f, -0.5f,   0.0f, 1.0f,   1,1,1 },
-
-    // bottom
-    { -0.5f, -0.5f, -0.5f,   0.0f, 0.0f,   1,1,1 },
-    {  0.5f, -0.5f, -0.5f,   1.0f, 0.0f,   1,1,1 },
-    {  0.5f, -0.5f,  0.5f,   1.0f, 1.0f,   1,1,1 }, 
-    { -0.5f, -0.5f,  0.5f,   0.0f, 1.0f,   1,1,1 }
-};
-
-static const uint32 CUBE_INDICES[36] = 
-{
-    0, 1, 2,  0, 2, 3,
-    4, 5, 6,  4, 6, 7,
-    8, 9,10,  8,10,11,
-   12,13,14, 12,14,15,
-   16,17,18, 16,18,19,
-   20,21,22, 20,22,23
-};
 
 typedef struct
 {
@@ -153,6 +98,63 @@ typedef struct
 }
 RendererState;
 RendererState renderer_state;
+
+// unit cube (-0.5..+0.5), y-up, right-handed.
+static const Vertex CUBE_VERTICES[] = {
+    // front
+    { -0.5f, -0.5f,  0.5f,   0.0f, 0.0f,   1,1,1 },
+    {  0.5f, -0.5f,  0.5f,   1.0f, 0.0f,   1,1,1 },
+    {  0.5f,  0.5f,  0.5f,   1.0f, 1.0f,   1,1,1 },
+    { -0.5f,  0.5f,  0.5f,   0.0f, 1.0f,   1,1,1 },
+
+    // back
+    {  0.5f, -0.5f, -0.5f,   0.0f, 0.0f,   1,1,1 },
+    { -0.5f, -0.5f, -0.5f,   1.0f, 0.0f,   1,1,1 },
+    { -0.5f,  0.5f, -0.5f,   1.0f, 1.0f,   1,1,1 },
+    {  0.5f,  0.5f, -0.5f,   0.0f, 1.0f,   1,1,1 },
+
+    // left
+    { -0.5f, -0.5f, -0.5f,   0.0f, 0.0f,   1,1,1 },
+    { -0.5f, -0.5f,  0.5f,   1.0f, 0.0f,   1,1,1 },
+    { -0.5f,  0.5f,  0.5f,   1.0f, 1.0f,   1,1,1 },
+    { -0.5f,  0.5f, -0.5f,   0.0f, 1.0f,   1,1,1 },
+
+    // right
+    {  0.5f, -0.5f,  0.5f,   0.0f, 0.0f,   1,1,1 },
+    {  0.5f, -0.5f, -0.5f,   1.0f, 0.0f,   1,1,1 },
+    {  0.5f,  0.5f, -0.5f,   1.0f, 1.0f,   1,1,1 },
+    {  0.5f,  0.5f,  0.5f,   0.0f, 1.0f,   1,1,1 },
+
+    // top
+    { -0.5f,  0.5f,  0.5f,   0.0f, 0.0f,   1,1,1 },
+    {  0.5f,  0.5f,  0.5f,   1.0f, 0.0f,   1,1,1 },
+    {  0.5f,  0.5f, -0.5f,   1.0f, 1.0f,   1,1,1 },
+    { -0.5f,  0.5f, -0.5f,   0.0f, 1.0f,   1,1,1 },
+
+    // bottom
+    { -0.5f, -0.5f, -0.5f,   0.0f, 0.0f,   1,1,1 },
+    {  0.5f, -0.5f, -0.5f,   1.0f, 0.0f,   1,1,1 },
+    {  0.5f, -0.5f,  0.5f,   1.0f, 1.0f,   1,1,1 }, 
+    { -0.5f, -0.5f,  0.5f,   0.0f, 1.0f,   1,1,1 }
+};
+
+static const uint32 CUBE_INDICES[36] = 
+{
+    0, 1, 2,  0, 2, 3,
+    4, 5, 6,  4, 6, 7,
+    8, 9,10,  8,10,11,
+   12,13,14, 12,14,15,
+   16,17,18, 16,18,19,
+   20,21,22, 20,22,23
+};
+
+Vertex frame_vertex_stash[65536];
+uint32 frame_vertex_count = 0;
+
+Cube cube_instances[1024];
+uint32 cube_instance_count = 0;
+
+Camera renderer_camera;
 
 void mat4Identity(float matrix[16]) 
 {
@@ -235,6 +237,30 @@ void mat4BuildTRS(float output_matrix[16], Vec3 translation, Vec4 quaternion, Ve
 	mat4BuildScale(scale_matrix, scale);
     mat4Multiply(translation_rotation_matrix, translation_matrix, rotation_matrix);
     mat4Multiply(output_matrix, translation_rotation_matrix, scale_matrix);
+}
+
+void mat4BuildViewFromCamera(float output_matrix[16], Camera camera)
+{
+    float rotation_matrix[16];
+    mat4BuildRotation(rotation_matrix, camera.rotation);
+
+    float rotation_transposed[16] = 
+    {
+        rotation_matrix[0], rotation_matrix[4], rotation_matrix[8],  0,
+        rotation_matrix[1], rotation_matrix[5], rotation_matrix[9],  0,
+        rotation_matrix[2], rotation_matrix[6], rotation_matrix[10], 0,
+        0, 0, 0, 1
+    };
+
+    Vec3 translation;
+    translation.x = -(rotation_transposed[0]*camera.coords.x + rotation_transposed[4]*camera.coords.y + rotation_transposed[8]*camera.coords.z);
+    translation.y = -(rotation_transposed[1]*camera.coords.x + rotation_transposed[5]*camera.coords.y + rotation_transposed[9]*camera.coords.z);
+    translation.z = -(rotation_transposed[2]*camera.coords.x + rotation_transposed[6]*camera.coords.y + rotation_transposed[10]*camera.coords.z);
+
+    memcpy(output_matrix, rotation_transposed, sizeof(rotation_transposed));
+    output_matrix[12] = translation.x;
+    output_matrix[13] = translation.y;
+    output_matrix[14] = translation.z;
 }
 
 // right handed, zero to one depth
@@ -1573,10 +1599,11 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &graphics_pipeline_creation_info, 0, &renderer_state.graphics_pipeline_handle);
 }
 
-void rendererSubmitFrame(AssetToLoad assets_to_load[256])
+void rendererSubmitFrame(AssetToLoad assets_to_load[256], Camera game_camera)
 {  
-	cube_instance_count = 0;
+	renderer_camera = game_camera;
 
+	cube_instance_count = 0;
     for (int asset_index = 0; asset_index < 256; asset_index++)
     {
         char* path = assets_to_load[asset_index].path;
@@ -1592,7 +1619,7 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[256])
             cube_instance->asset_index = (uint32)asset_cache_index;
             cube_instance->coords      = assets_to_load[asset_index].coords[asset_instance_index];
             cube_instance->scale       = assets_to_load[asset_index].scale[asset_instance_index];
-            cube_instance->quaternion = assets_to_load[asset_index].quaternion[asset_instance_index];
+            cube_instance->rotation = assets_to_load[asset_index].rotation[asset_instance_index];
         }
     }
 }
@@ -1703,8 +1730,7 @@ void rendererDraw(void)
     float aspect = (float)renderer_state.swapchain_extent.width / (float)renderer_state.swapchain_extent.height;
 	float projection_matrix[16], view_matrix[16];
     mat4BuildPerspective(projection_matrix, 60.0f * (6.2831831f/360.0f), aspect, 0.1f, 100.0f);
-    Vec3 temp_camera = { 0.0f, 0.0f, -3.0f };
-    mat4BuildTranslation(view_matrix, temp_camera);
+    mat4BuildViewFromCamera(view_matrix, renderer_camera);
 
     int32 last_asset = -1;
     for (uint32 cube_instance_index = 0; cube_instance_index < cube_instance_count; cube_instance_index++)
@@ -1718,7 +1744,8 @@ void rendererDraw(void)
         }
 
         float model_matrix[16], projection_view_matrix[16], mvp_matrix[16];
-        mat4BuildTRS(model_matrix, cube_instance->coords, cube_instance->quaternion, cube_instance->scale);
+
+        mat4BuildTRS(model_matrix, cube_instance->coords, cube_instance->rotation, cube_instance->scale);
         mat4Multiply(projection_view_matrix, projection_matrix, view_matrix);
         mat4Multiply(mvp_matrix, projection_view_matrix, model_matrix);
 

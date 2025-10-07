@@ -5,5 +5,5 @@
 
 void gameInitialise(void);
 void gameFrame(double, TickInput);
-void rendererSubmitFrame(AssetToLoad assets_to_load[256]);
+void rendererSubmitFrame(AssetToLoad assets_to_load[256], Camera camera);
 void rendererDraw();

@@ -7,13 +7,11 @@ typedef struct Vec2
     float x, y;
 }
 Vec2;
-
 typedef struct Vec3
 {
     float x, y, z;
 }
 Vec3;
-
 typedef struct Vec4
 {
     float x, y, z, w;
@@ -25,7 +23,6 @@ typedef struct Int2
     int32 x, y;
 }
 Int2;
-
 typedef struct Int3
 {
     int32 x, y, z;
@@ -46,10 +43,17 @@ typedef struct AssetToLoad
 	AssetType type;
     Vec3 coords[256];
 	Vec3 scale[256];
-    Vec4 quaternion[256];
+    Vec4 rotation[256];
     int32 asset_count;
 }
 AssetToLoad;
+
+typedef struct Camera 
+{
+    Vec3 coords;
+    Vec4 rotation;
+}
+Camera;
 
 typedef struct TickInput
 {
