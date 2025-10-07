@@ -2,73 +2,29 @@
 
 #include "types.h"
 
-typedef struct NormalizedCoords
+typedef struct Vec2
 {
     float x, y;
 }
-NormalizedCoords;
+Vec2;
 
-typedef struct IntCoords
+typedef struct Vec3
 {
-    int16 x, y;
+    float x, y, z;
 }
-IntCoords;
+Vec3;
 
-typedef struct Rect
+typedef struct Int2
 {
-    NormalizedCoords origin;
-    NormalizedCoords dimensions;
+    int32 x, y;
 }
-Rect;
+Int2;
 
-typedef struct Entity
+typedef struct AssetToLoad 
 {
-	NormalizedCoords origin;
-	int16 id;
+	bool _;
 }
-Entity;
-
-typedef enum
-{
-	NORTH = 0,
-    WEST  = 1,
-    SOUTH = 2,
-    EAST  = 3,
-}
-Direction;
-
-typedef struct WorldState 
-{
-	char* level_path;
-
-    NormalizedCoords player_coords;
-	Direction player_direction;
-    NormalizedCoords player_spawn_point;
-
-    int8 time_until_input_allowed;
-
-	Entity voids[256];
-    int16 void_count;
-
-    Entity grids[256];
-    int16 grid_count;
-
-    Entity walls[256];
-    int16 wall_count;
-
-    Entity boxes[256];
-    int16 box_count;
-}
-WorldState;
-
-typedef struct TextureToLoad
-{
-	char* path;
-	NormalizedCoords origin[256];
-    NormalizedCoords dimensions[256];
-    uint32 instance_count;
-}
-TextureToLoad;
+AssetToLoad;
 
 typedef struct TickInput
 {
@@ -87,7 +43,7 @@ typedef struct TickInput
     bool k_press;
     bool l_press;
 
-    NormalizedCoords mouse_norm;
+    Vec2 mouse_norm;
     bool left_mouse_press;
     bool right_mouse_press;
     bool middle_mouse_press;

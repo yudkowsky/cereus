@@ -7,14 +7,15 @@
 
 #include "stb_image.h" // TODO(spike): make a png parser, is probably fun. alternatively look at sean's c libraries
 
-const IntCoords SCREEN_RESOLUTION = { 1920, 1080 };
+const Int2 SCREEN_RESOLUTION = { 1920, 1080 };
 const float PIXEL_SCALE = 6.0f;
 
 bool first_submit_since_draw = true;
 
 typedef struct Vertex
 {
-    float x, y;
+    float x, y, z;
+    float u, v;
     float r, g ,b;
 }
 Vertex;
@@ -34,12 +35,54 @@ CachedTexture;
 typedef struct TextureToDraw
 {
     uint32 place_in_cache;
-    NormalizedCoords origin[256];
-    NormalizedCoords dimensions[256];
+    Vec2 origin[256];
+    Vec2 dimensions[256];
     uint32 instance_count;
 }
 TextureToDraw;
 TextureToDraw textures_to_draw[256];
+
+// unit cube (-0.5..+0.5), y-up, right-handed.
+static const Vertex CUBE_VERTICES[24] = {
+    { +0.5f, -0.5f, -0.5f,  0.0f, 1.0f,   1,0,0 },
+    { +0.5f, +0.5f, -0.5f,  0.0f, 0.0f,   1,0,0 },
+    { +0.5f, +0.5f, +0.5f,  1.0f, 0.0f,   1,0,0 },
+    { +0.5f, -0.5f, +0.5f,  1.0f, 1.0f,   1,0,0 },
+
+    { -0.5f, -0.5f, +0.5f,  0.0f, 1.0f,   0,1,0 },
+    { -0.5f, +0.5f, +0.5f,  0.0f, 0.0f,   0,1,0 },
+    { -0.5f, +0.5f, -0.5f,  1.0f, 0.0f,   0,1,0 },
+    { -0.5f, -0.5f, -0.5f,  1.0f, 1.0f,   0,1,0 },
+
+    { -0.5f, +0.5f, -0.5f,  0.0f, 1.0f,   0,0,1 },
+    { -0.5f, +0.5f, +0.5f,  0.0f, 0.0f,   0,0,1 },
+    { +0.5f, +0.5f, +0.5f,  1.0f, 0.0f,   0,0,1 },
+    { +0.5f, +0.5f, -0.5f,  1.0f, 1.0f,   0,0,1 },
+
+    { -0.5f, -0.5f, +0.5f,  0.0f, 1.0f,   1,1,0 },
+    { -0.5f, -0.5f, -0.5f,  0.0f, 0.0f,   1,1,0 },
+    { +0.5f, -0.5f, -0.5f,  1.0f, 0.0f,   1,1,0 },
+    { +0.5f, -0.5f, +0.5f,  1.0f, 1.0f,   1,1,0 },
+
+    { -0.5f, -0.5f, +0.5f,  0.0f, 1.0f,   1,0,1 },
+    { +0.5f, -0.5f, +0.5f,  1.0f, 1.0f,   1,0,1 },
+    { +0.5f, +0.5f, +0.5f,  1.0f, 0.0f,   1,0,1 },
+    { -0.5f, +0.5f, +0.5f,  0.0f, 0.0f,   1,0,1 },
+
+    { +0.5f, -0.5f, -0.5f,  0.0f, 1.0f,   0,1,1 },
+    { -0.5f, -0.5f, -0.5f,  1.0f, 1.0f,   0,1,1 },
+    { -0.5f, +0.5f, -0.5f,  1.0f, 0.0f,   0,1,1 },
+    { +0.5f, +0.5f, -0.5f,  0.0f, 0.0f,   0,1,1 },
+};
+
+static const uint32 CUBE_INDICES[36] = {
+    0, 1, 2,  0, 2, 3,
+    4, 5, 6,  4, 6, 7,
+    8, 9,10,  8,10,11,
+   12,13,14, 12,14,15,
+   16,17,18, 16,18,19,
+   20,21,22, 20,22,23
+};
 
 typedef struct
 {
@@ -87,14 +130,98 @@ typedef struct
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
     VkDescriptorSet descriptor_sets[256];
+
+    VkFormat depth_format;
+    VkImage depth_image;
+    VkDeviceMemory depth_image_memory;
+    VkImageView depth_image_view;
+
+    VkBuffer cube_vertex_buffer;
+    VkDeviceMemory cube_vertex_memory;
+    VkBuffer cube_index_buffer;
+    VkDeviceMemory cube_index_memory;
+    uint32 cube_index_count;
 }
 RendererState;
 RendererState renderer_state;
 
+static void mat4Identity(float matrix[16]) 
+{
+	memset(matrix, 0, sizeof(float) * 16);
+    matrix[0] = 1.0f;
+    matrix[5] = 1.0f;
+    matrix[10] = 1.0f;
+    matrix[15] = 1.0f;
+}
+
+// can use an actually optimised matrix mult algorithm here. 
+static void mat4Multiply(float output_matrix[16], float a[16], float b[16])
+{
+    float temporary_matrix[16]; // required if output_matrix = a or b
+	for (int column = 0; column < 4; column++)
+    {
+        for (int row = 0; row < 4; row++)
+        {
+            temporary_matrix[column*4 + row] = (a[row] * b[column*4]) + (a[4 + row] * b[column*4 + 1]) + (a[8 + row] * b[column*4 + 2]) + (a[12 + row] * b[column*4 + 3]);
+        }
+    }
+    memcpy(output_matrix, temporary_matrix, sizeof(temporary_matrix));
+
+}
+
+static void mat4BuildTranslation(float output_matrix[16], float x, float y, float z) 
+{
+    mat4Identity(output_matrix);
+	output_matrix[12] = x;
+    output_matrix[13] = y;
+    output_matrix[14] = z;
+}
+
+static void mat4BuildRotateX(float output_matrix[16], float radians) 
+{
+	mat4Identity(output_matrix);
+    output_matrix[5]  = cos(radians);
+    output_matrix[6]  = -sin(radians);
+    output_matrix[9]  = sin(radians);
+	output_matrix[10] = cos(radians);
+}
+
+static void mat4BuildRotateY(float output_matrix[16], float radians) 
+{
+	mat4Identity(output_matrix);
+    output_matrix[0]  = cos(radians);
+    output_matrix[2]  = sin(radians);
+    output_matrix[8]  = -sin(radians);
+	output_matrix[10] = cos(radians);
+}
+
+static void mat4BuildRotateZ(float output_matrix[16], float radians) 
+{
+    mat4Identity(output_matrix);
+    output_matrix[0]  = cos(radians);
+    output_matrix[1]  = -sin(radians);
+    output_matrix[4]  = sin(radians);
+	output_matrix[5]  = cos(radians);
+}
+
+// right handed, zero to one depth
+static void mat4BuildPerspective(float output_matrix[16], float fov_y_radians, float aspect, float z_near, float z_far) 
+{
+	float cotan = 1.0f / tanf(0.5f * fov_y_radians);
+    memset(output_matrix, 0, sizeof(float) * 16);
+
+    output_matrix[0] = cotan / aspect;
+    output_matrix[5] = cotan;
+
+	output_matrix[10] = z_far / (z_near - z_far);
+	output_matrix[11] = -1.0f;
+	output_matrix[14] = (z_near * z_far) / (z_near - z_far);
+}
+
 internal uint32 findMemoryType(uint32 type_bits, VkMemoryPropertyFlags property_flags)
 {
     VkPhysicalDeviceMemoryProperties memory_properties = {0};
-    vkGetPhysicalDeviceMemoryProperties(renderer_state.physical_device_handle, &memory_properties); // TODO(spike): could remove dependency on renderer_state here by passing it, but probably not an issue (read only)
+    vkGetPhysicalDeviceMemoryProperties(renderer_state.physical_device_handle, &memory_properties);
     for (uint32 memory_type_count_increment = 0; memory_type_count_increment < memory_properties.memoryTypeCount; memory_type_count_increment++)
     {
         bool is_compatible = (type_bits & (1u << memory_type_count_increment)) != 0;
@@ -104,7 +231,7 @@ internal uint32 findMemoryType(uint32 type_bits, VkMemoryPropertyFlags property_
     return UINT32_MAX;
 }
 
-internal bool readEntireFile(char* path, void** out_data, size_t* out_size) // TODO(spike): temporary. there's a malloc here, and should probably put size_t in types.h. moreover, shouldn't this happen at the platform layer?
+internal bool readEntireFile(char* path, void** out_data, size_t* out_size)
 {
 	FILE* file = fopen(path, "rb"); // read binary
     if (!file) return false;
@@ -113,7 +240,8 @@ internal bool readEntireFile(char* path, void** out_data, size_t* out_size) // T
     fseek(file, 0, SEEK_SET); // seeks back to the start, so the file can be read from byte 0
 	size_t file_size_bytes = (size_t)end_position;
 	void* file_bytes = malloc(file_size_bytes); // TODO(spike): bump-alloc here, after set up big alloction on platform layer
-	if (!file_bytes) {
+	if (!file_bytes)
+    {
         fclose(file);
         return false;
     }
@@ -392,6 +520,52 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 
     renderer_state.swapchain_extent = chosen_extent; // only assign after selection so we always have true data in renderer_state
 
+	// depth image creation for 3d rendering
+
+    renderer_state.depth_format = VK_FORMAT_D32_SFLOAT;
+
+    VkImageCreateInfo depth_image_info = {0};
+    depth_image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    depth_image_info.imageType = VK_IMAGE_TYPE_2D;
+    depth_image_info.extent.width = renderer_state.swapchain_extent.width;
+    depth_image_info.extent.height = renderer_state.swapchain_extent.height;
+    depth_image_info.extent.depth = 1;
+    depth_image_info.mipLevels = 1;
+    depth_image_info.arrayLayers = 1;
+    depth_image_info.format = renderer_state.depth_format;
+    depth_image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    depth_image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depth_image_info.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    depth_image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+    depth_image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    vkCreateImage(renderer_state.logical_device_handle, &depth_image_info, 0, &renderer_state.depth_image);
+	
+    VkMemoryRequirements depth_image_memory_requirements;
+    vkGetImageMemoryRequirements(renderer_state.logical_device_handle, renderer_state.depth_image, &depth_image_memory_requirements);
+
+	VkMemoryAllocateInfo depth_memory_allocation_info = {0};
+    depth_memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    depth_memory_allocation_info.allocationSize = depth_image_memory_requirements.size;
+    depth_memory_allocation_info.memoryTypeIndex = findMemoryType(depth_image_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    vkAllocateMemory(renderer_state.logical_device_handle, &depth_memory_allocation_info, 0, &renderer_state.depth_image_memory);
+
+    vkBindImageMemory(renderer_state.logical_device_handle, renderer_state.depth_image, renderer_state.depth_image_memory, 0);
+
+    VkImageViewCreateInfo depth_view_info = {0};
+    depth_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    depth_view_info.image = renderer_state.depth_image;
+    depth_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    depth_view_info.format = renderer_state.depth_format;
+    depth_view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    depth_view_info.subresourceRange.baseMipLevel = 0;
+    depth_view_info.subresourceRange.levelCount = 1;
+    depth_view_info.subresourceRange.baseArrayLayer = 0;
+    depth_view_info.subresourceRange.layerCount = 1;
+
+    vkCreateImageView(renderer_state.logical_device_handle, &depth_view_info, 0, &renderer_state.depth_image_view);
+
     uint32 minimum_swapchain_image_count = surface_capabilities.minImageCount + 1; // may be different from actual count (asking for minimum when creating swapchain)
 
     // if maxImageCount = 0, then this means 'no maximum', so no need to clamp.
@@ -485,13 +659,28 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	
 	VkAttachmentReference color_attachment_reference = {0}; // tells the subpass which attachment slot and in what layout during the subpass.
-	color_attachment_reference.attachment = 0; // to be explicit about that we are getting the first (only) attachment
+	color_attachment_reference.attachment = 0; // to be explicit about that we are getting the first attachment
     color_attachment_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // write color layout in optimal layout for color output
 	
+	VkAttachmentDescription depth_attachment = {0};
+    depth_attachment.format = renderer_state.depth_format;
+    depth_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; 
+    depth_attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference depth_attachment_reference = {0};
+    depth_attachment_reference.attachment = 1; // second attachment in array
+    depth_attachment_reference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
     VkSubpassDescription color_output_subpass = {0}; // only one subpass per frame for our minimal setup
 	color_output_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     color_output_subpass.colorAttachmentCount = 1;
     color_output_subpass.pColorAttachments = &color_attachment_reference;
+    color_output_subpass.pDepthStencilAttachment = &depth_attachment_reference;
     
     VkSubpassDependency color_output_subpass_dependency = {0}; // encodes memory + exectution ordering between stages outside the render pass and stages inside the subpass
 	color_output_subpass_dependency.srcSubpass = VK_SUBPASS_EXTERNAL; // declares source as 'outside the render pass' - there's only one subpass so the source has to be external here
@@ -501,14 +690,14 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	color_output_subpass_dependency.srcAccessMask = 0; // we don't rely on any prior contents
 	color_output_subpass_dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT; // we want to protect the attachment at the destination
 	
-    uint32 attachment_count = 1; // how many attachment descriptions exist in the whole render pass (color, depth/stencil...) 
+    VkAttachmentDescription attachments[2] = { color_attachment, depth_attachment };
 
     VkRenderPassCreateInfo render_pass_creation_info = {0}; // container that ties attachment(s), subpass(es), and dependency(ies) into a single render pass object.
 	render_pass_creation_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-	render_pass_creation_info.attachmentCount = attachment_count; 
-    render_pass_creation_info.pAttachments = &color_attachment;
+	render_pass_creation_info.attachmentCount = 2; 
+    render_pass_creation_info.pAttachments = attachments;
     render_pass_creation_info.subpassCount = 1;
-	render_pass_creation_info.pSubpasses = &color_output_subpass; // only one subpass, so just pass a pointer to where that subpass is, rather than some array of subpasses.
+	render_pass_creation_info.pSubpasses = &color_output_subpass;
     render_pass_creation_info.dependencyCount = 1;
     render_pass_creation_info.pDependencies = &color_output_subpass_dependency; // same story here - just a pointer to our one dependency, rather than an array.
 	
@@ -529,15 +718,17 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     VkFramebufferCreateInfo framebuffer_creation_info = {0};
     framebuffer_creation_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
     framebuffer_creation_info.renderPass = renderer_state.render_pass_handle;
-    framebuffer_creation_info.attachmentCount = attachment_count;
     framebuffer_creation_info.width = renderer_state.swapchain_extent.width;
     framebuffer_creation_info.height = renderer_state.swapchain_extent.height;
     framebuffer_creation_info.layers = 1;
 
-    for (uint32 swapchain_image_increment = 0; swapchain_image_increment < renderer_state.swapchain_image_count; swapchain_image_increment++)
+    for (uint32 swapchain_image_index = 0; swapchain_image_index < renderer_state.swapchain_image_count; swapchain_image_index++)
     {
-		framebuffer_creation_info.pAttachments = &renderer_state.swapchain_image_views[swapchain_image_increment];
-        VkResult framebuffer_creation_result = vkCreateFramebuffer(renderer_state.logical_device_handle, &framebuffer_creation_info, 0, &renderer_state.swapchain_framebuffers[swapchain_image_increment]);
+		VkImageView attachments[2] = { renderer_state.swapchain_image_views[swapchain_image_index], renderer_state.depth_image_view };
+        framebuffer_creation_info.attachmentCount = 2;
+        framebuffer_creation_info.pAttachments = attachments;
+
+        VkResult framebuffer_creation_result = vkCreateFramebuffer(renderer_state.logical_device_handle, &framebuffer_creation_info, 0, &renderer_state.swapchain_framebuffers[swapchain_image_index]);
 
         if (framebuffer_creation_result != VK_SUCCESS)
         {
@@ -649,6 +840,198 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     vkGetDeviceQueue(renderer_state.logical_device_handle, renderer_state.graphics_family_index, 0, &renderer_state.graphics_queue_handle);
     vkGetDeviceQueue(renderer_state.logical_device_handle, renderer_state.present_family_index, 0, &renderer_state.present_queue_handle);
 
+	// create device-local vertex/index buffers for cube
+	renderer_state.cube_index_count = 36;
+
+    VkDeviceSize vertices_size = (VkDeviceSize)sizeof(CUBE_VERTICES);
+    VkDeviceSize indices_size  = (VkDeviceSize)sizeof(CUBE_INDICES);
+
+	// stage and upload vertices
+    VkBuffer vertex_staging_buffer;
+    VkDeviceMemory vertex_staging_memory;
+
+    { // scope for variable name collision (ig TODO(spike): rename variables involved)
+        VkBufferCreateInfo buffer_creation_info = {0};
+        buffer_creation_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        buffer_creation_info.size = vertices_size;
+        buffer_creation_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        buffer_creation_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &vertex_staging_buffer);
+
+        VkMemoryRequirements memory_requirements;
+        vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, vertex_staging_buffer, &memory_requirements);
+
+        VkMemoryAllocateInfo memory_allocation_info = {0};
+		memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		memory_allocation_info.allocationSize = memory_requirements.size;
+		memory_allocation_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+		vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &vertex_staging_memory);
+        vkBindBufferMemory(renderer_state.logical_device_handle, vertex_staging_buffer, vertex_staging_memory, 0);
+
+        void* mapped = 0;
+        vkMapMemory(renderer_state.logical_device_handle, vertex_staging_memory, 0, vertices_size, 0, &mapped);
+        memcpy(mapped, CUBE_VERTICES, (size_t)vertices_size);
+        vkUnmapMemory(renderer_state.logical_device_handle, vertex_staging_memory);
+    }
+
+    // create gpu-local vertex buffer
+    {
+        VkBufferCreateInfo buffer_creation_info = {0};
+        buffer_creation_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        buffer_creation_info.size = vertices_size;
+        buffer_creation_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        buffer_creation_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &renderer_state.cube_vertex_buffer);
+
+        VkMemoryRequirements memory_requirements;
+        vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, renderer_state.cube_vertex_buffer, &memory_requirements);
+
+        VkMemoryAllocateInfo memory_allocation_info = {0};
+        memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        memory_allocation_info.allocationSize = memory_requirements.size;
+        memory_allocation_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &renderer_state.cube_vertex_memory);
+        vkBindBufferMemory(renderer_state.logical_device_handle, renderer_state.cube_vertex_buffer, renderer_state.cube_vertex_memory, 0);
+    }
+
+    // copy staging to device-local vertex buffer
+    {
+        VkCommandBufferAllocateInfo command_buffer_allocation_info = {0};
+        command_buffer_allocation_info .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        command_buffer_allocation_info .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        command_buffer_allocation_info .commandPool = renderer_state.graphics_command_pool_handle;
+        command_buffer_allocation_info .commandBufferCount = 1;
+
+        VkCommandBuffer command_buffer;
+        vkAllocateCommandBuffers(renderer_state.logical_device_handle, &command_buffer_allocation_info, &command_buffer);
+
+        VkCommandBufferBeginInfo command_buffer_begin_info = {0};
+        command_buffer_begin_info .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        command_buffer_begin_info .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
+
+        VkBufferCopy buffer_copy = {0};
+        buffer_copy .srcOffset = 0;
+        buffer_copy .dstOffset = 0;
+        buffer_copy .size = vertices_size;
+
+        vkCmdCopyBuffer(command_buffer, vertex_staging_buffer, renderer_state.cube_vertex_buffer, 1, &buffer_copy);
+
+        vkEndCommandBuffer(command_buffer);
+
+        VkSubmitInfo submit_info = {0};
+        submit_info .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info .commandBufferCount = 1;
+        submit_info .pCommandBuffers = &command_buffer;
+
+        vkQueueSubmit(renderer_state.graphics_queue_handle, 1, &submit_info, VK_NULL_HANDLE);
+        vkQueueWaitIdle(renderer_state.graphics_queue_handle);
+
+        vkFreeCommandBuffers(renderer_state.logical_device_handle, renderer_state.graphics_command_pool_handle, 1, &command_buffer);
+    }
+
+    // clean up vertex staging resources
+    vkDestroyBuffer(renderer_state.logical_device_handle, vertex_staging_buffer, 0);
+    vkFreeMemory(renderer_state.logical_device_handle, vertex_staging_memory, 0);
+
+	// stage and upload indices
+    VkBuffer index_staging_buffer;
+    VkDeviceMemory index_staging_memory;
+
+    { // TODO(spike): rename variables involved, to avoid scope requirement)
+        VkBufferCreateInfo buffer_creation_info = {0};
+        buffer_creation_info .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        buffer_creation_info .size = indices_size;
+        buffer_creation_info .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        buffer_creation_info .sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &index_staging_buffer);
+
+        VkMemoryRequirements memory_requirements;
+        vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, index_staging_buffer, &memory_requirements);
+
+        VkMemoryAllocateInfo memory_allocation_info = {0};
+        memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        memory_allocation_info.allocationSize = memory_requirements.size;
+        memory_allocation_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &index_staging_memory);
+        vkBindBufferMemory(renderer_state.logical_device_handle, index_staging_buffer, index_staging_memory, 0);
+
+        void* mapped = 0;
+        vkMapMemory(renderer_state.logical_device_handle, index_staging_memory, 0, indices_size, 0, &mapped);
+        memcpy(mapped, CUBE_INDICES, (size_t)indices_size);
+        vkUnmapMemory(renderer_state.logical_device_handle, index_staging_memory);
+    }
+
+    // create gpu-local index buffer
+    {
+        VkBufferCreateInfo buffer_creation_info = {0};
+        buffer_creation_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        buffer_creation_info.size = indices_size;
+        buffer_creation_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+        buffer_creation_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &renderer_state.cube_index_buffer);
+
+        VkMemoryRequirements memory_requirements;
+        vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, renderer_state.cube_index_buffer, &memory_requirements);
+
+        VkMemoryAllocateInfo memory_allocation_info = {0};
+        memory_allocation_info .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        memory_allocation_info .allocationSize = memory_requirements.size;
+        memory_allocation_info .memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &renderer_state.cube_index_memory);
+        vkBindBufferMemory(renderer_state.logical_device_handle, renderer_state.cube_index_buffer, renderer_state.cube_index_memory, 0);
+    }
+
+    // copy staging to device-local index buffer
+    {
+        VkCommandBufferAllocateInfo command_buffer_allocation_info = {0};
+        command_buffer_allocation_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        command_buffer_allocation_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        command_buffer_allocation_info.commandPool = renderer_state.graphics_command_pool_handle;
+        command_buffer_allocation_info.commandBufferCount = 1;
+
+        VkCommandBuffer command_buffer;
+        vkAllocateCommandBuffers(renderer_state.logical_device_handle, &command_buffer_allocation_info, &command_buffer);
+
+        VkCommandBufferBeginInfo command_buffer_begin_info = {0};
+        command_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        command_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
+
+        VkBufferCopy buffer_copy = {0};
+        buffer_copy .srcOffset = 0;
+        buffer_copy .dstOffset = 0;
+        buffer_copy .size = indices_size;
+
+        vkCmdCopyBuffer(command_buffer, index_staging_buffer, renderer_state.cube_index_buffer, 1, &buffer_copy);
+
+        vkEndCommandBuffer(command_buffer);
+
+        VkSubmitInfo submit_info = {0};
+        submit_info .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info .commandBufferCount = 1;
+        submit_info .pCommandBuffers = &command_buffer;
+
+        vkQueueSubmit(renderer_state.graphics_queue_handle, 1, &submit_info, VK_NULL_HANDLE);
+        vkQueueWaitIdle(renderer_state.graphics_queue_handle);
+
+        vkFreeCommandBuffers(renderer_state.logical_device_handle, renderer_state.graphics_command_pool_handle, 1, &command_buffer);
+    }
+
+    // clean up index staging resources
+    vkDestroyBuffer(renderer_state.logical_device_handle, index_staging_buffer, 0);
+    vkFreeMemory(renderer_state.logical_device_handle, index_staging_memory, 0);
+
     renderer_state.images_in_flight = calloc(renderer_state.swapchain_image_count, sizeof(VkFence)); // calloc because we want these to start at VK_NULL_HANDLE, i.e. 0.
 
 	// triangle time (should all be mostly temporary) TODO(spike): re-evaluate this after i've set up a fixed-size memory block for the entire game
@@ -752,32 +1135,36 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 
     VkPipelineShaderStageCreateInfo shader_stages[2] = { vertex_shader_stage_create_info, fragment_shader_stage_create_info }; // bundle both stages for pipeline creation
 	
-    VkVertexInputBindingDescription vertex_binding = {0}; // describes how the Vertex type is laid out in the vertex bufer (stride, rate)
-    vertex_binding.binding = 0;
-    vertex_binding.stride = sizeof(Vertex); // tightly packed
+    VkVertexInputBindingDescription vertex_binding = {0};
+    vertex_binding.binding   = 0;
+    vertex_binding.stride    = sizeof(Vertex);
     vertex_binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-	VkVertexInputAttributeDescription vertex_attribute_pos = {0}; // describes the pos attribute of a Vertex; where it comes from, which shader location it feeds, some other stuff
-    vertex_attribute_pos.location = 0;
-    vertex_attribute_pos.binding = 0;
-    vertex_attribute_pos.format = VK_FORMAT_R32G32_SFLOAT; // two 32-bit floats, matching vec2 position
-	vertex_attribute_pos.offset = offsetof(Vertex, x);
+    VkVertexInputAttributeDescription vertex_attributes[3] = {0};
 
-    VkVertexInputAttributeDescription vertex_attribute_color = {0};
-    vertex_attribute_color.location = 1;
-    vertex_attribute_color.binding = 0;
-    vertex_attribute_color.format = VK_FORMAT_R32G32B32_SFLOAT; // three 32-bit floats, matching vec3 color
-	vertex_attribute_color.offset = offsetof(Vertex, r);
+    vertex_attributes[0].binding  = 0;
+    vertex_attributes[0].location = 0;
+    vertex_attributes[0].format   = VK_FORMAT_R32G32B32_SFLOAT;
+    vertex_attributes[0].offset   = offsetof(Vertex, x);
 
-	VkVertexInputBindingDescription bindings[] = { vertex_binding };
-    VkVertexInputAttributeDescription attributes[] = { vertex_attribute_pos, vertex_attribute_color };
+    vertex_attributes[1].binding  = 0;
+    vertex_attributes[1].location = 1;
+    vertex_attributes[1].format   = VK_FORMAT_R32G32_SFLOAT;
+    vertex_attributes[1].offset   = offsetof(Vertex, u);
 
-    VkPipelineVertexInputStateCreateInfo vertex_input_state_creation_info = {0}; // struct that describes how vertex bindings/attributes feed the graphics pipeline
-	vertex_input_state_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-	vertex_input_state_creation_info.vertexBindingDescriptionCount = (uint32)(sizeof(bindings) / sizeof(bindings[0]));
-	vertex_input_state_creation_info.pVertexBindingDescriptions = bindings;
-	vertex_input_state_creation_info.vertexAttributeDescriptionCount = (uint32)(sizeof(attributes) / sizeof(attributes[0]));
-	vertex_input_state_creation_info.pVertexAttributeDescriptions = attributes;
+    vertex_attributes[2].binding  = 0;
+    vertex_attributes[2].location = 2;
+    vertex_attributes[2].format   = VK_FORMAT_R32G32B32_SFLOAT;
+    vertex_attributes[2].offset   = offsetof(Vertex, r);
+
+    VkVertexInputBindingDescription bindings[] = { vertex_binding };
+
+    VkPipelineVertexInputStateCreateInfo vertex_input_state_creation_info = {0};
+    vertex_input_state_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertex_input_state_creation_info.vertexBindingDescriptionCount   = (uint32)(sizeof(bindings)    / sizeof(bindings[0]));
+    vertex_input_state_creation_info.pVertexBindingDescriptions      = bindings;
+    vertex_input_state_creation_info.vertexAttributeDescriptionCount = (uint32)(sizeof(vertex_attributes)/ sizeof(vertex_attributes[0]));
+    vertex_input_state_creation_info.pVertexAttributeDescriptions    = vertex_attributes;
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly_state_creation_info = {0}; // struct that describes how vertices are assembled into primatives before rasterization
     input_assembly_state_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -849,15 +1236,11 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 
     VkPipelineDepthStencilStateCreateInfo depth_stencil_state_creation_info = {0}; // depth/stencil settings for the pipeline (not using this for simple 2D)
 	depth_stencil_state_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-	depth_stencil_state_creation_info.depthTestEnable = VK_FALSE;
-	depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
-	depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_ALWAYS;
+	depth_stencil_state_creation_info.depthTestEnable =  VK_TRUE;
+	depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
+	depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
 	depth_stencil_state_creation_info.depthBoundsTestEnable = VK_FALSE;
-	depth_stencil_state_creation_info.minDepthBounds = 0.0f;
-	depth_stencil_state_creation_info.maxDepthBounds = 1.0f;
 	depth_stencil_state_creation_info.stencilTestEnable = VK_FALSE;
-	depth_stencil_state_creation_info.front = (VkStencilOpState){0};
-	depth_stencil_state_creation_info.back = (VkStencilOpState){0};
 
     VkSamplerCreateInfo sampler_creation_info = {0};
     sampler_creation_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO; // TODO(spike): double check all this info at some point
@@ -906,20 +1289,15 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 
     vkCreateDescriptorPool(renderer_state.logical_device_handle, &descriptor_pool_creation_info, 0, &renderer_state.descriptor_pool);
 
-	// a push constant is some piece of data that the gpu needs in addition to the raw pixel data
-    // range here means the byte window which the shader is supposed to read
-	VkPushConstantRange push_constant_range = {0}; 
+    VkPushConstantRange push_constant_range = {0};
     push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    push_constant_range.offset = 0;
-    push_constant_range.size = sizeof(NormalizedCoords); // information: position (x,y) and width / height of texture in absolute coords
+    push_constant_range.offset     = 0;
+    push_constant_range.size       = (uint32)(sizeof(float) * 16);
 
-    // a graphics pipeline is a big bundle of stuff the GPU needs to turn vertices into pixels for a specific render pass.
-    // contains great things like: shaders: which vertex/fragment programs to run; input assembly: how to interpret vertices (e.g. this is a triangle); rasterisation rules, color blend...
-
-    VkPipelineLayoutCreateInfo graphics_pipeline_layout_creation_info = {0}; // create empty pipeline for now
+    VkPipelineLayoutCreateInfo graphics_pipeline_layout_creation_info = {0};
     graphics_pipeline_layout_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     graphics_pipeline_layout_creation_info.setLayoutCount = 1;
-    graphics_pipeline_layout_creation_info.pSetLayouts = &renderer_state.descriptor_set_layout;
+    graphics_pipeline_layout_creation_info.pSetLayouts = &renderer_state.descriptor_set_layout; 
     graphics_pipeline_layout_creation_info.pushConstantRangeCount = 1;
     graphics_pipeline_layout_creation_info.pPushConstantRanges = &push_constant_range;
 
@@ -934,7 +1312,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	graphics_pipeline_creation_info.pViewportState = &viewport_state_creation_info;
 	graphics_pipeline_creation_info.pRasterizationState = &rasterization_state_creation_info; // fill mode, cull off
 	graphics_pipeline_creation_info.pMultisampleState = &multisample_state_creation_info; // multisampling disabled (1x MSAA)
-	graphics_pipeline_creation_info.pDepthStencilState = &depth_stencil_state_creation_info; // depth / stencil disabled
+	graphics_pipeline_creation_info.pDepthStencilState = &depth_stencil_state_creation_info;
 	graphics_pipeline_creation_info.pColorBlendState = &color_blend_state_creation_info; // one color attachment; no blending
 	graphics_pipeline_creation_info.pDynamicState = &dynamic_state_creation_info; // declares that viewport / scissor are dynamic
 	graphics_pipeline_creation_info.layout = renderer_state.graphics_pipeline_layout;
@@ -946,10 +1324,11 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &graphics_pipeline_creation_info, 0, &renderer_state.graphics_pipeline_handle);
 }
 
-int32 loadTexture(TextureToLoad texture)
+/*
+int32 loadTexture(AssetToLoad asset)
 {
     int width, height, channels;
-    uint8* pixels = (uint8*)stbi_load(texture.path, &width, &height, &channels, STBI_rgb_alpha); // it wants unsigned char here instead of uint8
+    uint8* pixels = (uint8*)stbi_load(asset.path, &width, &height, &channels, STBI_rgb_alpha); // it wants unsigned char here instead of uint8
     if (!pixels) return -1;
 
     VkDeviceSize image_size_bytes = width * height * 4; // 4 bytes per pixel
@@ -1141,15 +1520,18 @@ int32 loadTexture(TextureToLoad texture)
     renderer_state.texture_cache[renderer_state.texture_cache_count].image = texture_image;
     renderer_state.texture_cache[renderer_state.texture_cache_count].memory = texture_image_memory;
     renderer_state.texture_cache[renderer_state.texture_cache_count].view = texture_image_view;
-    strcpy(renderer_state.texture_cache[renderer_state.texture_cache_count].path, texture.path);
+    strcpy(renderer_state.texture_cache[renderer_state.texture_cache_count].path, asset.path);
 
     renderer_state.texture_cache_count++;
 
     return (int32)(renderer_state.texture_cache_count - 1);
 }
+*/
 
-void rendererSubmitFrame(TextureToLoad textures_to_load[256])
+void rendererSubmitFrame(AssetToLoad assets_to_load[256])
 {
+    (void)assets_to_load; // not using
+    /*
     memset(textures_to_draw, 0, sizeof(textures_to_draw));
     frame_vertex_count = 0;
 
@@ -1207,6 +1589,7 @@ void rendererSubmitFrame(TextureToLoad textures_to_load[256])
             frame_vertex_count += 6;
         }
     }
+    */
 }
 
 void rendererDraw(void)
@@ -1251,10 +1634,6 @@ void rendererDraw(void)
 
     // actual things happening
 
-    if (frame_vertex_count)
-    {
-		memcpy(renderer_state.mapped_vertex_pointer, frame_vertex_stash, frame_vertex_count * sizeof(Vertex)); // copies CPU vertex stash into the persistently mapped vertex buffer
-    }
     VkCommandBuffer command_buffer = renderer_state.swapchain_command_buffers[swapchain_image_index]; // select command buffer that corresponds to the acquired swapchain image.
     vkResetCommandBuffer(command_buffer, 0); // throw away last frame's commands for this image and start fresh.
 
@@ -1263,7 +1642,14 @@ void rendererDraw(void)
 	command_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // submit once, reset next frame
 	vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
 
-    VkClearValue clear_color = { .color = {{ 0.005f, 0.008f, 0.02f, 1.0f }} };
+    VkClearValue clear_values[2];
+    clear_values[0].color.float32[0] = 0.005f;
+    clear_values[0].color.float32[1] = 0.008f;
+    clear_values[0].color.float32[2] = 0.02f;
+    clear_values[0].color.float32[3] = 1.0f;
+
+    clear_values[1].depthStencil.depth = 1.0f;
+    clear_values[1].depthStencil.stencil = 0;
 
     VkRenderPassBeginInfo render_pass_begin_info = {0};
     render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -1271,8 +1657,8 @@ void rendererDraw(void)
     render_pass_begin_info.framebuffer = renderer_state.swapchain_framebuffers[swapchain_image_index];
     render_pass_begin_info.renderArea.offset = (VkOffset2D){ 0,0 };
     render_pass_begin_info.renderArea.extent = renderer_state.swapchain_extent;
-    render_pass_begin_info.clearValueCount = 1;
-    render_pass_begin_info.pClearValues = &clear_color;
+    render_pass_begin_info.clearValueCount = 2;
+    render_pass_begin_info.pClearValues = clear_values;
 
     vkCmdBeginRenderPass(command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
@@ -1295,34 +1681,43 @@ void rendererDraw(void)
 
 	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_handle); // selects which baked pipeline the GPU will use for subsequent draw calls on this command buffer
 
-    VkDeviceSize vertex_buffer_offset = 0;
-    vkCmdBindVertexBuffers(command_buffer, 0, 1, &renderer_state.vertex_buffer_handle, &vertex_buffer_offset); // for binding 0, use this VkBuffer, starting at offset 0.
+    // bind cube buffer vertex at binding 0 
+    VkDeviceSize vb_offset = 0;
+    vkCmdBindVertexBuffers(command_buffer, 0, 1, &renderer_state.cube_vertex_buffer, &vb_offset);
 
-	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_handle);	
-	
-    uint32 vertex_offset = 0;
-	for (uint32 texture_index = 0; texture_index < 256; texture_index++)
- 	{
-		if (textures_to_draw[texture_index].instance_count == 0) break;
-    	vkCmdBindDescriptorSets(command_buffer, 
-     	          				VK_PIPELINE_BIND_POINT_GRAPHICS, 
-                                renderer_state.graphics_pipeline_layout, 0, 1, 
-                                &renderer_state.descriptor_sets[textures_to_draw[texture_index].place_in_cache], 0, 0);
+    // bind the cube index buffer (uint32 indices)
+    vkCmdBindIndexBuffer(command_buffer, renderer_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-        for (uint32 texture_instance = 0; texture_instance < textures_to_draw[texture_index].instance_count; texture_instance++)
-        {
-			NormalizedCoords push_data = textures_to_draw[texture_index].origin[texture_instance];
-
-            vkCmdPushConstants(command_buffer, 
-                               renderer_state.graphics_pipeline_layout, 
-                               VK_SHADER_STAGE_VERTEX_BIT, 0, 
-                               sizeof(NormalizedCoords), 
-                               &push_data);
-            vkCmdDraw(command_buffer, 6, 1, vertex_offset, 0);
-            vertex_offset += 6;
-        }
+    if (renderer_state.texture_cache_count > 0) {
+        vkCmdBindDescriptorSets(
+            command_buffer,
+            VK_PIPELINE_BIND_POINT_GRAPHICS,
+            renderer_state.graphics_pipeline_layout,
+            0,
+            1,
+            &renderer_state.descriptor_sets[0],
+            0,
+            0
+        );
     }
-    
+
+	local_persist float angle = 0.0f;
+    angle += 0.02;
+
+    float aspect = (float)renderer_state.swapchain_extent.width / (float)renderer_state.swapchain_extent.height;
+    float projection[16], view[16], model[16], temp[16], mvp[16], rotation_x[16], rotation_y[16];
+
+    mat4BuildPerspective(projection, 60.0f * (6.2831831f/360.0f), aspect, 0.1f, 100.0f); // TODO(spike): really need to walk through this function call properly
+    mat4BuildTranslation(view, 0.0f, 0.0f, -3.0f);
+    mat4BuildRotateX(rotation_x, angle + 0.5f);
+    mat4BuildRotateY(rotation_y, angle * 0.5f);
+	mat4Multiply(model, rotation_y, rotation_x);
+    mat4Multiply(temp, view, model);
+	mat4Multiply(mvp, projection, temp);
+
+    vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(mvp), mvp);
+    vkCmdDrawIndexed(command_buffer, renderer_state.cube_index_count, 1, 0, 0, 0);
+
     vkCmdEndRenderPass(command_buffer);
     vkEndCommandBuffer(command_buffer);
 

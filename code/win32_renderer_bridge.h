@@ -14,7 +14,7 @@ typedef struct
 RendererPlatformHandles;
 
 void rendererInitialise(RendererPlatformHandles handles);
-void rendererSubmitFrame(TextureToLoad textures_to_load[128]); // are these two needed?
+void rendererSubmitFrame(AssetToLoad assets_to_load[256]); // are these two needed?
 void rendererDraw(void);
 void rendererResize(uint32 width, uint32 height);
 void rendererShutdown(void);

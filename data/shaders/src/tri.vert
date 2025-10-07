@@ -1,33 +1,17 @@
 #version 450
-layout(location = 0) in vec2 in_position;
-layout(push_constant) uniform draw_parameters { vec2 translation; };
-layout(location = 0) out vec2 texture_coords;
+
+layout(location = 0) in vec3 inPosition;
+layout(location = 1) in vec2 inUV;
+layout(location = 2) in vec3 inColor;
+
+layout(location = 0) out vec3 vColor;
+
+layout(push_constant) uniform PC {
+    mat4 mvp;
+} pc;
 
 void main()
 {
-    gl_Position = vec4(in_position + translation, 0.0, 1.0);
-
-    int vertex_id = gl_VertexIndex % 6;
-
-    switch(vertex_id) 
-    {
-        case 0: // 1st: bottom left
-            texture_coords = vec2(0.0, 1.0);
-            break;
-        case 1: // 1st: bottom right  
-            texture_coords = vec2(1.0, 1.0);
-            break;
-        case 2: // 1st: top right
-            texture_coords = vec2(1.0, 0.0);
-            break;
-        case 3: // 2nd: bottom left
-            texture_coords = vec2(0.0, 1.0);
-            break;
-        case 4: // 2nd: top right
-            texture_coords = vec2(1.0, 0.0);
-            break;
-        case 5: // 2nd: top left
-            texture_coords = vec2(0.0, 0.0);
-            break;
-    }
+    gl_Position = pc.mvp * vec4(inPosition, 1.0);
+    vColor = inColor;
 }
