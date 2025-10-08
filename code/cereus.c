@@ -13,27 +13,30 @@
 typedef struct Entity
 {
     Int3 coords;
-    Direction rotation;
+    Direction direction;
     int32 id;
 }
 Entity;
 
-typedef enum TileType
+typedef enum EntityType
 {
     NONE = 0,
     VOID = 1,
     GRID = 2,
     WALL = 3,
-	BOX = 4
+	BOX = 4,
+    PLAYER = 5,
 }
-TileType;
+EntityType;
 
 typedef struct WorldState
 {
-    Entity voids[1024];
-    Entity grids[1024];
-    Entity walls[1024];
-    Entity boxes[1024];
+	Int3 player_coords;
+
+    Entity voids[2048];
+    Entity grids[2048];
+    Entity walls[2048];
+    Entity boxes[2048];
 
     int32 void_count;
     int32 grid_count;
@@ -41,6 +44,14 @@ typedef struct WorldState
     int32 box_count;
 }
 WorldState;
+
+typedef struct RaycastHit
+{
+    bool hit;
+    Int3 hit_coords;
+    Int3 place_coords;
+}
+RaycastHit;
 
 double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0.0;
@@ -65,10 +76,10 @@ int32 assent_to_load_count = 0;
 
 bool editor_mode = true;
 
-char*  grid_path   = "data/sprites/grid.png";
-char*  wall_path   = "data/sprites/wall.png";
-char*  box_path    = "data/sprites/box.png";
-char* player_path  = "data/sprites/player.png";
+char* grid_path   = "data/sprites/grid.png";
+char* wall_path   = "data/sprites/wall.png";
+char* box_path    = "data/sprites/box.png";
+char* player_path = "data/sprites/player.png";
 
 // CAMERA STUFF
 
@@ -125,11 +136,6 @@ Vec3 vec3RotateByQuaternion(Vec3 input_vector, Vec4 quaternion)
     			   input_vector.z + 2.0f * q_cross_t.z};
 }
 
-Vec3 intCoordsToNorm(Int3 int_coords)
-{
-    return (Vec3){ (float)int_coords.x, (float)int_coords.y, (float)int_coords.z };
-}
-
 Vec4 directionToQuaternion(Direction direction)
 {
     float yaw = 0.0f;
@@ -144,6 +150,64 @@ Vec4 directionToQuaternion(Direction direction)
     return quaternionFromAxisAngle(axis, yaw);
 }
 
+Vec3 intCoordsToNorm(Int3 int_coords)
+{
+    return (Vec3){ (float)int_coords.x, (float)int_coords.y, (float)int_coords.z };
+}
+
+Int3 normCoordsToInt(Vec3 norm_coords)
+{
+    if (norm_coords.x < 0) norm_coords.x++;
+    if (norm_coords.y < 0) norm_coords.y++;
+    if (norm_coords.z < 0) norm_coords.z++;
+	return (Int3){ (int32)floorf(norm_coords.x), (int32)floorf(norm_coords.y), (int32)floorf(norm_coords.z) };
+}
+
+// creating an entity
+
+void createEntity(EntityType type, Int3 coords, Direction direction)
+{
+    switch (type)
+    {
+        case VOID:
+        {
+            next_world_state.voids[next_world_state.void_count].coords = coords;
+            next_world_state.voids[next_world_state.void_count].direction = direction;
+            next_world_state.voids[next_world_state.void_count].id = next_world_state.void_count;
+            next_world_state.void_count++;
+            break;
+        }
+        case GRID: 
+        {
+            next_world_state.grids[next_world_state.grid_count].coords = coords; 
+            next_world_state.grids[next_world_state.grid_count].direction = direction;
+            next_world_state.grids[next_world_state.grid_count].id = next_world_state.grid_count;
+            next_world_state.grid_count++;
+            break;
+        }
+        case WALL:
+        {
+            next_world_state.walls[next_world_state.wall_count].coords = coords;
+            next_world_state.walls[next_world_state.wall_count].direction = direction;
+            next_world_state.walls[next_world_state.wall_count].id = next_world_state.wall_count;
+            next_world_state.wall_count++;
+            break;
+        }
+        case BOX:
+        {
+            next_world_state.boxes[next_world_state.box_count].coords = coords;
+            next_world_state.boxes[next_world_state.box_count].direction = direction;
+            next_world_state.boxes[next_world_state.box_count].id = next_world_state.box_count;
+            next_world_state.box_count++;
+            break;
+        }
+        default:
+        {
+            break;
+        }
+    }
+}
+
 // FILE I/O
 
 Int3 byteIndexToCoords(int32 byte_index, Int3 level_dim)
@@ -155,7 +219,7 @@ Int3 byteIndexToCoords(int32 byte_index, Int3 level_dim)
     return coords;
 }
 
-void writeAssetToLevel(char* path, TileType type, Int3 coords, Int3 level_dim)
+void writeAssetToLevel(char* path, EntityType type, Int3 coords, Int3 level_dim)
 {
 	// get index based on level_dim
     int32 byte_index = level_dim.x*level_dim.z*coords.y + level_dim.x*coords.z + coords.x;
@@ -167,6 +231,8 @@ void writeAssetToLevel(char* path, TileType type, Int3 coords, Int3 level_dim)
 
 void loadFileAsLevel(char* path, Int3 level_dim)
 {
+    next_world_state = (WorldState){0};
+
 	int32 level_size_bytes = level_dim.x*level_dim.y*level_dim.z;
 	FILE *file = fopen(path, "rb");
     unsigned char byte = 0;
@@ -175,32 +241,9 @@ void loadFileAsLevel(char* path, Int3 level_dim)
     for (int32 byte_index = 0; byte_index < level_size_bytes; byte_index++)
     {
 		fread(&byte, 1, 1, file);
-		switch (byte)
-        {
-            case VOID:
-            {
-				break;
-            }
-            case GRID:
-            {
-				break;
-            }
-            case WALL:
-            {
-                world_state.walls[world_state.wall_count].coords = byteIndexToCoords(byte_index, level_dim);
-                world_state.walls[world_state.wall_count].id = world_state.wall_count;
-                world_state.wall_count++;
-				break;
-            }
-            case BOX:
-            {
-				break;
-            }
-            default:
-        	{
-                break;
-            }
-        }
+
+        if (byte != 5) createEntity(byte, byteIndexToCoords(byte_index, level_dim), NORTH);
+        else next_world_state.player_coords = byteIndexToCoords(byte_index, level_dim);
     }
 }
 
@@ -257,7 +300,6 @@ void gameInitialise(void)
     Int3 test_coords = {0, 0, 0};
 
     // get level dimensions
-    Int3 level_dim = {0};
     FILE *file = fopen(level_path, "rb");
 	unsigned char byte = 0;
     fseek(file, 1, SEEK_CUR); // skip the first byte
@@ -272,11 +314,12 @@ void gameInitialise(void)
     // writeAssetToLevel(level_path, WALL, test_coords, level_dim);
 
     loadFileAsLevel(level_path, level_dim);
+
+    world_state = next_world_state;
 }
 
 void gameFrame(double delta_time, TickInput tick_input)
 {	
-   	// clamp for stalls or breakpoints
 	if (delta_time > 0.1) delta_time = 0.1;
 	accumulator += delta_time;
 
@@ -297,62 +340,57 @@ void gameFrame(double delta_time, TickInput tick_input)
 
     while (accumulator >= PHYSICS_INCREMENT)
     {
+		next_world_state = world_state;
+
+        Vec3 right_camera_basis, forward_camera_basis;
+        cameraBasisFromYaw(camera_yaw, &right_camera_basis, &forward_camera_basis);
+
+        if (tick_input.w_press) 
+        {
+            camera.coords.x += forward_camera_basis.x * MOVE_STEP;
+            camera.coords.z += forward_camera_basis.z * MOVE_STEP;
+        }
+        if (tick_input.a_press) 
+        {
+            camera.coords.x -= right_camera_basis.x * MOVE_STEP;
+            camera.coords.z -= right_camera_basis.z * MOVE_STEP;
+        }
+        if (tick_input.s_press) 
+        {
+            camera.coords.x -= forward_camera_basis.x * MOVE_STEP;
+            camera.coords.z -= forward_camera_basis.z * MOVE_STEP;
+        }
+        if (tick_input.d_press) 
+        {
+            camera.coords.x += right_camera_basis.x * MOVE_STEP;
+            camera.coords.z += right_camera_basis.z * MOVE_STEP;
+        }
+        if (tick_input.space_press) camera.coords.y += 0.05f;
+        if (tick_input.shift_press) camera.coords.y -= 0.05f;
+
         if (!editor_mode)
         {
 
         }
         else
         {
-            // handle movement input
-
-            Vec3 right_camera_basis, forward_camera_basis;
-            cameraBasisFromYaw(camera_yaw, &right_camera_basis, &forward_camera_basis);
-
-            if (tick_input.w_press) 
+            Int3 editor_position = normCoordsToInt(camera.coords);
+            if (tick_input.j_press)
             {
-                camera.coords.x += forward_camera_basis.x * MOVE_STEP;
-                camera.coords.z += forward_camera_basis.z * MOVE_STEP;
+                if (editor_position.x >= 0 && editor_position.y >= 0 && editor_position.z >= 0 && editor_position.x < level_dim.x && editor_position.y < level_dim.y && editor_position.z < level_dim.z)
+                {
+                    createEntity(WALL, editor_position, NORTH);
+                    writeAssetToLevel(level_path, WALL, editor_position, level_dim);
+                }
             }
-            if (tick_input.a_press) 
-            {
-                camera.coords.x -= right_camera_basis.x * MOVE_STEP;
-                camera.coords.z -= right_camera_basis.z * MOVE_STEP;
-            }
-            if (tick_input.s_press) 
-            {
-                camera.coords.x -= forward_camera_basis.x * MOVE_STEP;
-                camera.coords.z -= forward_camera_basis.z * MOVE_STEP;
-            }
-            if (tick_input.d_press) 
-            {
-                camera.coords.x += right_camera_basis.x * MOVE_STEP;
-                camera.coords.z += right_camera_basis.z * MOVE_STEP;
-            }
-            if (tick_input.space_press) camera.coords.y += 0.05f;
-            if (tick_input.shift_press) camera.coords.y -= 0.05f;
+        }
 
-            Int3 box_coords_1 = { 0, 0, 0 };
-            Int3 box_coords_2 = { 0, 0, 1 };
-            Int3 box_coords_3 = { 1, 0, 0 };
-            Int3 box_coords_4 = { 1, 0, 1 };
+        // finished updating state
+        world_state = next_world_state;
 
-            Int3 wall_coords_1 = { 0, 1, 0 };
-            Int3 wall_coords_2 = { 1, 1, 1 };
-
-            /*
-            drawAsset(box_path, CUBE_3D, box_coords_1, NORTH);
-            drawAsset(box_path, CUBE_3D, box_coords_2, NORTH);
-            drawAsset(box_path, CUBE_3D, box_coords_3, NORTH);
-            drawAsset(box_path, CUBE_3D, box_coords_4, NORTH);
-
-            drawAsset(wall_path, CUBE_3D, wall_coords_1, NORTH);
-            drawAsset(wall_path, CUBE_3D, wall_coords_2, NORTH);
-            */ 
-
-            for (int wall_index = 0; wall_index < world_state.wall_count; wall_index++)
-            {
-                drawAsset(wall_path, CUBE_3D, world_state.walls[wall_index].coords, NORTH);
-            }
+        for (int wall_index = 0; wall_index < world_state.wall_count; wall_index++)
+        {
+            drawAsset(wall_path, CUBE_3D, world_state.walls[wall_index].coords, NORTH);
         }
 
         rendererSubmitFrame(assets_to_load, camera);
