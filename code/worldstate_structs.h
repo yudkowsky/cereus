@@ -14,9 +14,9 @@ typedef struct AssetToLoad
 {
     char* path;
 	AssetType type;
-    Vec3 coords[256];
-	Vec3 scale[256];
-    Vec4 rotation[256];
+    Vec3 coords[1024];
+	Vec3 scale[1024];
+    Vec4 rotation[1024];
     int32 instance_count;
 }
 AssetToLoad;
@@ -36,14 +36,6 @@ typedef enum
     EAST       = 3
 }
 Direction;
-
-typedef struct Entity
-{
-    Int3 coords;
-    Direction rotation;
-    int32 id;
-}
-Entity;
 
 typedef struct TickInput
 {

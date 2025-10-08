@@ -3,12 +3,44 @@
 
 #include <string.h> // TODO(spike): temporary, for memset
 #include <math.h> // TODO(spike): also temporary, for sin/cos
-// #include <stdio.h> // TODO(spike): "temporary", for fopen 
+#include <stdio.h> // TODO(spike): "temporary", for fopen 
 // #include <windows.h> // TODO(spike): ok, actually temporary this time, for outputdebugstring
 
 #define local_persist static
 #define global_variable static
 #define internal static
+
+typedef struct Entity
+{
+    Int3 coords;
+    Direction rotation;
+    int32 id;
+}
+Entity;
+
+typedef enum TileType
+{
+    NONE = 0,
+    VOID = 1,
+    GRID = 2,
+    WALL = 3,
+	BOX = 4
+}
+TileType;
+
+typedef struct WorldState
+{
+    Entity voids[1024];
+    Entity grids[1024];
+    Entity walls[1024];
+    Entity boxes[1024];
+
+    int32 void_count;
+    int32 grid_count;
+    int32 wall_count;
+    int32 box_count;
+}
+WorldState;
 
 double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0.0;
@@ -22,13 +54,23 @@ float SENSITIVITY = 0.005f;
 float MOVE_STEP = 0.05f;
 Vec3 DEFAULT_SCALE = { 1.0f, 1.0f, 1.0f };
 
-char* loaded_texture_paths[256] = {0};
+WorldState world_state = {0};
+WorldState next_world_state = {0};
+char* level_path = "w:/cereus/data/levels/level_1.txt"; // absolute path required to modify original file
+Int3 level_dim = {0};
 
+char* loaded_texture_paths[256] = {0};
 AssetToLoad assets_to_load[256] = {0};
 int32 assent_to_load_count = 0;
 
-Entity boxes[256] = {0};
-char* box_path = "data/sprites/box.png";
+bool editor_mode = true;
+
+char*  grid_path   = "data/sprites/grid.png";
+char*  wall_path   = "data/sprites/wall.png";
+char*  box_path    = "data/sprites/box.png";
+char* player_path  = "data/sprites/player.png";
+
+// CAMERA STUFF
 
 void cameraBasisFromYaw(float yaw, Vec3* right, Vec3* forward)
 {
@@ -95,13 +137,74 @@ Vec4 directionToQuaternion(Direction direction)
     {
         case NORTH: yaw = 0.0f; 		break;
         case WEST:  yaw = 0.25f  * TAU; break;
-        case SOUTH: yaw = -0.1f * TAU; break;
-//        case SOUTH: yaw = -0.25f * TAU; break;
+        case SOUTH: yaw = -0.25f * TAU; break;
         case EAST:  yaw = 0.5f   * TAU; break;
     }
     Vec3 axis = {0, 1, 0};
     return quaternionFromAxisAngle(axis, yaw);
 }
+
+// FILE I/O
+
+Int3 byteIndexToCoords(int32 byte_index, Int3 level_dim)
+{
+	Int3 coords = {0};
+    coords.x = byte_index % level_dim.x;
+    coords.y = byte_index / (level_dim.x * level_dim.z);
+	coords.z = (byte_index / level_dim.x) % level_dim.z;
+    return coords;
+}
+
+void writeAssetToLevel(char* path, TileType type, Int3 coords, Int3 level_dim)
+{
+	// get index based on level_dim
+    int32 byte_index = level_dim.x*level_dim.z*coords.y + level_dim.x*coords.z + coords.x;
+    FILE *file = fopen(path, "rb+");
+    fseek(file, byte_index + 4, SEEK_SET);
+    fputc(type, file);
+    fclose(file);
+}
+
+void loadFileAsLevel(char* path, Int3 level_dim)
+{
+	int32 level_size_bytes = level_dim.x*level_dim.y*level_dim.z;
+	FILE *file = fopen(path, "rb");
+    unsigned char byte = 0;
+    fseek(file, 4, SEEK_SET);
+
+    for (int32 byte_index = 0; byte_index < level_size_bytes; byte_index++)
+    {
+		fread(&byte, 1, 1, file);
+		switch (byte)
+        {
+            case VOID:
+            {
+				break;
+            }
+            case GRID:
+            {
+				break;
+            }
+            case WALL:
+            {
+                world_state.walls[world_state.wall_count].coords = byteIndexToCoords(byte_index, level_dim);
+                world_state.walls[world_state.wall_count].id = world_state.wall_count;
+                world_state.wall_count++;
+				break;
+            }
+            case BOX:
+            {
+				break;
+            }
+            default:
+        	{
+                break;
+            }
+        }
+    }
+}
+
+// DRAW ASSET
 
 // takes integer coords and converts to Vec3 before passing to assets_to_load
 // scale = 1
@@ -111,7 +214,7 @@ void drawAsset(char* path, AssetType type, Int3 coords, Direction direction)
 {
     // check loaded_assets. if this char, continue at this index. if == 0, put path and type, and continue with this index.
 	int32 asset_location = -1;
-    for (int32 asset_index = 0; asset_index < 256; asset_index++)
+    for (int32 asset_index = 0; asset_index < 1024; asset_index++)
     {
         if (loaded_texture_paths[asset_index] == path)
         {
@@ -131,21 +234,44 @@ void drawAsset(char* path, AssetType type, Int3 coords, Direction direction)
     switch (type)
     {
         case SPRITE_2D:
+        {
             return;
+        }
         case CUBE_3D:
+        {
             assets_to_load[asset_location].coords[assets_to_load[asset_location].instance_count]   = intCoordsToNorm(coords);
             assets_to_load[asset_location].scale[assets_to_load[asset_location].instance_count]    = DEFAULT_SCALE;
             assets_to_load[asset_location].rotation[assets_to_load[asset_location].instance_count] = directionToQuaternion(direction);
             assets_to_load[asset_location].instance_count++;
             return;
+        }
         case MODEL_3D:
+        {
             return;
+        }
     }
 }
 
 void gameInitialise(void) 
 {	
+    Int3 test_coords = {0, 0, 0};
 
+    // get level dimensions
+    Int3 level_dim = {0};
+    FILE *file = fopen(level_path, "rb");
+	unsigned char byte = 0;
+    fseek(file, 1, SEEK_CUR); // skip the first byte
+	fread(&byte, 1, 1, file);
+    level_dim.x = byte;
+    fread(&byte, 1, 1, file);
+    level_dim.y = byte;
+    fread(&byte, 1, 1, file);
+    level_dim.z = byte;
+    fclose(file);
+
+    // writeAssetToLevel(level_path, WALL, test_coords, level_dim);
+
+    loadFileAsLevel(level_path, level_dim);
 }
 
 void gameFrame(double delta_time, TickInput tick_input)
@@ -171,53 +297,63 @@ void gameFrame(double delta_time, TickInput tick_input)
 
     while (accumulator >= PHYSICS_INCREMENT)
     {
-		// handle movement input
-
-		Vec3 right_camera_basis, forward_camera_basis;
-        cameraBasisFromYaw(camera_yaw, &right_camera_basis, &forward_camera_basis);
-
-        if (tick_input.w_press) 
+        if (!editor_mode)
         {
-            camera.coords.x += forward_camera_basis.x * MOVE_STEP;
-            camera.coords.z += forward_camera_basis.z * MOVE_STEP;
+
         }
-        if (tick_input.a_press) 
+        else
         {
-            camera.coords.x -= right_camera_basis.x * MOVE_STEP;
-            camera.coords.z -= right_camera_basis.z * MOVE_STEP;
+            // handle movement input
+
+            Vec3 right_camera_basis, forward_camera_basis;
+            cameraBasisFromYaw(camera_yaw, &right_camera_basis, &forward_camera_basis);
+
+            if (tick_input.w_press) 
+            {
+                camera.coords.x += forward_camera_basis.x * MOVE_STEP;
+                camera.coords.z += forward_camera_basis.z * MOVE_STEP;
+            }
+            if (tick_input.a_press) 
+            {
+                camera.coords.x -= right_camera_basis.x * MOVE_STEP;
+                camera.coords.z -= right_camera_basis.z * MOVE_STEP;
+            }
+            if (tick_input.s_press) 
+            {
+                camera.coords.x -= forward_camera_basis.x * MOVE_STEP;
+                camera.coords.z -= forward_camera_basis.z * MOVE_STEP;
+            }
+            if (tick_input.d_press) 
+            {
+                camera.coords.x += right_camera_basis.x * MOVE_STEP;
+                camera.coords.z += right_camera_basis.z * MOVE_STEP;
+            }
+            if (tick_input.space_press) camera.coords.y += 0.05f;
+            if (tick_input.shift_press) camera.coords.y -= 0.05f;
+
+            Int3 box_coords_1 = { 0, 0, 0 };
+            Int3 box_coords_2 = { 0, 0, 1 };
+            Int3 box_coords_3 = { 1, 0, 0 };
+            Int3 box_coords_4 = { 1, 0, 1 };
+
+            Int3 wall_coords_1 = { 0, 1, 0 };
+            Int3 wall_coords_2 = { 1, 1, 1 };
+
+            /*
+            drawAsset(box_path, CUBE_3D, box_coords_1, NORTH);
+            drawAsset(box_path, CUBE_3D, box_coords_2, NORTH);
+            drawAsset(box_path, CUBE_3D, box_coords_3, NORTH);
+            drawAsset(box_path, CUBE_3D, box_coords_4, NORTH);
+
+            drawAsset(wall_path, CUBE_3D, wall_coords_1, NORTH);
+            drawAsset(wall_path, CUBE_3D, wall_coords_2, NORTH);
+            */ 
+
+            for (int wall_index = 0; wall_index < world_state.wall_count; wall_index++)
+            {
+                drawAsset(wall_path, CUBE_3D, world_state.walls[wall_index].coords, NORTH);
+            }
         }
-        if (tick_input.s_press) 
-        {
-            camera.coords.x -= forward_camera_basis.x * MOVE_STEP;
-            camera.coords.z -= forward_camera_basis.z * MOVE_STEP;
-        }
-        if (tick_input.d_press) 
-        {
-            camera.coords.x += right_camera_basis.x * MOVE_STEP;
-            camera.coords.z += right_camera_basis.z * MOVE_STEP;
-        }
-        if (tick_input.space_press) camera.coords.y += 0.05f;
-        if (tick_input.shift_press) camera.coords.y -= 0.05f;
-
-		// should be done in drawAsset
-
-        /*
-		assets_to_load[0].path = box_path;
-        assets_to_load[0].type = CUBE_3D;
-        assets_to_load[0].coords[0] = box_coords_1;
-        assets_to_load[0].scale[0] = box_scale;
-        assets_to_load[0].rotation[0] = box_rotation;
-        assets_to_load[0].coords[1] = box_coords_2;
-        assets_to_load[0].scale[1] = box_scale;
-        assets_to_load[0].rotation[1] = box_rotation;
-        assets_to_load[0].instance_count = 2;
-		*/
-
-        Int3 box_coords_1   = { 0, 0, 0 };
-		Int3 box_coords_2   = { 0, 1, 1 };
-
-        drawAsset(box_path, CUBE_3D, box_coords_1, NORTH);
-        drawAsset(box_path, CUBE_3D, box_coords_2, SOUTH);
 
         rendererSubmitFrame(assets_to_load, camera);
         memset(assets_to_load, 0, sizeof(assets_to_load));

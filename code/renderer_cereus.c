@@ -83,7 +83,7 @@ typedef struct
 
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
-    VkDescriptorSet descriptor_sets[256];
+    VkDescriptorSet descriptor_sets[1024];
 
     VkFormat depth_format;
     VkImage depth_image;
@@ -1575,13 +1575,13 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     // descriptor pool allocates memory for all descriptor sets
     VkDescriptorPoolSize descriptor_pool_size = {0};
     descriptor_pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    descriptor_pool_size.descriptorCount = 256;
+    descriptor_pool_size.descriptorCount = 1024;
     
     VkDescriptorPoolCreateInfo descriptor_pool_creation_info = {0};
     descriptor_pool_creation_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     descriptor_pool_creation_info.poolSizeCount = 1;
     descriptor_pool_creation_info.pPoolSizes = &descriptor_pool_size;
-    descriptor_pool_creation_info.maxSets = 256;
+    descriptor_pool_creation_info.maxSets = 1024;
 
     vkCreateDescriptorPool(renderer_state.logical_device_handle, &descriptor_pool_creation_info, 0, &renderer_state.descriptor_pool);
 
@@ -1620,12 +1620,12 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &graphics_pipeline_creation_info, 0, &renderer_state.graphics_pipeline_handle);
 }
 
-void rendererSubmitFrame(AssetToLoad assets_to_load[256], Camera game_camera)
+void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
 {  
 	renderer_camera = game_camera;
 
 	cube_instance_count = 0;
-    for (int asset_index = 0; asset_index < 256; asset_index++)
+    for (int asset_index = 0; asset_index < 1024; asset_index++)
     {
         char* path = assets_to_load[asset_index].path;
         if (path == 0) break;
