@@ -2,33 +2,6 @@
 
 #include "types.h"
 
-typedef struct Vec2
-{
-    float x, y;
-}
-Vec2;
-typedef struct Vec3
-{
-    float x, y, z;
-}
-Vec3;
-typedef struct Vec4
-{
-    float x, y, z, w;
-}
-Vec4;
-
-typedef struct Int2
-{
-    int32 x, y;
-}
-Int2;
-typedef struct Int3
-{
-    int32 x, y, z;
-}
-Int3;
-
 typedef enum 
 {
 	SPRITE_2D = 0,
@@ -44,7 +17,7 @@ typedef struct AssetToLoad
     Vec3 coords[256];
 	Vec3 scale[256];
     Vec4 rotation[256];
-    int32 asset_count;
+    int32 instance_count;
 }
 AssetToLoad;
 
@@ -55,12 +28,32 @@ typedef struct Camera
 }
 Camera;
 
+typedef enum
+{
+    NORTH      = 0,
+    WEST       = 1,
+    SOUTH      = 2,
+    EAST       = 3
+}
+Direction;
+
+typedef struct Entity
+{
+    Int3 coords;
+    Direction rotation;
+    int32 id;
+}
+Entity;
+
 typedef struct TickInput
 {
     bool w_press;
 	bool a_press;
     bool s_press;
     bool d_press;
+
+    bool space_press;
+    bool shift_press;
 
     bool z_press;
     bool r_press;
@@ -72,7 +65,9 @@ typedef struct TickInput
     bool k_press;
     bool l_press;
 
-    Vec2 mouse_norm;
+	float mouse_dx;
+    float mouse_dy;
+
     bool left_mouse_press;
     bool right_mouse_press;
     bool middle_mouse_press;

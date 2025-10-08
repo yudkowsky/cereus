@@ -26,14 +26,23 @@ LRESULT CALLBACK windowMessageProcessor(
             PostQuitMessage(0);
             return 0;
 
-        case WM_MOUSEMOVE:
-            RECT client_rect;
-            GetClientRect(window_handle, &client_rect);
-            int client_width = client_rect.right - client_rect.left;
-            int client_height = client_rect.bottom - client_rect.top;
-			tick_input.mouse_norm.x = (LOWORD(lParam) * 2.0f / client_width) - 1.0f;
-            tick_input.mouse_norm.y = 1.0f - (HIWORD(lParam) * 2.0f / client_height);
+        case WM_INPUT:
+        {	
+			UINT size_of_input = 0;
+            GetRawInputData((HRAWINPUT)lParam, RID_INPUT, 0, &size_of_input, sizeof(RAWINPUTHEADER));
+
+            BYTE buffer[sizeof(RAWINPUT)];
+            if (size_of_input <= sizeof(buffer) && GetRawInputData((HRAWINPUT)lParam, RID_INPUT, buffer, &size_of_input, sizeof(RAWINPUTHEADER)) == size_of_input)
+            {
+                RAWINPUT* raw_input = (RAWINPUT*)buffer;
+                if (raw_input->header.dwType == RIM_TYPEMOUSE)
+                {
+                    tick_input.mouse_dx -= raw_input->data.mouse.lLastX;
+                    tick_input.mouse_dy -= raw_input->data.mouse.lLastY;
+                }
+            }
             break;
+        }
         case WM_LBUTTONDOWN:
             tick_input.left_mouse_press = true;
             break;
@@ -89,6 +98,12 @@ LRESULT CALLBACK windowMessageProcessor(
                 case 'L':
                     tick_input.l_press = true;
                 	break;
+                case VK_SPACE:
+                    tick_input.space_press = true;
+                    break;
+                case VK_SHIFT:
+                    tick_input.shift_press = true;
+                    break;
             }
             break;
         case WM_KEYUP:
@@ -127,6 +142,12 @@ LRESULT CALLBACK windowMessageProcessor(
                 case 'L':
                     tick_input.l_press = false;
                 	break;
+                case VK_SPACE:
+                    tick_input.space_press = false;
+                    break;
+                case VK_SHIFT:
+                    tick_input.shift_press = false;
+                    break;
             }
             break;
     }
@@ -166,6 +187,18 @@ int CALLBACK WinMain(
 
     ShowWindow(window_handle, initial_show_state);
 
+    while (ShowCursor(FALSE) >= 0) 
+    {
+        // fuction does the decrementing
+    }
+
+	RAWINPUTDEVICE raw_input_device = {0};
+    raw_input_device.usUsagePage = 0x01; // generic desktop controls
+    raw_input_device.usUsage 	 = 0x02; // mouse
+    raw_input_device.dwFlags     = RIDEV_NOLEGACY;
+    raw_input_device.hwndTarget  = window_handle;
+    RegisterRawInputDevices(&raw_input_device, 1, sizeof(raw_input_device));
+
     RendererPlatformHandles platform_handles = { .module_handle = module_handle, .window_handle = window_handle};
     rendererInitialise(platform_handles);
 
@@ -199,6 +232,9 @@ int CALLBACK WinMain(
         last_tick = current_tick;
 
         gameFrame(delta_time, tick_input); 
+
+        tick_input.mouse_dx = 0;
+        tick_input.mouse_dy = 0;
     }
 
     return (int)queued_message.wParam;

@@ -102,28 +102,28 @@ RendererState renderer_state;
 // unit cube (-0.5..+0.5), y-up, right-handed.
 static const Vertex CUBE_VERTICES[] = {
     // front
-    { -0.5f, -0.5f,  0.5f,   0.0f, 0.0f,   1,1,1 },
-    {  0.5f, -0.5f,  0.5f,   1.0f, 0.0f,   1,1,1 },
-    {  0.5f,  0.5f,  0.5f,   1.0f, 1.0f,   1,1,1 },
-    { -0.5f,  0.5f,  0.5f,   0.0f, 1.0f,   1,1,1 },
+    { -0.5f, -0.5f,  0.5f,   0.0f, 1.0f,   1,1,1 },
+    {  0.5f, -0.5f,  0.5f,   1.0f, 1.0f,   1,1,1 },
+    {  0.5f,  0.5f,  0.5f,   1.0f, 0.0f,   1,1,1 },
+    { -0.5f,  0.5f,  0.5f,   0.0f, 0.0f,   1,1,1 },
 
     // back
-    {  0.5f, -0.5f, -0.5f,   0.0f, 0.0f,   1,1,1 },
-    { -0.5f, -0.5f, -0.5f,   1.0f, 0.0f,   1,1,1 },
-    { -0.5f,  0.5f, -0.5f,   1.0f, 1.0f,   1,1,1 },
-    {  0.5f,  0.5f, -0.5f,   0.0f, 1.0f,   1,1,1 },
+    {  0.5f, -0.5f, -0.5f,   0.0f, 1.0f,   1,1,1 },
+    { -0.5f, -0.5f, -0.5f,   1.0f, 1.0f,   1,1,1 },
+    { -0.5f,  0.5f, -0.5f,   1.0f, 0.0f,   1,1,1 },
+    {  0.5f,  0.5f, -0.5f,   0.0f, 0.0f,   1,1,1 },
 
     // left
-    { -0.5f, -0.5f, -0.5f,   0.0f, 0.0f,   1,1,1 },
-    { -0.5f, -0.5f,  0.5f,   1.0f, 0.0f,   1,1,1 },
-    { -0.5f,  0.5f,  0.5f,   1.0f, 1.0f,   1,1,1 },
-    { -0.5f,  0.5f, -0.5f,   0.0f, 1.0f,   1,1,1 },
+    { -0.5f, -0.5f, -0.5f,   0.0f, 1.0f,   1,1,1 },
+    { -0.5f, -0.5f,  0.5f,   1.0f, 1.0f,   1,1,1 },
+    { -0.5f,  0.5f,  0.5f,   1.0f, 0.0f,   1,1,1 },
+    { -0.5f,  0.5f, -0.5f,   0.0f, 0.0f,   1,1,1 },
 
     // right
-    {  0.5f, -0.5f,  0.5f,   0.0f, 0.0f,   1,1,1 },
-    {  0.5f, -0.5f, -0.5f,   1.0f, 0.0f,   1,1,1 },
-    {  0.5f,  0.5f, -0.5f,   1.0f, 1.0f,   1,1,1 },
-    {  0.5f,  0.5f,  0.5f,   0.0f, 1.0f,   1,1,1 },
+    {  0.5f, -0.5f,  0.5f,   0.0f, 1.0f,   1,1,1 },
+    {  0.5f, -0.5f, -0.5f,   1.0f, 1.0f,   1,1,1 },
+    {  0.5f,  0.5f, -0.5f,   1.0f, 0.0f,   1,1,1 },
+    {  0.5f,  0.5f,  0.5f,   0.0f, 0.0f,   1,1,1 },
 
     // top
     { -0.5f,  0.5f,  0.5f,   0.0f, 0.0f,   1,1,1 },
@@ -239,28 +239,49 @@ void mat4BuildTRS(float output_matrix[16], Vec3 translation, Vec4 quaternion, Ve
     mat4Multiply(output_matrix, translation_rotation_matrix, scale_matrix);
 }
 
-void mat4BuildViewFromCamera(float output_matrix[16], Camera camera)
+void mat4BuildViewFromQuat(float output_matrix[16], Vec3 coords, Vec4 quaternion)
 {
-    float rotation_matrix[16];
-    mat4BuildRotation(rotation_matrix, camera.rotation);
+    mat4Identity(output_matrix);
 
-    float rotation_transposed[16] = 
-    {
-        rotation_matrix[0], rotation_matrix[4], rotation_matrix[8],  0,
-        rotation_matrix[1], rotation_matrix[5], rotation_matrix[9],  0,
-        rotation_matrix[2], rotation_matrix[6], rotation_matrix[10], 0,
-        0, 0, 0, 1
-    };
+    float length_squared = quaternion.x*quaternion.x + quaternion.y*quaternion.y + quaternion.z*quaternion.z + quaternion.w*quaternion.w;
+    if (length_squared < 1e-8f) 
+    { 
+        output_matrix[12] = -coords.x; 
+        output_matrix[13] = -coords.y; 
+        output_matrix[14] = -coords.z;
+        return;
+    }
+    float inverse_length = 1.0f / sqrtf(length_squared);
+    float x = quaternion.x*inverse_length, y = quaternion.y*inverse_length, z = quaternion.z*inverse_length, w = quaternion.w*inverse_length;
 
-    Vec3 translation;
-    translation.x = -(rotation_transposed[0]*camera.coords.x + rotation_transposed[4]*camera.coords.y + rotation_transposed[8]*camera.coords.z);
-    translation.y = -(rotation_transposed[1]*camera.coords.x + rotation_transposed[5]*camera.coords.y + rotation_transposed[9]*camera.coords.z);
-    translation.z = -(rotation_transposed[2]*camera.coords.x + rotation_transposed[6]*camera.coords.y + rotation_transposed[10]*camera.coords.z);
+    // basis vectors
+    float right_x = 1.0f - (2.0f*y*y + 2.0f*z*z);
+    float right_y = 2.0f*x*y + 2.0f*w*z;
+    float right_z = 2.0f*x*z - 2.0f*w*y;
 
-    memcpy(output_matrix, rotation_transposed, sizeof(rotation_transposed));
-    output_matrix[12] = translation.x;
-    output_matrix[13] = translation.y;
-    output_matrix[14] = translation.z;
+    float up_x = 2.0f*x*y - 2.0f*w*z;
+    float up_y = 1.0f - (2.0f*x*x + 2.0f*z*z);
+    float up_z = 2.0f*y*z + 2.0f*w*x;
+
+    float forward_x = 2.0f*x*z + 2.0f*w*y;
+    float forward_y = 2.0f*y*z - 2.0f*w*x;
+    float forward_z = 1.0f - (2.0f*x*x + 2.0f*y*y);
+
+    output_matrix[0] =  right_x;  
+    output_matrix[1] =  up_x;  
+    output_matrix[2] =  forward_x;  
+
+    output_matrix[4] =  right_y;  
+    output_matrix[5] =  up_y;  
+    output_matrix[6] =  forward_y;  
+
+    output_matrix[8] =  right_z;  
+    output_matrix[9] =  up_z;  
+    output_matrix[10] = forward_z;
+
+    output_matrix[12]= -(right_x*coords.x + right_y*coords.y + right_z*coords.z);
+    output_matrix[13]= -(up_x*coords.x + up_y*coords.y + up_z*coords.z);
+    output_matrix[14]= -(forward_x*coords.x + forward_y*coords.y + forward_z*coords.z);
 }
 
 // right handed, zero to one depth
@@ -298,7 +319,7 @@ internal bool readEntireFile(char* path, void** out_data, size_t* out_size)
    	long end_position = ftell(file); // return current file position, i.e. size of the file in bytes
     fseek(file, 0, SEEK_SET); // seeks back to the start, so the file can be read from byte 0
 	size_t file_size_bytes = (size_t)end_position;
-	void* file_bytes = malloc(file_size_bytes); // TODO(spike): bump-alloc here, after set up big alloction on platform layer
+	void* file_bytes = malloc(file_size_bytes);
 	if (!file_bytes)
     {
         fclose(file);
@@ -1613,7 +1634,7 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[256], Camera game_camera)
         int32 asset_cache_index = getOrLoadAsset(path);
         if (asset_cache_index == -1) continue;
 		
-        for (int32 asset_instance_index = 0; asset_instance_index < assets_to_load[asset_index].asset_count; asset_instance_index++)
+        for (int32 asset_instance_index = 0; asset_instance_index < assets_to_load[asset_index].instance_count; asset_instance_index++)
         {
 			Cube* cube_instance = &cube_instances[cube_instance_count++];
             cube_instance->asset_index = (uint32)asset_cache_index;
@@ -1730,7 +1751,7 @@ void rendererDraw(void)
     float aspect = (float)renderer_state.swapchain_extent.width / (float)renderer_state.swapchain_extent.height;
 	float projection_matrix[16], view_matrix[16];
     mat4BuildPerspective(projection_matrix, 60.0f * (6.2831831f/360.0f), aspect, 0.1f, 100.0f);
-    mat4BuildViewFromCamera(view_matrix, renderer_camera);
+	mat4BuildViewFromQuat(view_matrix, renderer_camera.coords, renderer_camera.rotation);
 
     int32 last_asset = -1;
     for (uint32 cube_instance_index = 0; cube_instance_index < cube_instance_count; cube_instance_index++)
