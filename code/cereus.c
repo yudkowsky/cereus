@@ -153,33 +153,20 @@ Vec4 directionToQuaternion(Direction direction)
 
 // VARIOUS BASIC HELPER FUNCTIONS
 
-Vec3 intCoordsToNorm(Int3 int_coords)
-{
-    return (Vec3){ (float)int_coords.x, (float)int_coords.y, (float)int_coords.z };
-}
+Vec3 intCoordsToNorm(Int3 int_coords) {
+    return (Vec3){ (float)int_coords.x, (float)int_coords.y, (float)int_coords.z }; }
 
-Int3 normCoordsToInt(Vec3 norm_coords)
-{
-    if (norm_coords.x < 0) norm_coords.x++;
-    if (norm_coords.y < 0) norm_coords.y++;
-    if (norm_coords.z < 0) norm_coords.z++;
-	return (Int3){ (int32)floorf(norm_coords.x), (int32)floorf(norm_coords.y), (int32)floorf(norm_coords.z) };
-}
+Int3 normCoordsToInt(Vec3 norm_coords) {
+	return (Int3){ (int32)floorf(norm_coords.x + 0.5f), (int32)floorf(norm_coords.y + 0.5f), (int32)floorf(norm_coords.z + 0.5f) }; }
 
-bool intCoordsWithinLevelBounds(Int3 coords)
-{
-    return (coords.x >= 0 && coords.y >= 0 && coords.z >= 0 && coords.x < level_dim.x && coords.y < level_dim.y && coords.z < level_dim.z);
-}
+bool intCoordsWithinLevelBounds(Int3 coords) {
+    return (coords.x >= 0 && coords.y >= 0 && coords.z >= 0 && coords.x < level_dim.x && coords.y < level_dim.y && coords.z < level_dim.z); }
 
-bool normCoordsWithinLevelBounds(Vec3 coords)
-{
-    return (coords.x > 0 && coords.y > 0 && coords.z >= 0 && coords.x < level_dim.x && coords.y < level_dim.y && coords.z < level_dim.z);
-}
+bool normCoordsWithinLevelBounds(Vec3 coords) {
+    return (coords.x > 0 && coords.y > 0 && coords.z >= 0 && coords.x < level_dim.x && coords.y < level_dim.y && coords.z < level_dim.z); }
 
-bool intCoordsIsEqual(Int3 a, Int3 b)
-{
-    return (a.x == b.x && a.y == b.y && a.z == b.z);
-}
+bool intCoordsIsEqual(Int3 a, Int3 b) {
+    return (a.x == b.x && a.y == b.y && a.z == b.z); }
 
 // CREATING ENTITY
 
@@ -358,6 +345,9 @@ RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance, Entity
 {
 	RaycastHit output = {0};
     Int3 current_cube = normCoordsToInt(start);
+    start.x += 0.5;
+    start.y += 0.5;
+    start.z += 0.5;
 
     // TODO(spike): temporary - need to fix so it works from outside bounds
 	if (!intCoordsWithinLevelBounds(current_cube)) return output;
