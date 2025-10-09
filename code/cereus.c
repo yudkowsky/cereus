@@ -538,18 +538,18 @@ void gameFrame(double delta_time, TickInput tick_input)
                     writeAssetToLevel(level_path, WALL, editor_position);
                 }
             }
-            if ((tick_input.k_press || tick_input.l_press) && time_until_meta_input == 0)
+            if ((tick_input.left_mouse_press || tick_input.right_mouse_press) && time_until_meta_input == 0)
             {
                 Vec3 neg_z_basis = {0, 0, -1};
                 Vec3 direction = vec3RotateByQuaternion(neg_z_basis, camera.rotation);
                 Entity raycast_target_info;
                 RaycastHit raycast_output = raycastHitCube(camera.coords, direction, 20, &raycast_target_info);
 
-				if (tick_input.l_press) 
+				if (tick_input.right_mouse_press) 
                 {
                     createEntity(WALL, raycast_output.place_coords, NORTH);
                 }
-                if (tick_input.k_press)
+                if (tick_input.left_mouse_press)
                 {
                     next_world_state.walls[raycast_target_info.id].id = -1;
                 }

@@ -39,10 +39,20 @@ LRESULT CALLBACK windowMessageProcessor(
                 {
                     tick_input.mouse_dx -= raw_input->data.mouse.lLastX;
                     tick_input.mouse_dy -= raw_input->data.mouse.lLastY;
+
+                    USHORT buttons = raw_input->data.mouse.usButtonFlags;
+                    if (buttons & RI_MOUSE_LEFT_BUTTON_DOWN)   tick_input.left_mouse_press   = true;
+                    if (buttons & RI_MOUSE_LEFT_BUTTON_UP)     tick_input.left_mouse_press   = false;
+                    if (buttons & RI_MOUSE_RIGHT_BUTTON_DOWN)  tick_input.right_mouse_press  = true;
+                    if (buttons & RI_MOUSE_RIGHT_BUTTON_UP)    tick_input.right_mouse_press  = false;
+                    if (buttons & RI_MOUSE_MIDDLE_BUTTON_DOWN) tick_input.middle_mouse_press = true;
+                    if (buttons & RI_MOUSE_MIDDLE_BUTTON_UP)   tick_input.middle_mouse_press = false;
                 }
             }
-            break;
+            return 0;
         }
+
+        /*
         case WM_LBUTTONDOWN:
             tick_input.left_mouse_press = true;
             break;
@@ -61,6 +71,7 @@ LRESULT CALLBACK windowMessageProcessor(
         case WM_MBUTTONUP:
             tick_input.middle_mouse_press = false;
             break;
+		*/
 
         case WM_KEYDOWN:
             switch (wParam)
@@ -195,7 +206,7 @@ int CALLBACK WinMain(
 	RAWINPUTDEVICE raw_input_device = {0};
     raw_input_device.usUsagePage = 0x01; // generic desktop controls
     raw_input_device.usUsage 	 = 0x02; // mouse
-    raw_input_device.dwFlags     = RIDEV_NOLEGACY;
+    raw_input_device.dwFlags     = 0;
     raw_input_device.hwndTarget  = window_handle;
     RegisterRawInputDevices(&raw_input_device, 1, sizeof(raw_input_device));
 
