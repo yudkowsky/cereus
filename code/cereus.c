@@ -10,13 +10,17 @@
 #define global_variable static
 #define internal static
 
+/*
 typedef struct Entity
 {
-    Int3 coords;
-    Direction direction;
-    int32 id;
+    Int3 coords_int;
+    Vec3 coords_norm;
+    Direction direciton_int;
+    Vec4 rotation_quat;
+	int32 id;
 }
 Entity;
+*/
 
 typedef enum EntityType
 {
@@ -32,18 +36,19 @@ EntityType;
 typedef struct WorldState
 {
 	Int3 player_coords;
+	
+    int8 tile_buffer[4096]; // same format as file - 1 byte information per tile
 
-    Entity voids[2048];
-    Entity grids[2048];
-    Entity walls[2048];
-    Entity boxes[2048];
+    // implicit coords of voids, grids, walls... entities where i don't care about indivitual ids or rotation
+    int32 voids[1024];
+    int32 grids[1024];
+    int32 walls[1024];
 
-    // note that these counts include -1s; it is actually an index for the next location to put an entity in their struct
-    int32 void_count;
-    int32 grid_count;
-    int32 wall_count;
-    int32 box_count;
+    // intformation on entites where i care about individuality, rotating them, giving them basic animation
+    //Entity boxes[1024];
+    //Entity player;
 }
+
 WorldState;
 
 typedef struct EditorState
@@ -56,9 +61,6 @@ EditorState;
 typedef struct RaycastHit
 {
     bool hit;
-    Entity hit_entity_info;
-    EntityType hit_entity_type;
-    Int3 place_coords;
 }
 RaycastHit;
 
