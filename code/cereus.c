@@ -22,7 +22,7 @@ typedef struct Entity
 Entity;
 */
 
-typedef enum EntityType
+typedef enum TileType
 {
     NONE = 0,
     VOID = 1,
@@ -31,21 +31,15 @@ typedef enum EntityType
 	BOX = 4,
     PLAYER = 5,
 }
-EntityType;
+TileType;
 
 typedef struct WorldState
 {
 	Int3 player_coords;
 	
-    int8 tile_buffer[4096]; // same format as file - 1 byte information per tile
-
-    // implicit coords of voids, grids, walls... entities where i don't care about indivitual ids or rotation
-    int32 voids[1024];
-    int32 grids[1024];
-    int32 walls[1024];
+    int8 buffer[4096]; // same format as file - 1 byte information per tile
 
     // intformation on entites where i care about individuality, rotating them, giving them basic animation
-    //Entity boxes[1024];
     //Entity player;
 }
 
@@ -54,13 +48,15 @@ WorldState;
 typedef struct EditorState
 {
     bool editor_mode;
-    EntityType picked_entity;
+    TileType picked_tile;
 }
 EditorState;
 
 typedef struct RaycastHit
 {
     bool hit;
+	Int3 hit_coords;
+    Int3 place_coords;
 }
 RaycastHit;
 
@@ -77,6 +73,7 @@ float SENSITIVITY = 0.005f;
 float MOVE_STEP = 0.05f;
 Vec3 DEFAULT_SCALE = { 1.0f, 1.0f, 1.0f };
 float RAYCAST_SEEK_LENGTH = 20.0f;
+int32 META_INPUT_TIME_ALLOW = 8;
 
 WorldState world_state = {0};
 WorldState next_world_state = {0};
@@ -89,6 +86,7 @@ char* loaded_texture_paths[256] = {0};
 AssetToLoad assets_to_load[256] = {0};
 int32 assent_to_load_count = 0;
 
+char* void_path   = "data/sprites/void.png";
 char* grid_path   = "data/sprites/grid.png";
 char* wall_path   = "data/sprites/wall.png";
 char* box_path    = "data/sprites/box.png";
@@ -180,160 +178,62 @@ bool normCoordsWithinLevelBounds(Vec3 coords) {
 bool intCoordsIsEqual(Int3 a, Int3 b) {
     return (a.x == b.x && a.y == b.y && a.z == b.z); }
 
+// FILE HELPERS
+
+int32 coordsToBufferIndex(Int3 coords)
+{
+    return level_dim.x*level_dim.z*coords.y + level_dim.x*coords.z + coords.x;
+}
+
+Int3 bufferIndexToCoords(int32 buffer_index)
+{
+	Int3 coords = {0};
+    coords.x = buffer_index % level_dim.x;
+    coords.y = buffer_index / (level_dim.x * level_dim.z);
+	coords.z = (buffer_index / level_dim.x) % level_dim.z;
+    return coords;
+}
+
 // ENTITY HANDLING
 
-void createEntity(EntityType type, Int3 coords, Direction direction)
+void setTileAtCoords(TileType type, Int3 coords)
 {
-    switch (type)
-    {
-        case VOID:
-        {
-            next_world_state.voids[next_world_state.void_count].coords = coords;
-            next_world_state.voids[next_world_state.void_count].direction = direction;
-            next_world_state.voids[next_world_state.void_count].id = next_world_state.void_count;
-            next_world_state.void_count++;
-            break;
-        }
-        case GRID: 
-        {
-            next_world_state.grids[next_world_state.grid_count].coords = coords; 
-            next_world_state.grids[next_world_state.grid_count].direction = direction;
-            next_world_state.grids[next_world_state.grid_count].id = next_world_state.grid_count;
-            next_world_state.grid_count++;
-            break;
-        }
-        case WALL:
-        {
-            next_world_state.walls[next_world_state.wall_count].coords = coords;
-            next_world_state.walls[next_world_state.wall_count].direction = direction;
-            next_world_state.walls[next_world_state.wall_count].id = next_world_state.wall_count;
-            next_world_state.wall_count++;
-            break;
-        }
-        case BOX:
-        {
-            next_world_state.boxes[next_world_state.box_count].coords = coords;
-            next_world_state.boxes[next_world_state.box_count].direction = direction;
-            next_world_state.boxes[next_world_state.box_count].id = next_world_state.box_count;
-            next_world_state.box_count++;
-            break;
-        }
-        default:
-        {
-            break;
-        }
-    }
+    int32 index = coordsToBufferIndex(coords); // convert coords to tile index
+    next_world_state.buffer[index] = type; // update buffer at index with type
 }
 
-// TODO(spike): don't loop over all things for one block - instead read file at that location.
-// probably don't actually read file, so set up some sort of file buffer to be loaded in (also means less writes to file)
-// TODO(spike): fix system with pointer here. two functions, one for type?
-Entity getEntityInfo(Int3 coords, EntityType *type)
+TileType getTileAtCoords(Int3 coords)
 {
-    Entity entity_info = {0};
-	for (int void_index = 0; void_index < next_world_state.void_count; void_index++)
-    {
-		if (intCoordsIsEqual(next_world_state.voids[void_index].coords, coords))
-        {
-            if (next_world_state.voids[void_index].id == -1) continue;
-            entity_info.coords = next_world_state.voids[void_index].coords;
-            entity_info.direction = next_world_state.voids[void_index].direction;
-            entity_info.id = next_world_state.voids[void_index].id;
-            *type = VOID;
-            return entity_info;
-        }
-    }
-	for (int grid_index = 0; grid_index < next_world_state.grid_count; grid_index++)
-    {
-		if (intCoordsIsEqual(next_world_state.grids[grid_index].coords, coords)) 
-        {
-            if (next_world_state.walls[grid_index].id == -1) continue;
-            entity_info.coords = next_world_state.grids[grid_index].coords;
-            entity_info.direction = next_world_state.grids[grid_index].direction;
-            entity_info.id = next_world_state.grids[grid_index].id;
-            *type = GRID;
-            return entity_info;
-        }
-    }
-	for (int wall_index = 0; wall_index < next_world_state.wall_count; wall_index++)
-    {
-		if (intCoordsIsEqual(next_world_state.walls[wall_index].coords, coords)) 
-        {
-            if (next_world_state.walls[wall_index].id == -1) continue;
-            entity_info.coords = next_world_state.walls[wall_index].coords;
-            entity_info.direction = next_world_state.walls[wall_index].direction;
-            entity_info.id = next_world_state.walls[wall_index].id;
-            *type = WALL;
-            return entity_info;
-        }
-    }
-	for (int box_index = 0; box_index < next_world_state.box_count; box_index++)
-    {
-		if (intCoordsIsEqual(next_world_state.boxes[box_index].coords, coords)) 
-        {
-            if (next_world_state.boxes[box_index].id == -1) continue;
-            entity_info.coords = next_world_state.boxes[box_index].coords;
-            entity_info.direction = next_world_state.boxes[box_index].direction;
-            entity_info.id = next_world_state.boxes[box_index].id;
-            *type = BOX;
-            return entity_info;
-        }
-    }
-    return entity_info;
-}
+    int32 index = coordsToBufferIndex(coords);
+    return next_world_state.buffer[index];
 
-void voidEntityAtId(EntityType type, int32 id)
-{
-    switch(type)
-    {
-        case VOID:
-        {
-            next_world_state.voids[id].id = -1;
-            return;
-        }
-        case GRID:
-        {
-            next_world_state.grids[id].id = -1;
-            return;
-        }
-        case WALL:
-        {
-            next_world_state.walls[id].id = -1;
-            return;
-        }
-        case BOX:
-        {
-            next_world_state.boxes[id].id = -1;
-            return;
-        }
-        default:
-        {
-            return;
-        }
-    }
 }
 
 // FILE I/O
 
-Int3 byteIndexToCoords(int32 byte_index)
+void loadFileToBuffer(char* level_path)
 {
-	Int3 coords = {0};
-    coords.x = byte_index % level_dim.x;
-    coords.y = byte_index / (level_dim.x * level_dim.z);
-	coords.z = (byte_index / level_dim.x) % level_dim.z;
-    return coords;
-}
-
-void writeAssetToLevel(char* path, EntityType type, Int3 coords)
-{
-	// get index based on level_dim
-    int32 byte_index = level_dim.x*level_dim.z*coords.y + level_dim.x*coords.z + coords.x;
-    FILE *file = fopen(path, "rb+");
-    fseek(file, byte_index + 4, SEEK_SET);
-    fputc(type, file);
+    // get level dimensions
+    FILE *file = fopen(level_path, "rb");
+	unsigned char byte = 0;
+    fseek(file, 1, SEEK_CUR); // skip the first byte
+	fread(&byte, 1, 1, file);
+    level_dim.x = byte;
+    fread(&byte, 1, 1, file);
+    level_dim.y = byte;
+    fread(&byte, 1, 1, file);
+    level_dim.z = byte;
     fclose(file);
+
+	// TODO(spike): write the rest to next_world_state.buffer
 }
 
+void writeBufferToFile()
+{
+
+}
+
+/*
 void loadFileAsLevel(char* path)
 {
     next_world_state = (WorldState){0};
@@ -351,8 +251,21 @@ void loadFileAsLevel(char* path)
         else next_world_state.player_coords = byteIndexToCoords(byte_index);
     }
 }
+*/
 
 // DRAW ASSET
+
+char* getPath(TileType tile)
+{
+    switch(tile)
+    {
+        case VOID: return void_path;
+        case GRID: return grid_path;
+        case WALL: return wall_path;
+        case BOX:  return box_path;
+        default: return 0;
+    }
+}
 
 // takes integer coords and converts to Vec3 before passing to assets_to_load
 // scale = 1
@@ -456,9 +369,6 @@ RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance)
     Int3 previous_cube = current_cube;
     float t = 0.0f;
 
-    EntityType current_cube_type;
-    Entity current_cube_info;
-
     // main loop from paper
     while (t <= max_distance) 
     {
@@ -486,12 +396,11 @@ RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance)
 
         if (!intCoordsWithinLevelBounds(current_cube)) break;
 
-        current_cube_info = getEntityInfo(current_cube, &current_cube_type);
-        if (current_cube_type != NONE && current_cube_info.id != -1)
+        TileType tile = getTileAtCoords(current_cube);
+        if (tile != NONE)
         {
             output.hit = true;
-            output.hit_entity_info = current_cube_info;
-            output.hit_entity_type = current_cube_type;
+            output.hit_coords = current_cube;
             output.place_coords = previous_cube;
             return output;
         }
@@ -501,21 +410,7 @@ RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance)
 
 void gameInitialise(void) 
 {	
-    // get level dimensions
-    FILE *file = fopen(level_path, "rb");
-	unsigned char byte = 0;
-    fseek(file, 1, SEEK_CUR); // skip the first byte
-	fread(&byte, 1, 1, file);
-    level_dim.x = byte;
-    fread(&byte, 1, 1, file);
-    level_dim.y = byte;
-    fread(&byte, 1, 1, file);
-    level_dim.z = byte;
-    fclose(file);
-
-    // writeAssetToLevel(level_path, WALL, test_coords, level_dim);
-
-    loadFileAsLevel(level_path);
+    loadFileToBuffer(level_path);
 
     world_state = next_world_state;
 }
@@ -567,15 +462,15 @@ void gameFrame(double delta_time, TickInput tick_input)
             camera.coords.x += right_camera_basis.x * MOVE_STEP;
             camera.coords.z += right_camera_basis.z * MOVE_STEP;
         }
-        if (tick_input.space_press) camera.coords.y += 0.05f;
-        if (tick_input.shift_press) camera.coords.y -= 0.05f;
+        if (tick_input.space_press) camera.coords.y += MOVE_STEP;
+        if (tick_input.shift_press) camera.coords.y -= MOVE_STEP;
 
         if (!editor_state.editor_mode)
         {
 			if (time_until_meta_input == 0 && tick_input.e_press) 
             {
                 editor_state.editor_mode = true;
-                time_until_meta_input = 8;
+                time_until_meta_input = META_INPUT_TIME_ALLOW;
             }
         }
         else
@@ -583,7 +478,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 			if (time_until_meta_input == 0 && tick_input.e_press) 
             {
                 editor_state.editor_mode = false;
-                time_until_meta_input = 8;
+                time_until_meta_input = META_INPUT_TIME_ALLOW;
             }
 
 			if (time_until_meta_input == 0 && tick_input.j_press)
@@ -591,9 +486,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                 Int3 int_editor_position = normCoordsToInt(camera.coords);
                 if (intCoordsWithinLevelBounds(int_editor_position))
                 {
-                    createEntity(WALL, int_editor_position, NORTH);
-                    writeAssetToLevel(level_path, editor_state.picked_entity, int_editor_position);
-                    time_until_meta_input = 8;
+					setTileAtCoords(editor_state.picked_tile, int_editor_position);
+                    time_until_meta_input = META_INPUT_TIME_ALLOW;
                 }
             }
 
@@ -603,31 +497,22 @@ void gameFrame(double delta_time, TickInput tick_input)
                 Vec3 neg_z_basis = {0, 0, -1};
                 RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
 
-                if (tick_input.left_mouse_press)   
-                {
-                    voidEntityAtId(raycast_output.hit_entity_type, raycast_output.hit_entity_info.id);
-                    writeAssetToLevel(level_path, NONE, raycast_output.hit_entity_info.coords);
-                }
-                else if (tick_input.right_mouse_press)  
-                {
-                    createEntity(editor_state.picked_entity, raycast_output.place_coords, NORTH);
-                    writeAssetToLevel(level_path, editor_state.picked_entity, raycast_output.place_coords);
-                }
-                else if (tick_input.middle_mouse_press) 
-                {
-                    editor_state.picked_entity = raycast_output.hit_entity_type; 
-                }
-                time_until_meta_input = 8;
+                if (tick_input.left_mouse_press) setTileAtCoords(NONE, raycast_output.place_coords);
+                else if (tick_input.right_mouse_press) setTileAtCoords(editor_state.picked_tile, raycast_output.place_coords);
+                else if (tick_input.middle_mouse_press) editor_state.picked_tile = getTileAtCoords(raycast_output.hit_coords); 
+                time_until_meta_input = META_INPUT_TIME_ALLOW;
             }
         }
 
         // finished updating state
         world_state = next_world_state;
+        writeBufferToFile();
 
-        for (int wall_index = 0; wall_index < world_state.wall_count; wall_index++)
+        // draw cubes
+        for (int32 tile_index = 0; tile_index < level_dim.x*level_dim.y*level_dim.z; tile_index++)
         {
-            if (world_state.walls[wall_index].id == -1) continue;
-            drawAsset(wall_path, CUBE_3D, world_state.walls[wall_index].coords, NORTH);
+			TileType tile = world_state.buffer[tile_index];
+            if (tile != NONE) drawAsset(getPath(tile), CUBE_3D, bufferIndexToCoords(tile_index), NORTH);
         }
 
 		if (time_until_meta_input != 0) time_until_meta_input--;
