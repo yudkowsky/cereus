@@ -215,7 +215,7 @@ void loadFileToBuffer(char* level_path)
 {
     // get level dimensions
     FILE *file = fopen(level_path, "rb");
-	unsigned char byte = 0;
+	uint8 byte = 0;
     fseek(file, 1, SEEK_CUR); // skip the first byte
 	fread(&byte, 1, 1, file);
     level_dim.x = byte;
@@ -223,35 +223,18 @@ void loadFileToBuffer(char* level_path)
     level_dim.y = byte;
     fread(&byte, 1, 1, file);
     level_dim.z = byte;
-    fclose(file);
 
 	// TODO(spike): write the rest to next_world_state.buffer
+    uint8 buffer[4096];
+	fread(&buffer, 1, level_dim.x*level_dim.y*level_dim.z, file);
+	fclose(file);
+    memcpy(next_world_state.buffer, buffer, level_dim.x*level_dim.y*level_dim.z);
 }
 
 void writeBufferToFile()
 {
 
 }
-
-/*
-void loadFileAsLevel(char* path)
-{
-    next_world_state = (WorldState){0};
-
-	int32 level_size_bytes = level_dim.x*level_dim.y*level_dim.z;
-	FILE *file = fopen(path, "rb");
-    unsigned char byte = 0;
-    fseek(file, 4, SEEK_SET);
-
-    for (int32 byte_index = 0; byte_index < level_size_bytes; byte_index++)
-    {
-		fread(&byte, 1, 1, file);
-
-        if (byte != 5) createEntity(byte, byteIndexToCoords(byte_index), NORTH);
-        else next_world_state.player_coords = byteIndexToCoords(byte_index);
-    }
-}
-*/
 
 // DRAW ASSET
 
