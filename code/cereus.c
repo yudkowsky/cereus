@@ -65,32 +65,33 @@ double accumulator = 0.0;
 
 float TAU = 6.28318530f;
 
-Camera camera = { {0, 0, 4}, {0, 0, 0, 1} };
-float camera_yaw = 0.0f;
-float camera_pitch = 0.0f;
-
 float SENSITIVITY = 0.005f;
 float MOVE_STEP = 0.05f;
 Vec3 DEFAULT_SCALE = { 1.0f, 1.0f, 1.0f };
 float RAYCAST_SEEK_LENGTH = 20.0f;
 int32 META_INPUT_TIME_ALLOW = 8;
 
+Camera camera = {0};
+Vec3 AXIS_YAW = { 0, 1, 0 };
+Vec3 AXIS_PITCH = { 1, 0, 0 };
+float camera_yaw = 0.0f;
+float camera_pitch = 0.0f;
+
 WorldState world_state = {0};
 WorldState next_world_state = {0};
 EditorState editor_state = {0};
+
 char* level_path = "w:/cereus/data/levels/level_1.txt"; // absolute path required to modify original file
 Int3 level_dim = {0};
 int32 time_until_meta_input = 0;
-
-char* loaded_texture_paths[256] = {0};
-AssetToLoad assets_to_load[256] = {0};
-int32 assent_to_load_count = 0;
 
 char* void_path   = "data/sprites/void.png";
 char* grid_path   = "data/sprites/grid.png";
 char* wall_path   = "data/sprites/wall.png";
 char* box_path    = "data/sprites/box.png";
 char* player_path = "data/sprites/player.png";
+
+AssetToLoad assets_to_load[256] = {0};
 
 // CAMERA STUFF
 
@@ -211,10 +212,10 @@ TileType getTileAtCoords(Int3 coords)
 
 // FILE I/O
 
-void loadFileToBuffer(char* level_path)
+void loadFileToBuffer(char* path)
 {
     // get level dimensions
-    FILE *file = fopen(level_path, "rb");
+    FILE *file = fopen(path, "rb");
 	uint8 byte = 0;
     fseek(file, 1, SEEK_CUR); // skip the first byte
 	fread(&byte, 1, 1, file);
@@ -224,16 +225,18 @@ void loadFileToBuffer(char* level_path)
     fread(&byte, 1, 1, file);
     level_dim.z = byte;
 
-	// TODO(spike): write the rest to next_world_state.buffer
     uint8 buffer[4096];
 	fread(&buffer, 1, level_dim.x*level_dim.y*level_dim.z, file);
 	fclose(file);
     memcpy(next_world_state.buffer, buffer, level_dim.x*level_dim.y*level_dim.z);
 }
 
-void writeBufferToFile()
+void writeBufferToFile(char* path)
 {
-
+    FILE *file = fopen(path, "rb+");
+    fseek(file, 4, SEEK_CUR);
+	fwrite(world_state.buffer, 1, 4096, file);
+    fclose(file);
 }
 
 // DRAW ASSET
@@ -257,24 +260,22 @@ char* getPath(TileType tile)
 // assuming one path -> one asset type.
 void drawAsset(char* path, AssetType type, Int3 coords, Direction direction)
 {
-    // check loaded_assets. if this char, continue at this index. if == 0, put path and type, and continue with this index.
 	int32 asset_location = -1;
-    for (int32 asset_index = 0; asset_index < 1024; asset_index++)
+    for (int32 asset_index = 0; asset_index < 256; asset_index++)
     {
-        if (loaded_texture_paths[asset_index] == path)
+        if (assets_to_load[asset_index].path == path) 
         {
             asset_location = asset_index;
             break;
         }
-        if (loaded_texture_paths[asset_index] == 0)
+        if (assets_to_load[asset_index].path == 0)
         {
-            loaded_texture_paths[asset_index] = path;
             asset_location = asset_index;
+            assets_to_load[asset_location].path = path;
+            assets_to_load[asset_location].type = type;
             break;
         }
     }
-    assets_to_load[asset_location].path = path;
-    assets_to_load[asset_location].type = type;
 
     switch (type)
     {
@@ -396,6 +397,12 @@ void gameInitialise(void)
 {	
     loadFileToBuffer(level_path);
 
+	camera.coords = (Vec3){3, 8, 15};
+    camera_yaw = 0; // north
+    camera_pitch = -TAU * 0.25f; // look straight down
+    Vec4 quaternion_yaw   = quaternionFromAxisAngle(AXIS_YAW,   camera_yaw);
+    Vec4 quaternion_pitch = quaternionFromAxisAngle(AXIS_PITCH, camera_pitch);
+    camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
     world_state = next_world_state;
 }
 
@@ -404,7 +411,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 	if (delta_time > 0.1) delta_time = 0.1;
 	accumulator += delta_time;
 
-    camera_yaw   += tick_input.mouse_dx * SENSITIVITY;
+    // modifies globals directly
+    camera_yaw += tick_input.mouse_dx * SENSITIVITY;
     if (camera_yaw >  3.14159265f) camera_yaw -= 2.0f*3.14159265f;
     if (camera_yaw < -3.14159265f) camera_yaw += 2.0f*3.14159265f;
 
@@ -413,10 +421,8 @@ void gameFrame(double delta_time, TickInput tick_input)
     if (camera_pitch >  pitch_limit) camera_pitch =  pitch_limit; 
     if (camera_pitch < -pitch_limit) camera_pitch = -pitch_limit; 
 
-    Vec3 default_quaternion_yaw   = { 0, 1, 0 };
-    Vec3 default_quaternion_pitch = { 1, 0, 0 };
-    Vec4 quaternion_yaw   = quaternionFromAxisAngle(default_quaternion_yaw,   camera_yaw);
-    Vec4 quaternion_pitch = quaternionFromAxisAngle(default_quaternion_pitch, camera_pitch);
+    Vec4 quaternion_yaw   = quaternionFromAxisAngle(AXIS_YAW,   camera_yaw);
+    Vec4 quaternion_pitch = quaternionFromAxisAngle(AXIS_PITCH, camera_pitch);
     camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
 
     while (accumulator >= PHYSICS_INCREMENT)
@@ -467,10 +473,9 @@ void gameFrame(double delta_time, TickInput tick_input)
 
 			if (time_until_meta_input == 0 && tick_input.j_press)
             {
-                Int3 int_editor_position = normCoordsToInt(camera.coords);
-                if (intCoordsWithinLevelBounds(int_editor_position))
+                if (normCoordsWithinLevelBounds(camera.coords))
                 {
-					setTileAtCoords(editor_state.picked_tile, int_editor_position);
+					setTileAtCoords(editor_state.picked_tile, normCoordsToInt(camera.coords));
                     time_until_meta_input = META_INPUT_TIME_ALLOW;
                 }
             }
@@ -480,7 +485,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 Vec3 neg_z_basis = {0, 0, -1};
                 RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
-
                 if (tick_input.left_mouse_press) setTileAtCoords(NONE, raycast_output.hit_coords);
                 else if (tick_input.right_mouse_press) setTileAtCoords(editor_state.picked_tile, raycast_output.place_coords);
                 else if (tick_input.middle_mouse_press) editor_state.picked_tile = getTileAtCoords(raycast_output.hit_coords); 
@@ -489,14 +493,13 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (time_until_meta_input == 0 && tick_input.l_press)
             {
                 editor_state.picked_tile++;
-                if (editor_state.picked_tile == 5) editor_state.picked_tile = GRID;
+                if (editor_state.picked_tile == 5) editor_state.picked_tile = VOID;
                 time_until_meta_input = META_INPUT_TIME_ALLOW;
             }
         }
 
         // finished updating state
         world_state = next_world_state;
-        writeBufferToFile();
 
         // draw cubes
         for (int32 tile_index = 0; tile_index < level_dim.x*level_dim.y*level_dim.z; tile_index++)
@@ -506,6 +509,8 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
 		if (time_until_meta_input != 0) time_until_meta_input--;
+
+        if (editor_state.editor_mode && tick_input.i_press) writeBufferToFile(level_path);
 
         rendererSubmitFrame(assets_to_load, camera);
         memset(assets_to_load, 0, sizeof(assets_to_load));
