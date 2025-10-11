@@ -72,8 +72,9 @@ float RAYCAST_SEEK_LENGTH = 20.0f;
 int32 META_INPUT_TIME_ALLOW = 8;
 
 Camera camera = {0};
-Vec3 AXIS_YAW = { 0, 1, 0 };
-Vec3 AXIS_PITCH = { 1, 0, 0 };
+Int3 AXIS_X = { 1, 0, 0 };
+Int3 AXIS_Y = { 0, 1, 0 };
+Int3 AXIS_Z = { 0, 0, 1 };
 float camera_yaw = 0.0f;
 float camera_pitch = 0.0f;
 
@@ -130,11 +131,6 @@ Vec4 quaternionNormalize(Vec4 quaternion)
     return quaternionScalarMultiply(quaternion, inverse_length);
 }
 
-Vec3 vec3Add(Vec3 a, Vec3 b)
-{
-	return (Vec3){ a.x+b.x, a.y+b.y, a.z+b.z };
-}
-
 Vec3 vec3CrossProduct(Vec3 a, Vec3 b)
 {
 	return (Vec3){ a.y*b.z - a.z*b.y, a.z*b.x - a.x*b.z, a.x*b.y - a.y*b.x };
@@ -185,11 +181,23 @@ bool normCoordsWithinLevelBounds(Vec3 coords) {
 bool intCoordsIsEqual(Int3 a, Int3 b) {
     return (a.x == b.x && a.y == b.y && a.z == b.z); }
 
-// FILE HELPERS
+Vec3 vec3Negative(Vec3 coords) {
+    return (Vec3){ -coords.x, -coords.y, -coords.z }; }
+
+Int3 int3Negative(Int3 coords) {
+    return (Int3){ -coords.x, -coords.y, -coords.z }; }
+
+Vec3 vec3Add(Vec3 a, Vec3 b) {
+	return (Vec3){ a.x+b.x, a.y+b.y, a.z+b.z }; }
+
+Int3 int3Add(Int3 a, Int3 b) {	
+	return (Int3){ a.x+b.x, a.y+b.y, a.z+b.z }; }
+
+// BUFFER INTERFACING
 
 int32 coordsToBufferIndex(Int3 coords)
 {
-    return level_dim.x*level_dim.z*coords.y + level_dim.x*coords.z + coords.x;
+    return level_dim.x*level_dim.z*coords.y + level_dim.x*coords.z + coords.x; 
 }
 
 Int3 bufferIndexToCoords(int32 buffer_index)
@@ -201,20 +209,11 @@ Int3 bufferIndexToCoords(int32 buffer_index)
     return coords;
 }
 
-// ENTITY HANDLING
+void setTileAtCoords(TileType type, Int3 coords) {
+    next_world_state.buffer[coordsToBufferIndex(coords)] = type; }
 
-void setTileAtCoords(TileType type, Int3 coords)
-{
-    int32 index = coordsToBufferIndex(coords); // convert coords to tile index
-    next_world_state.buffer[index] = type; // update buffer at index with type
-}
-
-TileType getTileAtCoords(Int3 coords)
-{
-    int32 index = coordsToBufferIndex(coords);
-    return next_world_state.buffer[index];
-
-}
+TileType getTileAtCoords(Int3 coords) {
+    return next_world_state.buffer[coordsToBufferIndex(coords)]; }
 
 // FILE I/O
 
@@ -422,10 +421,10 @@ void gameInitialise(void)
     }
 
 	camera.coords = (Vec3){3, 8, 15};
-    camera_yaw = 0; // north (toward -z)
+    camera_yaw = 0; // towards -z; north
     camera_pitch = -TAU * 0.25f; // look straight down
-    Vec4 quaternion_yaw   = quaternionFromAxisAngle(AXIS_YAW,   camera_yaw);
-    Vec4 quaternion_pitch = quaternionFromAxisAngle(AXIS_PITCH, camera_pitch);
+    Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera_yaw);
+    Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera_pitch);
     camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
     world_state = next_world_state;
 }
@@ -439,15 +438,15 @@ void gameFrame(double delta_time, TickInput tick_input)
     if (editor_state.editor_mode)
     {
         camera_yaw += tick_input.mouse_dx * SENSITIVITY;
-        if (camera_yaw >  3.14159265f) camera_yaw -= 2.0f*3.14159265f;
-        if (camera_yaw < -3.14159265f) camera_yaw += 2.0f*3.14159265f;
+        if (camera_yaw >  0.5f * TAU) camera_yaw -= TAU; 
+        if (camera_yaw < -0.5f * TAU) camera_yaw += TAU; 
         camera_pitch += tick_input.mouse_dy * SENSITIVITY;
-        float pitch_limit = 1.553343f;
+        float pitch_limit = 0.25f * TAU;
         if (camera_pitch >  pitch_limit) camera_pitch =  pitch_limit; 
         if (camera_pitch < -pitch_limit) camera_pitch = -pitch_limit; 
 
-        Vec4 quaternion_yaw   = quaternionFromAxisAngle(AXIS_YAW,   camera_yaw);
-        Vec4 quaternion_pitch = quaternionFromAxisAngle(AXIS_PITCH, camera_pitch);
+        Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera_yaw);
+        Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera_pitch);
         camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
     }
 
@@ -464,16 +463,47 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press))
             {
-				Int3 next_player_coords = next_world_state.player_coords;
-                if 		(tick_input.w_press) next_player_coords.z--;
-                else if (tick_input.a_press) next_player_coords.x--;
-                else if (tick_input.s_press) next_player_coords.z++;
-                else if (tick_input.d_press) next_player_coords.x++;
+				//Int3 next_player_coords = next_world_state.player_coords;
+                Direction input_direction = 0;
+                Int3 next_player_coords = {0};
+                Direction next_player_direction = 0;
+                if 		(tick_input.w_press) input_direction = NORTH; 
+                else if (tick_input.a_press) input_direction = WEST; 
+                else if (tick_input.s_press) input_direction = SOUTH; 
+                else if (tick_input.d_press) input_direction = EAST; 
 
-                // if movement goes through, delete old buffer position and write new one
-                setTileAtCoords(NONE, next_world_state.player_coords);
-                next_world_state.player_coords = next_player_coords;
-                setTileAtCoords(PLAYER, next_world_state.player_coords);
+                if (input_direction == next_world_state.player_direction || true)
+                {
+               		// already facing this direction; attempt to move 
+                    if 		(tick_input.w_press) next_player_coords = int3Add(next_world_state.player_coords, int3Negative(AXIS_Z));
+                    else if (tick_input.a_press) next_player_coords = int3Add(next_world_state.player_coords, int3Negative(AXIS_X));
+                    else if (tick_input.s_press) next_player_coords = int3Add(next_world_state.player_coords, AXIS_Z);
+                    else if (tick_input.d_press) next_player_coords = int3Add(next_world_state.player_coords, AXIS_X);
+                    TileType next_tile = getTileAtCoords(next_player_coords);
+                    switch (next_tile)
+                    {
+                        case VOID:
+                        case GRID:
+                        case WALL:
+                        {
+                            // no movement - do nothing
+							break;
+                        }
+                        default:
+                        {
+                            // if movement goes through, delete old buffer position and write new one
+                            setTileAtCoords(NONE, next_world_state.player_coords);
+                            next_world_state.player_coords = next_player_coords;
+                            setTileAtCoords(PLAYER, next_world_state.player_coords);
+                        }
+                    }
+                }
+                else
+                {
+                    // attempt to turn. just turn for now
+                    
+        		}
+
 
                 time_until_input = 8;
             }
