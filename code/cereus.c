@@ -76,7 +76,8 @@ Vec3 PLAYER_SCALE = { 0.75f, 0.75f, 0.75f };
 float RAYCAST_SEEK_LENGTH = 20.0f;
 int32 INPUT_TIME_UNTIL_ALLOW = 8;
 
-Int3 IDENTITY_TRANSLATION = { 0, 0, 0 };
+// TODO(spike): doesn't really fit as a vec3 but set this when working on animations
+Vec3 IDENTITY_TRANSLATION = { 0, 0, 0 };
 Int3 AXIS_X = { 1, 0, 0 };
 Int3 AXIS_Y = { 0, 1, 0 };
 Int3 AXIS_Z = { 0, 0, 1 };
@@ -129,9 +130,24 @@ Vec4 quaternionScalarMultiply(Vec4 quaternion, float scalar)
     return (Vec4){ quaternion.x*scalar, quaternion.y*scalar, quaternion.z*scalar, quaternion.w*scalar };
 }
 
+Vec4 quaternionAdd(Vec4 a, Vec4 b)
+{
+    return (Vec4){ a.x+b.x, a.y+b.y, a.z+b.z, a.w+b.w };
+}
+
 Vec4 quaternionSubtract(Vec4 a, Vec4 b)
 {
     return (Vec4){ a.x-b.x, a.y-b.y, a.z-b.z, a.w-b.w };
+}
+
+float quaternionDot(Vec4 a, Vec4 b)
+{
+    return a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w;
+}
+
+Vec4 quaternionConjugate(Vec4 quaternion)
+{
+    return (Vec4){ -quaternion.x, -quaternion.y, -quaternion.z, quaternion.w };
 }
 
 Vec4 quaternionMultiply(Vec4 a, Vec4 b)
@@ -174,10 +190,10 @@ Vec4 directionToQuaternion(Direction direction)
     float yaw = 0.0f;
     switch (direction)
     {
-        case NORTH: yaw = 0.0f; 		break;
-        case WEST:  yaw = 0.25f  * TAU; break;
-        case SOUTH: yaw = -0.25f * TAU; break;
-        case EAST:  yaw = 0.5f   * TAU; break;
+        case NORTH: yaw = 0.0f; 		  break;
+        case WEST:  yaw = 0.25f * TAU;    break;
+        case SOUTH: yaw = 0.5f * TAU;     break;
+        case EAST:  yaw = -0.25f   * TAU; break;
     }
     Vec3 axis = {0, 1, 0};
     return quaternionFromAxisAngle(axis, yaw);
@@ -292,7 +308,7 @@ char* getPath(TileType tile)
 // scale = 1
 // rotation from ROTATION enum to quaternion
 // assuming one path -> one asset type.
-void drawAsset(char* path, AssetType type, Vec3 coords, Vec3 scale, Direction direction)
+void drawAsset(char* path, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation)
 {
     // for breakpoint
     if (path == player_path)
@@ -328,7 +344,7 @@ void drawAsset(char* path, AssetType type, Vec3 coords, Vec3 scale, Direction di
         {
             assets_to_load[asset_location].coords[assets_to_load[asset_location].instance_count]   = coords;
             assets_to_load[asset_location].scale[assets_to_load[asset_location].instance_count]    = scale;
-            assets_to_load[asset_location].rotation[assets_to_load[asset_location].instance_count] = directionToQuaternion(direction);
+            assets_to_load[asset_location].rotation[assets_to_load[asset_location].instance_count] = rotation;
             assets_to_load[asset_location].instance_count++;
             return;
         }
@@ -436,42 +452,49 @@ RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance)
 
 // ANIMATIONS
 
-void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* position_to_change)
+void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change)
 {
     // find next free in Animations
-    int32 animation_index = 0;
+    int32 animation_index = -1;
+    for (int find_anim_index = 0; find_anim_index < 32; find_anim_index++)
+    {
+        if (animations[find_anim_index].frames_left == 0)
+        {
+            animation_index = find_anim_index;
+            animations[animation_index] = (Animation){0};
+            break;
+        }
+    }
 
-    // set frame count
+    // set frame count. the last frame here is the true/correct position
     animations[animation_index].frames_left = 8;
 
     // get difference between coords
-	Vec3 translation_per_frame = (vec3ScalarMultiply(vec3Subtract(position_b, position_a), (float)(1.0f/animations[animation_index].frames_left)));
-    //Vec4 rotation_per_frame = (quaternionScalarMultiply(quaternionSubtract(rotation_a, rotation_b), frame_count));
+	Vec3 translation_per_frame = (vec3ScalarMultiply      (vec3Subtract      (position_b, position_a), (float)(1.0f/animations[animation_index].frames_left)));
+    Vec4 rotation_per_frame    = (quaternionScalarMultiply(quaternionSubtract(rotation_a, rotation_b), (float)(1.0f/animations[animation_index].frames_left)));
 
-    animations[animation_index].position_to_change = position_to_change;
-    for (int frame_index = 0; frame_index < animations[animation_index].frames_left; frame_index++)
+    if (!vec3IsZero(translation_per_frame))
     {
-        animations[animation_index].position[7-frame_index] = vec3Add(*position_to_change, vec3ScalarMultiply(translation_per_frame, (float)(1+frame_index)));
+        animations[animation_index].position_to_change = position_to_change;
+        for (int frame_index = 0; frame_index < animations[animation_index].frames_left; frame_index++)
+        {
+            animations[animation_index].position[animations[animation_index].frames_left-(1+frame_index)] 
+            = vec3Add(*position_to_change, vec3ScalarMultiply(translation_per_frame, (float)(1+frame_index)));
+        }
+    }
+    if(!quaternionIsZero(rotation_per_frame))
+    {
+        animations[animation_index].rotation_to_change = rotation_to_change;
+        
+        if (quaternionDot(rotation_a, rotation_b) < 0.0f) rotation_b = quaternionScalarMultiply(rotation_b, -1.0f);
+        for (int frame_index = 0; frame_index < animations[animation_index].frames_left; frame_index++)
+        {
+            float t = (float)(frame_index + 1) / animations[animation_index].frames_left;
+	    	animations[animation_index].rotation[animations[animation_index].frames_left-(1+frame_index)] 
+            = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(rotation_a, 1.0f - t), quaternionScalarMultiply(rotation_b, t)));
+        }
     }
 }
-
-/*
-void createRotationInterpolationAnimation(Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change)
-{
-    // find next free in Animations
-    int32 animation_index = 0;
-
-    // set frame count
-    int32 frame_count = 8;
-
-    // get difference between coords
-    Vec4 rotation_per_frame = (quaternionScalarMultiply(quaternionSubtract(rotation_a, rotation_b), frame_count));
-
-    if (!quaternionIsZero(rotation_per_frame))
-    {
-    }
-}
-*/
 
 void gameInitialise(void) 
 {	
@@ -484,6 +507,8 @@ void gameInitialise(void)
         {
             next_world_state.player.coords = bufferIndexToCoords(buffer_index);
             next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
+            next_world_state.player.direction = NORTH;
+            next_world_state.player.rotation_quat = directionToQuaternion(NORTH); 
             break;
         }
     }
@@ -562,7 +587,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             {
                                 createInterpolationAnimation(intCoordsToNorm(next_world_state.player.coords), 
                                         					 intCoordsToNorm(next_player_coords), 
-                                                			 &next_world_state.player.position_norm);
+                                                			 &next_world_state.player.position_norm,
+                                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0);
                                 setTileAtCoords(NONE, next_world_state.player.coords);
                                 next_world_state.player.coords = next_player_coords;
                                 setTileAtCoords(PLAYER, next_world_state.player.coords);
@@ -573,11 +599,13 @@ void gameFrame(double delta_time, TickInput tick_input)
                 }
                 else
                 {
-                    // attempt to turn. just turn for now, unless facing opposite.
                    	bool opposite = (abs(input_direction - next_world_state.player.direction) == 2);
                     if (!opposite) 
                     {
-                        //createPlayerRotationAnimation(next_world_state.player.direction, input_direction)
+                        createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
+                                					 directionToQuaternion(next_world_state.player.direction), 
+                                                     directionToQuaternion(input_direction), 
+                                                     &next_world_state.player.rotation_quat);
                         next_world_state.player.direction = input_direction;
                     }
         		}
@@ -650,7 +678,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 		for (int animation_index = 0; animation_index < 32; animation_index++)
         {
 			if (animations[animation_index].frames_left == 0) continue;
-			*animations[animation_index].position_to_change = animations[animation_index].position[animations[animation_index].frames_left-1];
+			if (animations[animation_index].position_to_change != 0) *animations[animation_index].position_to_change = animations[animation_index].position[animations[animation_index].frames_left-1];
+			if (animations[animation_index].rotation_to_change != 0) *animations[animation_index].rotation_to_change = animations[animation_index].rotation[animations[animation_index].frames_left-1];
             animations[animation_index].frames_left--;
         }
 
@@ -661,9 +690,8 @@ void gameFrame(double delta_time, TickInput tick_input)
         for (int32 tile_index = 0; tile_index < level_dim.x*level_dim.y*level_dim.z; tile_index++)
         {
 			TileType tile = world_state.buffer[tile_index];
-			//if (tile == PLAYER) drawAsset(player_path, CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), PLAYER_SCALE, world_state.player.direction);
-			if (tile == PLAYER) drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.direction);
-			else if (tile != NONE) drawAsset(getPath(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, NORTH);
+			if (tile == PLAYER) drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
+			else if (tile != NONE) drawAsset(getPath(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(NORTH));
         }
 
 		if (time_until_input != 0) time_until_input--;
