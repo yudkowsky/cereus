@@ -242,6 +242,7 @@ char* getPath(TileType tile)
 {
     switch(tile)
     {
+        case NONE: return 0;
         case VOID: return void_path;
         case GRID: return grid_path;
         case WALL: return wall_path;
@@ -480,9 +481,15 @@ void gameFrame(double delta_time, TickInput tick_input)
                 Vec3 neg_z_basis = {0, 0, -1};
                 RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
 
-                if (tick_input.left_mouse_press) setTileAtCoords(NONE, raycast_output.place_coords);
+                if (tick_input.left_mouse_press) setTileAtCoords(NONE, raycast_output.hit_coords);
                 else if (tick_input.right_mouse_press) setTileAtCoords(editor_state.picked_tile, raycast_output.place_coords);
                 else if (tick_input.middle_mouse_press) editor_state.picked_tile = getTileAtCoords(raycast_output.hit_coords); 
+                time_until_meta_input = META_INPUT_TIME_ALLOW;
+            }
+            if (time_until_meta_input == 0 && tick_input.l_press)
+            {
+                editor_state.picked_tile++;
+                if (editor_state.picked_tile == 5) editor_state.picked_tile = GRID;
                 time_until_meta_input = META_INPUT_TIME_ALLOW;
             }
         }
