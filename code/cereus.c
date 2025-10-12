@@ -16,7 +16,7 @@ typedef enum TileType
     VOID = 1,
     GRID = 2,
     WALL = 3,
-	BOX = 4,
+    BOX = 4,
     PLAYER = 5,
 }
 TileType;
@@ -27,14 +27,14 @@ typedef struct Entity
     Vec3 position_norm;
     Direction direction;
     Vec4 rotation_quat;
-	int32 id;
+    int32 id;
 }
 Entity;
 
 typedef struct Animation
 {
     int32 frames_left;
-	Vec3* position_to_change;
+    Vec3* position_to_change;
     Vec4* rotation_to_change;
     Vec3 position[32];
     Vec4 rotation[32];
@@ -44,7 +44,8 @@ Animation;
 typedef struct WorldState
 {
     int8 buffer[4096]; // same format as file - 1 byte information per tile
-	Entity player;
+    Entity player;
+    Entity boxes[32];
 }
 
 WorldState;
@@ -59,10 +60,18 @@ EditorState;
 typedef struct RaycastHit
 {
     bool hit;
-	Int3 hit_coords;
+    Int3 hit_coords;
     Int3 place_coords;
 }
 RaycastHit;
+
+typedef struct BoxPush
+{
+    Int3 previous_coords[32];
+    Int3 new_coords[32];
+    int32 count;
+}
+BoxPush;
 
 double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0.0;
@@ -256,8 +265,11 @@ Int3 bufferIndexToCoords(int32 buffer_index)
 void setTileAtCoords(TileType type, Int3 coords) {
     next_world_state.buffer[coordsToBufferIndex(coords)] = type; }
 
+// TODO(spike): simplify
 TileType getTileAtCoords(Int3 coords) {
-    return next_world_state.buffer[coordsToBufferIndex(coords)]; }
+    TileType tile = next_world_state.buffer[coordsToBufferIndex(coords)];
+    return tile;
+}
 
 // FILE I/O
 
@@ -310,13 +322,6 @@ char* getPath(TileType tile)
 // assuming one path -> one asset type.
 void drawAsset(char* path, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation)
 {
-    // for breakpoint
-    if (path == player_path)
-    {
-        int foo = 0;
-        (void)foo;
-    }
-
 	int32 asset_location = -1;
     for (int32 asset_index = 0; asset_index < 256; asset_index++)
     {
@@ -333,7 +338,6 @@ void drawAsset(char* path, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotatio
             break;
         }
     }
-
     switch (type)
     {
         case SPRITE_2D:
@@ -500,16 +504,25 @@ void gameInitialise(void)
 {	
     loadFileToBuffer(level_path);
 
-	// loop though and find where player was placed
+    memset(next_world_state.boxes, -1, sizeof(next_world_state.boxes));
+    int32 box_count = 0;
     for (int buffer_index = 0; buffer_index < level_dim.x*level_dim.y*level_dim.z; buffer_index++)
     {
-    	if (next_world_state.buffer[buffer_index] == PLAYER) 
+		if (next_world_state.buffer[buffer_index] == PLAYER) 
         {
             next_world_state.player.coords = bufferIndexToCoords(buffer_index);
             next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
             next_world_state.player.direction = NORTH;
             next_world_state.player.rotation_quat = directionToQuaternion(NORTH); 
-            break;
+        }
+		else if (next_world_state.buffer[buffer_index] == BOX)
+        {
+            next_world_state.boxes[box_count].coords = bufferIndexToCoords(buffer_index);
+            next_world_state.boxes[box_count].position_norm = intCoordsToNorm(next_world_state.boxes[box_count].coords);
+            next_world_state.boxes[box_count].direction = NORTH;
+            next_world_state.boxes[box_count].rotation_quat = directionToQuaternion(NORTH);
+            next_world_state.boxes[box_count].id = box_count;
+            box_count++;
         }
     }
 
@@ -581,8 +594,31 @@ void gameFrame(double delta_time, TickInput tick_input)
                             // no movement - do nothing
 							break;
                         }
+                        case BOX:
+                        {
+                            /*
+                            //BoxPush boxes_to_push = boxPush(next_player_coords, input_direction);
+							if (boxes_to_push.count != 0)
+                            {
+                                for (int box_index = 0; box_index < boxes_to_push.count; box_index++)
+                                {
+									
+                                }
+
+                                // player
+                                createInterpolationAnimation(intCoordsToNorm(next_world_state.player.coords), 
+                                        					 intCoordsToNorm(next_player_coords), 
+                                                			 &next_world_state.player.position_norm,
+                                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0);
+                                setTileAtCoords(NONE, next_world_state.player.coords);
+                                next_world_state.player.coords = next_player_coords;
+                                setTileAtCoords(PLAYER, next_world_state.player.coords);
+                            }
+                            */
+                        }
                         default:
                         {
+                            // check if would walk off ledge
                             if (getTileAtCoords(int3Add(next_player_coords, int3Negative(AXIS_Y))) != NONE)
                             {
                                 createInterpolationAnimation(intCoordsToNorm(next_world_state.player.coords), 
@@ -646,6 +682,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
 
+            /*
 			if (time_until_input == 0 && tick_input.j_press)
             {
                 if (normCoordsWithinLevelBounds(camera.coords))
@@ -654,15 +691,46 @@ void gameFrame(double delta_time, TickInput tick_input)
                     time_until_input = INPUT_TIME_UNTIL_ALLOW;
                 }
             }
+            */
 
             // inputs that require raycast
-			if (time_until_input == 0 && (tick_input.left_mouse_press || tick_input.right_mouse_press || tick_input.middle_mouse_press))
+			if (time_until_input == 0 && (tick_input.j_press || tick_input.k_press || tick_input.z_press))
             {
                 Vec3 neg_z_basis = {0, 0, -1};
                 RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
-                if (tick_input.left_mouse_press) setTileAtCoords(NONE, raycast_output.hit_coords);
-                else if (tick_input.right_mouse_press) setTileAtCoords(editor_state.picked_tile, raycast_output.place_coords);
-                else if (tick_input.middle_mouse_press) editor_state.picked_tile = getTileAtCoords(raycast_output.hit_coords); 
+                if (tick_input.j_press) 
+                {
+                    if (getTileAtCoords(raycast_output.hit_coords) == BOX)
+                    {
+						for (int box_index = 0; box_index < 32; box_index++)
+                        {
+                            if (!intCoordsIsEqual(next_world_state.boxes[box_index].coords, raycast_output.hit_coords)) continue;
+                            next_world_state.boxes[box_index].coords = (Int3){0};
+                            next_world_state.boxes[box_index].position_norm = (Vec3){0};
+                            next_world_state.boxes[box_index].id = -1;
+                            break;
+                        }
+                    }
+                    setTileAtCoords(NONE, raycast_output.hit_coords);
+                }
+                else if (tick_input.k_press) 
+                {
+                    setTileAtCoords(editor_state.picked_tile, raycast_output.place_coords);
+                    if (editor_state.picked_tile == BOX)
+                    {	
+                        for (int box_index = 0; box_index < 32; box_index++)
+                        {
+                            if (next_world_state.boxes[box_index].id != -1) continue;
+                            next_world_state.boxes[box_index].coords = raycast_output.place_coords;
+                            next_world_state.boxes[box_index].position_norm = intCoordsToNorm(raycast_output.place_coords);
+                            next_world_state.boxes[box_index].direction = NORTH;
+                            next_world_state.boxes[box_index].rotation_quat = directionToQuaternion(NORTH);
+                            next_world_state.boxes[box_index].id = box_index;
+                            break;
+                        }
+                    }
+                }
+                else if (tick_input.z_press) editor_state.picked_tile = getTileAtCoords(raycast_output.hit_coords); 
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
             if (time_until_input == 0 && tick_input.l_press)
@@ -691,13 +759,20 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
 			TileType tile = world_state.buffer[tile_index];
 			if (tile == PLAYER) drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
+			else if (tile == BOX) // doesn't matter what order we render boxes in, all rendered the same. so just loop over boxes array and render
+            {
+                for (int box_index = 0; box_index < 32; box_index++)
+                {
+                    if (world_state.boxes[box_index].id == -1) continue;
+                    drawAsset(box_path, CUBE_3D, world_state.boxes[box_index].position_norm, DEFAULT_SCALE, world_state.boxes[box_index].rotation_quat);
+                }
+            }
 			else if (tile != NONE) drawAsset(getPath(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(NORTH));
         }
 
 		if (time_until_input != 0) time_until_input--;
 
-        // don't want to corrupt file 
-        // if (editor_state.editor_mode && tick_input.i_press) writeBufferToFile(level_path);
+        if (editor_state.editor_mode && tick_input.i_press) writeBufferToFile(level_path);
 
         rendererSubmitFrame(assets_to_load, camera);
         memset(assets_to_load, 0, sizeof(assets_to_load));
