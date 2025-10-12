@@ -65,13 +65,14 @@ typedef struct RaycastHit
 }
 RaycastHit;
 
-typedef struct BoxPush
+typedef struct Push 
 {
     Int3 previous_coords[32];
     Int3 new_coords[32];
+    Vec3* pointer_to_entity[32];
     int32 count;
 }
-BoxPush;
+Push;
 
 double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0.0;
@@ -500,14 +501,38 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
     }
 }
 
+// PUSH ENTITES
+
+Push push(Int3 coords, Direction direction)
+{
+	// fill Push with previous coords per entity, next coords per entity, pointer to that entity and count
+    // will use to call an animation, and for that i need:
+    // pos1, pos2, and adress of entity
+    // to get address: switch on type of entity, loop through that type of entity for the one with that location.
+    // maybe don't switch case? just get array of those entities as a pointer, and loop through the array at that pointer to find coords, for all pointers there?
+}
+
 void gameInitialise(void) 
 {	
     loadFileToBuffer(level_path);
 
     memset(next_world_state.boxes, -1, sizeof(next_world_state.boxes));
     int32 box_count = 0;
+    Entity *pointer = 0;
     for (int buffer_index = 0; buffer_index < level_dim.x*level_dim.y*level_dim.z; buffer_index++)
     {
+        if      (next_world_state.buffer[buffer_index] == PLAYER) pointer = &next_world_state.player;
+        else if (next_world_state.buffer[buffer_index] == BOX) pointer = &next_world_state.boxes[box_count];
+        if (pointer != 0)
+        {
+			pointer->coords = bufferIndexToCoords(buffer_index);
+            pointer->position_norm = intCoordsToNorm(pointer->coords);
+            pointer->direction = NORTH;
+            pointer->rotation_quat = directionToQuaternion(NORTH);
+            pointer->id = box_count; //TODO(spike): find some solution to this that doesn't require switching? i.e. use pointer to object to find count of object generally
+            pointer = 0;
+        }
+        /*
 		if (next_world_state.buffer[buffer_index] == PLAYER) 
         {
             next_world_state.player.coords = bufferIndexToCoords(buffer_index);
@@ -524,6 +549,7 @@ void gameInitialise(void)
             next_world_state.boxes[box_count].id = box_count;
             box_count++;
         }
+        */
     }
 
 	camera.coords = (Vec3){3, 8, 15};
@@ -595,12 +621,12 @@ void gameFrame(double delta_time, TickInput tick_input)
 							break;
                         }
                         case BOX:
+                        /*
                         {
-                            /*
-                            //BoxPush boxes_to_push = boxPush(next_player_coords, input_direction);
-							if (boxes_to_push.count != 0)
+                            Push entities_to_push = boxPush(next_player_coords, input_direction);
+							if (entities_to_push.count != 0)
                             {
-                                for (int box_index = 0; box_index < boxes_to_push.count; box_index++)
+                                for (int box_index = 0; box_index < entities_to_push.count; box_index++)
                                 {
 									
                                 }
@@ -614,8 +640,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 next_world_state.player.coords = next_player_coords;
                                 setTileAtCoords(PLAYER, next_world_state.player.coords);
                             }
-                            */
                         }
+                        */
                         default:
                         {
                             // check if would walk off ledge
