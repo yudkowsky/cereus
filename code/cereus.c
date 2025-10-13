@@ -85,6 +85,7 @@ Vec3 DEFAULT_SCALE = { 1.0f, 1.0f, 1.0f };
 Vec3 PLAYER_SCALE = { 0.75f, 0.75f, 0.75f };
 float RAYCAST_SEEK_LENGTH = 20.0f;
 int32 INPUT_TIME_UNTIL_ALLOW = 8;
+int32 MAX_ENTITY_INSTANCE_COUNT = 32; // TODO(spike): use this everywhere rather than 32
 
 // TODO(spike): doesn't really fit as a vec3 but set this when working on animations
 Vec3 IDENTITY_TRANSLATION = { 0, 0, 0 };
@@ -270,6 +271,18 @@ void setTileAtCoords(TileType type, Int3 coords) {
 TileType getTileAtCoords(Int3 coords) {
     TileType tile = next_world_state.buffer[coordsToBufferIndex(coords)];
     return tile;
+}
+
+int32 getEntityCount(Entity *pointer_to_array)
+{
+    int32 count = 0;
+    // loop over entity array
+    for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
+	{
+		if (pointer_to_array[entity_index].id == -1) continue;
+        count++;
+    }
+    return count;
 }
 
 // FILE I/O
@@ -516,22 +529,30 @@ void gameInitialise(void)
 {	
     loadFileToBuffer(level_path);
 
-    memset(next_world_state.boxes, -1, sizeof(next_world_state.boxes));
-    int32 box_count = 0;
+    memset(next_world_state.boxes, -1, sizeof(next_world_state.boxes)); // TODO(spike): function to zero WorldState in a better way
     Entity *pointer = 0;
     for (int buffer_index = 0; buffer_index < level_dim.x*level_dim.y*level_dim.z; buffer_index++)
     {
-        if      (next_world_state.buffer[buffer_index] == PLAYER) pointer = &next_world_state.player;
-        else if (next_world_state.buffer[buffer_index] == BOX) pointer = &next_world_state.boxes[box_count];
+        if (next_world_state.buffer[buffer_index] == BOX) pointer = next_world_state.boxes;
         if (pointer != 0)
         {
-			pointer->coords = bufferIndexToCoords(buffer_index);
-            pointer->position_norm = intCoordsToNorm(pointer->coords);
-            pointer->direction = NORTH;
-            pointer->rotation_quat = directionToQuaternion(NORTH);
-            pointer->id = box_count; //TODO(spike): find some solution to this that doesn't require switching? i.e. use pointer to object to find count of object generally
+            int32 count = getEntityCount(pointer);
+			pointer[count].coords = bufferIndexToCoords(buffer_index);
+            pointer[count].position_norm = intCoordsToNorm(pointer->coords);
+            pointer[count].direction = NORTH;
+            pointer[count].rotation_quat = directionToQuaternion(pointer->direction);
+            pointer[count].id = getEntityCount(pointer);
             pointer = 0;
         }
+        else if (next_world_state.buffer[buffer_index] == PLAYER) // special case for player, since there is only one
+        {
+            next_world_state.player.coords = bufferIndexToCoords(buffer_index);
+            next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
+            next_world_state.player.direction = NORTH;
+            next_world_state.player.rotation_quat = directionToQuaternion(next_world_state.player.direction);
+            next_world_state.player.id = 0;
+        }
+
         /*
 		if (next_world_state.buffer[buffer_index] == PLAYER) 
         {
@@ -726,6 +747,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
                 if (tick_input.j_press) 
                 {
+                    // TODO(spike): could use pointer here to update state
                     if (getTileAtCoords(raycast_output.hit_coords) == BOX)
                     {
 						for (int box_index = 0; box_index < 32; box_index++)
@@ -741,7 +763,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 }
                 else if (tick_input.k_press) 
                 {
-                    setTileAtCoords(editor_state.picked_tile, raycast_output.place_coords);
+                    // TODO(spike): could also use pointer here
                     if (editor_state.picked_tile == BOX)
                     {	
                         for (int box_index = 0; box_index < 32; box_index++)
@@ -755,6 +777,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             break;
                         }
                     }
+                    setTileAtCoords(editor_state.picked_tile, raycast_output.place_coords);
                 }
                 else if (tick_input.z_press) editor_state.picked_tile = getTileAtCoords(raycast_output.hit_coords); 
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
@@ -784,6 +807,8 @@ void gameFrame(double delta_time, TickInput tick_input)
         for (int32 tile_index = 0; tile_index < level_dim.x*level_dim.y*level_dim.z; tile_index++)
         {
 			TileType tile = world_state.buffer[tile_index];
+
+            // entities rendered differently because i want to render them based on norm_coords. so we loop here
 			if (tile == PLAYER) drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
 			else if (tile == BOX) // doesn't matter what order we render boxes in, all rendered the same. so just loop over boxes array and render
             {
@@ -793,6 +818,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                     drawAsset(box_path, CUBE_3D, world_state.boxes[box_index].position_norm, DEFAULT_SCALE, world_state.boxes[box_index].rotation_quat);
                 }
             }
+
+            // if no animations just render normally
 			else if (tile != NONE) drawAsset(getPath(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(NORTH));
         }
 

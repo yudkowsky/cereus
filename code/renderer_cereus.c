@@ -190,8 +190,8 @@ void mat4BuildTranslation(float output_matrix[16], Vec3 translation)
 void mat4BuildScale(float output_matrix[16], Vec3 scale)
 {
     memset(output_matrix, 0, sizeof(float) * 16);
-	output_matrix[0] = scale.x;
-    output_matrix[5] = scale.y;
+	output_matrix[0]  = scale.x;
+    output_matrix[5]  = scale.y;
     output_matrix[10] = scale.z;
     output_matrix[15] = 1.0f;
 }
@@ -577,13 +577,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     instance_creation_info.enabledExtensionCount = 2;
     instance_creation_info.ppEnabledExtensionNames = instance_extensions;
 
-    VkResult instance_creation_result = vkCreateInstance(&instance_creation_info, 0, &renderer_state.vulkan_instance_handle);
-
-    if (instance_creation_result != VK_SUCCESS)
-    {
-        return;
-        // TODO(spike): instance needs cleanup
-    }
+    vkCreateInstance(&instance_creation_info, 0, &renderer_state.vulkan_instance_handle);
 
     // struct that holds info that the surfaces uses to talk to platform layer
 	VkWin32SurfaceCreateInfoKHR surface_creation_info = {0};
@@ -591,22 +585,12 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     surface_creation_info.hinstance = renderer_state.platform_handles.module_handle;
     surface_creation_info.hwnd = renderer_state.platform_handles.window_handle;
 
-	VkResult surface_creation_result = vkCreateWin32SurfaceKHR(renderer_state.vulkan_instance_handle, &surface_creation_info, 0, &renderer_state.surface_handle);
-
-    if (surface_creation_result != VK_SUCCESS) 
-    {
-        return;
-        // TODO(spike): instance needs cleanup
-    }
+	vkCreateWin32SurfaceKHR(renderer_state.vulkan_instance_handle, &surface_creation_info, 0, &renderer_state.surface_handle);
 
 	uint32 device_count = 0;
     vkEnumeratePhysicalDevices(renderer_state.vulkan_instance_handle, &device_count, 0);
 
-	if (device_count == 0)
-    {
-        return;
-        // TODO(spike): surface + instance need cleanup
-    }
+	if (device_count == 0) return;
 
 	VkPhysicalDevice* physical_devices = malloc(sizeof(*physical_devices) * device_count);
 	vkEnumeratePhysicalDevices(renderer_state.vulkan_instance_handle, &device_count, physical_devices);
@@ -679,11 +663,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     uint32 present_mode_count = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(renderer_state.physical_device_handle, renderer_state.surface_handle, &present_mode_count, 0);
     
-    if (present_mode_count == 0)
-    {
-        return;
-        // TODO(spike): surface + instance needs cleanup
-    }
+    if (present_mode_count == 0) return;
 
     VkPresentModeKHR* present_modes = malloc(sizeof(*present_modes) * present_mode_count);
     vkGetPhysicalDeviceSurfacePresentModesKHR(renderer_state.physical_device_handle, renderer_state.surface_handle, &present_mode_count, present_modes);
@@ -706,11 +686,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     uint32 surface_format_count = 0; // the allowed (pixel format, color space) pairs for images to present.
     vkGetPhysicalDeviceSurfaceFormatsKHR(renderer_state.physical_device_handle, renderer_state.surface_handle, &surface_format_count, 0);
 
-	if (surface_format_count == 0)
-    {
-        return;
-        // TODO(spike): surface + instance need cleanup
-    }
+	if (surface_format_count == 0) return;
 
     VkSurfaceFormatKHR* surface_formats = malloc(sizeof(*surface_formats) * surface_format_count);
     vkGetPhysicalDeviceSurfaceFormatsKHR(renderer_state.physical_device_handle, renderer_state.surface_handle, &surface_format_count, surface_formats);
@@ -788,13 +764,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	device_info.ppEnabledExtensionNames = device_extensions;
     device_info.pEnabledFeatures = &device_features;
 
-    VkResult logical_device_creation_result = vkCreateDevice(renderer_state.physical_device_handle, &device_info, 0, &renderer_state.logical_device_handle);
-
-    if (logical_device_creation_result != VK_SUCCESS)
-    {
-        return;
-        // TODO(spike): instance + surface needs cleanup
-    }
+    vkCreateDevice(renderer_state.physical_device_handle, &device_info, 0, &renderer_state.logical_device_handle);
 
     VkExtent2D chosen_extent = surface_capabilities.currentExtent;
 
@@ -899,13 +869,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 		swapchain_creation_info.pQueueFamilyIndices = queue_family_indices;
     }
 
-	VkResult swapchain_creation_result = vkCreateSwapchainKHR(renderer_state.logical_device_handle, &swapchain_creation_info, 0, &renderer_state.swapchain_handle);
-
-    if (swapchain_creation_result != VK_SUCCESS)
-    {
-        return;
-        // TODO(spike): logical device + surface + instance need cleanup
-    }
+	vkCreateSwapchainKHR(renderer_state.logical_device_handle, &swapchain_creation_info, 0, &renderer_state.swapchain_handle);
 
 	vkGetSwapchainImagesKHR(renderer_state.logical_device_handle, renderer_state.swapchain_handle, &renderer_state.swapchain_image_count, 0);
     VkImage* swapchain_images = malloc(sizeof(*swapchain_images) * renderer_state.swapchain_image_count);
@@ -929,14 +893,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     for (uint32 swapchain_image_increment = 0; swapchain_image_increment < renderer_state.swapchain_image_count; swapchain_image_increment++)
     {
         view_creation_info.image = swapchain_images[swapchain_image_increment];
-        VkResult view_creation_result = vkCreateImageView(renderer_state.logical_device_handle, &view_creation_info, 0, &renderer_state.swapchain_image_views[swapchain_image_increment]);
-        if (view_creation_result != VK_SUCCESS)
-        {
-            free(swapchain_images);
-            free(renderer_state.swapchain_image_views);
-            return;
-            // TODO(spike): swapchain + logical device + surface + instance need cleanup
-        }
+    	vkCreateImageView(renderer_state.logical_device_handle, &view_creation_info, 0, &renderer_state.swapchain_image_views[swapchain_image_increment]);
     }
 
 	free(swapchain_images);
@@ -997,13 +954,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     render_pass_creation_info.dependencyCount = 1;
     render_pass_creation_info.pDependencies = &color_output_subpass_dependency; // same story here - just a pointer to our one dependency, rather than an array.
 	
-    VkResult render_pass_creation_result = vkCreateRenderPass(renderer_state.logical_device_handle, &render_pass_creation_info, 0, &renderer_state.render_pass_handle);
-
-    if (render_pass_creation_result != VK_SUCCESS)
-    {
-        return;
-        // TODO(spike): images + swapchain + device + surface + instance need cleanup
-    }
+    vkCreateRenderPass(renderer_state.logical_device_handle, &render_pass_creation_info, 0, &renderer_state.render_pass_handle);
 
 	// a framebuffer is the binding of the render pass' attachment slots to specific image views, with a fixed size (width/height) and layer count. 
     // it doesn't allocate memory, it just ties the render pass to the actual image 
@@ -1020,17 +971,11 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 
     for (uint32 swapchain_image_index = 0; swapchain_image_index < renderer_state.swapchain_image_count; swapchain_image_index++)
     {
-		VkImageView attachments[2] = { renderer_state.swapchain_image_views[swapchain_image_index], renderer_state.depth_image_view };
+		VkImageView framebuffer_attachments[2] = { renderer_state.swapchain_image_views[swapchain_image_index], renderer_state.depth_image_view };
         framebuffer_creation_info.attachmentCount = 2;
-        framebuffer_creation_info.pAttachments = attachments;
+        framebuffer_creation_info.pAttachments = framebuffer_attachments;
 
-        VkResult framebuffer_creation_result = vkCreateFramebuffer(renderer_state.logical_device_handle, &framebuffer_creation_info, 0, &renderer_state.swapchain_framebuffers[swapchain_image_index]);
-
-        if (framebuffer_creation_result != VK_SUCCESS)
-        {
-            return;
-            // TODO(spike): render pass + images + swapchain + device + surface + instance need cleanup
-        }
+        vkCreateFramebuffer(renderer_state.logical_device_handle, &framebuffer_creation_info, 0, &renderer_state.swapchain_framebuffers[swapchain_image_index]);
     }
 
 	VkCommandPoolCreateInfo command_pool_creation_info = {0}; // describes the command pool tied to graphics queue family
@@ -1038,13 +983,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     command_pool_creation_info.queueFamilyIndex = renderer_state.graphics_family_index;
     command_pool_creation_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT; // lets us reset / rerecord command buffers
 
-	VkResult command_pool_creation_result = vkCreateCommandPool(renderer_state.logical_device_handle, &command_pool_creation_info, 0, &renderer_state.graphics_command_pool_handle);
-
-    if (command_pool_creation_result != VK_SUCCESS)
-    {
-        return;
-        // TODO(spike): framebuffer + render pass + images + swapchain + device + surface + instance need cleanup
-    }
+	vkCreateCommandPool(renderer_state.logical_device_handle, &command_pool_creation_info, 0, &renderer_state.graphics_command_pool_handle);
 
     renderer_state.swapchain_command_buffers = malloc(sizeof(VkCommandBuffer) * renderer_state.swapchain_image_count);
 
@@ -1054,13 +993,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     command_buffer_allocation_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; // primary command buffers submit directly to the graphics queue. secondary CBs are for nesting / multithreading 
     command_buffer_allocation_info.commandBufferCount = renderer_state.swapchain_image_count;
 	
-    VkResult command_buffer_allocation_result = vkAllocateCommandBuffers(renderer_state.logical_device_handle, &command_buffer_allocation_info, renderer_state.swapchain_command_buffers);
-
-	if (command_buffer_allocation_result != VK_SUCCESS)
-    {
-		return;
-        // TODO(spike): command pool + framebuffer + render pass + images + swapchain + device + surface + instance need cleanup
-    }
+    vkAllocateCommandBuffers(renderer_state.logical_device_handle, &command_buffer_allocation_info, renderer_state.swapchain_command_buffers);
 
 	VkCommandBufferBeginInfo command_buffer_begin_info = {0}; // container for how a command buffer begins recording (unused for us, no flags needed)
 	command_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1146,90 +1079,84 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     VkBuffer vertex_staging_buffer;
     VkDeviceMemory vertex_staging_memory;
 
-    { // scope for variable name collision (ig TODO(spike): rename variables involved)
-        VkBufferCreateInfo buffer_creation_info = {0};
-        buffer_creation_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        buffer_creation_info.size = vertices_size;
-        buffer_creation_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        buffer_creation_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    // scope for variable name collision (ig TODO(spike): rename variables involved)
+    VkBufferCreateInfo buffer_creation_info = {0};
+    buffer_creation_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_creation_info.size = vertices_size;
+    buffer_creation_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    buffer_creation_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &vertex_staging_buffer);
+    vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &vertex_staging_buffer);
 
-        VkMemoryRequirements memory_requirements;
-        vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, vertex_staging_buffer, &memory_requirements);
+    VkMemoryRequirements memory_requirements;
+    vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, vertex_staging_buffer, &memory_requirements);
 
-        VkMemoryAllocateInfo memory_allocation_info = {0};
-		memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		memory_allocation_info.allocationSize = memory_requirements.size;
-		memory_allocation_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    VkMemoryAllocateInfo memory_allocation_info = {0};
+    memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    memory_allocation_info.allocationSize = memory_requirements.size;
+    memory_allocation_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-		vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &vertex_staging_memory);
-        vkBindBufferMemory(renderer_state.logical_device_handle, vertex_staging_buffer, vertex_staging_memory, 0);
+    vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &vertex_staging_memory);
+    vkBindBufferMemory(renderer_state.logical_device_handle, vertex_staging_buffer, vertex_staging_memory, 0);
 
-        void* mapped = 0;
-        vkMapMemory(renderer_state.logical_device_handle, vertex_staging_memory, 0, vertices_size, 0, &mapped);
-        memcpy(mapped, CUBE_VERTICES, (size_t)vertices_size);
-        vkUnmapMemory(renderer_state.logical_device_handle, vertex_staging_memory);
-    }
+    void* mapped = 0;
+    vkMapMemory(renderer_state.logical_device_handle, vertex_staging_memory, 0, vertices_size, 0, &mapped);
+    memcpy(mapped, CUBE_VERTICES, (size_t)vertices_size);
+    vkUnmapMemory(renderer_state.logical_device_handle, vertex_staging_memory);
 
     // create gpu-local vertex buffer
-    {
-        VkBufferCreateInfo buffer_creation_info = {0};
-        buffer_creation_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        buffer_creation_info.size = vertices_size;
-        buffer_creation_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-        buffer_creation_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    buffer_creation_info = (VkBufferCreateInfo){0};
+    buffer_creation_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_creation_info.size = vertices_size;
+    buffer_creation_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    buffer_creation_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &renderer_state.cube_vertex_buffer);
+    vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &renderer_state.cube_vertex_buffer);
 
-        VkMemoryRequirements memory_requirements;
-        vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, renderer_state.cube_vertex_buffer, &memory_requirements);
+    vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, renderer_state.cube_vertex_buffer, &memory_requirements);
 
-        VkMemoryAllocateInfo memory_allocation_info = {0};
-        memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        memory_allocation_info.allocationSize = memory_requirements.size;
-        memory_allocation_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    memory_allocation_info = (VkMemoryAllocateInfo){0};
+    memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    memory_allocation_info.allocationSize = memory_requirements.size;
+    memory_allocation_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-        vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &renderer_state.cube_vertex_memory);
-        vkBindBufferMemory(renderer_state.logical_device_handle, renderer_state.cube_vertex_buffer, renderer_state.cube_vertex_memory, 0);
-    }
+    vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &renderer_state.cube_vertex_memory);
+    vkBindBufferMemory(renderer_state.logical_device_handle, renderer_state.cube_vertex_buffer, renderer_state.cube_vertex_memory, 0);
 
     // copy staging to device-local vertex buffer
-    {
-        VkCommandBufferAllocateInfo command_buffer_allocation_info = {0};
-        command_buffer_allocation_info .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        command_buffer_allocation_info .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        command_buffer_allocation_info .commandPool = renderer_state.graphics_command_pool_handle;
-        command_buffer_allocation_info .commandBufferCount = 1;
+    command_buffer_allocation_info = (VkCommandBufferAllocateInfo){0};
+    command_buffer_allocation_info .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    command_buffer_allocation_info .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    command_buffer_allocation_info .commandPool = renderer_state.graphics_command_pool_handle;
+    command_buffer_allocation_info .commandBufferCount = 1;
 
-        VkCommandBuffer command_buffer;
-        vkAllocateCommandBuffers(renderer_state.logical_device_handle, &command_buffer_allocation_info, &command_buffer);
+    VkCommandBuffer command_buffer;
+    vkAllocateCommandBuffers(renderer_state.logical_device_handle, &command_buffer_allocation_info, &command_buffer);
 
-        VkCommandBufferBeginInfo command_buffer_begin_info = {0};
-        command_buffer_begin_info .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        command_buffer_begin_info .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    command_buffer_begin_info = (VkCommandBufferBeginInfo){0};
+    command_buffer_begin_info .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    command_buffer_begin_info .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-        vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
+    vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
 
-        VkBufferCopy buffer_copy = {0};
-        buffer_copy .srcOffset = 0;
-        buffer_copy .dstOffset = 0;
-        buffer_copy .size = vertices_size;
+    VkBufferCopy buffer_copy = {0};
+    buffer_copy .srcOffset = 0;
+    buffer_copy .dstOffset = 0;
+    buffer_copy .size = vertices_size;
 
-        vkCmdCopyBuffer(command_buffer, vertex_staging_buffer, renderer_state.cube_vertex_buffer, 1, &buffer_copy);
+    vkCmdCopyBuffer(command_buffer, vertex_staging_buffer, renderer_state.cube_vertex_buffer, 1, &buffer_copy);
 
-        vkEndCommandBuffer(command_buffer);
+    vkEndCommandBuffer(command_buffer);
 
-        VkSubmitInfo submit_info = {0};
-        submit_info .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit_info .commandBufferCount = 1;
-        submit_info .pCommandBuffers = &command_buffer;
+    VkSubmitInfo submit_info = {0};
+    submit_info .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info .commandBufferCount = 1;
+    submit_info .pCommandBuffers = &command_buffer;
 
-        vkQueueSubmit(renderer_state.graphics_queue_handle, 1, &submit_info, VK_NULL_HANDLE);
-        vkQueueWaitIdle(renderer_state.graphics_queue_handle);
+    vkQueueSubmit(renderer_state.graphics_queue_handle, 1, &submit_info, VK_NULL_HANDLE);
+    vkQueueWaitIdle(renderer_state.graphics_queue_handle);
 
-        vkFreeCommandBuffers(renderer_state.logical_device_handle, renderer_state.graphics_command_pool_handle, 1, &command_buffer);
-    }
+    vkFreeCommandBuffers(renderer_state.logical_device_handle, renderer_state.graphics_command_pool_handle, 1, &command_buffer);
 
     // clean up vertex staging resources
     vkDestroyBuffer(renderer_state.logical_device_handle, vertex_staging_buffer, 0);
@@ -1239,90 +1166,81 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     VkBuffer index_staging_buffer;
     VkDeviceMemory index_staging_memory;
 
-    { // TODO(spike): rename variables involved, to avoid scope requirement)
-        VkBufferCreateInfo buffer_creation_info = {0};
-        buffer_creation_info .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        buffer_creation_info .size = indices_size;
-        buffer_creation_info .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        buffer_creation_info .sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    buffer_creation_info = (VkBufferCreateInfo){0};
+    buffer_creation_info .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_creation_info .size = indices_size;
+    buffer_creation_info .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    buffer_creation_info .sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &index_staging_buffer);
+    vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &index_staging_buffer);
 
-        VkMemoryRequirements memory_requirements;
-        vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, index_staging_buffer, &memory_requirements);
+    vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, index_staging_buffer, &memory_requirements);
 
-        VkMemoryAllocateInfo memory_allocation_info = {0};
-        memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        memory_allocation_info.allocationSize = memory_requirements.size;
-        memory_allocation_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    memory_allocation_info = (VkMemoryAllocateInfo){0};
+    memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    memory_allocation_info.allocationSize = memory_requirements.size;
+    memory_allocation_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-        vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &index_staging_memory);
-        vkBindBufferMemory(renderer_state.logical_device_handle, index_staging_buffer, index_staging_memory, 0);
+    vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &index_staging_memory);
+    vkBindBufferMemory(renderer_state.logical_device_handle, index_staging_buffer, index_staging_memory, 0);
 
-        void* mapped = 0;
-        vkMapMemory(renderer_state.logical_device_handle, index_staging_memory, 0, indices_size, 0, &mapped);
-        memcpy(mapped, CUBE_INDICES, (size_t)indices_size);
-        vkUnmapMemory(renderer_state.logical_device_handle, index_staging_memory);
-    }
+    mapped = 0;
+    vkMapMemory(renderer_state.logical_device_handle, index_staging_memory, 0, indices_size, 0, &mapped);
+    memcpy(mapped, CUBE_INDICES, (size_t)indices_size);
+    vkUnmapMemory(renderer_state.logical_device_handle, index_staging_memory);
 
     // create gpu-local index buffer
-    {
-        VkBufferCreateInfo buffer_creation_info = {0};
-        buffer_creation_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        buffer_creation_info.size = indices_size;
-        buffer_creation_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-        buffer_creation_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    buffer_creation_info = (VkBufferCreateInfo){0};
+    buffer_creation_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_creation_info.size = indices_size;
+    buffer_creation_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    buffer_creation_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &renderer_state.cube_index_buffer);
+    vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &renderer_state.cube_index_buffer);
 
-        VkMemoryRequirements memory_requirements;
-        vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, renderer_state.cube_index_buffer, &memory_requirements);
+    vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, renderer_state.cube_index_buffer, &memory_requirements);
 
-        VkMemoryAllocateInfo memory_allocation_info = {0};
-        memory_allocation_info .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        memory_allocation_info .allocationSize = memory_requirements.size;
-        memory_allocation_info .memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    memory_allocation_info = (VkMemoryAllocateInfo){0};
+    memory_allocation_info .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    memory_allocation_info .allocationSize = memory_requirements.size;
+    memory_allocation_info .memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-        vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &renderer_state.cube_index_memory);
-        vkBindBufferMemory(renderer_state.logical_device_handle, renderer_state.cube_index_buffer, renderer_state.cube_index_memory, 0);
-    }
+    vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &renderer_state.cube_index_memory);
+    vkBindBufferMemory(renderer_state.logical_device_handle, renderer_state.cube_index_buffer, renderer_state.cube_index_memory, 0);
 
     // copy staging to device-local index buffer
-    {
-        VkCommandBufferAllocateInfo command_buffer_allocation_info = {0};
-        command_buffer_allocation_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-        command_buffer_allocation_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        command_buffer_allocation_info.commandPool = renderer_state.graphics_command_pool_handle;
-        command_buffer_allocation_info.commandBufferCount = 1;
+    command_buffer_allocation_info = (VkCommandBufferAllocateInfo){0};
+    command_buffer_allocation_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    command_buffer_allocation_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    command_buffer_allocation_info.commandPool = renderer_state.graphics_command_pool_handle;
+    command_buffer_allocation_info.commandBufferCount = 1;
 
-        VkCommandBuffer command_buffer;
-        vkAllocateCommandBuffers(renderer_state.logical_device_handle, &command_buffer_allocation_info, &command_buffer);
+    vkAllocateCommandBuffers(renderer_state.logical_device_handle, &command_buffer_allocation_info, &command_buffer);
 
-        VkCommandBufferBeginInfo command_buffer_begin_info = {0};
-        command_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        command_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    command_buffer_begin_info = (VkCommandBufferBeginInfo){0};
+    command_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    command_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-        vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
+    vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
 
-        VkBufferCopy buffer_copy = {0};
-        buffer_copy .srcOffset = 0;
-        buffer_copy .dstOffset = 0;
-        buffer_copy .size = indices_size;
+    buffer_copy = (VkBufferCopy){0};
+    buffer_copy .srcOffset = 0;
+    buffer_copy .dstOffset = 0;
+    buffer_copy .size = indices_size;
 
-        vkCmdCopyBuffer(command_buffer, index_staging_buffer, renderer_state.cube_index_buffer, 1, &buffer_copy);
+    vkCmdCopyBuffer(command_buffer, index_staging_buffer, renderer_state.cube_index_buffer, 1, &buffer_copy);
 
-        vkEndCommandBuffer(command_buffer);
+    vkEndCommandBuffer(command_buffer);
 
-        VkSubmitInfo submit_info = {0};
-        submit_info .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit_info .commandBufferCount = 1;
-        submit_info .pCommandBuffers = &command_buffer;
+    submit_info = (VkSubmitInfo){0};
+    submit_info .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info .commandBufferCount = 1;
+    submit_info .pCommandBuffers = &command_buffer;
 
-        vkQueueSubmit(renderer_state.graphics_queue_handle, 1, &submit_info, VK_NULL_HANDLE);
-        vkQueueWaitIdle(renderer_state.graphics_queue_handle);
+    vkQueueSubmit(renderer_state.graphics_queue_handle, 1, &submit_info, VK_NULL_HANDLE);
+    vkQueueWaitIdle(renderer_state.graphics_queue_handle);
 
-        vkFreeCommandBuffers(renderer_state.logical_device_handle, renderer_state.graphics_command_pool_handle, 1, &command_buffer);
-    }
+    vkFreeCommandBuffers(renderer_state.logical_device_handle, renderer_state.graphics_command_pool_handle, 1, &command_buffer);
 
     // clean up index staging resources
     vkDestroyBuffer(renderer_state.logical_device_handle, index_staging_buffer, 0);
@@ -1333,28 +1251,28 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	// triangle time (should all be mostly temporary) TODO(spike): re-evaluate this after i've set up a fixed-size memory block for the entire game
     VkDeviceSize dynamic_vertex_stream_bytes = 65536 * sizeof(Vertex);
 
-    VkBufferCreateInfo buffer_creation_info = {0};
-    buffer_creation_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_creation_info.size = dynamic_vertex_stream_bytes;
-    buffer_creation_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    buffer_creation_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE; // should probably test on excl. vs. concurrent here, depending on what we did before?
+    VkBufferCreateInfo vertex_buffer_creation_info = {0};
+    vertex_buffer_creation_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    vertex_buffer_creation_info.size = dynamic_vertex_stream_bytes;
+    vertex_buffer_creation_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    vertex_buffer_creation_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE; // should probably test on excl. vs. concurrent here, depending on what we did before?
 
     vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &renderer_state.vertex_buffer_handle);
 
-    VkMemoryRequirements memory_requirements = {0};
-    vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, renderer_state.vertex_buffer_handle, &memory_requirements);
+    VkMemoryRequirements vertex_memory_requirements = {0};
+    vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, renderer_state.vertex_buffer_handle, &vertex_memory_requirements);
 	uint32 memory_type_index = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 	if (memory_type_index == UINT32_MAX)
     {
         return;
     }
 
-    VkMemoryAllocateInfo memory_allocation_info = {0};
-    memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-    memory_allocation_info.allocationSize = memory_requirements.size;
-    memory_allocation_info.memoryTypeIndex = memory_type_index;
+    VkMemoryAllocateInfo vertex_memory_allocation_info = {0};
+	vertex_memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+    vertex_memory_allocation_info.allocationSize = memory_requirements.size;
+    vertex_memory_allocation_info.memoryTypeIndex = memory_type_index;
 
-    vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &renderer_state.vertex_memory);
+    vkAllocateMemory(renderer_state.logical_device_handle, &vertex_memory_allocation_info, 0, &renderer_state.vertex_memory);
 
     vkBindBufferMemory(renderer_state.logical_device_handle, renderer_state.vertex_buffer_handle, renderer_state.vertex_memory, 0);
 	vkMapMemory(renderer_state.logical_device_handle, renderer_state.vertex_memory, 0, VK_WHOLE_SIZE, 0, &renderer_state.mapped_vertex_pointer);
