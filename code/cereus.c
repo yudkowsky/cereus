@@ -85,14 +85,14 @@ Vec3 DEFAULT_SCALE = { 1.0f, 1.0f, 1.0f };
 Vec3 PLAYER_SCALE = { 0.75f, 0.75f, 0.75f };
 float RAYCAST_SEEK_LENGTH = 20.0f;
 int32 INPUT_TIME_UNTIL_ALLOW = 8;
-int32 MAX_ENTITY_INSTANCE_COUNT = 32; // TODO(spike): use this everywhere rather than 32
+int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 int32 MAX_ENTITY_PUSH_COUNT = 32;
+int32 MAX_ANIMATION_COUNT = 32;
 
-// TODO(spike): doesn't really fit as a vec3 but set this when working on animations
-Vec3 IDENTITY_TRANSLATION = { 0, 0, 0 };
 Int3 AXIS_X = { 1, 0, 0 };
 Int3 AXIS_Y = { 0, 1, 0 };
 Int3 AXIS_Z = { 0, 0, 1 };
+Vec3 IDENTITY_TRANSLATION = { 0, 0, 0 };
 Vec4 IDENTITY_QUATERNION = { 0, 0, 0, 1};
 
 Camera camera = {0};
@@ -268,11 +268,8 @@ Int3 bufferIndexToCoords(int32 buffer_index)
 void setTileAtCoords(TileType type, Int3 coords) {
     next_world_state.buffer[coordsToBufferIndex(coords)] = type; }
 
-// TODO(spike): simplify
 TileType getTileAtCoords(Int3 coords) {
-    TileType tile = next_world_state.buffer[coordsToBufferIndex(coords)];
-    return tile;
-}
+    return next_world_state.buffer[coordsToBufferIndex(coords)]; }
 
 int32 getEntityCount(Entity *pointer_to_array)
 {
@@ -475,7 +472,7 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
 {
     // find next free in Animations
     int32 animation_index = -1;
-    for (int find_anim_index = 0; find_anim_index < 32; find_anim_index++)
+    for (int find_anim_index = 0; find_anim_index < MAX_ANIMATION_COUNT; find_anim_index++)
     {
         if (animations[find_anim_index].frames_left == 0)
         {
@@ -563,12 +560,7 @@ bool canPush(Int3 coords, Direction direction)
 
 Push push(Int3 coords, Direction direction)
 {
-	// fill Push with previous coords per entity, next coords per entity, pointer to that entity - and amount of entities to push 
-    // will use to call an animation, and for that i need:
-    // pos1, pos2, and adress of entity
-    // to get address: switch on type of entity, loop through that type of entity for the one with that location.
-    // maybe don't switch case? just get array of those entities as a pointer, and loop through the array at that pointer to find coords, for all pointers there?
-    Push entities_to_push = {0}; // MAX_ENTITY_PUSH_COUNT
+    Push entities_to_push = {0}; 
 	Int3 current_coords = coords;
     for (int push_index = 0; push_index < MAX_ENTITY_PUSH_COUNT; push_index++)
     {
@@ -609,25 +601,6 @@ void gameInitialise(void)
             next_world_state.player.rotation_quat = directionToQuaternion(next_world_state.player.direction);
             next_world_state.player.id = 0;
         }
-
-        /*
-		if (next_world_state.buffer[buffer_index] == PLAYER) 
-        {
-            next_world_state.player.coords = bufferIndexToCoords(buffer_index);
-            next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
-            next_world_state.player.direction = NORTH;
-            next_world_state.player.rotation_quat = directionToQuaternion(NORTH); 
-        }
-		else if (next_world_state.buffer[buffer_index] == BOX)
-        {
-            next_world_state.boxes[box_count].coords = bufferIndexToCoords(buffer_index);
-            next_world_state.boxes[box_count].position_norm = intCoordsToNorm(next_world_state.boxes[box_count].coords);
-            next_world_state.boxes[box_count].direction = NORTH;
-            next_world_state.boxes[box_count].rotation_quat = directionToQuaternion(NORTH);
-            next_world_state.boxes[box_count].id = box_count;
-            box_count++;
-        }
-        */
     }
 
 	camera.coords = (Vec3){3, 8, 15};
@@ -792,11 +765,29 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
 
             /*
-            // TODO(spike): set this up with the box update thing
-			if (time_until_input == 0 && tick_input.j_press)
+			if (time_until_input == 0 && tick_input.l_press)
             {
                 if (normCoordsWithinLevelBounds(camera.coords))
                 {
+					Entity *group_pointer = 0;
+                    switch (editor_state.picked_tile)
+                    {
+                        case BOX: group_pointer = next_world_state.boxes; break;
+                        default: group_pointer = 0;
+                    }
+                    if (group_pointer != 0) 
+                    {	
+                        for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
+                        {
+                            if (group_pointer[entity_index].id != -1) continue;
+                            group_pointer[entity_index].coords = normCoordsToInt(camera.coords);
+                            group_pointer[entity_index].position_norm = intCoordsToNorm(group_pointer[entity_index].coords);
+                            group_pointer[entity_index].direction = NORTH;
+                            group_pointer[entity_index].rotation_quat = directionToQuaternion(NORTH);
+                            group_pointer[entity_index].id = entity_index;
+                            break;
+                        }
+                    }
 					setTileAtCoords(editor_state.picked_tile, normCoordsToInt(camera.coords));
                     time_until_input = INPUT_TIME_UNTIL_ALLOW;
                 }
@@ -810,7 +801,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
                 if (tick_input.j_press) 
                 {
-                    // TODO(spike): could use pointer here to update state
                     Entity *entity_pointer = getEntityPointer(raycast_output.hit_coords);
                     if (entity_pointer != 0)
                     {
@@ -822,12 +812,15 @@ void gameFrame(double delta_time, TickInput tick_input)
                 }
                 else if (tick_input.k_press) 
                 {
-                    // TODO(spike): could also use pointer here
                     Entity *group_pointer = 0;
-                    if (editor_state.picked_tile == BOX) 
+                    switch (editor_state.picked_tile)
+                    {
+                        case BOX: group_pointer = next_world_state.boxes; break;
+                        default: group_pointer = 0;
+                    }
+                    if (group_pointer != 0) 
                     {	
-                        group_pointer = next_world_state.boxes;
-                        for (int entity_index = 0; entity_index < 32; entity_index++)
+                        for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
                         {
                             if (group_pointer[entity_index].id != -1) continue;
                             group_pointer[entity_index].coords = raycast_output.place_coords;
@@ -853,7 +846,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // do animations
         
-		for (int animation_index = 0; animation_index < 32; animation_index++)
+		for (int animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
         {
 			if (animations[animation_index].frames_left == 0) continue;
 			if (animations[animation_index].position_to_change != 0) *animations[animation_index].position_to_change = animations[animation_index].position[animations[animation_index].frames_left-1];
@@ -873,7 +866,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 			if (tile == PLAYER) drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
 			else if (tile == BOX) // doesn't matter what order we render boxes in, all rendered the same. so just loop over boxes array and render
             {
-                for (int box_index = 0; box_index < 32; box_index++)
+                for (int box_index = 0; box_index < MAX_ENTITY_INSTANCE_COUNT; box_index++)
                 {
                     if (world_state.boxes[box_index].id == -1) continue;
                     drawAsset(box_path, CUBE_3D, world_state.boxes[box_index].position_norm, DEFAULT_SCALE, world_state.boxes[box_index].rotation_quat);
