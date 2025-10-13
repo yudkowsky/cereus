@@ -595,9 +595,9 @@ void gameInitialise(void)
         {
             int32 count = getEntityCount(pointer);
 			pointer[count].coords = bufferIndexToCoords(buffer_index);
-            pointer[count].position_norm = intCoordsToNorm(pointer->coords);
+            pointer[count].position_norm = intCoordsToNorm(pointer[count].coords);
             pointer[count].direction = NORTH;
-            pointer[count].rotation_quat = directionToQuaternion(pointer->direction);
+            pointer[count].rotation_quat = directionToQuaternion(pointer[count].direction);
             pointer[count].id = getEntityCount(pointer);
             pointer = 0;
         }
@@ -709,7 +709,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                             					 intCoordsToNorm(entities_to_push.new_coords[entity_index]),
             													 &entities_to_push.pointer_to_entity[entity_index]->position_norm,
                                                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0);
-                                    setTileAtCoords(NONE, entities_to_push.pointer_to_entity[entity_index]->coords);
+                                    if (entity_index == 0) setTileAtCoords(NONE, entities_to_push.pointer_to_entity[entity_index]->coords);
 									entities_to_push.pointer_to_entity[entity_index]->coords = entities_to_push.new_coords[entity_index];
                                     setTileAtCoords(BOX, entities_to_push.new_coords[entity_index]);
                                 }
@@ -840,7 +840,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             break;
                         }
                     }
-                    setTileAtCoords(editor_state.picked_tile, raycast_output.place_coords);
+                    setTileAtCoords(editor_state.picked_tile, raycast_output.place_coords); // TODO(spike): next: debug this, i think it's not writing to file properly.
                 }
                 else if (tick_input.z_press) editor_state.picked_tile = getTileAtCoords(raycast_output.hit_coords); 
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
