@@ -791,8 +791,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
 
-            // TODO(spike): set this up with the box update thing
             /*
+            // TODO(spike): set this up with the box update thing
 			if (time_until_input == 0 && tick_input.j_press)
             {
                 if (normCoordsWithinLevelBounds(camera.coords))
@@ -811,36 +811,34 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (tick_input.j_press) 
                 {
                     // TODO(spike): could use pointer here to update state
-                    if (getTileAtCoords(raycast_output.hit_coords) == BOX)
+                    Entity *entity_pointer = getEntityPointer(raycast_output.hit_coords);
+                    if (entity_pointer != 0)
                     {
-						for (int box_index = 0; box_index < 32; box_index++)
-                        {
-                            if (!int3IsEqual(next_world_state.boxes[box_index].coords, raycast_output.hit_coords)) continue;
-                            next_world_state.boxes[box_index].coords = (Int3){0};
-                            next_world_state.boxes[box_index].position_norm = (Vec3){0};
-                            next_world_state.boxes[box_index].id = -1;
-                            break;
-                        }
+                        entity_pointer->coords = (Int3){0};
+                        entity_pointer->position_norm = (Vec3){0};
+                        entity_pointer->id = -1;
                     }
                     setTileAtCoords(NONE, raycast_output.hit_coords);
                 }
                 else if (tick_input.k_press) 
                 {
                     // TODO(spike): could also use pointer here
-                    if (editor_state.picked_tile == BOX)
+                    Entity *group_pointer = 0;
+                    if (editor_state.picked_tile == BOX) 
                     {	
-                        for (int box_index = 0; box_index < 32; box_index++)
+                        group_pointer = next_world_state.boxes;
+                        for (int entity_index = 0; entity_index < 32; entity_index++)
                         {
-                            if (next_world_state.boxes[box_index].id != -1) continue;
-                            next_world_state.boxes[box_index].coords = raycast_output.place_coords;
-                            next_world_state.boxes[box_index].position_norm = intCoordsToNorm(raycast_output.place_coords);
-                            next_world_state.boxes[box_index].direction = NORTH;
-                            next_world_state.boxes[box_index].rotation_quat = directionToQuaternion(NORTH);
-                            next_world_state.boxes[box_index].id = box_index;
+                            if (group_pointer[entity_index].id != -1) continue;
+                            group_pointer[entity_index].coords = raycast_output.place_coords;
+                            group_pointer[entity_index].position_norm = intCoordsToNorm(raycast_output.place_coords);
+                            group_pointer[entity_index].direction = NORTH;
+                            group_pointer[entity_index].rotation_quat = directionToQuaternion(NORTH);
+                            group_pointer[entity_index].id = entity_index;
                             break;
                         }
                     }
-                    setTileAtCoords(editor_state.picked_tile, raycast_output.place_coords); // TODO(spike): next: debug this, i think it's not writing to file properly.
+                    setTileAtCoords(editor_state.picked_tile, raycast_output.place_coords); 
                 }
                 else if (tick_input.z_press) editor_state.picked_tile = getTileAtCoords(raycast_output.hit_coords); 
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
