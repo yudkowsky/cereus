@@ -112,7 +112,8 @@ int32 time_until_input = 0;
 char* void_path   = "data/sprites/void6.png";
 char* grid_path   = "data/sprites/grid6.png";
 char* wall_path   = "data/sprites/wall6.png";
-char* box_path    = "data/sprites/box6.png";
+char* box_path    = "data/sprites/mirror6.png";
+//char* box_path    = "data/sprites/box6.png";
 char* player_path = "data/sprites/player6.png";
 
 AssetToLoad assets_to_load[256] = {0};
