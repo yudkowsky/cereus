@@ -69,7 +69,7 @@ typedef struct Push
 {
     Int3 previous_coords[32];
     Int3 new_coords[32];
-    Vec3* pointer_to_entity[32];
+    Entity* pointer_to_entity[32];
     int32 count;
 }
 Push;
@@ -86,6 +86,7 @@ Vec3 PLAYER_SCALE = { 0.75f, 0.75f, 0.75f };
 float RAYCAST_SEEK_LENGTH = 20.0f;
 int32 INPUT_TIME_UNTIL_ALLOW = 8;
 int32 MAX_ENTITY_INSTANCE_COUNT = 32; // TODO(spike): use this everywhere rather than 32
+int32 MAX_ENTITY_PUSH_COUNT = 32;
 
 // TODO(spike): doesn't really fit as a vec3 but set this when working on animations
 Vec3 IDENTITY_TRANSLATION = { 0, 0, 0 };
@@ -164,7 +165,7 @@ Vec4 quaternionConjugate(Vec4 quaternion)
 Vec4 quaternionMultiply(Vec4 a, Vec4 b)
 {
     return (Vec4){ a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
-        		   a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
+    		 	   a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
         		   a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
         		   a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z};
 }
@@ -224,7 +225,7 @@ bool intCoordsWithinLevelBounds(Int3 coords) {
 bool normCoordsWithinLevelBounds(Vec3 coords) {
     return (coords.x > 0 && coords.y > 0 && coords.z >= 0 && coords.x < level_dim.x && coords.y < level_dim.y && coords.z < level_dim.z); }
 
-bool intCoordsIsEqual(Int3 a, Int3 b) {
+bool int3IsEqual(Int3 a, Int3 b) {
     return (a.x == b.x && a.y == b.y && a.z == b.z); }
 
 Vec3 vec3Negative(Vec3 coords) {
@@ -516,13 +517,69 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
 
 // PUSH ENTITES
 
+Int3 getNextCoords(Int3 coords, Direction direction)
+{
+	switch (direction)
+    {
+        case NORTH: return int3Add(coords, int3Negative(AXIS_Z)); // rename negate
+        case WEST:  return int3Add(coords, int3Negative(AXIS_X));
+        case SOUTH: return int3Add(coords, AXIS_Z);
+        case EAST:  return int3Add(coords, AXIS_X);
+    }
+    return (Int3){0};
+}
+
+Entity* getEntityPointer(Int3 coords)
+{
+	TileType type = getTileAtCoords(coords);
+    Entity *group_pointer = 0;
+    switch (type)
+    {
+        case PLAYER: return &next_world_state.player; // special case for player
+        case BOX: group_pointer = next_world_state.boxes;
+        //case ENTITY: group_pointer = next_world_state.entity; <- in general
+        for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
+        {
+            if (int3IsEqual(group_pointer[entity_index].coords, coords)) return &group_pointer[entity_index];
+        }
+        default: return (Entity*){0};
+    }
+}
+
+bool canPush(Int3 coords, Direction direction)
+{
+    Int3 current_coords = coords;
+    TileType current_tile;
+    for (int push_index = 0; push_index < MAX_ENTITY_PUSH_COUNT; push_index++) // could theoretically be more entities to push here
+    {
+    	current_coords = getNextCoords(current_coords, direction);
+        current_tile = getTileAtCoords(current_coords);
+        if (!intCoordsWithinLevelBounds(current_coords)) return false;
+        if (current_tile == WALL) return false;
+        if (current_tile == NONE) return true;
+    }
+    return false;
+}
+
 Push push(Int3 coords, Direction direction)
 {
-	// fill Push with previous coords per entity, next coords per entity, pointer to that entity and count
+	// fill Push with previous coords per entity, next coords per entity, pointer to that entity - and amount of entities to push 
     // will use to call an animation, and for that i need:
     // pos1, pos2, and adress of entity
     // to get address: switch on type of entity, loop through that type of entity for the one with that location.
     // maybe don't switch case? just get array of those entities as a pointer, and loop through the array at that pointer to find coords, for all pointers there?
+    Push entities_to_push = {0}; // MAX_ENTITY_PUSH_COUNT
+	Int3 current_coords = coords;
+    for (int push_index = 0; push_index < MAX_ENTITY_PUSH_COUNT; push_index++)
+    {
+		entities_to_push.previous_coords[push_index] = current_coords;
+        entities_to_push.pointer_to_entity[push_index] = getEntityPointer(current_coords);
+        current_coords = getNextCoords(current_coords, direction);
+        entities_to_push.new_coords[push_index] = current_coords; 
+        entities_to_push.count++;
+        if (getTileAtCoords(current_coords) == NONE) break;
+    }
+    return entities_to_push;
 }
 
 void gameInitialise(void) 
@@ -618,7 +675,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 Direction input_direction = 0;
                 Int3 next_player_coords = {0};
-                //Direction next_player_direction = 0;
                 if 		(tick_input.w_press) input_direction = NORTH; 
                 else if (tick_input.a_press) input_direction = WEST; 
                 else if (tick_input.s_press) input_direction = SOUTH; 
@@ -642,14 +698,20 @@ void gameFrame(double delta_time, TickInput tick_input)
 							break;
                         }
                         case BOX:
-                        /*
                         {
-                            Push entities_to_push = boxPush(next_player_coords, input_direction);
-							if (entities_to_push.count != 0)
+                            bool can_push = canPush(next_player_coords, input_direction);
+                            if (can_push) 
                             {
-                                for (int box_index = 0; box_index < entities_to_push.count; box_index++)
+                                Push entities_to_push = push(next_player_coords, input_direction);
+                                for (int entity_index = 0; entity_index < entities_to_push.count; entity_index++)
                                 {
-									
+                                    createInterpolationAnimation(intCoordsToNorm(entities_to_push.previous_coords[entity_index]),
+                                            					 intCoordsToNorm(entities_to_push.new_coords[entity_index]),
+            													 &entities_to_push.pointer_to_entity[entity_index]->position_norm,
+                                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0);
+                                    setTileAtCoords(NONE, entities_to_push.pointer_to_entity[entity_index]->coords);
+									entities_to_push.pointer_to_entity[entity_index]->coords = entities_to_push.new_coords[entity_index];
+                                    setTileAtCoords(BOX, entities_to_push.new_coords[entity_index]);
                                 }
 
                                 // player
@@ -659,10 +721,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                              IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0);
                                 setTileAtCoords(NONE, next_world_state.player.coords);
                                 next_world_state.player.coords = next_player_coords;
-                                setTileAtCoords(PLAYER, next_world_state.player.coords);
+                                setTileAtCoords(PLAYER, next_player_coords);
                             }
+                            break;
                         }
-                        */
                         default:
                         {
                             // check if would walk off ledge
@@ -729,6 +791,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
 
+            // TODO(spike): set this up with the box update thing
             /*
 			if (time_until_input == 0 && tick_input.j_press)
             {
@@ -752,7 +815,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     {
 						for (int box_index = 0; box_index < 32; box_index++)
                         {
-                            if (!intCoordsIsEqual(next_world_state.boxes[box_index].coords, raycast_output.hit_coords)) continue;
+                            if (!int3IsEqual(next_world_state.boxes[box_index].coords, raycast_output.hit_coords)) continue;
                             next_world_state.boxes[box_index].coords = (Int3){0};
                             next_world_state.boxes[box_index].position_norm = (Vec3){0};
                             next_world_state.boxes[box_index].id = -1;
