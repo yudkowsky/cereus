@@ -109,11 +109,11 @@ Animation animations[32];
 
 int32 time_until_input = 0;
 
-char* void_path   = "data/sprites/void.png";
-char* grid_path   = "data/sprites/grid.png";
-char* wall_path   = "data/sprites/wall.png";
-char* box_path    = "data/sprites/box.png";
-char* player_path = "data/sprites/player.png";
+char* void_path   = "data/sprites/void6.png";
+char* grid_path   = "data/sprites/grid6.png";
+char* wall_path   = "data/sprites/wall6.png";
+char* box_path    = "data/sprites/box6.png";
+char* player_path = "data/sprites/player6.png";
 
 AssetToLoad assets_to_load[256] = {0};
 
@@ -249,7 +249,7 @@ Vec3 vec3Subtract(Vec3 a, Vec3 b) {
 Vec3 vec3ScalarMultiply(Vec3 position, float scalar) {
     return (Vec3){ position.x*scalar, position.y*scalar, position.z*scalar }; }
 
-// BUFFER INTERFACING
+// BUFFER / STATE INTERFACING
 
 int32 coordsToBufferIndex(Int3 coords)
 {
@@ -281,6 +281,20 @@ int32 getEntityCount(Entity *pointer_to_array)
         count++;
     }
     return count;
+}
+
+void replaceEntityInstanceInGroup(Entity* group_pointer, Int3 coords, Direction direction) // TODO(spike) 
+{
+    for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
+    {
+        if (group_pointer[entity_index].id != -1) continue;
+        group_pointer[entity_index].coords = coords;
+        group_pointer[entity_index].position_norm = intCoordsToNorm(coords); 
+        group_pointer[entity_index].direction = direction;
+        group_pointer[entity_index].rotation_quat = directionToQuaternion(direction);
+        group_pointer[entity_index].id = entity_index;
+        break;
+    }
 }
 
 // FILE I/O
@@ -764,7 +778,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
 
-            /*
 			if (time_until_input == 0 && tick_input.l_press)
             {
                 if (normCoordsWithinLevelBounds(camera.coords))
@@ -775,24 +788,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                         case BOX: group_pointer = next_world_state.boxes; break;
                         default: group_pointer = 0;
                     }
-                    if (group_pointer != 0) 
-                    {	
-                        for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
-                        {
-                            if (group_pointer[entity_index].id != -1) continue;
-                            group_pointer[entity_index].coords = normCoordsToInt(camera.coords);
-                            group_pointer[entity_index].position_norm = intCoordsToNorm(group_pointer[entity_index].coords);
-                            group_pointer[entity_index].direction = NORTH;
-                            group_pointer[entity_index].rotation_quat = directionToQuaternion(NORTH);
-                            group_pointer[entity_index].id = entity_index;
-                            break;
-                        }
-                    }
+                    if (group_pointer != 0) replaceEntityInstanceInGroup(group_pointer, normCoordsToInt(camera.coords), NORTH);
 					setTileAtCoords(editor_state.picked_tile, normCoordsToInt(camera.coords));
                     time_until_input = INPUT_TIME_UNTIL_ALLOW;
                 }
             }
-            */
 
             // inputs that require raycast
 			if (time_until_input == 0 && (tick_input.j_press || tick_input.k_press || tick_input.z_press))
@@ -818,30 +818,20 @@ void gameFrame(double delta_time, TickInput tick_input)
                         case BOX: group_pointer = next_world_state.boxes; break;
                         default: group_pointer = 0;
                     }
-                    if (group_pointer != 0) 
-                    {	
-                        for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
-                        {
-                            if (group_pointer[entity_index].id != -1) continue;
-                            group_pointer[entity_index].coords = raycast_output.place_coords;
-                            group_pointer[entity_index].position_norm = intCoordsToNorm(raycast_output.place_coords);
-                            group_pointer[entity_index].direction = NORTH;
-                            group_pointer[entity_index].rotation_quat = directionToQuaternion(NORTH);
-                            group_pointer[entity_index].id = entity_index;
-                            break;
-                        }
-                    }
+                    if (group_pointer != 0) replaceEntityInstanceInGroup(group_pointer, raycast_output.place_coords, NORTH);
                     setTileAtCoords(editor_state.picked_tile, raycast_output.place_coords); 
                 }
                 else if (tick_input.z_press) editor_state.picked_tile = getTileAtCoords(raycast_output.hit_coords); 
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
+            /*
             if (time_until_input == 0 && tick_input.l_press)
             {
                 editor_state.picked_tile++;
                 if (editor_state.picked_tile == 6) editor_state.picked_tile = VOID;
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
+            */
         }
 
         // do animations
