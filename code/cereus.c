@@ -657,6 +657,62 @@ void push(Int3 coords, Direction direction)
     }
 }
 
+// there are alternatives here but this honestly might be the cleanest (and fastest)
+Direction getNextMirrorState(Direction start_direction, Direction push_direction)
+{
+    switch (start_direction)
+    {
+        case NORTH: switch (push_direction)
+        {
+            case NORTH: return SOUTH;
+            case SOUTH: return SOUTH;
+            case WEST:  return UP;
+            case EAST:  return DOWN;
+            default:    return 0;
+        }
+        case SOUTH: switch (push_direction)
+        {
+            case NORTH: return NORTH;
+            case SOUTH: return NORTH;
+            case WEST:  return DOWN;
+            case EAST:  return UP;
+            default: 	return 0;
+        }
+        case WEST:  switch (push_direction)
+        {
+            case NORTH: return UP;
+            case SOUTH: return DOWN;
+            case WEST:  return EAST;
+            case EAST:  return EAST;
+            default: 	return 0;
+        }
+        case EAST:  switch (push_direction)
+        {
+            case NORTH: return DOWN;
+            case SOUTH: return UP;
+            case WEST:  return WEST;
+            case EAST:  return WEST;
+            default: 	return 0;
+        }
+        case UP:    switch (push_direction)
+        {
+            case NORTH: return EAST;
+            case SOUTH: return WEST;
+            case WEST:  return SOUTH;
+            case EAST:  return NORTH;
+            default: 	return 0;
+        }
+        case DOWN:  switch (push_direction)
+        {
+            case NORTH: return WEST;
+            case SOUTH: return EAST;
+            case WEST:  return NORTH;
+            case EAST:  return SOUTH;
+            default: 	return 0;
+        }
+    }
+}
+
 Vec4 rollingDirectionToQuaternion(Direction direction)
 {
 	Vec3 up = { 0.0f, 1.0f, 0.0f };
@@ -688,7 +744,8 @@ void roll(Int3 coords, Direction direction)
                                  quaternion_transform,
         						 &pointer->rotation_quat);
     // TODO(spike): encode new dir by before_dir and push_dir rather than by final quat. alternative here is to switch on 4 possible quats after transform for each dir state
-	//Direction new_direction = getNextMirrorState(pointer->direction, direction);
+	Direction new_direction = getNextMirrorState(pointer->direction, direction);
+    pointer->direction = new_direction;
 }
 
 void gameInitialise(void) 
