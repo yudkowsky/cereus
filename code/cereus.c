@@ -71,7 +71,7 @@ typedef struct Push
 {
     Int3 previous_coords[32];
     Int3 new_coords[32];
-    TileType type;
+    TileType type[32];
     Entity* pointer_to_entity[32];
     int32 count;
 }
@@ -201,21 +201,6 @@ Vec3 vec3RotateByQuaternion(Vec3 input_vector, Vec4 quaternion)
     			   input_vector.z + 2.0f * q_cross_t.z};
 }
 
-Vec4 directionToQuaternion(Direction direction)
-{
-    float yaw = 0.0f;
-    switch (direction)
-    {
-        case NORTH: yaw = 0.0f; 		  break;
-        case WEST:  yaw = 0.25f  * TAU;   break;
-        case SOUTH: yaw = 0.5f   * TAU;   break;
-        case EAST:  yaw = -0.25f * TAU;   break;
-        default: yaw = 0.0f;			  break; // TODO(spike): check if case for UP or DOWN needed here?
-    }
-    Vec3 axis = {0, 1, 0};
-    return quaternionFromAxisAngle(axis, yaw);
-}
-
 // VARIOUS BASIC HELPER FUNCTIONS
 
 Vec3 intCoordsToNorm(Int3 int_coords) {
@@ -253,7 +238,7 @@ Vec3 vec3Subtract(Vec3 a, Vec3 b) {
 
 Vec3 vec3ScalarMultiply(Vec3 position, float scalar) {
     return (Vec3){ position.x*scalar, position.y*scalar, position.z*scalar }; }
-
+    
 // BUFFER / STATE INTERFACING
 
 int32 coordsToBufferIndex(Int3 coords)
@@ -286,6 +271,56 @@ int32 getEntityCount(Entity *pointer_to_array)
         count++;
     }
     return count;
+}
+
+Vec4 directionToQuaternion(Direction direction)
+{
+    float yaw = 0.0f;
+    float roll = 0.0f;
+    bool do_yaw = false;
+    bool do_roll = false;
+    switch (direction)
+    {
+        case NORTH: 
+        {
+            yaw = 0.0f;
+            do_yaw = true;
+            break;
+        }
+        case WEST: 
+        {
+            yaw = 0.25f  * TAU;
+            do_yaw = true;
+            break;
+        }
+        case SOUTH: 
+        {
+            yaw = 0.5f   * TAU;
+            do_yaw = true;
+            break;
+        }
+        case EAST:
+        {
+            yaw = -0.25f * TAU;
+            do_yaw = true;
+            break;
+        }
+        case UP:
+        {
+            roll = 0.25f * TAU;
+			do_roll = true;
+            break;
+        }
+        case DOWN:
+        {
+            roll = -0.25f * TAU;
+			do_roll = true;
+            break;
+        }
+    }
+    if (do_yaw)  return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), yaw);
+    if (do_roll) return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Z), roll);
+    return IDENTITY_QUATERNION;
 }
 
 void replaceEntityInstanceInGroup(Entity* group_pointer, Int3 coords, Direction direction) // TODO(spike) 
@@ -538,13 +573,20 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
     }
 }
 
-// PUSH ENTITES
+/*
+void createRollingAnimation(Vec3 position, Vec3* position_to_change, Vec4 rotation, Vec4* rotation_to_change)
+{
+
+}
+*/
+
+// PUSH / ROLL ENTITES
 
 Int3 getNextCoords(Int3 coords, Direction direction)
 {
 	switch (direction)
     {
-        case NORTH: return int3Add(coords, int3Negative(AXIS_Z)); // rename negate
+        case NORTH: return int3Add(coords, int3Negative(AXIS_Z)); // TODO(spike): rename negate
         case WEST:  return int3Add(coords, int3Negative(AXIS_X));
         case SOUTH: return int3Add(coords, AXIS_Z);
         case EAST:  return int3Add(coords, AXIS_X);
@@ -593,24 +635,60 @@ void push(Int3 coords, Direction direction)
 	Int3 current_coords = coords;
     for (int push_index = 0; push_index < MAX_ENTITY_PUSH_COUNT; push_index++)
     {
-        entities_to_push.type = getTileAtCoords(current_coords);
+        entities_to_push.type[push_index] = getTileAtCoords(current_coords);
 		entities_to_push.previous_coords[push_index] = current_coords;
         entities_to_push.pointer_to_entity[push_index] = getEntityPointer(current_coords);
         current_coords = getNextCoords(current_coords, direction);
         entities_to_push.new_coords[push_index] = current_coords; 
         entities_to_push.count++;
+
+
         if (getTileAtCoords(current_coords) == NONE) break;
     }
     for (int entity_index = 0; entity_index < entities_to_push.count; entity_index++)
     {
+        entities_to_push.pointer_to_entity[entity_index]->coords = entities_to_push.new_coords[entity_index];
         createInterpolationAnimation(intCoordsToNorm(entities_to_push.previous_coords[entity_index]),
                                      intCoordsToNorm(entities_to_push.new_coords[entity_index]),
                                      &entities_to_push.pointer_to_entity[entity_index]->position_norm,
                                      IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0);
-        if (entity_index == 0) setTileAtCoords(NONE, entities_to_push.pointer_to_entity[entity_index]->coords);
-        entities_to_push.pointer_to_entity[entity_index]->coords = entities_to_push.new_coords[entity_index];
-        setTileAtCoords(entities_to_push.type, entities_to_push.new_coords[entity_index]);
+        if (entity_index == 0) setTileAtCoords(NONE, entities_to_push.pointer_to_entity[entity_index]->coords); // TODO(spike): is this needed? will necessarily be overwritten by player / object doing the pushing
+        setTileAtCoords(entities_to_push.type[entity_index], entities_to_push.new_coords[entity_index]);
     }
+}
+
+Vec4 rollingDirectionToQuaternion(Direction direction)
+{
+	Vec3 up = { 0.0f, 1.0f, 0.0f };
+    Vec3 rolling = {0};
+    switch (direction)
+    {
+        case NORTH: rolling = intCoordsToNorm(int3Negative(AXIS_Z)); break;
+        case WEST:  rolling = intCoordsToNorm(int3Negative(AXIS_X)); break;
+        case SOUTH: rolling = intCoordsToNorm(AXIS_Z);				 break;
+        case EAST:  rolling = intCoordsToNorm(AXIS_X); 				 break;
+        default: return IDENTITY_QUATERNION;
+    }
+	Vec3 axis = vec3CrossProduct(up, rolling);
+    return quaternionFromAxisAngle(axis, 0.25f*TAU);
+}
+
+void roll(Int3 coords, Direction direction)
+{
+    Entity* pointer = getEntityPointer(coords);
+	setTileAtCoords(NONE, coords);
+    setTileAtCoords(MIRROR, getNextCoords(coords, direction));
+	pointer->coords = getNextCoords(coords, direction);
+	Vec4 quaternion_transform = quaternionNormalize(quaternionMultiply(rollingDirectionToQuaternion(direction), directionToQuaternion(pointer->direction)));
+    
+    createInterpolationAnimation(intCoordsToNorm(coords), 
+            					 intCoordsToNorm(getNextCoords(coords, direction)), 
+                                 &pointer->position_norm, 
+                                 directionToQuaternion(pointer->direction), 
+                                 quaternion_transform,
+        						 &pointer->rotation_quat);
+    // TODO(spike): encode new dir by before_dir and push_dir rather than by final quat. alternative here is to switch on 4 possible quats after transform for each dir state
+	//Direction new_direction = getNextMirrorState(pointer->direction, direction);
 }
 
 void gameInitialise(void) 
@@ -629,7 +707,7 @@ void gameInitialise(void)
             int32 count = getEntityCount(pointer);
 			pointer[count].coords = bufferIndexToCoords(buffer_index);
             pointer[count].position_norm = intCoordsToNorm(pointer[count].coords);
-            pointer[count].direction = NORTH;
+            pointer[count].direction = UP;
             pointer[count].rotation_quat = directionToQuaternion(pointer[count].direction);
             pointer[count].id = getEntityCount(pointer);
             pointer = 0;
@@ -721,9 +799,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                         {
                             if (canPush(next_player_coords, input_direction))
                             {
-                                push(next_player_coords, input_direction); // TODO(spike): roll(next_player_coords, input_direction); and then push(next_player_coords + 1, input_direction)
+                                // TODO(spike): decide if should be able to push boxes/mirrors after a rolled mirror
+                                if (getTileAtCoords(getNextCoords(next_player_coords, input_direction)) != NONE) push(getNextCoords(next_player_coords, input_direction), input_direction); 
+                                roll(next_player_coords, input_direction);
                                 move_player = true;
                             }
+                            break;
                         }
                         default:
                         {
@@ -871,7 +952,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 			if (tile == PLAYER) continue;
 			if (tile == BOX)    continue;
 			if (tile == MIRROR) continue;
-			if (tile != NONE) drawAsset(getPath(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(NORTH));
+			if (tile != NONE)   drawAsset(getPath(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(NORTH));
         }
         // draw entities
         drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);

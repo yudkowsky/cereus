@@ -222,7 +222,7 @@ void mat4BuildRotation(float output_matrix[16], Vec4 quaternion)
     output_matrix[5]  = 1.0f - 2.0f*(x*x + z*z);
     output_matrix[6]  = 2.0f*(y*z + w*x);
     output_matrix[7]  = 0.0f;
-    output_matrix[8]  = 2.0f*(w*x + w*y);
+    output_matrix[8]  = 2.0f*(x*z + w*y);
     output_matrix[9]  = 2.0f*(y*z - w*x);
     output_matrix[10] = 1.0f - 2.0f*(x*x + y*y);
     output_matrix[11] = 0.0f;
