@@ -87,7 +87,8 @@ float MOVE_STEP = 0.05f;
 Vec3 DEFAULT_SCALE = { 1.0f, 1.0f, 1.0f };
 Vec3 PLAYER_SCALE = { 0.75f, 0.75f, 0.75f };
 float RAYCAST_SEEK_LENGTH = 20.0f;
-int32 INPUT_TIME_UNTIL_ALLOW = 8;
+int32 INPUT_TIME_UNTIL_ALLOW = 32;
+int32 ANIMATION_TIME = 32;
 int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 int32 MAX_ENTITY_PUSH_COUNT = 32;
 int32 MAX_ANIMATION_COUNT = 32;
@@ -117,7 +118,7 @@ char* grid_path   = "data/sprites/grid6.png";
 char* wall_path   = "data/sprites/wall6.png";
 char* box_path    = "data/sprites/box6.png";
 char* player_path = "data/sprites/player6.png";
-char* mirror_path = "data/sprites/mirror6.png";
+char* mirror_path = "data/sprites/mirror6_same.png";
 
 AssetToLoad assets_to_load[256] = {0};
 
@@ -531,7 +532,7 @@ RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance)
 
 void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change)
 {
-    // find next free in Animations
+    // find next free in animations
     int32 animation_index = -1;
     for (int find_anim_index = 0; find_anim_index < MAX_ANIMATION_COUNT; find_anim_index++)
     {
@@ -544,11 +545,11 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
     }
 
     // set frame count. the last frame here is the true/correct position
-    animations[animation_index].frames_left = 8;
+    animations[animation_index].frames_left = ANIMATION_TIME;
 
     // get difference between coords
-	Vec3 translation_per_frame = (vec3ScalarMultiply      (vec3Subtract      (position_b, position_a), (float)(1.0f/animations[animation_index].frames_left)));
-    Vec4 rotation_per_frame    = (quaternionScalarMultiply(quaternionSubtract(rotation_a, rotation_b), (float)(1.0f/animations[animation_index].frames_left)));
+	Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(position_b, position_a), (float)(1.0f/ANIMATION_TIME));
+    Vec4 rotation_per_frame    = quaternionNormalize(quaternionScalarMultiply(quaternionSubtract(rotation_a, rotation_b), (float)(1.0f/ANIMATION_TIME))); // TODO(spike): not actually used to do rotation
 
     if (!vec3IsZero(translation_per_frame))
     {
@@ -566,19 +567,73 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
         if (quaternionDot(rotation_a, rotation_b) < 0.0f) rotation_b = quaternionScalarMultiply(rotation_b, -1.0f);
         for (int frame_index = 0; frame_index < animations[animation_index].frames_left; frame_index++)
         {
-            float t = (float)(frame_index + 1) / animations[animation_index].frames_left;
+            float param = (float)(frame_index + 1) / animations[animation_index].frames_left;
 	    	animations[animation_index].rotation[animations[animation_index].frames_left-(1+frame_index)] 
-            = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(rotation_a, 1.0f - t), quaternionScalarMultiply(rotation_b, t)));
+            = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(rotation_a, 1.0f - param), quaternionScalarMultiply(rotation_b, param)));
         }
     }
 }
 
-/*
-void createRollingAnimation(Vec3 position, Vec3* position_to_change, Vec4 rotation, Vec4* rotation_to_change)
-{
+void createRollingAnimation(Vec3 position, Direction direction, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change)
+{	
+    // find next free in animations
+    int32 animation_index = -1;
+    for (int find_anim_index = 0; find_anim_index < MAX_ANIMATION_COUNT; find_anim_index++)
+    {
+        if (animations[find_anim_index].frames_left == 0)
+        {
+            animation_index = find_anim_index;
+            animations[animation_index] = (Animation){0};
+            break;
+        }
+    }
+    
+    animations[animation_index].frames_left = ANIMATION_TIME;
+    animations[animation_index].rotation_to_change = rotation_to_change;
+    animations[animation_index].position_to_change = position_to_change;
 
+    // translation on circle arc
+    Vec3 start_translation = {0};
+    start_translation.y -= 0.5f;
+    switch (direction)
+    {
+        case NORTH: start_translation.z -= 0.5f; break;
+        case WEST:  start_translation.x -= 0.5f; break;
+        case SOUTH: start_translation.z += 0.5f; break;
+        case EAST:  start_translation.x += 0.5f; break;
+        default: return;
+    }
+
+    Vec3 pivot_point = vec3Add(position, start_translation);
+
+    // TODO(spike): combine with rollingDirectionToQuaternion function
+	Vec3 rolling = {0};
+    switch (direction)
+    {
+        case NORTH: rolling = intCoordsToNorm(int3Negative(AXIS_Z)); break;
+        case WEST:  rolling = intCoordsToNorm(int3Negative(AXIS_X)); break;
+        case SOUTH: rolling = intCoordsToNorm(AXIS_Z); 				 break;
+        case EAST:  rolling = intCoordsToNorm(AXIS_X);				 break;
+        default: break;
+    }
+    Vec3 axis = vec3CrossProduct(intCoordsToNorm(AXIS_Y), rolling);
+    Vec3 pivot_to_cube_center = vec3Subtract(position, pivot_point);
+	float d_theta_per_frame = (TAU*0.25f)/(float)ANIMATION_TIME;
+
+    for (int frame_index = 0; frame_index < animations[animation_index].frames_left; frame_index++)
+    {
+        // rotation
+        float param = (float)(frame_index + 1) / animations[animation_index].frames_left;
+        animations[animation_index].rotation[animations[animation_index].frames_left-(1+frame_index)] 
+        = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(rotation_a, 1.0f - param), quaternionScalarMultiply(rotation_b, param)));
+        
+        // translation
+		float theta = (frame_index+1) * d_theta_per_frame;
+        Vec4 roll = quaternionFromAxisAngle(axis, theta);
+        Vec3 relative_rotation = vec3RotateByQuaternion(pivot_to_cube_center, roll);
+        animations[animation_index].position[animations[animation_index].frames_left-(1+frame_index)] = vec3Add(pivot_point, relative_rotation);
+    }
 }
-*/
 
 // PUSH / ROLL ENTITES
 
@@ -657,7 +712,8 @@ void push(Int3 coords, Direction direction)
     }
 }
 
-// there are alternatives here but this honestly might be the cleanest (and fastest)
+// encoding new dir by before_dir and push_dir rather than by final quat. 
+// alternative here is to switch on 4 possible quats after transform for each dir state. since it's more or less arbitrary anyway this is probably fine
 Direction getNextMirrorState(Direction start_direction, Direction push_direction)
 {
     switch (start_direction)
@@ -678,7 +734,7 @@ Direction getNextMirrorState(Direction start_direction, Direction push_direction
             case EAST:  return UP;
             default: 	return 0;
         }
-        case WEST:  switch (push_direction)
+        case WEST: switch (push_direction)
         {
             case NORTH: return UP;
             case SOUTH: return DOWN;
@@ -686,7 +742,7 @@ Direction getNextMirrorState(Direction start_direction, Direction push_direction
             case EAST:  return EAST;
             default: 	return 0;
         }
-        case EAST:  switch (push_direction)
+        case EAST: switch (push_direction)
         {
             case NORTH: return DOWN;
             case SOUTH: return UP;
@@ -694,7 +750,7 @@ Direction getNextMirrorState(Direction start_direction, Direction push_direction
             case EAST:  return WEST;
             default: 	return 0;
         }
-        case UP:    switch (push_direction)
+        case UP: switch (push_direction)
         {
             case NORTH: return EAST;
             case SOUTH: return WEST;
@@ -702,7 +758,7 @@ Direction getNextMirrorState(Direction start_direction, Direction push_direction
             case EAST:  return NORTH;
             default: 	return 0;
         }
-        case DOWN:  switch (push_direction)
+        case DOWN: switch (push_direction)
         {
             case NORTH: return WEST;
             case SOUTH: return EAST;
@@ -711,6 +767,7 @@ Direction getNextMirrorState(Direction start_direction, Direction push_direction
             default: 	return 0;
         }
     }
+    return 0;
 }
 
 Vec4 rollingDirectionToQuaternion(Direction direction)
@@ -737,13 +794,12 @@ void roll(Int3 coords, Direction direction)
 	pointer->coords = getNextCoords(coords, direction);
 	Vec4 quaternion_transform = quaternionNormalize(quaternionMultiply(rollingDirectionToQuaternion(direction), directionToQuaternion(pointer->direction)));
     
-    createInterpolationAnimation(intCoordsToNorm(coords), 
-            					 intCoordsToNorm(getNextCoords(coords, direction)), 
-                                 &pointer->position_norm, 
-                                 directionToQuaternion(pointer->direction), 
-                                 quaternion_transform,
-        						 &pointer->rotation_quat);
-    // TODO(spike): encode new dir by before_dir and push_dir rather than by final quat. alternative here is to switch on 4 possible quats after transform for each dir state
+    createRollingAnimation(intCoordsToNorm(coords), 
+            			   direction,
+                           &pointer->position_norm, 
+                           directionToQuaternion(pointer->direction), 
+                           quaternion_transform,
+        				   &pointer->rotation_quat);
 	Direction new_direction = getNextMirrorState(pointer->direction, direction);
     pointer->direction = new_direction;
 }
@@ -779,9 +835,9 @@ void gameInitialise(void)
         }
     }
 
-	camera.coords = (Vec3){3, 8, 15};
+	camera.coords = (Vec3){10, 12, 15};
     camera_yaw = 0; // towards -z; north
-    camera_pitch = -TAU * 0.25f; // look straight down
+    camera_pitch = -TAU * 0.18f; // look down-ish
     Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera_yaw);
     Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera_pitch);
     camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
