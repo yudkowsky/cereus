@@ -96,7 +96,7 @@ int32 ANIMATION_TIME = 8;
 int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 int32 MAX_ENTITY_PUSH_COUNT = 32;
 int32 MAX_ANIMATION_COUNT = 32;
-int32 MAX_LASER_TRAVEL_DISTANCE = 20;
+int32 MAX_LASER_TRAVEL_DISTANCE = 48;
 
 Int3 AXIS_X = { 1, 0, 0 };
 Int3 AXIS_Y = { 0, 1, 0 };
@@ -269,6 +269,45 @@ void setTileAtCoords(TileType type, Int3 coords) {
 TileType getTileAtCoords(Int3 coords) {
     return next_world_state.buffer[coordsToBufferIndex(coords)]; }
 
+Entity* getEntityPointer(Int3 coords)
+{
+	TileType type = getTileAtCoords(coords);
+    Entity *group_pointer = 0;
+    switch (type)
+    {
+        case PLAYER: return &next_world_state.player; // special case for player
+        case BOX:    group_pointer = next_world_state.boxes;   break;
+        case MIRROR: group_pointer = next_world_state.mirrors; break;
+        case SOURCE:  group_pointer = next_world_state.sources;  break;
+        default: return 0;
+    }
+    for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
+    {
+        if (int3IsEqual(group_pointer[entity_index].coords, coords)) return &group_pointer[entity_index];
+    }
+    return 0;
+}
+
+Direction getEntityDirection(Int3 coords) 
+{
+	Entity *entity_pointer = getEntityPointer(coords);
+    return entity_pointer->direction;
+}
+
+Direction oppositeDirection(Direction direction)
+{
+    switch (direction)
+    {
+        case NORTH: return SOUTH;
+        case SOUTH: return NORTH;
+        case WEST:  return EAST;
+        case EAST:  return WEST;
+        case UP:    return DOWN;
+        case DOWN:  return UP;
+        default: return 0;
+    }
+}
+
 int32 getEntityCount(Entity *pointer_to_array)
 {
     int32 count = 0;
@@ -281,7 +320,7 @@ int32 getEntityCount(Entity *pointer_to_array)
     return count;
 }
 
-Vec4 directionToQuaternion(Direction direction)
+Vec4 directionToQuaternion(Direction direction, bool roll_z)
 {
     float yaw = 0.0f;
     float roll = 0.0f;
@@ -327,7 +366,8 @@ Vec4 directionToQuaternion(Direction direction)
         }
     }
     if (do_yaw)  return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), yaw);
-    if (do_roll) return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Z), roll);
+    if (do_roll && roll_z)  return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Z), roll);
+    if (do_roll && !roll_z) return quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), roll);
     return IDENTITY_QUATERNION;
 }
 
@@ -339,7 +379,7 @@ void replaceEntityInstanceInGroup(Entity* group_pointer, Int3 coords, Direction 
         group_pointer[entity_index].coords = coords;
         group_pointer[entity_index].position_norm = intCoordsToNorm(coords); 
         group_pointer[entity_index].direction = direction;
-        group_pointer[entity_index].rotation_quat = directionToQuaternion(direction);
+        group_pointer[entity_index].rotation_quat = directionToQuaternion(direction, true);
         group_pointer[entity_index].id = entity_index;
         break;
     }
@@ -663,25 +703,6 @@ Int3 getNextCoords(Int3 coords, Direction direction)
     return (Int3){0};
 }
 
-Entity* getEntityPointer(Int3 coords)
-{
-	TileType type = getTileAtCoords(coords);
-    Entity *group_pointer = 0;
-    switch (type)
-    {
-        case PLAYER: return &next_world_state.player; // special case for player
-        case BOX:    group_pointer = next_world_state.boxes;   break;
-        case MIRROR: group_pointer = next_world_state.mirrors; break;
-        case SOURCE:  group_pointer = next_world_state.sources;  break;
-        default: return 0;
-    }
-    for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
-    {
-        if (int3IsEqual(group_pointer[entity_index].coords, coords)) return &group_pointer[entity_index];
-    }
-    return 0;
-}
-
 bool canPush(Int3 coords, Direction direction)
 {
     Int3 current_coords = coords;
@@ -780,8 +801,6 @@ Direction getNextMirrorState(Direction start_direction, Direction push_direction
             default: 	return 0;
         }
     }
-
-
     return 0;
 }
 
@@ -791,16 +810,80 @@ void roll(Int3 coords, Direction direction)
 	setTileAtCoords(NONE, coords);
     setTileAtCoords(MIRROR, getNextCoords(coords, direction));
 	pointer->coords = getNextCoords(coords, direction);
-	Vec4 quaternion_transform = quaternionNormalize(quaternionMultiply(quaternionFromAxisAngle(rollingAxis(direction), 0.25f*TAU), directionToQuaternion(pointer->direction)));
+	Vec4 quaternion_transform = quaternionNormalize(quaternionMultiply(quaternionFromAxisAngle(rollingAxis(direction), 0.25f*TAU), directionToQuaternion(pointer->direction, true)));
     
     createRollingAnimation(intCoordsToNorm(coords), 
             			   direction,
                            &pointer->position_norm, 
-                           directionToQuaternion(pointer->direction), 
+                           directionToQuaternion(pointer->direction, true), 
                            quaternion_transform,
         				   &pointer->rotation_quat);
 	Direction new_direction = getNextMirrorState(pointer->direction, direction);
     pointer->direction = new_direction;
+}
+
+// LASERS
+
+bool canMirrorReflect(Direction laser_direction, Direction mirror_direction)
+{
+    switch (laser_direction)
+    {
+        case NORTH: 
+        case SOUTH: switch (mirror_direction)
+        {
+            case WEST: 
+            case EAST: return false;
+            default: return true;
+        }
+        case WEST:
+        case EAST: switch (mirror_direction)
+        {
+            case NORTH: 
+            case SOUTH: return false;
+            default: return true;
+        }
+        case UP:
+        case DOWN: switch (mirror_direction)
+        {
+            case UP: 
+            case DOWN: return false;
+            default: return true;
+        }
+        default: return false;
+    }
+}
+
+// assumes 6-directional laser
+Direction getNextLaserDirection(Direction laser_direction, Direction mirror_direction)
+{
+    if (mirror_direction <= 4) // if mirror N, W, S, E:
+    {
+        if (laser_direction == mirror_direction) 					return DOWN;
+        if (laser_direction == oppositeDirection(mirror_direction)) return UP;
+        if (laser_direction == UP) 									return oppositeDirection(mirror_direction);
+        if (laser_direction == DOWN) 								return mirror_direction;
+    }
+    switch (mirror_direction) // only UP / DOWN cases left
+    {
+        // laser_direction must be N, W, S, E
+        case UP: switch (laser_direction)
+        {
+            case NORTH: return EAST;
+            case SOUTH: return WEST;
+            case WEST:  return SOUTH;
+            case EAST:  return NORTH;
+            default: return 0;
+        }
+        case DOWN: switch (laser_direction)
+        {
+            case NORTH: return WEST;
+            case SOUTH: return EAST;
+            case WEST:  return NORTH;
+            case EAST:  return SOUTH;
+			default: return 0;
+        }
+        default: return 0;
+    }
 }
 
 void gameInitialise(void) 
@@ -821,17 +904,17 @@ void gameInitialise(void)
             int32 count = getEntityCount(pointer);
 			pointer[count].coords = bufferIndexToCoords(buffer_index);
             pointer[count].position_norm = intCoordsToNorm(pointer[count].coords);
-            pointer[count].direction = SOUTH;
-            pointer[count].rotation_quat = directionToQuaternion(pointer[count].direction);
+            pointer[count].direction = SOUTH; // TODO(spike): encode direction in file  
+            pointer[count].rotation_quat = directionToQuaternion(pointer[count].direction, true);
             pointer[count].id = getEntityCount(pointer);
-            pointer =0;
+            pointer = 0;
         }
         else if (next_world_state.buffer[buffer_index] == PLAYER) // special case for player, since there is only one
         {
             next_world_state.player.coords = bufferIndexToCoords(buffer_index);
             next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
             next_world_state.player.direction = NORTH;
-            next_world_state.player.rotation_quat = directionToQuaternion(next_world_state.player.direction);
+            next_world_state.player.rotation_quat = directionToQuaternion(next_world_state.player.direction, true);
             next_world_state.player.id = 0;
         }
     }
@@ -947,8 +1030,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (!opposite) 
                     {
                         createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
-                                					 directionToQuaternion(next_world_state.player.direction), 
-                                                     directionToQuaternion(input_direction), 
+                                					 directionToQuaternion(next_world_state.player.direction, true), 
+                                                     directionToQuaternion(input_direction, true), 
                                                      &next_world_state.player.rotation_quat);
                         next_world_state.player.direction = input_direction;
                     }
@@ -1069,17 +1152,32 @@ void gameFrame(double delta_time, TickInput tick_input)
         world_state = next_world_state;
 
         // laser calculation and immediate drawing. does not depend on worldstate; is calculated every frame
+        // should keep an ephemeral buffer for just this section to work out how to handle crossing beams / two combined beams? maybe handle combined colors as just 2 or 3 combined beams always
         for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)
         {
             Entity* entity_pointer = &next_world_state.sources[source_index];
             if (entity_pointer->id == -1) continue;
-            Int3 current_coords = getNextCoords(entity_pointer->coords, entity_pointer->direction);
+            Direction current_direction = entity_pointer->direction;
+            Int3 current_coords = getNextCoords(entity_pointer->coords, current_direction);
+
             for (int laser_index = 0; laser_index < MAX_LASER_TRAVEL_DISTANCE; laser_index++)
             {
                 if (!intCoordsWithinLevelBounds(current_coords)) break;
-                if (getTileAtCoords(current_coords) != NONE) break;
-                drawAsset(laser_path, CUBE_3D, intCoordsToNorm(current_coords), LASER_SCALE, directionToQuaternion(entity_pointer->direction));
-                current_coords = getNextCoords(current_coords, entity_pointer->direction);
+                if (getTileAtCoords(current_coords) == MIRROR)
+                {
+                    bool can_reflect = canMirrorReflect(current_direction, getEntityDirection(current_coords));
+					if (can_reflect) current_direction = getNextLaserDirection(current_direction, getEntityDirection(current_coords));
+					else break;
+                }
+                else if (getTileAtCoords(current_coords) == PLAYER)
+                {
+                    // handle player abilities; TODO(spike): think about ordering here
+                    // right now there is 1f delay: abilities only calculated after checking if allowed to push
+                }
+                else if (getTileAtCoords(current_coords) != NONE) break;
+
+                drawAsset(laser_path, CUBE_3D, intCoordsToNorm(current_coords), LASER_SCALE, directionToQuaternion(current_direction, false));
+                current_coords = getNextCoords(current_coords, current_direction);
             }
         }
 
@@ -1088,7 +1186,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
 			TileType tile = world_state.buffer[tile_index];
 			if (tile == PLAYER || tile == BOX || tile == MIRROR || tile == SOURCE) continue;
-			if (tile != NONE)   drawAsset(getPath(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(NORTH));
+			if (tile != NONE)   drawAsset(getPath(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(NORTH, false));
         }
 
         // draw entities

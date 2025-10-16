@@ -548,11 +548,7 @@ int32 getOrLoadAsset(char* path)
     // check if already loaded
     for (uint32 asset_cache_index = 0; asset_cache_index < renderer_state.asset_cache_count; asset_cache_index++)
     {
-        if (strcmp(renderer_state.asset_cache[asset_cache_index].path, path) == 0)
-        {
-            return (int32)asset_cache_index;
-        }
-
+        if (strcmp(renderer_state.asset_cache[asset_cache_index].path, path) == 0) return (int32)asset_cache_index;
     }
     return loadAsset(path); // not found
 }
@@ -1561,7 +1557,7 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
             cube_instance->asset_index = (uint32)asset_cache_index;
             cube_instance->coords      = assets_to_load[asset_index].coords[asset_instance_index];
             cube_instance->scale       = assets_to_load[asset_index].scale[asset_instance_index];
-            cube_instance->rotation = assets_to_load[asset_index].rotation[asset_instance_index];
+            cube_instance->rotation    = assets_to_load[asset_index].rotation[asset_instance_index];
         }
     }
 }
