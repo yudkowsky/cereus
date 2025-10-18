@@ -25,16 +25,16 @@ typedef enum TileType
     SOURCE_GREEN   = 33,
     SOURCE_BLUE    = 34,
     SOURCE_MAGENTA = 35,
-    SOURCE_CYAN    = 36,
-    SOURCE_YELLOW  = 37,
+    SOURCE_YELLOW  = 36,
+    SOURCE_CYAN    = 37,
     SOURCE_WHITE   = 38,
 
     LASER_RED = 40,
     LASER_GREEN = 41,
     LASER_BLUE = 42,
     LASER_MAGENTA = 43,
-    LASER_CYAN = 44,
-    LASER_YELLOW = 45,
+    LASER_YELLOW = 44,
+    LASER_CYAN = 45,
     LASER_WHITE = 46
 }
 TileType;
@@ -46,8 +46,8 @@ typedef enum Color
     GREEN    = 2,
 	BLUE     = 3,
 	MAGENTA  = 4,
-    CYAN     = 5,
-    YELLOW   = 6,
+    YELLOW   = 5,
+    CYAN     = 6,
     WHITE    = 7
 }
 Color;
@@ -105,7 +105,7 @@ typedef struct RaycastHit
     Int3 place_coords;
 }
 RaycastHit;
-
+ 
 typedef struct Push 
 {
     Int3 previous_coords[32];
@@ -115,6 +115,22 @@ typedef struct Push
     int32 count;
 }
 Push;
+
+typedef struct LaserColor
+{
+    bool red;
+    bool green;
+    bool blue;
+}
+LaserColor;
+
+typedef struct LaserBuffer
+{
+    Direction direction;
+    LaserColor color;
+    Int3 coords;
+}
+LaserBuffer;
 
 double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0.0;
@@ -166,16 +182,16 @@ char* laser_red_path     = "data/sprites/laser-red.png";
 char* laser_green_path   = "data/sprites/laser-green.png";
 char* laser_blue_path    = "data/sprites/laser-blue.png";
 char* laser_magenta_path = "data/sprites/laser-magenta.png";
-char* laser_cyan_path    = "data/sprites/laser-cyan.png";
 char* laser_yellow_path  = "data/sprites/laser-yellow.png";
+char* laser_cyan_path    = "data/sprites/laser-cyan.png";
 char* laser_white_path   = "data/sprites/laser-white.png";
 
 char* source_red_path     = "data/sprites/source-red.png";
 char* source_green_path   = "data/sprites/source-green.png";
 char* source_blue_path    = "data/sprites/source-blue.png";
 char* source_magenta_path = "data/sprites/source-magenta.png";
-char* source_cyan_path    = "data/sprites/source-cyan.png";
 char* source_yellow_path  = "data/sprites/source-yellow.png";
+char* source_cyan_path    = "data/sprites/source-cyan.png";
 char* source_white_path   = "data/sprites/source-white.png";
 
 AssetToLoad assets_to_load[256] = {0};
@@ -340,7 +356,7 @@ Direction getTileDirection(Int3 coords)
 
 bool isSource(TileType tile) 
 {
-    return (tile == SOURCE_RED || tile == SOURCE_GREEN || tile == SOURCE_BLUE || tile == SOURCE_MAGENTA || tile == SOURCE_CYAN || tile == SOURCE_YELLOW || tile == SOURCE_WHITE);
+    return (tile == SOURCE_RED || tile == SOURCE_GREEN || tile == SOURCE_BLUE || tile == SOURCE_MAGENTA || tile == SOURCE_YELLOW || tile == SOURCE_CYAN|| tile == SOURCE_WHITE);
 }
 
 Color getColor(Int3 coords)
@@ -351,8 +367,8 @@ Color getColor(Int3 coords)
         case SOURCE_GREEN:   return GREEN;
         case SOURCE_BLUE:	 return BLUE;
         case SOURCE_MAGENTA: return MAGENTA;
-        case SOURCE_CYAN:    return CYAN;
         case SOURCE_YELLOW:  return YELLOW;
+        case SOURCE_CYAN:    return CYAN;
         case SOURCE_WHITE:	 return WHITE;
         default: return NO_COLOR;
     }
@@ -523,16 +539,16 @@ char* getPath(TileType tile)
         case LASER_GREEN:	return laser_green_path;
         case LASER_BLUE:	return laser_blue_path;
         case LASER_MAGENTA:	return laser_magenta_path;
-        case LASER_CYAN:	return laser_cyan_path;
         case LASER_YELLOW:	return laser_yellow_path;
+        case LASER_CYAN:	return laser_cyan_path;
         case LASER_WHITE:	return laser_white_path;
 
         case SOURCE_RED:	 return source_red_path;
         case SOURCE_GREEN:	 return source_green_path;
         case SOURCE_BLUE:	 return source_blue_path;
         case SOURCE_MAGENTA: return source_magenta_path;
-        case SOURCE_CYAN:	 return source_cyan_path;
         case SOURCE_YELLOW:	 return source_yellow_path;
+        case SOURCE_CYAN:	 return source_cyan_path;
         case SOURCE_WHITE:	 return source_white_path;
         default: return 0;
     }
@@ -990,6 +1006,15 @@ Direction getNextLaserDirectionMirror(Direction laser_direction, Direction mirro
     }
 }
 
+LaserColor getLaserColor(TileType tile)
+{
+    LaserColor laser_color = {0};
+    if (tile == LASER_RED   || tile == LASER_MAGENTA || tile == LASER_YELLOW  || tile == LASER_WHITE) laser_color.red = true;
+    if (tile == LASER_GREEN || tile == LASER_YELLOW  || tile == LASER_CYAN    || tile == LASER_WHITE) laser_color.green = true;
+    if (tile == LASER_BLUE  || tile == LASER_CYAN    || tile == LASER_MAGENTA || tile == LASER_WHITE) laser_color.blue = true;
+    return laser_color;
+}
+
 void gameInitialise(void) 
 {	
     loadFileToBuffer(level_path);
@@ -1270,8 +1295,9 @@ void gameFrame(double delta_time, TickInput tick_input)
         // finished updating state
         world_state = next_world_state;
 
-        // laser calculation and immediate drawing. does not depend on worldstate; is calculated every frame
-        // should keep an ephemeral buffer for just this section to work out how to handle crossing beams / two combined beams? maybe handle combined colors as just 2 or 3 combined beams always
+        // calculate where lasers are into ephemeral laser buffer // TODO(spike): figure out if i should allocate this memory before and just 0 it, or if i should allocate it on the stack per frame.
+        LaserBuffer laser_buffer[1024] = {0};
+        int32 laser_tile_count = 0;
         for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)
         {
             Entity* entity_pointer = &next_world_state.sources[source_index];
@@ -1290,7 +1316,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 }
                 else if (getTileType(current_coords) == CRYSTAL)
                 {
-                    break;
+					break;
                 }
                 else if (getTileType(current_coords) == PLAYER)
                 {
@@ -1299,14 +1325,52 @@ void gameFrame(double delta_time, TickInput tick_input)
                 }
                 else if (getTileType(current_coords) != NONE) break;
 				  
-                char* path = getPath(getTileType(entity_pointer->coords) + 8); // 8 is offset between lasers and sources in enum
-                drawAsset(path, CUBE_3D, intCoordsToNorm(current_coords), LASER_SCALE, directionToQuaternion(current_direction, false));
+                LaserColor laser_color = getLaserColor(getTileType(entity_pointer->coords) + 8);
+
+				if (laser_color.red)   laser_buffer[laser_tile_count].color.red = true;
+				if (laser_color.green) laser_buffer[laser_tile_count].color.green = true;
+				if (laser_color.blue)  laser_buffer[laser_tile_count].color.blue = true;
+                laser_buffer[laser_tile_count].direction = current_direction;
+                laser_buffer[laser_tile_count].coords    = current_coords;
+                laser_tile_count++;
+
                 current_coords = getNextCoords(current_coords, current_direction);
             }
         }
 
+        // draw lasers
+        for (int laser_index = 0; laser_index < laser_tile_count; laser_index++)
+        {
+            bool comparison_found = false;
+            for (int laser_comparison_index = laser_index + 1; laser_comparison_index < laser_tile_count; laser_comparison_index++) // only compares forward
+            {
+                if (int3IsEqual(laser_buffer[laser_index].coords, laser_buffer[laser_comparison_index].coords) && 
+                    (laser_buffer[laser_index].direction == laser_buffer[laser_comparison_index].direction || laser_buffer[laser_index].direction == oppositeDirection(laser_buffer[laser_comparison_index].direction)))
+                {
+					laser_buffer[laser_comparison_index].color.red   = laser_buffer[laser_index].color.red   | laser_buffer[laser_comparison_index].color.red;
+					laser_buffer[laser_comparison_index].color.green = laser_buffer[laser_index].color.green | laser_buffer[laser_comparison_index].color.green;
+					laser_buffer[laser_comparison_index].color.blue  = laser_buffer[laser_index].color.blue  | laser_buffer[laser_comparison_index].color.blue;
+                    comparison_found = true;
+                    break;
+                }
+            }
+            if (comparison_found) 
+            {
+                comparison_found = false;
+                continue;
+            }
+            LaserColor color = laser_buffer[laser_index].color;
+            if      (color.red && color.green && color.blue) drawAsset(laser_white_path,   CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), LASER_SCALE, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (color.red && color.green              ) drawAsset(laser_yellow_path,  CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), LASER_SCALE, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (color.red &&                color.blue) drawAsset(laser_magenta_path, CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), LASER_SCALE, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (             color.green && color.blue) drawAsset(laser_cyan_path,    CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), LASER_SCALE, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (color.red                             ) drawAsset(laser_red_path,     CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), LASER_SCALE, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (             color.green              ) drawAsset(laser_green_path,   CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), LASER_SCALE, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (                            color.blue) drawAsset(laser_blue_path,    CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), LASER_SCALE, directionToQuaternion(laser_buffer[laser_index].direction, false));
+        }
+
         // draw static objects
-        for (int32 tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
+        for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
         {
 			TileType tile = world_state.buffer[tile_index];
 			if (tile == PLAYER || tile == BOX || tile == MIRROR || isSource(tile) || tile == CRYSTAL) continue;
