@@ -81,7 +81,7 @@ Animation;
 
 typedef struct WorldState
 {
-    int8 buffer[4096]; // same format as file - 1 byte information per tile
+    uint8 buffer[16384]; // 2 bytes info per tile 
     Entity player;
     Entity boxes[32];
     Entity mirrors[32];
@@ -142,7 +142,7 @@ Camera camera = {0};
 float camera_yaw = 0.0f;
 float camera_pitch = 0.0f;
 
-char* level_path = "w:/cereus/data/levels/level_1.txt"; // absolute path required to modify original file
+char* level_path = "w:/cereus/data/levels/level-2.txt"; // absolute path required to modify original file
 Int3 level_dim = {0};
 
 WorldState world_state = {0};
@@ -297,28 +297,42 @@ Vec3 vec3ScalarMultiply(Vec3 position, float scalar) {
     
 // BUFFER / STATE INTERFACING
 
-int32 coordsToBufferIndex(Int3 coords)
+int32 coordsToBufferIndexType(Int3 coords)
 {
-    return level_dim.x*level_dim.z*coords.y + level_dim.x*coords.z + coords.x; 
+    return 2*(level_dim.x*level_dim.z*coords.y + level_dim.x*coords.z + coords.x); 
+}
+int32 coordsToBufferIndexDirection(Int3 coords)
+{
+    return 2*(level_dim.x*level_dim.z*coords.y + level_dim.x*coords.z + coords.x) + 1; 
 }
 
 Int3 bufferIndexToCoords(int32 buffer_index)
 {
 	Int3 coords = {0};
-    coords.x = buffer_index % level_dim.x;
-    coords.y = buffer_index / (level_dim.x * level_dim.z);
-	coords.z = (buffer_index / level_dim.x) % level_dim.z;
+    coords.x = (buffer_index/2) % level_dim.x;
+    coords.y = (buffer_index/2) / (level_dim.x * level_dim.z);
+	coords.z = ((buffer_index/2) / level_dim.x) % level_dim.z;
     return coords;
 }
 
 void setTileType(TileType type, Int3 coords) 
 {
-    next_world_state.buffer[coordsToBufferIndex(coords)] = type; 
+    next_world_state.buffer[coordsToBufferIndexType(coords)] = type; 
+}
+
+void setTileDirection(Direction direction, Int3 coords)
+{
+    next_world_state.buffer[coordsToBufferIndexDirection(coords)] = direction;
 }
 
 TileType getTileType(Int3 coords) 
 {
-    return next_world_state.buffer[coordsToBufferIndex(coords)]; 
+    return next_world_state.buffer[coordsToBufferIndexType(coords)]; 
+}
+
+Direction getTileDirection(Int3 coords) 
+{
+    return next_world_state.buffer[coordsToBufferIndexDirection(coords)]; 
 }
 
 bool isSource(TileType tile) 
@@ -443,7 +457,7 @@ Vec4 directionToQuaternion(Direction direction, bool roll_z)
     return IDENTITY_QUATERNION;
 }
 
-void replaceEntityInstanceInGroup(Entity* group_pointer, Int3 coords, Direction direction, Color color) 
+void setEntityInstanceInGroup(Entity* group_pointer, Int3 coords, Direction direction, Color color) 
 {
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
     {
@@ -473,7 +487,7 @@ void loadFileToBuffer(char* path)
     fread(&byte, 1, 1, file);
     level_dim.z = byte;
 
-    uint8 buffer[4096];
+    uint8 buffer[16384]; // level_dim.x*level_dim.y*level_dim.z * 2 for color bytes
 	fread(&buffer, 1, level_dim.x*level_dim.y*level_dim.z, file);
 	fclose(file);
     memcpy(next_world_state.buffer, buffer, level_dim.x*level_dim.y*level_dim.z);
@@ -483,7 +497,7 @@ void writeBufferToFile(char* path)
 {
     FILE *file = fopen(path, "rb+");
     fseek(file, 4, SEEK_CUR);
-	fwrite(world_state.buffer, 1, 4096, file);
+	fwrite(world_state.buffer, 1, 16384, file);
     fclose(file);
 }
 
@@ -980,7 +994,7 @@ void gameInitialise(void)
     memset(next_world_state.mirrors, -1, sizeof(next_world_state.mirrors));
     memset(next_world_state.sources, -1, sizeof(next_world_state.sources));
     Entity *pointer = 0;
-    for (int buffer_index = 0; buffer_index < level_dim.x*level_dim.y*level_dim.z; buffer_index++)
+    for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
     {
         TileType buffer_contents = next_world_state.buffer[buffer_index];
         if (buffer_contents == BOX)    pointer = next_world_state.boxes;
@@ -991,7 +1005,7 @@ void gameInitialise(void)
             int32 count = getEntityCount(pointer);
 			pointer[count].coords = bufferIndexToCoords(buffer_index);
             pointer[count].position_norm = intCoordsToNorm(pointer[count].coords);
-            pointer[count].direction = SOUTH; 
+            pointer[count].direction = next_world_state.buffer[buffer_index + 1]; 
             pointer[count].rotation_quat = directionToQuaternion(pointer[count].direction, true);
             pointer[count].id = getEntityCount(pointer);
             pointer = 0;
@@ -1000,7 +1014,7 @@ void gameInitialise(void)
         {
             next_world_state.player.coords = bufferIndexToCoords(buffer_index);
             next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
-            next_world_state.player.direction = NORTH;
+            next_world_state.player.direction = next_world_state.buffer[buffer_index + 1];
             next_world_state.player.rotation_quat = directionToQuaternion(next_world_state.player.direction, true);
             next_world_state.player.id = 0;
         }
@@ -1161,11 +1175,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
 
-            /*
-			if (time_until_input == 0 && tick_input.l_press)
+			if (time_until_input == 0 && tick_input.j_press)
             {
                 if (normCoordsWithinLevelBounds(camera.coords))
                 {
+                    /*
 					Entity *group_pointer = 0;
                     switch (editor_state.picked_tile)
                     {
@@ -1174,19 +1188,19 @@ void gameFrame(double delta_time, TickInput tick_input)
                         default: group_pointer = 0;
                     }
                     if (group_pointer != 0) replaceEntityInstanceInGroup(group_pointer, normCoordsToInt(camera.coords), NORTH);
-					setTileType(editor_state.picked_tile, normCoordsToInt(camera.coords));
+                    */
+					setTileType(VOID, normCoordsToInt(camera.coords));
                     time_until_input = INPUT_TIME_UNTIL_ALLOW;
                 }
             }
-            */
 
             // inputs that require raycast
-			if (time_until_input == 0 && (tick_input.j_press || tick_input.k_press || tick_input.z_press))
+			else if (time_until_input == 0 && (tick_input.left_mouse_press || tick_input.right_mouse_press || tick_input.middle_mouse_press || tick_input.r_press))
             {
                 Vec3 neg_z_basis = {0, 0, -1};
             	RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
 
-                if (tick_input.j_press && raycast_output.hit) 
+                if (tick_input.left_mouse_press && raycast_output.hit) 
                 {
                     Entity *entity_pointer = getEntityPointer(raycast_output.hit_coords);
                     if (entity_pointer != 0)
@@ -1197,12 +1211,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                     }
                     setTileType(NONE, raycast_output.hit_coords);
                 }
-                else if (tick_input.k_press && raycast_output.hit) 
+                else if (tick_input.right_mouse_press && raycast_output.hit) 
                 {
                     Entity *group_pointer = 0;
                     if (isSource(editor_state.picked_tile)) 
                     {
-                        replaceEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, WEST, getColor(raycast_output.place_coords));
+                        setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getColor(raycast_output.place_coords));
                     }
                     else 
                     {
@@ -1212,15 +1226,28 @@ void gameFrame(double delta_time, TickInput tick_input)
                             case MIRROR: group_pointer = next_world_state.mirrors; break;
                             default: group_pointer = 0;
                         }
-                        if (group_pointer != 0) replaceEntityInstanceInGroup(group_pointer, raycast_output.place_coords, NORTH, NO_COLOR);
+                        if (group_pointer != 0) setEntityInstanceInGroup(group_pointer, raycast_output.place_coords, NORTH, NO_COLOR);
                     }
                     setTileType(editor_state.picked_tile, raycast_output.place_coords); 
                 }
-                else if (tick_input.z_press && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords); 
+                else if (tick_input.r_press && raycast_output.hit)
+                {   
+                    Direction direction = getTileDirection(raycast_output.hit_coords);
+                    if (direction == DOWN) direction = NORTH;
+                    else direction++;
+                	next_world_state.buffer[coordsToBufferIndexDirection(raycast_output.hit_coords)] = direction;
+                    Entity *entity_pointer = getEntityPointer(raycast_output.hit_coords);
+                    if (entity_pointer != 0)
+                    {
+                        entity_pointer->direction = direction;
+                    	entity_pointer->rotation_quat = directionToQuaternion(direction, false);
+                	}
+                }
+                else if (tick_input.middle_mouse_press && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords); 
 
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
-            if (time_until_input == 0 && tick_input.l_press)
+			else if (time_until_input == 0 && tick_input.l_press)
             {
 				editor_state.picked_tile++;
                 if      (editor_state.picked_tile == PLAYER) editor_state.picked_tile = MIRROR;
@@ -1278,17 +1305,17 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // draw static objects
-        for (int32 tile_index = 0; tile_index < level_dim.x*level_dim.y*level_dim.z; tile_index++)
+        for (int32 tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
         {
 			TileType tile = world_state.buffer[tile_index];
 			if (tile == PLAYER || tile == BOX || tile == MIRROR || isSource(tile)) continue;
-			if (tile != NONE)   drawAsset(getPath(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(NORTH, false));
+			if (tile != NONE)   drawAsset(getPath(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false));
         }
 
         // draw non-colored entities
+        drawEntityLoop(world_state.boxes,   box_path,    CUBE_3D, DEFAULT_SCALE);
+        drawEntityLoop(world_state.mirrors, mirror_path, CUBE_3D, DEFAULT_SCALE);
         drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
-        drawEntityLoop(world_state.boxes,   box_path,        CUBE_3D, DEFAULT_SCALE);
-        drawEntityLoop(world_state.mirrors, mirror_path,     CUBE_3D, DEFAULT_SCALE);
 
 		// draw colored entites
 		for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)
@@ -1297,9 +1324,9 @@ void gameFrame(double delta_time, TickInput tick_input)
             drawAsset(path, CUBE_3D, world_state.sources[source_index].position_norm, DEFAULT_SCALE, world_state.sources[source_index].rotation_quat);
         }
 
-		if (time_until_input != 0) time_until_input--;
-
         if (editor_state.editor_mode && tick_input.i_press) writeBufferToFile(level_path);
+
+		if (time_until_input != 0) time_until_input--;
 
         rendererSubmitFrame(assets_to_load, camera);
         memset(assets_to_load, 0, sizeof(assets_to_load));
