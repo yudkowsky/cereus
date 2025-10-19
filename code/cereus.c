@@ -1643,6 +1643,18 @@ void gameFrame(double delta_time, TickInput tick_input)
         // draw lasers
         for (int laser_index = 0; laser_index < laser_tile_count; laser_index++)
         {
+			// check if inside mirror / crystal, and if so skip
+			bool do_draw = true;
+            for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
+            {
+                if (int3IsEqual(laser_buffer[laser_index].coords, world_state.mirrors[entity_index].coords) || int3IsEqual(laser_buffer[laser_index].coords, world_state.crystals[entity_index].coords))
+                {
+                    do_draw = false;
+                    break;
+                }
+            }
+            if (!do_draw) continue;
+
             bool comparison_found = false;
             for (int laser_comparison_index = laser_index + 1; laser_comparison_index < laser_tile_count; laser_comparison_index++) // only compares forward
             {
