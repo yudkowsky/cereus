@@ -460,7 +460,6 @@ Vec4 directionToQuaternion(Direction direction, bool roll_z)
             roll = -0.25f * TAU;
 			do_roll = true;
             break;
-
         case NORTH_WEST:
 			yaw = 0.125f * TAU;
             do_yaw = true;
@@ -496,7 +495,7 @@ Vec4 directionToQuaternion(Direction direction, bool roll_z)
             roll_z = true;
             break;
         case DOWN_NORTH:
-            yaw  = 0.0f;         roll = 0.125f * TAU;
+            yaw  = 0.0f;         roll = -0.125f * TAU;
             do_yaw = true;       do_roll = true;
             break;
         case DOWN_SOUTH:
@@ -524,11 +523,6 @@ Vec4 directionToQuaternion(Direction direction, bool roll_z)
         Vec4 quaternion_roll = quaternionFromAxisAngle(intCoordsToNorm(roll_z ? AXIS_Z : AXIS_X), roll);
         return quaternionMultiply(quaternion_roll, quaternion_yaw);
     }
-	/*
-    if (do_yaw)  return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), yaw);
-    if (do_roll && roll_z)  return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Z), roll);
-    if (do_roll && !roll_z) return quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), roll);
-    */
     return IDENTITY_QUATERNION;
 }
 
@@ -1311,7 +1305,7 @@ void gameInitialise(void)
 			pointer[count].coords = bufferIndexToCoords(buffer_index);
             pointer[count].position_norm = intCoordsToNorm(pointer[count].coords);
             pointer[count].direction = next_world_state.buffer[buffer_index + 1]; 
-            pointer[count].rotation_quat = directionToQuaternion(pointer[count].direction, true);
+            pointer[count].rotation_quat = directionToQuaternion(pointer[count].direction, false);
             pointer[count].color = getEntityColor(pointer[count].coords);
             pointer[count].id = getEntityCount(pointer);
             pointer = 0;
@@ -1321,7 +1315,7 @@ void gameInitialise(void)
             next_world_state.player.coords = bufferIndexToCoords(buffer_index);
             next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
             next_world_state.player.direction = next_world_state.buffer[buffer_index + 1];
-            next_world_state.player.rotation_quat = directionToQuaternion(next_world_state.player.direction, true);
+            next_world_state.player.rotation_quat = directionToQuaternion(next_world_state.player.direction, false);
             next_world_state.player.id = 0;
         }
     }
@@ -1539,7 +1533,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (entity_pointer != 0)
                     {
                         entity_pointer->direction = direction;
-                    	entity_pointer->rotation_quat = directionToQuaternion(direction, false);
+                    	entity_pointer->rotation_quat = directionToQuaternion(direction, true);
                 	}
                 }
                 else if (tick_input.middle_mouse_press && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
@@ -1613,7 +1607,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 else if (getTileType(current_coords) == CRYSTAL)
                 {
                     if (!isParallelToXZ(current_direction)) break; // let crystal break beam if not coming at angle flat on the y axis
-
 					if (laser_color.red) current_direction = getRedDirectionAtCrystal(current_direction); 
 					else if (laser_color.green) current_direction = current_direction;
 					else if (laser_color.blue) current_direction = getBlueDirectionAtCrystal(current_direction); 
