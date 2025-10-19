@@ -141,7 +141,8 @@ float SENSITIVITY = 0.005f;
 float MOVE_STEP = 0.05f;
 Vec3 DEFAULT_SCALE = { 1.0f,   1.0f,   1.0f  };
 Vec3 PLAYER_SCALE  = { 0.75f,  0.75f,  0.75f };
-Vec3 LASER_SCALE   = { 0.125f, 0.125f, 1.0f  };
+Vec3 ORTHOGONAL_LASER_SCALE = { 0.125f, 0.125f, 1.0f   };
+Vec3 DIAGONAL_LASER_SCALE   = { 0.125f, 0.125f, 1.415f };
 float RAYCAST_SEEK_LENGTH = 20.0f;
 int32 INPUT_TIME_UNTIL_ALLOW = 8;
 int32 ANIMATION_TIME = 8;
@@ -149,6 +150,7 @@ int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 int32 MAX_ENTITY_PUSH_COUNT = 32;
 int32 MAX_ANIMATION_COUNT = 32;
 int32 MAX_LASER_TRAVEL_DISTANCE = 48;
+int32 MAX_PSEUDO_SOURCE_COUNT = 128;
 
 Int3 AXIS_X = { 1, 0, 0 };
 Int3 AXIS_Y = { 0, 1, 0 };
@@ -359,7 +361,7 @@ bool isSource(TileType tile)
     return (tile == SOURCE_RED || tile == SOURCE_GREEN || tile == SOURCE_BLUE || tile == SOURCE_MAGENTA || tile == SOURCE_YELLOW || tile == SOURCE_CYAN|| tile == SOURCE_WHITE);
 }
 
-Color getColor(Int3 coords)
+Color getEntityColor(Int3 coords)
 {
     switch (getTileType(coords))
     {
@@ -425,6 +427,7 @@ int32 getEntityCount(Entity *pointer_to_array)
     return count;
 }
 
+// roll_z only works / is used for 6-dim. otherwise we just decide (it doesn't make sense to ask for diagonals)
 Vec4 directionToQuaternion(Direction direction, bool roll_z)
 {
     float yaw = 0.0f;
@@ -434,45 +437,98 @@ Vec4 directionToQuaternion(Direction direction, bool roll_z)
     switch (direction)
     {
         case NORTH: 
-        {
             yaw = 0.0f;
             do_yaw = true;
             break;
-        }
         case WEST: 
-        {
             yaw = 0.25f  * TAU;
             do_yaw = true;
             break;
-        }
         case SOUTH: 
-        {
             yaw = 0.5f   * TAU;
             do_yaw = true;
             break;
-        }
         case EAST:
-        {
             yaw = -0.25f * TAU;
             do_yaw = true;
             break;
-        }
         case UP:
-        {
             roll = 0.25f * TAU;
 			do_roll = true;
             break;
-        }
         case DOWN:
-        {
             roll = -0.25f * TAU;
 			do_roll = true;
             break;
-        }
+
+        case NORTH_WEST:
+			yaw = 0.125f * TAU;
+            do_yaw = true;
+            break;
+        case NORTH_EAST:
+            yaw = -0.125f * TAU;
+            do_yaw = true;
+            break;
+        case SOUTH_WEST:
+            yaw = 0.375f * TAU;
+            do_yaw = true;
+            break;
+        case SOUTH_EAST:
+            yaw = -0.375f * TAU;
+            do_yaw = true;
+            break;
+        case UP_NORTH:
+            yaw  = 0.0f;         roll = -0.125f * TAU;
+            do_yaw = true;       do_roll = true;
+            break;
+        case UP_SOUTH:
+            yaw  = 0.5f * TAU;   roll = -0.125f * TAU;
+            do_yaw = true;       do_roll = true;
+            break;
+        case UP_WEST:
+            yaw  = 0.25f * TAU;  roll = -0.125f * TAU;
+            do_yaw = true; 		 do_roll = true;
+            roll_z = true;
+            break;
+        case UP_EAST:
+            yaw  = -0.25f * TAU; roll = 0.125f * TAU;
+            do_yaw = true; 		 do_roll = true;
+            roll_z = true;
+            break;
+        case DOWN_NORTH:
+            yaw  = 0.0f;         roll = 0.125f * TAU;
+            do_yaw = true;       do_roll = true;
+            break;
+        case DOWN_SOUTH:
+            yaw  = 0.5f * TAU;   roll = 0.125f * TAU;
+            do_yaw = true; 	     do_roll = true;
+            break;
+        case DOWN_WEST:
+            yaw  = 0.25f * TAU;  roll = 0.125f * TAU;
+            do_yaw = true;       do_roll = true;
+            roll_z = true;
+            break;
+        case DOWN_EAST:
+            yaw  = -0.25f * TAU; roll = -0.125f * TAU;
+            do_yaw = true;       do_roll = true;
+            roll_z = true;
+            break;
+        default: return (Vec4){ 0, 0, 0, 0 };
     }
+
+	if (do_yaw && !do_roll) return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), yaw);
+    if (!do_yaw && do_roll) return quaternionFromAxisAngle(intCoordsToNorm(roll_z ? AXIS_Z : AXIS_X), roll);
+    if (do_yaw && do_roll)
+ 	{
+        Vec4 quaternion_yaw  = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), yaw);
+        Vec4 quaternion_roll = quaternionFromAxisAngle(intCoordsToNorm(roll_z ? AXIS_Z : AXIS_X), roll);
+        return quaternionMultiply(quaternion_roll, quaternion_yaw);
+    }
+	/*
     if (do_yaw)  return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), yaw);
     if (do_roll && roll_z)  return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Z), roll);
     if (do_roll && !roll_z) return quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), roll);
+    */
     return IDENTITY_QUATERNION;
 }
 
@@ -808,7 +864,7 @@ void createRollingAnimation(Vec3 position, Direction direction, Vec3* position_t
     }
 }
 
-// PUSH / ROLL ENTITES
+// PUSH HELPER (ALTHOUGH 3/4 OF THIS IS FOR LASERS)
 
 Int3 getNextCoords(Int3 coords, Direction direction)
 {
@@ -820,9 +876,26 @@ Int3 getNextCoords(Int3 coords, Direction direction)
         case EAST:  return int3Add(coords, AXIS_X);
         case UP:	return int3Add(coords, AXIS_Y);
         case DOWN:	return int3Add(coords, int3Negate(AXIS_Y));
+
+        case NORTH_WEST: return int3Add(coords, int3Add(int3Negate(AXIS_Z), int3Negate(AXIS_X)));
+        case NORTH_EAST: return int3Add(coords, int3Add(int3Negate(AXIS_Z), AXIS_X));
+        case SOUTH_WEST: return int3Add(coords, int3Add(AXIS_Z, int3Negate(AXIS_X)));
+        case SOUTH_EAST: return int3Add(coords, int3Add(AXIS_Z, AXIS_X));
+                               
+        case UP_NORTH:   return int3Add(coords, int3Add(int3Negate(AXIS_Z), AXIS_Y));
+        case UP_SOUTH:   return int3Add(coords, int3Add(AXIS_Z, AXIS_Y));
+        case UP_WEST:	 return int3Add(coords, int3Add(int3Negate(AXIS_X), AXIS_Y));
+        case UP_EAST:    return int3Add(coords, int3Add(AXIS_X, AXIS_Y));
+                               
+        case DOWN_NORTH: return int3Add(coords, int3Add(int3Negate(AXIS_Z), int3Negate(AXIS_Y)));
+        case DOWN_SOUTH: return int3Add(coords, int3Add(AXIS_Z, int3Negate(AXIS_Y)));
+        case DOWN_WEST:  return int3Add(coords, int3Add(int3Negate(AXIS_X), int3Negate(AXIS_Y)));
+        case DOWN_EAST:  return int3Add(coords, int3Add(AXIS_X, int3Negate(AXIS_Y)));
     }
     return (Int3){0};
 }
+
+// PUSH / ROLL ENTITES
 
 bool canPush(Int3 coords, Direction direction)
 {
@@ -833,10 +906,11 @@ bool canPush(Int3 coords, Direction direction)
     	current_coords = getNextCoords(current_coords, direction);
         current_tile = getTileType(current_coords);
         if (!intCoordsWithinLevelBounds(current_coords)) return false;
+        if (isSource(current_tile)) return false;
         if (current_tile == WALL) return false;
         if (current_tile == NONE) return true;
     }
-    return false;
+    return false; // only here if hit the max entity push count
 }
 
 void push(Int3 coords, Direction direction)
@@ -851,8 +925,6 @@ void push(Int3 coords, Direction direction)
         current_coords = getNextCoords(current_coords, direction);
         entities_to_push.new_coords[push_index] = current_coords; 
         entities_to_push.count++;
-
-
         if (getTileType(current_coords) == NONE) break;
     }
     for (int entity_index = 0; entity_index < entities_to_push.count; entity_index++)
@@ -867,7 +939,7 @@ void push(Int3 coords, Direction direction)
     }
 }
 
-// encoding new dir by prev dir and push dir rather than by final quat. 
+// encoding new dir by prev dir and push dir rather than by final quat. assumes 6-dim dir
 Direction getNextMirrorState(Direction start_direction, Direction push_direction)
 {
     switch (start_direction)
@@ -920,8 +992,8 @@ Direction getNextMirrorState(Direction start_direction, Direction push_direction
             case EAST:  return SOUTH;
             default: 	return 0;
         }
+        default: return 0;
     }
-    return 0;
 }
 
 void roll(Int3 coords, Direction direction)
@@ -946,6 +1018,7 @@ void roll(Int3 coords, Direction direction)
 
 bool canMirrorReflect(Direction laser_direction, Direction mirror_direction)
 {
+    /*
     switch (laser_direction)
     {
         case NORTH: 
@@ -971,39 +1044,197 @@ bool canMirrorReflect(Direction laser_direction, Direction mirror_direction)
         }
         default: return false;
     }
+    */
+    
+    switch (mirror_direction)
+    {
+        case NORTH: if (laser_direction == WEST || laser_direction == EAST || laser_direction == UP_SOUTH || laser_direction == DOWN_NORTH) return false; break;
+        case SOUTH: if (laser_direction == WEST || laser_direction == EAST || laser_direction == UP_NORTH || laser_direction == DOWN_SOUTH) return false; break;
+        case WEST:  if (laser_direction == NORTH || laser_direction == SOUTH || laser_direction == UP_EAST || laser_direction == DOWN_WEST) return false; break;
+        case EAST:  if (laser_direction == NORTH || laser_direction == SOUTH || laser_direction == UP_WEST || laser_direction == DOWN_EAST) return false; break;
+        case UP:    if (laser_direction == UP || laser_direction == DOWN || laser_direction == NORTH_EAST || laser_direction == SOUTH_WEST) return false; break;
+        case DOWN:  if (laser_direction == UP || laser_direction == DOWN || laser_direction == NORTH_WEST || laser_direction == SOUTH_EAST) return false; break;
+        default: return 0;
+    }
+    return true;
 }
 
-// assumes 6-directional laser
 Direction getNextLaserDirectionMirror(Direction laser_direction, Direction mirror_direction)
 {
-    if (mirror_direction <= 4) // if mirror N, W, S, E:
+    if (mirror_direction <= 4 && laser_direction <= 6) 
     {
         if (laser_direction == mirror_direction) 					return DOWN;
         if (laser_direction == oppositeDirection(mirror_direction)) return UP;
         if (laser_direction == UP) 									return oppositeDirection(mirror_direction);
         if (laser_direction == DOWN) 								return mirror_direction;
     }
-    switch (mirror_direction) // only UP / DOWN cases left
+    switch (mirror_direction) // N/S/W/E diagonal cases, and U/D all cases
     {
-        // laser_direction must be N, W, S, E
+        case NORTH: switch (laser_direction)
+        {
+            case NORTH_WEST: return DOWN_WEST;
+            case NORTH_EAST: return DOWN_EAST;
+            case SOUTH_WEST: return UP_WEST;
+            case SOUTH_EAST: return UP_EAST;
+
+            case UP_NORTH:   return DOWN_SOUTH;
+            //case UP_SOUTH:
+            case UP_WEST:    return SOUTH_WEST;
+            case UP_EAST:    return SOUTH_EAST;
+
+            //case DOWN_NORTH: 
+            case DOWN_SOUTH: return UP_NORTH;
+            case DOWN_WEST:  return NORTH_WEST;
+            case DOWN_EAST:  return NORTH_EAST;
+
+            default: return 0;
+        }
+        case SOUTH: switch (laser_direction)
+        {
+            case NORTH_WEST: return UP_WEST;
+            case NORTH_EAST: return UP_EAST;
+            case SOUTH_WEST: return DOWN_WEST;
+            case SOUTH_EAST: return DOWN_EAST;
+
+            //case UP_NORTH:
+            case UP_SOUTH:   return DOWN_NORTH;
+            case UP_WEST:	 return NORTH_WEST;
+            case UP_EAST:    return NORTH_EAST;
+
+            case DOWN_NORTH: return UP_SOUTH;
+            //case DOWN_SOUTH: 
+            case DOWN_WEST:  return SOUTH_WEST;
+            case DOWN_EAST:  return SOUTH_EAST;
+
+            default: return 0;
+        }
+        case WEST: switch (laser_direction)
+        {
+            case NORTH_WEST: return DOWN_NORTH;
+            case NORTH_EAST: return UP_NORTH;
+            case SOUTH_WEST: return DOWN_SOUTH;
+            case SOUTH_EAST: return UP_SOUTH;
+
+            case UP_NORTH:   return NORTH_EAST;
+            case UP_SOUTH:   return SOUTH_EAST;
+            case UP_WEST:    return DOWN_EAST;
+            //case UP_EAST:    
+
+            case DOWN_NORTH: return NORTH_WEST;
+            case DOWN_SOUTH: return SOUTH_WEST;
+            //case DOWN_WEST:
+            case DOWN_EAST:  return UP_WEST;
+
+            default: return 0;
+        }
+        case EAST: switch (laser_direction)
+        {
+            case NORTH_WEST: return UP_NORTH;
+            case NORTH_EAST: return DOWN_NORTH;
+            case SOUTH_WEST: return UP_SOUTH;
+            case SOUTH_EAST: return DOWN_SOUTH;
+
+            case UP_NORTH:   return NORTH_WEST;
+            case UP_SOUTH:   return SOUTH_WEST;
+            //case UP_WEST:
+            case UP_EAST:    return DOWN_WEST;
+
+            case DOWN_NORTH: return NORTH_EAST;
+            case DOWN_SOUTH: return SOUTH_EAST;
+            case DOWN_WEST:  return UP_EAST;
+            //case DOWN_EAST:
+
+            default: return 0;
+        }
         case UP: switch (laser_direction)
         {
-            case NORTH: return EAST;
-            case SOUTH: return WEST;
-            case WEST:  return SOUTH;
-            case EAST:  return NORTH;
+            case NORTH: 	 return EAST;
+            case SOUTH: 	 return WEST;
+            case WEST:  	 return SOUTH;
+            case EAST:  	 return NORTH;
+
+            case NORTH_WEST: return SOUTH_EAST;
+            //case NORTH_EAST:
+            //case SOUTH_WEST:
+            case SOUTH_EAST: return NORTH_WEST;
+
+            case UP_NORTH:   return UP_EAST;
+            case UP_SOUTH:   return UP_WEST;
+            case UP_WEST:    return UP_SOUTH;
+            case UP_EAST:    return UP_NORTH;
+
+            case DOWN_NORTH: return DOWN_EAST;
+            case DOWN_SOUTH: return DOWN_WEST;
+            case DOWN_WEST:  return DOWN_SOUTH;
+            case DOWN_EAST:  return DOWN_NORTH;
+
             default: return 0;
         }
         case DOWN: switch (laser_direction)
         {
-            case NORTH: return WEST;
-            case SOUTH: return EAST;
-            case WEST:  return NORTH;
-            case EAST:  return SOUTH;
+            case NORTH: 	 return WEST;
+            case SOUTH: 	 return EAST;
+            case WEST:  	 return NORTH;
+            case EAST:  	 return SOUTH;
+
+            //case NORTH_WEST: 
+            case NORTH_EAST: return SOUTH_WEST;
+            case SOUTH_WEST: return NORTH_EAST;
+            //case SOUTH_EAST:
+
+            case UP_NORTH:   return UP_WEST;
+            case UP_SOUTH:	 return UP_EAST;
+            case UP_WEST:    return UP_NORTH;
+            case UP_EAST:    return UP_SOUTH;
+
+            case DOWN_NORTH: return DOWN_WEST;
+            case DOWN_SOUTH: return DOWN_EAST;
+            case DOWN_WEST:  return DOWN_NORTH;
+            case DOWN_EAST:  return DOWN_SOUTH;
+
 			default: return 0;
         }
         default: return 0;
     }
+}
+
+Direction getRedDirectionAtCrystal(Direction input_direction)
+{
+    switch(input_direction)
+    {
+        case NORTH:      return NORTH_WEST;
+        case NORTH_WEST: return WEST;
+        case WEST:		 return SOUTH_WEST;
+    	case SOUTH_WEST: return SOUTH;
+    	case SOUTH:      return SOUTH_EAST;
+        case SOUTH_EAST: return EAST;
+        case EAST:       return NORTH_EAST;
+        case NORTH_EAST: return NORTH;
+        default: return 0;
+    }
+}
+
+Direction getBlueDirectionAtCrystal(Direction input_direction)
+{
+    switch(input_direction)
+    {
+        case NORTH:      return NORTH_EAST;
+        case NORTH_WEST: return NORTH;
+        case WEST:		 return NORTH_WEST;
+    	case SOUTH_WEST: return WEST;
+    	case SOUTH:      return SOUTH_WEST;
+        case SOUTH_EAST: return SOUTH;
+        case EAST:       return SOUTH_EAST;
+        case NORTH_EAST: return EAST;
+        default: return 0;
+    }
+}
+
+bool isParallelToXZ(Direction direction)
+{
+    Int3 test_coords = getNextCoords(normCoordsToInt(IDENTITY_TRANSLATION), direction);
+	if (test_coords.y != 0) return false;
+	else return true;
 }
 
 LaserColor getLaserColor(TileType tile)
@@ -1013,6 +1244,49 @@ LaserColor getLaserColor(TileType tile)
     if (tile == LASER_GREEN || tile == LASER_YELLOW  || tile == LASER_CYAN    || tile == LASER_WHITE) laser_color.green = true;
     if (tile == LASER_BLUE  || tile == LASER_CYAN    || tile == LASER_MAGENTA || tile == LASER_WHITE) laser_color.blue = true;
     return laser_color;
+}
+
+bool isSourcePrimary(TileType tile)
+{
+    switch (tile)
+    {
+        case SOURCE_RED:   return true;
+        case SOURCE_GREEN: return true;
+        case SOURCE_BLUE:  return true;
+        default: return false;
+    }
+}
+
+LaserColor colorToLaserColor(Color color)
+{
+    LaserColor laser_color = {0};
+    switch (color)
+    {
+        case RED:     laser_color.red   = true; break;
+        case GREEN:   laser_color.green = true; break;
+        case BLUE:    laser_color.blue  = true; break;
+        case MAGENTA: laser_color.red   = true; laser_color.blue  = true; break;
+        case YELLOW:  laser_color.red   = true; laser_color.green = true; break;
+        case CYAN:    laser_color.green = true; laser_color.blue  = true; break;
+        case WHITE:   laser_color.red   = true; laser_color.green = true; laser_color.blue = true; break;
+        default: break;
+    }
+    return laser_color;
+}
+
+void addPrimarySource(Entity* new_source_pointer, Entity* original_source_pointer, int32 *total_source_count, Color color)
+{
+    new_source_pointer->coords = original_source_pointer->coords;
+    new_source_pointer->direction = original_source_pointer->direction;
+    new_source_pointer->id = 10000 + original_source_pointer->id;
+    new_source_pointer->color = color;
+    (*total_source_count)++;
+}
+
+bool isDiagonal(Direction direction)
+{
+    if (direction == NORTH || direction == SOUTH || direction == WEST || direction == EAST || direction == UP || direction == DOWN) return false;
+    else return true;
 }
 
 void gameInitialise(void) 
@@ -1038,6 +1312,7 @@ void gameInitialise(void)
             pointer[count].position_norm = intCoordsToNorm(pointer[count].coords);
             pointer[count].direction = next_world_state.buffer[buffer_index + 1]; 
             pointer[count].rotation_quat = directionToQuaternion(pointer[count].direction, true);
+            pointer[count].color = getEntityColor(pointer[count].coords);
             pointer[count].id = getEntityCount(pointer);
             pointer = 0;
         }
@@ -1050,6 +1325,8 @@ void gameInitialise(void)
             next_world_state.player.id = 0;
         }
     }
+    next_world_state.player.coords = (Int3){3,1,3};
+    next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
 
 	camera.coords = (Vec3){10, 12, 15};
     camera_yaw = 0; // towards -z; north
@@ -1237,7 +1514,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     Entity *group_pointer = 0;
                     if (isSource(editor_state.picked_tile)) 
                     {
-                        setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getColor(raycast_output.place_coords));
+                        setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords));
                     }
                     else 
                     {
@@ -1295,41 +1572,66 @@ void gameFrame(double delta_time, TickInput tick_input)
         // finished updating state
         world_state = next_world_state;
 
-        // calculate where lasers are into ephemeral laser buffer // TODO(spike): figure out if i should allocate this memory before and just 0 it, or if i should allocate it on the stack per frame.
+        // calculate where lasers are into ephemeral laser buffer // TODO(spike): figure out if i should allocate this memory before and just zero it, or if i should allocate it on the stack per frame.
         LaserBuffer laser_buffer[1024] = {0};
         int32 laser_tile_count = 0;
-        for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)
+        int32 total_source_count = getEntityCount(next_world_state.sources);
+        Entity sources_as_primary[128]; 
+        memset(sources_as_primary, -1, sizeof(sources_as_primary)); // TODO(spike): better zeroing function to be used here also
+        memcpy(sources_as_primary, next_world_state.sources, sizeof(Entity) * total_source_count);
+
+        for (int source_index = 0; source_index < MAX_PSEUDO_SOURCE_COUNT; source_index++)
         {
-            Entity* entity_pointer = &next_world_state.sources[source_index];
+            Entity* entity_pointer = &sources_as_primary[source_index];
             if (entity_pointer->id == -1) continue;
             Direction current_direction = entity_pointer->direction;
             Int3 current_coords = getNextCoords(entity_pointer->coords, current_direction);
 
+            switch (entity_pointer->color) 
+            {
+                case MAGENTA: addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, BLUE);  break;
+                case YELLOW:  addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, GREEN); break;
+                case CYAN:    addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, BLUE); break;
+                case WHITE:
+              	{
+					addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, GREEN); 
+                    addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, BLUE); // creates a duplicate ID here. still unclear if i even want to use these though
+                    break;
+              	}
+                default: break;
+            }
+
             for (int laser_index = 0; laser_index < MAX_LASER_TRAVEL_DISTANCE; laser_index++)
             {
+                LaserColor laser_color = colorToLaserColor(entity_pointer->color);
                 if (!intCoordsWithinLevelBounds(current_coords)) break;
-                if (getTileType(current_coords) == MIRROR)
-                {
-                    bool can_reflect = canMirrorReflect(current_direction, getEntityDirection(current_coords));
-					if (can_reflect) current_direction = getNextLaserDirectionMirror(current_direction, getEntityDirection(current_coords));
-					else break;
-                }
-                else if (getTileType(current_coords) == CRYSTAL)
-                {
-					break;
-                }
-                else if (getTileType(current_coords) == PLAYER)
+                if (getTileType(current_coords) == PLAYER)
                 {
                     // TODO(spike): think about ordering here. right now there is 1f delay: abilities only calculated after checking if allowed to push
                     break;
                 }
-                else if (getTileType(current_coords) != NONE) break;
-				  
-                LaserColor laser_color = getLaserColor(getTileType(entity_pointer->coords) + 8);
+                else if (getTileType(current_coords) == CRYSTAL)
+                {
+                    if (!isParallelToXZ(current_direction)) break; // let crystal break beam if not coming at angle flat on the y axis
 
-				if (laser_color.red)   laser_buffer[laser_tile_count].color.red = true;
-				if (laser_color.green) laser_buffer[laser_tile_count].color.green = true;
-				if (laser_color.blue)  laser_buffer[laser_tile_count].color.blue = true;
+					if (laser_color.red) current_direction = getRedDirectionAtCrystal(current_direction); 
+					else if (laser_color.green) current_direction = current_direction;
+					else if (laser_color.blue) current_direction = getBlueDirectionAtCrystal(current_direction); 
+                }
+                else if (getTileType(current_coords) == MIRROR)
+                {
+                    bool can_reflect = canMirrorReflect(current_direction, getEntityDirection(current_coords));
+					if (can_reflect) 
+                    {
+                        current_direction = getNextLaserDirectionMirror(current_direction, getEntityDirection(current_coords));
+                    }
+					else break;
+                }
+                else if (getTileType(current_coords) != NONE) break;
+
+				if      (laser_color.red)   laser_buffer[laser_tile_count].color.red   = true; 
+				else if (laser_color.green) laser_buffer[laser_tile_count].color.green = true; // else here ensures magenta -> red, yellow -> red, cyan -> green for non-primaries.
+				else if (laser_color.blue)  laser_buffer[laser_tile_count].color.blue  = true; // the rest are aleady in sources_as_primary, and will be added to laser_buffer at the end of the loop
                 laser_buffer[laser_tile_count].direction = current_direction;
                 laser_buffer[laser_tile_count].coords    = current_coords;
                 laser_tile_count++;
@@ -1360,13 +1662,18 @@ void gameFrame(double delta_time, TickInput tick_input)
                 continue;
             }
             LaserColor color = laser_buffer[laser_index].color;
-            if      (color.red && color.green && color.blue) drawAsset(laser_white_path,   CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), LASER_SCALE, directionToQuaternion(laser_buffer[laser_index].direction, false));
-            else if (color.red && color.green              ) drawAsset(laser_yellow_path,  CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), LASER_SCALE, directionToQuaternion(laser_buffer[laser_index].direction, false));
-            else if (color.red &&                color.blue) drawAsset(laser_magenta_path, CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), LASER_SCALE, directionToQuaternion(laser_buffer[laser_index].direction, false));
-            else if (             color.green && color.blue) drawAsset(laser_cyan_path,    CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), LASER_SCALE, directionToQuaternion(laser_buffer[laser_index].direction, false));
-            else if (color.red                             ) drawAsset(laser_red_path,     CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), LASER_SCALE, directionToQuaternion(laser_buffer[laser_index].direction, false));
-            else if (             color.green              ) drawAsset(laser_green_path,   CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), LASER_SCALE, directionToQuaternion(laser_buffer[laser_index].direction, false));
-            else if (                            color.blue) drawAsset(laser_blue_path,    CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), LASER_SCALE, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            Vec3 laser_scale = {0};
+   			bool is_diagonal = isDiagonal(laser_buffer[laser_index].direction);
+            if (is_diagonal) laser_scale = DIAGONAL_LASER_SCALE;
+            else 			 laser_scale = ORTHOGONAL_LASER_SCALE;
+
+            if      (color.red && color.green && color.blue) drawAsset(laser_white_path,   CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (color.red && color.green              ) drawAsset(laser_yellow_path,  CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (color.red &&                color.blue) drawAsset(laser_magenta_path, CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (             color.green && color.blue) drawAsset(laser_cyan_path,    CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (color.red                             ) drawAsset(laser_red_path,     CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (             color.green              ) drawAsset(laser_green_path,   CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (                            color.blue) drawAsset(laser_blue_path,    CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
         }
 
         // draw static objects
