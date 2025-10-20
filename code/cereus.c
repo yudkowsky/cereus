@@ -1012,34 +1012,6 @@ void roll(Int3 coords, Direction direction)
 
 bool canMirrorReflect(Direction laser_direction, Direction mirror_direction)
 {
-    /*
-    switch (laser_direction)
-    {
-        case NORTH: 
-        case SOUTH: switch (mirror_direction)
-        {
-            case WEST: 
-            case EAST: return false;
-            default: return true;
-        }
-        case WEST:
-        case EAST: switch (mirror_direction)
-        {
-            case NORTH: 
-            case SOUTH: return false;
-            default: return true;
-        }
-        case UP:
-        case DOWN: switch (mirror_direction)
-        {
-            case UP: 
-            case DOWN: return false;
-            default: return true;
-        }
-        default: return false;
-    }
-    */
-    
     switch (mirror_direction)
     {
         case NORTH: if (laser_direction == WEST || laser_direction == EAST || laser_direction == UP_SOUTH || laser_direction == DOWN_NORTH) return false; break;
@@ -1533,7 +1505,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (entity_pointer != 0)
                     {
                         entity_pointer->direction = direction;
-                    	entity_pointer->rotation_quat = directionToQuaternion(direction, true);
+						if (getTileType(entity_pointer->coords) == MIRROR) entity_pointer->rotation_quat = directionToQuaternion(direction, true); // unclear why this is required, something to do with my sprite layout
+						else entity_pointer->rotation_quat = directionToQuaternion(direction, false);
                 	}
                 }
                 else if (tick_input.middle_mouse_press && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
@@ -1550,11 +1523,23 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-        // world logic
-        // falling objects should go here
+		// falling object calculations
+        // objects that should fall: boxes, mirrors, crystals, and the player
+        Entity* group_pointer = next_world_state.boxes;
+        for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
+        {
+            // below checks if space beneath and if norm coords are same as int coords, i.e., any currently playing animation is done.
+            if (getTileType(getNextCoords(group_pointer[entity_index].coords, DOWN)) == NONE && int3IsEqual(group_pointer[entity_index].coords, normCoordsToInt(group_pointer[entity_index].position_norm)))
+            {
+                Int3 new_coords = int3Add(group_pointer[entity_index].coords, int3Negate(AXIS_Y)); 
+                setTileType(getTileType(group_pointer[entity_index].coords), new_coords);
+                setTileType(NONE, group_pointer[entity_index].coords);
+                group_pointer[entity_index].coords = new_coords;
+                group_pointer[entity_index].position_norm = intCoordsToNorm(new_coords); // queue animation here instead
+            }
+        }
 
         // do animations
-        
 		for (int animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
         {
 			if (animations[animation_index].frames_left == 0) continue;
@@ -1562,9 +1547,6 @@ void gameFrame(double delta_time, TickInput tick_input)
 			if (animations[animation_index].rotation_to_change != 0) *animations[animation_index].rotation_to_change = animations[animation_index].rotation[animations[animation_index].frames_left-1];
             animations[animation_index].frames_left--;
         }
-
-        // finished updating state
-        world_state = next_world_state;
 
         // calculate where lasers are into ephemeral laser buffer // TODO(spike): figure out if i should allocate this memory before and just zero it, or if i should allocate it on the stack per frame.
         LaserBuffer laser_buffer[1024] = {0};
@@ -1601,7 +1583,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (!intCoordsWithinLevelBounds(current_coords)) break;
                 if (getTileType(current_coords) == PLAYER)
                 {
-                    // TODO(spike): think about ordering here. right now there is 1f delay: abilities only calculated after checking if allowed to push
+                    // TODO(spike): think about ordering here. i want player checks to occur before player pushes objects, 
+                    //  			but also i don't want lasers to be queued to render at a location if it will change that frame because player pushes.
+                    //  			likely i should get the information of if a laser is queued to hit player first, without filling laser_buffer,
+                    //  			and then do pushing calculations with that in mind, and only then actually fill buffer.
+                    //  			for now, live with 1f delay (shouldn't actually be gameplay sensitive, since inputs are on 8f timer)
+                    if (laser_color.red)   next_world_state.player.hit_by_red   = true;
+                    if (laser_color.green) next_world_state.player.hit_by_green = true;
+                    if (laser_color.blue)  next_world_state.player.hit_by_blue  = true;
                     break;
                 }
                 else if (getTileType(current_coords) == CRYSTAL)
@@ -1632,6 +1621,9 @@ void gameFrame(double delta_time, TickInput tick_input)
                 current_coords = getNextCoords(current_coords, current_direction);
             }
         }
+
+        // finished updating state
+        world_state = next_world_state;
 
         // draw lasers
         for (int laser_index = 0; laser_index < laser_tile_count; laser_index++)
