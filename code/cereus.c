@@ -1308,7 +1308,7 @@ int32 updateLaserBuffer(void)
     int32 total_source_count = getEntityCount(next_world_state.sources);
     Entity sources_as_primary[128]; 
     memset(sources_as_primary, -1, sizeof(sources_as_primary)); // TODO(spike): better zeroing function to be used here also
-    memcpy(sources_as_primary, next_world_state.sources, sizeof(Entity) * total_source_count);
+    memcpy(sources_as_primary, next_world_state.sources, sizeof(Entity) * MAX_PSEUDO_SOURCE_COUNT);
         
     // set these to 0 before we start checking
     next_world_state.player.hit_by_red   = false;
@@ -1366,7 +1366,7 @@ int32 updateLaserBuffer(void)
             else if (getTileType(current_coords) != NONE) break;
 
             if      (laser_color.red)   laser_buffer[laser_tile_count].color.red   = true; 
-            else if (laser_color.green) laser_buffer[laser_tile_count].color.green = true; // else here ensures magenta -> red, yellow -> red, cyan -> green for non-primaries.
+            else if (laser_color.green) laser_buffer[laser_tile_count].color.green = true; // else here ensures magenta -> red, yellow -> red, cyan -> green for non-primaries;
             else if (laser_color.blue)  laser_buffer[laser_tile_count].color.blue  = true; // the rest are aleady in sources_as_primary, and will be added to laser_buffer at the end of the loop
             laser_buffer[laser_tile_count].direction = current_direction;
             laser_buffer[laser_tile_count].coords    = current_coords;
@@ -1814,6 +1814,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 		// draw colored entites
 		for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)
         {
+            if (world_state.sources[source_index].id == -1) continue;
             char* path = getPath(getTileType(world_state.sources[source_index].coords));
             drawAsset(path, CUBE_3D, world_state.sources[source_index].position_norm, DEFAULT_SCALE, world_state.sources[source_index].rotation_quat);
         }
