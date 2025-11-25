@@ -1328,7 +1328,7 @@ void gameInitialise(void)
     //next_world_state.player.coords = (Int3){3,1,3};
     next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
 
-	camera.coords = (Vec3){10, 12, 15};
+	camera.coords = (Vec3){15, 12, 19};
     camera_yaw = 0; // towards -z; north
     camera_pitch = -TAU * 0.18f; // look down-ish
     Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera_yaw);
@@ -1422,7 +1422,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (move_player)
                     {
                         // don't allow walking off edge
-                        if (getTileType(int3Add(next_player_coords, int3Negate(AXIS_Y))) != NONE)
+                        if (getTileType(int3Add(next_player_coords, int3Negate(AXIS_Y))) != NONE || next_world_state.player.hit_by_red) // slo-mo if red
                         {
                             createInterpolationAnimation(intCoordsToNorm(next_world_state.player.coords), 
                                                          intCoordsToNorm(next_player_coords), 
@@ -1527,7 +1527,13 @@ void gameFrame(double delta_time, TickInput tick_input)
                         setTileType(editor_state.picked_tile, raycast_output.place_coords); 
                         setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
                     }
-                    else 
+                    else if (editor_state.picked_tile == PLAYER)
+                    {
+						next_world_state.player.coords = raycast_output.place_coords;
+                        next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
+                        setTileType(editor_state.picked_tile, raycast_output.place_coords);
+                    }
+                    else
                     {
                         switch (editor_state.picked_tile)
                         {
@@ -1561,8 +1567,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 			else if (time_until_input == 0 && tick_input.l_press)
             {
 				editor_state.picked_tile++;
-                if      (editor_state.picked_tile == PLAYER) editor_state.picked_tile = MIRROR;
-                else if (editor_state.picked_tile == CRYSTAL + 1) editor_state.picked_tile = SOURCE_RED;
+                //if    (editor_state.picked_tile == PLAYER) editor_state.picked_tile = MIRROR;
+                if 		(editor_state.picked_tile == CRYSTAL + 1) editor_state.picked_tile = SOURCE_RED;
                 else if (editor_state.picked_tile == SOURCE_WHITE + 1) editor_state.picked_tile = VOID;
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
@@ -1589,10 +1595,23 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                                  getEntityId(group_pointer[entity_index].coords));
                 }
+                /*
+                // delete if void below
+                else if (getTileType(getNextCoords(group_pointer[entity_index].coords, DOWN)) == VOID)
+                {
+                    Int3 new_coords = int3Add(group_pointer[entity_index].coords, int3Negate(AXIS_Y));
+					
+                    createInterpolationAnimation(intCoordsToNorm(int3Add(new_coords, AXIS_Y)), 
+                                                 intCoordsToNorm(new_coords), 
+                                                 &group_pointer[entity_index].position_norm,
+                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                 getEntityId(group_pointer[entity_index].coords));
+                }
+                */
             }
 		}
         // player gets own special case
-        if (getTileType(getNextCoords(next_world_state.player.coords, DOWN)) == NONE)
+        if (getTileType(getNextCoords(next_world_state.player.coords, DOWN)) == NONE && !next_world_state.player.hit_by_red) // slo-mo if red
         {
             Int3 new_coords = int3Add(next_world_state.player.coords, int3Negate(AXIS_Y)); 
             setTileType(PLAYER, new_coords);
@@ -1760,7 +1779,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         drawEntityLoop(world_state.boxes,    box_path,     CUBE_3D, DEFAULT_SCALE);
         drawEntityLoop(world_state.mirrors,  mirror_path,  CUBE_3D, DEFAULT_SCALE);
         drawEntityLoop(world_state.crystals, crystal_path, CUBE_3D, DEFAULT_SCALE);
-        if (!next_world_state.player.hit_by_red) drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
+        drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
 
 		// draw colored entites
 		for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)
