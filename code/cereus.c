@@ -146,7 +146,10 @@ const Vec3 ORTHOGONAL_LASER_SCALE = { 0.125f, 0.125f, 1.0f   };
 const Vec3 DIAGONAL_LASER_SCALE   = { 0.125f, 0.125f, 1.415f };
 const float RAYCAST_SEEK_LENGTH = 20.0f;
 const int32 INPUT_TIME_UNTIL_ALLOW = 8;
-const int32 ANIMATION_TIME = 8;
+const int32 PUSH_ANIMATION_TIME = 8;
+const int32 ROLL_ANIMATION_TIME = 12;
+const int32 TURN_ANIMATION_TIME = 8;
+const int32 FALL_ANIMATION_TIME = 8;
 const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
 const int32 MAX_ANIMATION_COUNT = 32;
@@ -791,7 +794,7 @@ Vec3 rollingAxis(Direction direction)
 // ANIMATIONS
 
 // automatically queues if given object is already being moved around. assumes object is entity, because requires id - easily fixable if required. assumes max two animations on any given object (max one queued)
-void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change, int32 entity_id)
+void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change, int32 entity_id, int32 animation_frames)
 {
 	// get id from position a - i should be calling for the animation right before pos a is updated
     int32 queue_time = 0; // frames which allow for previous animation to finish, if one exists
@@ -814,10 +817,9 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
 	animations[animation_index].id = entity_id;
 
     // set frame count. the last frame here is the true/correct position
-    int32 animation_frames = ANIMATION_TIME;
-    animations[animation_index].frames_left = ANIMATION_TIME + queue_time; 
+    animations[animation_index].frames_left = animation_frames + queue_time; 
 
-	Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(position_b, position_a), (float)(1.0f/ANIMATION_TIME));
+	Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(position_b, position_a), (float)(1.0f/animation_frames));
 
     if (!vec3IsZero(translation_per_frame))
     {
@@ -841,7 +843,7 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
     }
 }
 
-void createRollingAnimation(Vec3 position, Direction direction, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change, int32 entity_id)
+void createRollingAnimation(Vec3 position, Direction direction, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change, int32 entity_id, int32 animation_frames)
 {	
     int32 queue_time = 0;
 
@@ -861,8 +863,7 @@ void createRollingAnimation(Vec3 position, Direction direction, Vec3* position_t
     }
     
     animations[animation_index].id = entity_id;
-    int32 animation_frames = ANIMATION_TIME;
-    animations[animation_index].frames_left = ANIMATION_TIME + queue_time; 
+    animations[animation_index].frames_left = animation_frames + queue_time; 
     animations[animation_index].rotation_to_change = rotation_to_change;
     animations[animation_index].position_to_change = position_to_change;
 
@@ -881,7 +882,7 @@ void createRollingAnimation(Vec3 position, Direction direction, Vec3* position_t
     Vec3 pivot_point = vec3Add(position, start_translation);
     Vec3 axis = rollingAxis(direction);
     Vec3 pivot_to_cube_center = vec3Subtract(position, pivot_point);
-	float d_theta_per_frame = (TAU*0.25f)/(float)ANIMATION_TIME;
+	float d_theta_per_frame = (TAU*0.25f)/(float)animation_frames;
 
     for (int frame_index = 0; frame_index < animation_frames; frame_index++)
     {
@@ -970,7 +971,7 @@ void push(Int3 coords, Direction direction)
                                      intCoordsToNorm(entities_to_push.new_coords[entity_index]),
                                      &entities_to_push.pointer_to_entity[entity_index]->position_norm,
                                      IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                     id); 
+                                     id, PUSH_ANIMATION_TIME); 
         if (entity_index == 0) setTileType(NONE, entities_to_push.pointer_to_entity[entity_index]->coords); // will necessarily be overwritten by player / object doing the pushing; keeping for safety for now
         setTileType(entities_to_push.type[entity_index], entities_to_push.new_coords[entity_index]);
     }
@@ -1048,7 +1049,7 @@ void roll(Int3 coords, Direction direction)
                            directionToQuaternion(pointer->direction, true), 
                            quaternion_transform,
         				   &pointer->rotation_quat,
-                           id);
+                           id, ROLL_ANIMATION_TIME);
 	Direction new_direction = getNextMirrorState(pointer->direction, direction);
     pointer->direction = new_direction;
     setTileDirection(new_direction, pointer->coords);
@@ -1513,17 +1514,23 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (move_player)
                     {
                         // don't allow walking off edge
-                        if (getTileType(int3Add(next_player_coords, int3Negate(AXIS_Y))) != NONE || next_world_state.player.hit_by_red) // slo-mo if red
+                        TileType tile_below = getTileType(int3Add(next_player_coords, int3Negate(AXIS_Y)));
+                        if (tile_below != NONE || next_world_state.player.hit_by_red) // no-grav if red
                         {
+                            int32 animation_time = 0;
+                            if (next_tile == MIRROR) animation_time = ROLL_ANIMATION_TIME;
+                            else 					 animation_time = PUSH_ANIMATION_TIME;
                             createInterpolationAnimation(intCoordsToNorm(next_world_state.player.coords), 
                                                          intCoordsToNorm(next_player_coords), 
                                                          &next_world_state.player.position_norm,
                                                          IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                         1); // passing 1 as id for player 
+                                                         1, animation_time); // passing 1 as id for player 
                             setTileType(NONE, next_world_state.player.coords);
                             next_world_state.player.coords = next_player_coords;
                             setTileType(PLAYER, next_world_state.player.coords);
                         }
+                        if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME;
+                        else					 time_until_input = PUSH_ANIMATION_TIME;
                     }
                 }
                 else
@@ -1535,12 +1542,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 					 directionToQuaternion(next_world_state.player.direction, true), 
                                                      directionToQuaternion(input_direction, true), 
                                                      &next_world_state.player.rotation_quat,
-                                                     1); // passing 1 as id for player 
+                                                     1, TURN_ANIMATION_TIME); // passing 1 as id for player 
                         next_world_state.player.direction = input_direction;
                         setTileDirection(next_world_state.player.direction, next_world_state.player.coords);
                     }
+                    time_until_input = TURN_ANIMATION_TIME;
         		}
-                time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
         }
         else
@@ -1671,7 +1678,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // objects that should fall: boxes, mirrors, crystals, and the player (below)
 
         Entity* object_group_to_fall[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
-        if (!next_world_state.player.hit_by_blue) // no-grav if blue
+        if (!next_world_state.player.hit_by_blue) // slo-mo if blue
         {
             for (int to_fall_index = 0; to_fall_index < 3; to_fall_index++)
             {
@@ -1688,7 +1695,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                      intCoordsToNorm(new_coords), 
                                                      &group_pointer[entity_index].position_norm,
                                                      IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                     getEntityId(group_pointer[entity_index].coords));
+                                                     getEntityId(group_pointer[entity_index].coords), FALL_ANIMATION_TIME);
                     }
                     /*
                     // delete if void below
@@ -1707,7 +1714,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
         // player gets own special case
-        if (getTileType(getNextCoords(next_world_state.player.coords, DOWN)) == NONE && !next_world_state.player.hit_by_red) // slo-mo if red
+        if (getTileType(getNextCoords(next_world_state.player.coords, DOWN)) == NONE && !next_world_state.player.hit_by_red) // no-grav if red
         {
             Int3 new_coords = int3Add(next_world_state.player.coords, int3Negate(AXIS_Y)); 
             setTileType(PLAYER, new_coords);
@@ -1717,7 +1724,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                          intCoordsToNorm(new_coords), 
                                          &next_world_state.player.position_norm,
                                          IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                         getEntityId(next_world_state.player.coords));
+                                         getEntityId(next_world_state.player.coords), FALL_ANIMATION_TIME);
         }
 
         // do animations
