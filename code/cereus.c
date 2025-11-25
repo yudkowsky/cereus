@@ -558,6 +558,8 @@ void setEntityInstanceInGroup(Entity* group_pointer, Int3 coords, Direction dire
         group_pointer[entity_index].rotation_quat = directionToQuaternion(direction, true);
         group_pointer[entity_index].id = entity_index;
         group_pointer[entity_index].color = color;
+
+        setTileDirection(direction, coords);
         break;
     }
 }
@@ -1040,6 +1042,7 @@ void roll(Int3 coords, Direction direction)
         				   &pointer->rotation_quat);
 	Direction new_direction = getNextMirrorState(pointer->direction, direction);
     pointer->direction = new_direction;
+    setTileDirection(new_direction, pointer->coords);
 }
 
 // LASERS
@@ -1371,6 +1374,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press))
             {
+				// PLAYER MOVEMENT
+                
                 Direction input_direction = 0;
                 Int3 next_player_coords = {0};
                 if 		(tick_input.w_press) input_direction = NORTH; 
@@ -1437,8 +1442,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                 }
                 else
                 {
-                   	bool opposite = (abs(input_direction - next_world_state.player.direction) == 2);
-                    if (!opposite) 
+                    // player turns
+                    if (input_direction != oppositeDirection(next_world_state.player.direction)) 
                     {
                         createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
                                 					 directionToQuaternion(next_world_state.player.direction, true), 
@@ -1446,6 +1451,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                      &next_world_state.player.rotation_quat,
                                                      1); // passing 1 as id for player 
                         next_world_state.player.direction = input_direction;
+                        setTileDirection(next_world_state.player.direction, next_world_state.player.coords);
                     }
         		}
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
@@ -1551,7 +1557,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     Direction direction = getTileDirection(raycast_output.hit_coords);
                     if (direction == DOWN) direction = NORTH;
                     else direction++;
-                	next_world_state.buffer[coordsToBufferIndexDirection(raycast_output.hit_coords)] = direction;
+                    setTileDirection(direction, raycast_output.hit_coords);
                     Entity *entity_pointer = getEntityPointer(raycast_output.hit_coords);
                     if (entity_pointer != 0)
                     {
