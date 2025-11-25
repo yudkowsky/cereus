@@ -72,6 +72,7 @@ Entity;
 
 typedef struct Animation
 {
+    int32 id;
     int32 frames_left;
     Vec3* position_to_change;
     Vec4* rotation_to_change;
@@ -132,31 +133,36 @@ typedef struct LaserBuffer
 }
 LaserBuffer;
 
-double PHYSICS_INCREMENT = 1.0/60.0;
+const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0.0;
 
-float TAU = 6.28318530f;
+const float TAU = 6.2831853071f;
 
-float SENSITIVITY = 0.005f;
-float MOVE_STEP = 0.05f;
-Vec3 DEFAULT_SCALE = { 1.0f,   1.0f,   1.0f  };
-Vec3 PLAYER_SCALE  = { 0.75f,  0.75f,  0.75f };
-Vec3 ORTHOGONAL_LASER_SCALE = { 0.125f, 0.125f, 1.0f   };
-Vec3 DIAGONAL_LASER_SCALE   = { 0.125f, 0.125f, 1.415f };
-float RAYCAST_SEEK_LENGTH = 20.0f;
-int32 INPUT_TIME_UNTIL_ALLOW = 8;
-int32 ANIMATION_TIME = 8;
-int32 MAX_ENTITY_INSTANCE_COUNT = 32;
-int32 MAX_ENTITY_PUSH_COUNT = 32;
-int32 MAX_ANIMATION_COUNT = 32;
-int32 MAX_LASER_TRAVEL_DISTANCE = 48;
-int32 MAX_PSEUDO_SOURCE_COUNT = 128;
+const float SENSITIVITY = 0.005f;
+const float MOVE_STEP = 0.05f;
+const Vec3 DEFAULT_SCALE = { 1.0f,   1.0f,   1.0f  };
+const Vec3 PLAYER_SCALE  = { 0.75f,  0.75f,  0.75f };
+const Vec3 ORTHOGONAL_LASER_SCALE = { 0.125f, 0.125f, 1.0f   };
+const Vec3 DIAGONAL_LASER_SCALE   = { 0.125f, 0.125f, 1.415f };
+const float RAYCAST_SEEK_LENGTH = 20.0f;
+const int32 INPUT_TIME_UNTIL_ALLOW = 8;
+const int32 ANIMATION_TIME = 8;
+const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
+const int32 MAX_ENTITY_PUSH_COUNT = 32;
+const int32 MAX_ANIMATION_COUNT = 32;
+const int32 MAX_LASER_TRAVEL_DISTANCE = 48;
+const int32 MAX_PSEUDO_SOURCE_COUNT = 128;
 
-Int3 AXIS_X = { 1, 0, 0 };
-Int3 AXIS_Y = { 0, 1, 0 };
-Int3 AXIS_Z = { 0, 0, 1 };
-Vec3 IDENTITY_TRANSLATION = { 0, 0, 0 };
-Vec4 IDENTITY_QUATERNION = { 0, 0, 0, 1};
+const Int3 AXIS_X = { 1, 0, 0 };
+const Int3 AXIS_Y = { 0, 1, 0 };
+const Int3 AXIS_Z = { 0, 0, 1 };
+const Vec3 IDENTITY_TRANSLATION = { 0, 0, 0 };
+const Vec4 IDENTITY_QUATERNION = { 0, 0, 0, 1};
+
+const int32 ID_OFFSET_BOX     = 100 * 1; 
+const int32 ID_OFFSET_MIRROR  = 100 * 2; 
+const int32 ID_OFFSET_CRYSTAL = 100 * 3; 
+const int32 ID_OFFSET_SOURCE  = 100 * 4; 
 
 Camera camera = {0};
 float camera_yaw = 0.0f;
@@ -246,7 +252,7 @@ Vec4 quaternionConjugate(Vec4 quaternion)
 Vec4 quaternionMultiply(Vec4 a, Vec4 b)
 {
     return (Vec4){ a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
-    		 	   a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
+    			   a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
         		   a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
         		   a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z};
 }
@@ -396,6 +402,12 @@ Entity* getEntityPointer(Int3 coords)
     return 0;
 }
 
+int32 getEntityId(Int3 coords)
+{
+	Entity *entity_pointer = getEntityPointer(coords);
+    return entity_pointer->id;
+}
+
 Direction getEntityDirection(Int3 coords) 
 {
 	Entity *entity_pointer = getEntityPointer(coords);
@@ -425,6 +437,15 @@ int32 getEntityCount(Entity *pointer_to_array)
         count++;
     }
     return count;
+}
+
+int32 entityIdOffset(Entity *pointer)
+{
+    if (pointer == next_world_state.boxes)    return ID_OFFSET_BOX;
+    if (pointer == next_world_state.mirrors)  return ID_OFFSET_MIRROR;
+    if (pointer == next_world_state.crystals) return ID_OFFSET_CRYSTAL;
+    if (pointer == next_world_state.sources)  return ID_OFFSET_SOURCE;
+    return 0;
 }
 
 // roll_z only works / is used for 6-dim. otherwise we just decide (it doesn't make sense to ask for diagonals)
@@ -767,42 +788,53 @@ Vec3 rollingAxis(Direction direction)
 
 // ANIMATIONS
 
-void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change)
+// automatically queues if given object is already being moved around. assumes object is entity, because requires id - easily fixable if required. assumes max two animations on any given object (max one queued)
+void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change, int32 entity_id)
 {
-    // find next free in animations
+	// get id from position a - i should be calling for the animation right before pos a is updated
+    int32 queue_time = 0; // frames which allow for previous animation to finish, if one exists
+
+    // find next free in animations. 
     int32 animation_index = -1;
+
     for (int find_anim_index = 0; find_anim_index < MAX_ANIMATION_COUNT; find_anim_index++)
     {
-        if (animations[find_anim_index].frames_left == 0)
+        if (animation_index == -1 && animations[find_anim_index].frames_left == 0)
         {
             animation_index = find_anim_index;
             animations[animation_index] = (Animation){0};
-            break;
+        }
+        if (animations[find_anim_index].id == entity_id && animations[find_anim_index].frames_left != 0) // this is the part that assumes that only one animation is queued
+        {
+			queue_time = animations[find_anim_index].frames_left;
         }
     }
 
-    // set frame count. the last frame here is the true/correct position
-    animations[animation_index].frames_left = ANIMATION_TIME;
+	animations[animation_index].id = entity_id;
 
-	Vec3 translation_per_frame   = vec3ScalarMultiply(vec3Subtract(position_b, position_a), (float)(1.0f/ANIMATION_TIME));
+    // set frame count. the last frame here is the true/correct position
+    int32 animation_frames = ANIMATION_TIME;
+    animations[animation_index].frames_left = ANIMATION_TIME + queue_time; 
+
+	Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(position_b, position_a), (float)(1.0f/ANIMATION_TIME));
 
     if (!vec3IsZero(translation_per_frame))
     {
         animations[animation_index].position_to_change = position_to_change;
-        for (int frame_index = 0; frame_index < animations[animation_index].frames_left; frame_index++)
+        for (int frame_index = 0; frame_index < animation_frames; frame_index++)
         {
-            animations[animation_index].position[animations[animation_index].frames_left-(1+frame_index)] 
-            = vec3Add(*position_to_change, vec3ScalarMultiply(translation_per_frame, (float)(1+frame_index)));
+            animations[animation_index].position[animation_frames-(1+frame_index)] 
+            = vec3Add(position_a, vec3ScalarMultiply(translation_per_frame, (float)(1+frame_index)));
         }
     }
     if (!quaternionIsZero(quaternionSubtract(rotation_b, rotation_a)))
     {
         animations[animation_index].rotation_to_change = rotation_to_change;
         if (quaternionDot(rotation_a, rotation_b) < 0.0f) rotation_b = quaternionScalarMultiply(rotation_b, -1.0f);
-        for (int frame_index = 0; frame_index < animations[animation_index].frames_left; frame_index++)
+        for (int frame_index = 0; frame_index < animation_frames; frame_index++)
         {
-            float param = (float)(frame_index + 1) / animations[animation_index].frames_left;
-	    	animations[animation_index].rotation[animations[animation_index].frames_left-(1+frame_index)] 
+            float param = (float)(frame_index + 1) / animation_frames;
+	    	animations[animation_index].rotation[animation_frames-(1+frame_index)] 
             = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(rotation_a, 1.0f - param), quaternionScalarMultiply(rotation_b, param)));
         }
     }
@@ -923,11 +955,13 @@ void push(Int3 coords, Direction direction)
     }
     for (int entity_index = 0; entity_index < entities_to_push.count; entity_index++)
     {
+        int32 id = getEntityId(entities_to_push.previous_coords[entity_index]);
         entities_to_push.pointer_to_entity[entity_index]->coords = entities_to_push.new_coords[entity_index];
         createInterpolationAnimation(intCoordsToNorm(entities_to_push.previous_coords[entity_index]),
                                      intCoordsToNorm(entities_to_push.new_coords[entity_index]),
                                      &entities_to_push.pointer_to_entity[entity_index]->position_norm,
-                                     IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0);
+                                     IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                     id); 
         if (entity_index == 0) setTileType(NONE, entities_to_push.pointer_to_entity[entity_index]->coords); // will necessarily be overwritten by player / object doing the pushing; keeping for safety for now
         setTileType(entities_to_push.type[entity_index], entities_to_push.new_coords[entity_index]);
     }
@@ -1279,7 +1313,7 @@ void gameInitialise(void)
             pointer[count].direction = next_world_state.buffer[buffer_index + 1]; 
             pointer[count].rotation_quat = directionToQuaternion(pointer[count].direction, false);
             pointer[count].color = getEntityColor(pointer[count].coords);
-            pointer[count].id = getEntityCount(pointer);
+            pointer[count].id = getEntityCount(pointer) + entityIdOffset(pointer);
             pointer = 0;
         }
         else if (next_world_state.buffer[buffer_index] == PLAYER) // special case for player, since there is only one
@@ -1288,7 +1322,7 @@ void gameInitialise(void)
             next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
             next_world_state.player.direction = next_world_state.buffer[buffer_index + 1];
             next_world_state.player.rotation_quat = directionToQuaternion(next_world_state.player.direction, false);
-            next_world_state.player.id = 0;
+            next_world_state.player.id = 1;
         }
     }
     next_world_state.player.coords = (Int3){3,1,3};
@@ -1393,7 +1427,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             createInterpolationAnimation(intCoordsToNorm(next_world_state.player.coords), 
                                                          intCoordsToNorm(next_player_coords), 
                                                          &next_world_state.player.position_norm,
-                                                         IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0);
+                                                         IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                         1); // passing 1 as id for player 
                             setTileType(NONE, next_world_state.player.coords);
                             next_world_state.player.coords = next_player_coords;
                             setTileType(PLAYER, next_world_state.player.coords);
@@ -1408,7 +1443,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                         createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
                                 					 directionToQuaternion(next_world_state.player.direction, true), 
                                                      directionToQuaternion(input_direction, true), 
-                                                     &next_world_state.player.rotation_quat);
+                                                     &next_world_state.player.rotation_quat,
+                                                     1); // passing 1 as id for player 
                         next_world_state.player.direction = input_direction;
                     }
         		}
@@ -1524,26 +1560,38 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
 		// falling object calculations
-        // objects that should fall: boxes, mirrors, crystals, and the player
-        Entity* group_pointer = next_world_state.boxes;
-        for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
+        // objects that should fall: boxes, mirrors, crystals, and TODO(spike): the player
+
+        Entity* object_group_to_fall[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
+        for (int to_fall_index = 0; to_fall_index < 3; to_fall_index++)
         {
-            // below checks if space beneath and if norm coords are same as int coords, i.e., any currently playing animation is done.
-            if (getTileType(getNextCoords(group_pointer[entity_index].coords, DOWN)) == NONE && int3IsEqual(group_pointer[entity_index].coords, normCoordsToInt(group_pointer[entity_index].position_norm)))
+            Entity* group_pointer = object_group_to_fall[to_fall_index];
+            for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
             {
-                Int3 new_coords = int3Add(group_pointer[entity_index].coords, int3Negate(AXIS_Y)); 
-                setTileType(getTileType(group_pointer[entity_index].coords), new_coords);
-                setTileType(NONE, group_pointer[entity_index].coords);
-                group_pointer[entity_index].coords = new_coords;
-                group_pointer[entity_index].position_norm = intCoordsToNorm(new_coords); // queue animation here instead
+                if (getTileType(getNextCoords(group_pointer[entity_index].coords, DOWN)) == NONE)
+                {
+                    Int3 new_coords = int3Add(group_pointer[entity_index].coords, int3Negate(AXIS_Y)); 
+                    setTileType(getTileType(group_pointer[entity_index].coords), new_coords);
+                    setTileType(NONE, group_pointer[entity_index].coords);
+                    group_pointer[entity_index].coords = new_coords;
+                    createInterpolationAnimation(intCoordsToNorm(int3Add(new_coords, AXIS_Y)), 
+                                                 intCoordsToNorm(new_coords), 
+                                                 &group_pointer[entity_index].position_norm,
+                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                 getEntityId(group_pointer[entity_index].coords));
+                }
             }
-        }
+		}
 
         // do animations
 		for (int animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
         {
 			if (animations[animation_index].frames_left == 0) continue;
-			if (animations[animation_index].position_to_change != 0) *animations[animation_index].position_to_change = animations[animation_index].position[animations[animation_index].frames_left-1];
+			if (animations[animation_index].position_to_change != 0) 
+            {
+                Vec3 next_pos = animations[animation_index].position[animations[animation_index].frames_left-1];
+                if (!vec3IsZero(next_pos)) *animations[animation_index].position_to_change = next_pos; 
+            }
 			if (animations[animation_index].rotation_to_change != 0) *animations[animation_index].rotation_to_change = animations[animation_index].rotation[animations[animation_index].frames_left-1];
             animations[animation_index].frames_left--;
         }
