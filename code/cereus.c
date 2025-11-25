@@ -155,6 +155,7 @@ const int32 MAX_ENTITY_PUSH_COUNT = 32;
 const int32 MAX_ANIMATION_COUNT = 32;
 const int32 MAX_LASER_TRAVEL_DISTANCE = 48;
 const int32 MAX_PSEUDO_SOURCE_COUNT = 128;
+const float LASER_OBJECT_COLLISION_VARIABLE = 0.5;
 
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
@@ -936,7 +937,7 @@ bool canPush(Int3 coords, Direction direction)
 {
     Int3 current_coords = coords;
     TileType current_tile;
-    if (getTileType(getNextCoords(current_coords, DOWN)) == NONE && !next_world_state.player.hit_by_red) return false;
+    //if (getTileType(getNextCoords(current_coords, DOWN)) == NONE && !next_world_state.player.hit_by_red) return false;
     for (int push_index = 0; push_index < MAX_ENTITY_PUSH_COUNT; push_index++) 
     {
     	current_coords = getNextCoords(current_coords, direction);
@@ -947,6 +948,28 @@ bool canPush(Int3 coords, Direction direction)
         if (current_tile == NONE) return true;
     }
     return false; // only here if hit the max entity push count
+}
+
+void pushWithoutAnimation(Int3 coords, Direction direction)
+{
+    Push entities_to_push = {0}; 
+	Int3 current_coords = coords;
+    for (int push_index = 0; push_index < MAX_ENTITY_PUSH_COUNT; push_index++)
+    {
+        entities_to_push.type[push_index] = getTileType(current_coords);
+		entities_to_push.previous_coords[push_index] = current_coords;
+        entities_to_push.pointer_to_entity[push_index] = getEntityPointer(current_coords);
+        current_coords = getNextCoords(current_coords, direction);
+        entities_to_push.new_coords[push_index] = current_coords; 
+        entities_to_push.count++;
+        if (getTileType(current_coords) == NONE) break;
+    }
+    for (int entity_index = 0; entity_index < entities_to_push.count; entity_index++)
+    {
+        entities_to_push.pointer_to_entity[entity_index]->coords = entities_to_push.new_coords[entity_index];
+        if (entity_index == 0) setTileType(NONE, entities_to_push.pointer_to_entity[entity_index]->coords);
+        setTileType(entities_to_push.type[entity_index], entities_to_push.new_coords[entity_index]);
+    }
 }
 
 void push(Int3 coords, Direction direction)
@@ -1032,6 +1055,17 @@ Direction getNextMirrorState(Direction start_direction, Direction push_direction
         }
         default: return 0;
     }
+}
+
+void rollWithoutAnimation(Int3 coords, Direction direction)
+{
+    Entity* pointer = getEntityPointer(coords);
+	setTileType(NONE, coords);
+    setTileType(MIRROR, getNextCoords(coords, direction));
+	pointer->coords = getNextCoords(coords, direction);
+	Direction new_direction = getNextMirrorState(pointer->direction, direction);
+    pointer->direction = new_direction;
+    setTileDirection(new_direction, pointer->coords);
 }
 
 void roll(Int3 coords, Direction direction)
@@ -1473,6 +1507,9 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (input_direction == next_world_state.player.direction)
                 {
                		// already facing this direction; attempt to move 
+                    bool try_to_push = false;
+                    bool try_to_roll = false;
+
                     bool move_player = false;
                     if 		(tick_input.w_press) next_player_coords = int3Add(next_world_state.player.coords, int3Negate(AXIS_Z));
                     else if (tick_input.a_press) next_player_coords = int3Add(next_world_state.player.coords, int3Negate(AXIS_X));
@@ -1489,7 +1526,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         {
                             if (canPush(next_player_coords, input_direction)) 
                             {
-                                push(next_player_coords, input_direction);
+                                try_to_push = true;
 								move_player = true;
                             }
                             break;
@@ -1501,7 +1538,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 // currently not allowing roll unless there is free space ahead
                                 TileType push_tile = getTileType(getNextCoords(next_player_coords, input_direction));
                                 if (push_tile != NONE) break; // push(getNextCoords(next_player_coords, input_direction), input_direction);
-                                roll(next_player_coords, input_direction);
+                                try_to_roll = true;
                                 move_player = true;
                             }
                             break;
@@ -1515,8 +1552,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                     {
                         // don't allow walking off edge
                         TileType tile_below = getTileType(int3Add(next_player_coords, int3Negate(AXIS_Y)));
-                        if (tile_below != NONE || next_world_state.player.hit_by_red) // no-grav if red
+                        if (tile_below != NONE || next_world_state.player.hit_by_red)
                         {
+                            if (try_to_push) 	  push(next_player_coords, input_direction);
+                            else if (try_to_roll) roll(next_player_coords, input_direction);
+
+                            // standard movement
                             int32 animation_time = 0;
                             if (next_tile == MIRROR) animation_time = ROLL_ANIMATION_TIME;
                             else 					 animation_time = PUSH_ANIMATION_TIME;
@@ -1527,7 +1568,60 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                          1, animation_time); // passing 1 as id for player 
                             setTileType(NONE, next_world_state.player.coords);
                             next_world_state.player.coords = next_player_coords;
-                            setTileType(PLAYER, next_world_state.player.coords);
+                            setTileType(PLAYER, next_world_state.player.coords);	
+                        }
+                        else // speculative movement over gap, with the hopes that we will be red
+                        {
+                            WorldState world_state_savestate = next_world_state;
+
+                            if (try_to_push) pushWithoutAnimation(next_player_coords, input_direction);
+                            if (try_to_roll) rollWithoutAnimation(next_player_coords, input_direction);
+
+							// do falling logic without the animation
+                            Entity* object_group_to_fall[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
+                            if (!next_world_state.player.hit_by_blue) // slo-mo if blue
+                            {
+                                for (int to_fall_index = 0; to_fall_index < 3; to_fall_index++)
+                                {
+                                    Entity* group_pointer = object_group_to_fall[to_fall_index];
+                                    for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
+                                    {
+                                        if (getTileType(getNextCoords(group_pointer[entity_index].coords, DOWN)) == NONE)
+                                        {
+                                            Int3 new_coords = int3Add(group_pointer[entity_index].coords, int3Negate(AXIS_Y)); 
+                                            setTileType(getTileType(group_pointer[entity_index].coords), new_coords);
+                                            setTileType(NONE, group_pointer[entity_index].coords);
+                                        }
+                                    }
+                                }
+                            }
+                            setTileType(NONE, next_world_state.player.coords);
+                            next_world_state.player.coords = next_player_coords;
+                            setTileType(PLAYER, next_world_state.player.coords);	
+
+                            updateLaserBuffer();
+
+                            bool leap_of_faith_worked = false;
+                            if (next_world_state.player.hit_by_red) leap_of_faith_worked = true;
+                            next_world_state = world_state_savestate;
+                            if (leap_of_faith_worked)
+                            {
+								if (try_to_push) push(next_player_coords, input_direction);
+                                if (try_to_roll) roll(next_player_coords, input_direction);
+
+                                // standard movement
+                                int32 animation_time = 0;
+                                if (next_tile == MIRROR) animation_time = ROLL_ANIMATION_TIME;
+                                else 					 animation_time = PUSH_ANIMATION_TIME;
+                                createInterpolationAnimation(intCoordsToNorm(next_world_state.player.coords), 
+                                                             intCoordsToNorm(next_player_coords), 
+                                                             &next_world_state.player.position_norm,
+                                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                             1, animation_time); // passing 1 as id for player 
+                                setTileType(NONE, next_world_state.player.coords);
+                                next_world_state.player.coords = next_player_coords;
+                                setTileType(PLAYER, next_world_state.player.coords);	
+                            }
                         }
                         if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME;
                         else					 time_until_input = PUSH_ANIMATION_TIME;
