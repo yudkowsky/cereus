@@ -1582,6 +1582,19 @@ void gameFrame(double delta_time, TickInput tick_input)
                 }
             }
 		}
+        // player gets own special case
+        if (getTileType(getNextCoords(next_world_state.player.coords, DOWN)) == NONE)
+        {
+            Int3 new_coords = int3Add(next_world_state.player.coords, int3Negate(AXIS_Y)); 
+            setTileType(PLAYER, new_coords);
+            setTileType(NONE, next_world_state.player.coords);
+            next_world_state.player.coords = new_coords;
+            createInterpolationAnimation(intCoordsToNorm(int3Add(new_coords, AXIS_Y)), 
+                                         intCoordsToNorm(new_coords), 
+                                         &next_world_state.player.position_norm,
+                                         IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                         getEntityId(next_world_state.player.coords));
+        }
 
         // do animations
 		for (int animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
