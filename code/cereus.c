@@ -175,6 +175,7 @@ WorldState world_state = {0};
 WorldState next_world_state = {0};
 EditorState editor_state = {0};
 Animation animations[32];
+LaserBuffer laser_buffer[1024] = {0};
 
 int32 time_until_input = 0;
 
@@ -556,9 +557,8 @@ void setEntityInstanceInGroup(Entity* group_pointer, Int3 coords, Direction dire
         group_pointer[entity_index].position_norm = intCoordsToNorm(coords); 
         group_pointer[entity_index].direction = direction;
         group_pointer[entity_index].rotation_quat = directionToQuaternion(direction, true);
-        group_pointer[entity_index].id = entity_index;
+        group_pointer[entity_index].id = entity_index + entityIdOffset(group_pointer);
         group_pointer[entity_index].color = color;
-
         setTileDirection(direction, coords);
         break;
     }
@@ -798,7 +798,6 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
 
     // find next free in animations. 
     int32 animation_index = -1;
-
     for (int find_anim_index = 0; find_anim_index < MAX_ANIMATION_COUNT; find_anim_index++)
     {
         if (animation_index == -1 && animations[find_anim_index].frames_left == 0)
@@ -842,8 +841,10 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
     }
 }
 
-void createRollingAnimation(Vec3 position, Direction direction, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change)
+void createRollingAnimation(Vec3 position, Direction direction, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change, int32 entity_id)
 {	
+    int32 queue_time = 0;
+
     // find next free in animations
     int32 animation_index = -1;
     for (int find_anim_index = 0; find_anim_index < MAX_ANIMATION_COUNT; find_anim_index++)
@@ -852,11 +853,16 @@ void createRollingAnimation(Vec3 position, Direction direction, Vec3* position_t
         {
             animation_index = find_anim_index;
             animations[animation_index] = (Animation){0};
-            break;
+        }
+        if (animations[find_anim_index].id == entity_id && animations[find_anim_index].frames_left != 0)
+        {
+            queue_time = animations[find_anim_index].frames_left;
         }
     }
     
-    animations[animation_index].frames_left = ANIMATION_TIME;
+    animations[animation_index].id = entity_id;
+    int32 animation_frames = ANIMATION_TIME;
+    animations[animation_index].frames_left = ANIMATION_TIME + queue_time; 
     animations[animation_index].rotation_to_change = rotation_to_change;
     animations[animation_index].position_to_change = position_to_change;
 
@@ -877,18 +883,18 @@ void createRollingAnimation(Vec3 position, Direction direction, Vec3* position_t
     Vec3 pivot_to_cube_center = vec3Subtract(position, pivot_point);
 	float d_theta_per_frame = (TAU*0.25f)/(float)ANIMATION_TIME;
 
-    for (int frame_index = 0; frame_index < animations[animation_index].frames_left; frame_index++)
+    for (int frame_index = 0; frame_index < animation_frames; frame_index++)
     {
         // rotation
         float param = (float)(frame_index + 1) / animations[animation_index].frames_left;
-        animations[animation_index].rotation[animations[animation_index].frames_left-(1+frame_index)] 
+        animations[animation_index].rotation[animation_frames-(1+frame_index)] 
         = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(rotation_a, 1.0f - param), quaternionScalarMultiply(rotation_b, param)));
         
         // translation
 		float theta = (frame_index+1) * d_theta_per_frame;
         Vec4 roll = quaternionFromAxisAngle(axis, theta);
         Vec3 relative_rotation = vec3RotateByQuaternion(pivot_to_cube_center, roll);
-        animations[animation_index].position[animations[animation_index].frames_left-(1+frame_index)] = vec3Add(pivot_point, relative_rotation);
+        animations[animation_index].position[animation_frames-(1+frame_index)] = vec3Add(pivot_point, relative_rotation);
     }
 }
 
@@ -929,6 +935,7 @@ bool canPush(Int3 coords, Direction direction)
 {
     Int3 current_coords = coords;
     TileType current_tile;
+    if (getTileType(getNextCoords(current_coords, DOWN)) == NONE && !next_world_state.player.hit_by_red) return false;
     for (int push_index = 0; push_index < MAX_ENTITY_PUSH_COUNT; push_index++) 
     {
     	current_coords = getNextCoords(current_coords, direction);
@@ -1028,6 +1035,7 @@ Direction getNextMirrorState(Direction start_direction, Direction push_direction
 
 void roll(Int3 coords, Direction direction)
 {
+    int32 id = getEntityId(coords);
     Entity* pointer = getEntityPointer(coords);
 	setTileType(NONE, coords);
     setTileType(MIRROR, getNextCoords(coords, direction));
@@ -1039,7 +1047,8 @@ void roll(Int3 coords, Direction direction)
                            &pointer->position_norm, 
                            directionToQuaternion(pointer->direction, true), 
                            quaternion_transform,
-        				   &pointer->rotation_quat);
+        				   &pointer->rotation_quat,
+                           id);
 	Direction new_direction = getNextMirrorState(pointer->direction, direction);
     pointer->direction = new_direction;
     setTileDirection(new_direction, pointer->coords);
@@ -1290,6 +1299,83 @@ bool isDiagonal(Direction direction)
 {
     if (direction == NORTH || direction == SOUTH || direction == WEST || direction == EAST || direction == UP || direction == DOWN) return false;
     else return true;
+}
+
+int32 updateLaserBuffer(void)
+{
+    int32 laser_tile_count = 0;
+    int32 total_source_count = getEntityCount(next_world_state.sources);
+    Entity sources_as_primary[128]; 
+    memset(sources_as_primary, -1, sizeof(sources_as_primary)); // TODO(spike): better zeroing function to be used here also
+    memcpy(sources_as_primary, next_world_state.sources, sizeof(Entity) * total_source_count);
+        
+    // set these to 0 before we start checking
+    next_world_state.player.hit_by_red   = false;
+    next_world_state.player.hit_by_green = false;
+    next_world_state.player.hit_by_blue  = false;
+
+    for (int source_index = 0; source_index < MAX_PSEUDO_SOURCE_COUNT; source_index++)
+    {
+        Entity* entity_pointer = &sources_as_primary[source_index];
+        if (entity_pointer->id == -1) continue;
+        Direction current_direction = entity_pointer->direction;
+        Int3 current_coords = getNextCoords(entity_pointer->coords, current_direction);
+
+        switch (entity_pointer->color) 
+        {
+            case MAGENTA: addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, BLUE);  break;
+            case YELLOW:  addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, GREEN); break;
+            case CYAN:    addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, BLUE); break;
+            case WHITE:
+            {
+                addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, GREEN); 
+                addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, BLUE); // creates a duplicate ID here. still unclear if i even want to use these though
+                break;
+            }
+            default: break;
+        }
+
+        for (int laser_index = 0; laser_index < MAX_LASER_TRAVEL_DISTANCE; laser_index++)
+        {
+            LaserColor laser_color = colorToLaserColor(entity_pointer->color);
+            if (!intCoordsWithinLevelBounds(current_coords)) break;
+            if (getTileType(current_coords) == PLAYER)
+            {
+                if (laser_color.red)   next_world_state.player.hit_by_red   = true;
+                if (laser_color.green) next_world_state.player.hit_by_green = true;
+                if (laser_color.blue)  next_world_state.player.hit_by_blue  = true;
+                break;
+            }
+            else if (getTileType(current_coords) == CRYSTAL)
+            {
+                if (!isParallelToXZ(current_direction)) break; // let crystal break beam if not coming at angle flat on the y axis
+                if (laser_color.red) current_direction = getRedDirectionAtCrystal(current_direction); 
+                else if (laser_color.green) current_direction = current_direction;
+                else if (laser_color.blue) current_direction = getBlueDirectionAtCrystal(current_direction); 
+            }
+            else if (getTileType(current_coords) == MIRROR)
+            {
+                bool can_reflect = canMirrorReflect(current_direction, getEntityDirection(current_coords));
+                if (can_reflect) 
+                {
+                    current_direction = getNextLaserDirectionMirror(current_direction, getEntityDirection(current_coords));
+                }
+                else break;
+            }
+            else if (getTileType(current_coords) != NONE) break;
+
+            if      (laser_color.red)   laser_buffer[laser_tile_count].color.red   = true; 
+            else if (laser_color.green) laser_buffer[laser_tile_count].color.green = true; // else here ensures magenta -> red, yellow -> red, cyan -> green for non-primaries.
+            else if (laser_color.blue)  laser_buffer[laser_tile_count].color.blue  = true; // the rest are aleady in sources_as_primary, and will be added to laser_buffer at the end of the loop
+            laser_buffer[laser_tile_count].direction = current_direction;
+            laser_buffer[laser_tile_count].coords    = current_coords;
+            laser_tile_count++;
+
+            current_coords = getNextCoords(current_coords, current_direction);
+        }
+    }
+
+    return laser_tile_count;
 }
 
 void gameInitialise(void) 
@@ -1579,43 +1665,47 @@ void gameFrame(double delta_time, TickInput tick_input)
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
         }
+        updateLaserBuffer();
 
 		// falling object calculations
         // objects that should fall: boxes, mirrors, crystals, and the player (below)
 
         Entity* object_group_to_fall[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
-        for (int to_fall_index = 0; to_fall_index < 3; to_fall_index++)
+        if (!next_world_state.player.hit_by_blue) // no-grav if blue
         {
-            Entity* group_pointer = object_group_to_fall[to_fall_index];
-            for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
+            for (int to_fall_index = 0; to_fall_index < 3; to_fall_index++)
             {
-                if (getTileType(getNextCoords(group_pointer[entity_index].coords, DOWN)) == NONE)
+                Entity* group_pointer = object_group_to_fall[to_fall_index];
+                for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
                 {
-                    Int3 new_coords = int3Add(group_pointer[entity_index].coords, int3Negate(AXIS_Y)); 
-                    setTileType(getTileType(group_pointer[entity_index].coords), new_coords);
-                    setTileType(NONE, group_pointer[entity_index].coords);
-                    group_pointer[entity_index].coords = new_coords;
-                    createInterpolationAnimation(intCoordsToNorm(int3Add(new_coords, AXIS_Y)), 
-                                                 intCoordsToNorm(new_coords), 
-                                                 &group_pointer[entity_index].position_norm,
-                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                 getEntityId(group_pointer[entity_index].coords));
+                    if (getTileType(getNextCoords(group_pointer[entity_index].coords, DOWN)) == NONE)
+                    {
+                        Int3 new_coords = int3Add(group_pointer[entity_index].coords, int3Negate(AXIS_Y)); 
+                        setTileType(getTileType(group_pointer[entity_index].coords), new_coords);
+                        setTileType(NONE, group_pointer[entity_index].coords);
+                        group_pointer[entity_index].coords = new_coords;
+                        createInterpolationAnimation(intCoordsToNorm(int3Add(new_coords, AXIS_Y)), 
+                                                     intCoordsToNorm(new_coords), 
+                                                     &group_pointer[entity_index].position_norm,
+                                                     IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                     getEntityId(group_pointer[entity_index].coords));
+                    }
+                    /*
+                    // delete if void below
+                    else if (getTileType(getNextCoords(group_pointer[entity_index].coords, DOWN)) == VOID)
+                    {
+                        Int3 new_coords = int3Add(group_pointer[entity_index].coords, int3Negate(AXIS_Y));
+                        
+                        createInterpolationAnimation(intCoordsToNorm(int3Add(new_coords, AXIS_Y)), 
+                                                     intCoordsToNorm(new_coords), 
+                                                     &group_pointer[entity_index].position_norm,
+                                                     IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                     getEntityId(group_pointer[entity_index].coords));
+                    }
+                    */
                 }
-                /*
-                // delete if void below
-                else if (getTileType(getNextCoords(group_pointer[entity_index].coords, DOWN)) == VOID)
-                {
-                    Int3 new_coords = int3Add(group_pointer[entity_index].coords, int3Negate(AXIS_Y));
-					
-                    createInterpolationAnimation(intCoordsToNorm(int3Add(new_coords, AXIS_Y)), 
-                                                 intCoordsToNorm(new_coords), 
-                                                 &group_pointer[entity_index].position_norm,
-                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                 getEntityId(group_pointer[entity_index].coords));
-                }
-                */
             }
-		}
+        }
         // player gets own special case
         if (getTileType(getNextCoords(next_world_state.player.coords, DOWN)) == NONE && !next_world_state.player.hit_by_red) // slo-mo if red
         {
@@ -1643,84 +1733,9 @@ void gameFrame(double delta_time, TickInput tick_input)
             animations[animation_index].frames_left--;
         }
 
-        // calculate where lasers are into ephemeral laser buffer // TODO(spike): figure out if i should allocate this memory before and just zero it, or if i should allocate it on the stack per frame.
-        LaserBuffer laser_buffer[1024] = {0};
-        int32 laser_tile_count = 0;
-        int32 total_source_count = getEntityCount(next_world_state.sources);
-        Entity sources_as_primary[128]; 
-        memset(sources_as_primary, -1, sizeof(sources_as_primary)); // TODO(spike): better zeroing function to be used here also
-        memcpy(sources_as_primary, next_world_state.sources, sizeof(Entity) * total_source_count);
-        
-        // set these to 0 before we start checking
-        next_world_state.player.hit_by_red   = false;
-        next_world_state.player.hit_by_green = false;
-        next_world_state.player.hit_by_blue  = false;
-
-        for (int source_index = 0; source_index < MAX_PSEUDO_SOURCE_COUNT; source_index++)
-        {
-            Entity* entity_pointer = &sources_as_primary[source_index];
-            if (entity_pointer->id == -1) continue;
-            Direction current_direction = entity_pointer->direction;
-            Int3 current_coords = getNextCoords(entity_pointer->coords, current_direction);
-
-            switch (entity_pointer->color) 
-            {
-                case MAGENTA: addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, BLUE);  break;
-                case YELLOW:  addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, GREEN); break;
-                case CYAN:    addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, BLUE); break;
-                case WHITE:
-              	{
-					addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, GREEN); 
-                    addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, BLUE); // creates a duplicate ID here. still unclear if i even want to use these though
-                    break;
-              	}
-                default: break;
-            }
-
-            for (int laser_index = 0; laser_index < MAX_LASER_TRAVEL_DISTANCE; laser_index++)
-            {
-                LaserColor laser_color = colorToLaserColor(entity_pointer->color);
-                if (!intCoordsWithinLevelBounds(current_coords)) break;
-                if (getTileType(current_coords) == PLAYER)
-                {
-                    // TODO(spike): think about ordering here. i want player checks to occur before player pushes objects, 
-                    //  			but also i don't want lasers to be queued to render at a location if it will change that frame because player pushes.
-                    //  			likely i should get the information of if a laser is queued to hit player first, without filling laser_buffer,
-                    //  			and then do pushing calculations with that in mind, and only then actually fill buffer.
-                    //  			for now, live with 1f delay (shouldn't actually be gameplay sensitive, since inputs are on 8f timer)
-                    if (laser_color.red)   next_world_state.player.hit_by_red   = true;
-                    if (laser_color.green) next_world_state.player.hit_by_green = true;
-                    if (laser_color.blue)  next_world_state.player.hit_by_blue  = true;
-                    break;
-                }
-                else if (getTileType(current_coords) == CRYSTAL)
-                {
-                    if (!isParallelToXZ(current_direction)) break; // let crystal break beam if not coming at angle flat on the y axis
-					if (laser_color.red) current_direction = getRedDirectionAtCrystal(current_direction); 
-					else if (laser_color.green) current_direction = current_direction;
-					else if (laser_color.blue) current_direction = getBlueDirectionAtCrystal(current_direction); 
-                }
-                else if (getTileType(current_coords) == MIRROR)
-                {
-                    bool can_reflect = canMirrorReflect(current_direction, getEntityDirection(current_coords));
-					if (can_reflect) 
-                    {
-                        current_direction = getNextLaserDirectionMirror(current_direction, getEntityDirection(current_coords));
-                    }
-					else break;
-                }
-                else if (getTileType(current_coords) != NONE) break;
-
-				if      (laser_color.red)   laser_buffer[laser_tile_count].color.red   = true; 
-				else if (laser_color.green) laser_buffer[laser_tile_count].color.green = true; // else here ensures magenta -> red, yellow -> red, cyan -> green for non-primaries.
-				else if (laser_color.blue)  laser_buffer[laser_tile_count].color.blue  = true; // the rest are aleady in sources_as_primary, and will be added to laser_buffer at the end of the loop
-                laser_buffer[laser_tile_count].direction = current_direction;
-                laser_buffer[laser_tile_count].coords    = current_coords;
-                laser_tile_count++;
-
-                current_coords = getNextCoords(current_coords, current_direction);
-            }
-        }
+        // clear and then reupdate laser buffer based on actions that happened this frame
+		memset(laser_buffer, 0, sizeof(laser_buffer));
+		int32 laser_tile_count = updateLaserBuffer();
 
         // finished updating state
         world_state = next_world_state;
@@ -1772,6 +1787,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             else if (             color.green              ) drawAsset(laser_green_path,   CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
             else if (                            color.blue) drawAsset(laser_blue_path,    CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
         }
+        // clear laser buffer 
+        memset(laser_buffer, 0, sizeof(laser_buffer));
 
         // draw static objects
         for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
