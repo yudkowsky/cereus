@@ -83,7 +83,7 @@ Animation;
 
 typedef struct WorldState
 {
-    uint8 buffer[16384]; // 2 bytes info per tile 
+    uint8 buffer[32768]; // 2 bytes info per tile 
     Entity player;
     Entity boxes[32];
     Entity mirrors[32];
@@ -577,7 +577,7 @@ void loadFileToBuffer(char* path)
     fread(&byte, 1, 1, file);
     level_dim.z = byte;
 
-    uint8 buffer[16384]; // level_dim.x*level_dim.y*level_dim.z * 2 for color bytes
+    uint8 buffer[32768]; // level_dim.x*level_dim.y*level_dim.z * 2 for color bytes
 	fread(&buffer, 1, level_dim.x*level_dim.y*level_dim.z, file);
 	fclose(file);
     memcpy(next_world_state.buffer, buffer, level_dim.x*level_dim.y*level_dim.z);
@@ -587,7 +587,7 @@ void writeBufferToFile(char* path)
 {
     FILE *file = fopen(path, "rb+");
     fseek(file, 4, SEEK_CUR);
-	fwrite(world_state.buffer, 1, 16384, file);
+	fwrite(world_state.buffer, 1, 32768, file);
     fclose(file);
 }
 
@@ -1325,7 +1325,7 @@ void gameInitialise(void)
             next_world_state.player.id = 1;
         }
     }
-    next_world_state.player.coords = (Int3){3,1,3};
+    //next_world_state.player.coords = (Int3){3,1,3};
     next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
 
 	camera.coords = (Vec3){10, 12, 15};
@@ -1456,6 +1456,14 @@ void gameFrame(double delta_time, TickInput tick_input)
             Vec3 right_camera_basis, forward_camera_basis;
             cameraBasisFromYaw(camera_yaw, &right_camera_basis, &forward_camera_basis);
 
+			// WASD: movement
+            // E: toggle editor mode
+            // J: set void at current coords
+            // L: increment tile at cursor
+            // LMB: destroy tile at cursor
+            // RMB: place tile at cursor
+            // MMB: pick tile at cursor
+
             if (tick_input.w_press) 
             {
                 camera.coords.x += forward_camera_basis.x * MOVE_STEP;
@@ -1516,7 +1524,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                     Entity *group_pointer = 0;
                     if (isSource(editor_state.picked_tile)) 
                     {
-                        setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords));
+                        setTileType(editor_state.picked_tile, raycast_output.place_coords); 
+                        setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
                     }
                     else 
                     {
@@ -1528,8 +1537,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             default: group_pointer = 0;
                         }
                         if (group_pointer != 0) setEntityInstanceInGroup(group_pointer, raycast_output.place_coords, NORTH, NO_COLOR);
+                        setTileType(editor_state.picked_tile, raycast_output.place_coords); 
                     }
-                    setTileType(editor_state.picked_tile, raycast_output.place_coords); 
                 }
                 else if (tick_input.r_press && raycast_output.hit)
                 {   
@@ -1560,7 +1569,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
 		// falling object calculations
-        // objects that should fall: boxes, mirrors, crystals, and TODO(spike): the player
+        // objects that should fall: boxes, mirrors, crystals, and the player (below)
 
         Entity* object_group_to_fall[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
         for (int to_fall_index = 0; to_fall_index < 3; to_fall_index++)
@@ -1616,6 +1625,11 @@ void gameFrame(double delta_time, TickInput tick_input)
         Entity sources_as_primary[128]; 
         memset(sources_as_primary, -1, sizeof(sources_as_primary)); // TODO(spike): better zeroing function to be used here also
         memcpy(sources_as_primary, next_world_state.sources, sizeof(Entity) * total_source_count);
+        
+        // set these to 0 before we start checking
+        next_world_state.player.hit_by_red   = false;
+        next_world_state.player.hit_by_green = false;
+        next_world_state.player.hit_by_blue  = false;
 
         for (int source_index = 0; source_index < MAX_PSEUDO_SOURCE_COUNT; source_index++)
         {
@@ -1746,7 +1760,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         drawEntityLoop(world_state.boxes,    box_path,     CUBE_3D, DEFAULT_SCALE);
         drawEntityLoop(world_state.mirrors,  mirror_path,  CUBE_3D, DEFAULT_SCALE);
         drawEntityLoop(world_state.crystals, crystal_path, CUBE_3D, DEFAULT_SCALE);
-        drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
+        if (!next_world_state.player.hit_by_red) drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
 
 		// draw colored entites
 		for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)
@@ -1755,6 +1769,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             drawAsset(path, CUBE_3D, world_state.sources[source_index].position_norm, DEFAULT_SCALE, world_state.sources[source_index].rotation_quat);
         }
 
+        // write to file
         if (editor_state.editor_mode && tick_input.i_press) writeBufferToFile(level_path);
 
 		if (time_until_input != 0) time_until_input--;
