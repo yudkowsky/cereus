@@ -35,6 +35,7 @@ typedef struct CachedAsset
     VkDeviceMemory memory;
     VkImageView view;
     char path[256];
+    int32 unlit;
 }
 CachedAsset;
 
@@ -550,7 +551,7 @@ int32 getOrLoadAsset(char* path)
     {
         if (strcmp(renderer_state.asset_cache[asset_cache_index].path, path) == 0) return (int32)asset_cache_index;
     }
-    return loadAsset(path); // not found
+    return loadAsset(path);
 }
 
 void rendererInitialise(RendererPlatformHandles platform_handles)
@@ -1505,7 +1506,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     VkPushConstantRange push_constant_range = {0};
     push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     push_constant_range.offset     = 0;
-    push_constant_range.size       = (uint32)(sizeof(float) * 16);
+    push_constant_range.size       = (uint32)(sizeof(float) * 3 * 16);
 
     VkPipelineLayoutCreateInfo graphics_pipeline_layout_creation_info = {0};
     graphics_pipeline_layout_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -1550,7 +1551,7 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
 
         int32 asset_cache_index = getOrLoadAsset(path);
         if (asset_cache_index == -1) continue;
-		
+
         for (int32 asset_instance_index = 0; asset_instance_index < assets_to_load[asset_index].instance_count; asset_instance_index++)
         {
 			Cube* cube_instance = &cube_instances[cube_instance_count++];
@@ -1686,8 +1687,13 @@ void rendererDraw(void)
         mat4BuildTRS(model_matrix, cube_instance->coords, cube_instance->rotation, cube_instance->scale);
         mat4Multiply(projection_view_matrix, projection_matrix, view_matrix);
         mat4Multiply(mvp_matrix, projection_view_matrix, model_matrix);
+		
+        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 						  sizeof(model_matrix), 	 model_matrix);
+        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(model_matrix),     sizeof(view_matrix), 		 view_matrix);
+        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(model_matrix) * 2, sizeof(projection_matrix), projection_matrix);
 
-        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(mvp_matrix), mvp_matrix);
+        //vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(mvp_matrix), mvp_matrix);
+        
         vkCmdDrawIndexed(command_buffer, renderer_state.cube_index_count, 1, 0, 0, 0);
     }
 

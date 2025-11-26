@@ -8,12 +8,16 @@ layout(location = 0) out vec2 uv;
 layout(location = 1) out vec3 normal;
 
 layout(push_constant) uniform PC {
-    mat4 mvp;
+    mat4 model;
+    mat4 view;
+    mat4 projection;
 } pc;
 
 void main()
 {
-    gl_Position = pc.mvp * vec4(position, 1.0);
+    mat4 mvp = pc.projection * pc.view * pc.model;
+    gl_Position = mvp * vec4(position, 1.0);
     uv = input_uv;
-    normal = input_normal;
+
+    normal = vec3(pc.model * vec4(input_normal, 0.0));
 }

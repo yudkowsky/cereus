@@ -6,10 +6,15 @@ layout(location = 1) in vec3 normal;
 
 layout(location = 0) out vec4 out_color;
 
+layout(push_constant) uniform PC {
+    mat4 model;
+    mat4 view;
+    mat4 projection;
+} pc;
+
 const vec3 light_direction = vec3(0.3, 1, 0.5);
 
 void main()
 {
-//  out_color = texture(input_texture, uv) * dot(normal, normalize(light_direction));
-	out_color = texture(input_texture, uv);
+    out_color = texture(input_texture, uv) * max(dot(normalize(normal), normalize(light_direction)), 0.2);
 }

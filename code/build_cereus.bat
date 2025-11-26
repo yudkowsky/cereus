@@ -4,8 +4,8 @@ set "VULKAN_SDK=C:\VulkanSDK\1.4.321.1"
 set "VK_SDK_PATH=%VULKAN_SDK%"
 
 pushd ..\data\shaders\src
-glslc tri.vert -o ..\spirv\tri.vert.spv
-glslc tri.frag -o ..\spirv\tri.frag.spv 
+glslc tri.vert -g -o ..\spirv\tri.vert.spv
+glslc tri.frag -g -o ..\spirv\tri.frag.spv 
 popd
 
 IF NOT EXIST ..\..\build_cereus mkdir ..\..\build_cereus
