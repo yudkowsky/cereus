@@ -20,6 +20,7 @@ typedef enum TileType
     PLAYER  = 5,
     MIRROR  = 6,
     CRYSTAL = 7,
+    PACK    = 8,
 
     SOURCE_RED     = 32,
     SOURCE_GREEN   = 33,
@@ -67,6 +68,9 @@ typedef struct Entity
     bool hit_by_red;
     bool hit_by_green;
     bool hit_by_blue;
+
+    // only pack
+    bool pack_detached;
 }
 Entity;
 
@@ -85,6 +89,7 @@ typedef struct WorldState
 {
     uint8 buffer[32768]; // 2 bytes info per tile 
     Entity player;
+    Entity pack;
     Entity boxes[32];
     Entity mirrors[32];
     Entity sources[32];
@@ -140,8 +145,8 @@ const float TAU = 6.2831853071f;
 
 const float SENSITIVITY = 0.005f;
 const float MOVE_STEP = 0.05f;
-const Vec3 DEFAULT_SCALE = { 1.0f,   1.0f,   1.0f  };
-const Vec3 PLAYER_SCALE  = { 0.75f,  0.75f,  0.75f };
+const Vec3 DEFAULT_SCALE = { 1.0f,  1.0f,  1.0f  };
+const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 const Vec3 ORTHOGONAL_LASER_SCALE = { 0.125f, 0.125f, 1.0f   };
 const Vec3 DIAGONAL_LASER_SCALE   = { 0.125f, 0.125f, 1.415f };
 const float RAYCAST_SEEK_LENGTH = 20.0f;
@@ -190,6 +195,7 @@ char* box_path     = "data/sprites/box.png";
 char* player_path  = "data/sprites/player.png";
 char* mirror_path  = "data/sprites/mirror.png";
 char* crystal_path = "data/sprites/crystal.png";
+char* pack_path    = "data/sprites/pack.png";
 
 char* laser_red_path     = "data/sprites/laser-red.png";
 char* laser_green_path   = "data/sprites/laser-green.png";
@@ -394,10 +400,11 @@ Entity* getEntityPointer(Int3 coords)
     if (isSource(tile)) group_pointer = next_world_state.sources;
     else switch(tile)
     {
-        case PLAYER:  return &next_world_state.player;
         case BOX:     group_pointer = next_world_state.boxes;    break;
         case MIRROR:  group_pointer = next_world_state.mirrors;  break;
         case CRYSTAL: group_pointer = next_world_state.crystals; break;
+        case PLAYER:  return &next_world_state.player;
+        case PACK:	  return &next_world_state.pack;
         default: return 0;
     }
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
@@ -611,6 +618,7 @@ char* getPath(TileType tile)
         case PLAYER:  return player_path;
         case MIRROR:  return mirror_path;
         case CRYSTAL: return crystal_path;
+        case PACK:    return pack_path;
 
         case LASER_RED:     return laser_red_path;
         case LASER_GREEN:	return laser_green_path;
@@ -989,13 +997,13 @@ void push(Int3 coords, Direction direction)
     for (int entity_index = 0; entity_index < entities_to_push.count; entity_index++)
     {
         int32 id = getEntityId(entities_to_push.previous_coords[entity_index]);
+        if (entity_index == 0) setTileType(NONE, entities_to_push.pointer_to_entity[entity_index]->coords); 
         entities_to_push.pointer_to_entity[entity_index]->coords = entities_to_push.new_coords[entity_index];
         createInterpolationAnimation(intCoordsToNorm(entities_to_push.previous_coords[entity_index]),
                                      intCoordsToNorm(entities_to_push.new_coords[entity_index]),
                                      &entities_to_push.pointer_to_entity[entity_index]->position_norm,
                                      IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                      id, PUSH_ANIMATION_TIME); 
-        if (entity_index == 0) setTileType(NONE, entities_to_push.pointer_to_entity[entity_index]->coords); // will necessarily be overwritten by player / object doing the pushing; keeping for safety for now
         setTileType(entities_to_push.type[entity_index], entities_to_push.new_coords[entity_index]);
     }
 }
@@ -1338,6 +1346,7 @@ bool isDiagonal(Direction direction)
 
 int32 updateLaserBuffer(void)
 {
+    memset(laser_buffer, 0, sizeof(laser_buffer));
     int32 laser_tile_count = 0;
     int32 total_source_count = getEntityCount(next_world_state.sources);
     Entity sources_as_primary[128]; 
@@ -1448,6 +1457,14 @@ void gameInitialise(void)
             next_world_state.player.rotation_quat = directionToQuaternion(next_world_state.player.direction, false);
             next_world_state.player.id = 1;
         }
+        else if (next_world_state.buffer[buffer_index] == PACK) // likewise special case for pack
+        {
+            next_world_state.pack.coords = bufferIndexToCoords(buffer_index);
+            next_world_state.pack.position_norm = intCoordsToNorm(next_world_state.pack.coords);
+            next_world_state.pack.direction = next_world_state.buffer[buffer_index + 1];
+            next_world_state.pack.rotation_quat = directionToQuaternion(next_world_state.pack.direction, false);
+            next_world_state.pack.id = 2;
+        }
     }
     //next_world_state.player.coords = (Int3){3,1,3};
     next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
@@ -1523,6 +1540,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         case WALL: break;
                         case BOX:
                         case CRYSTAL:
+                        case PACK:
                         {
                             if (canPush(next_player_coords, input_direction)) 
                             {
@@ -1566,9 +1584,22 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                          &next_world_state.player.position_norm,
                                                          IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                                          1, animation_time); // passing 1 as id for player 
-                            setTileType(NONE, next_world_state.player.coords);
+                            // move pack also
+                            if (next_world_state.pack.pack_detached) setTileType(NONE, next_world_state.player.coords);
+                            else 
+                            {
+                                setTileType(NONE, next_world_state.pack.coords);
+                                setTileType(PACK, next_world_state.player.coords);
+                                createInterpolationAnimation(intCoordsToNorm(next_world_state.pack.coords),
+                                        					 intCoordsToNorm(next_world_state.player.coords),
+                                                             &next_world_state.pack.position_norm,
+                                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                             2, animation_time);
+                                next_world_state.pack.coords = next_world_state.player.coords;
+                            }
                             next_world_state.player.coords = next_player_coords;
                             setTileType(PLAYER, next_world_state.player.coords);	
+
                         }
                         else // speculative movement over gap, with the hopes that we will be red
                         {
@@ -1594,6 +1625,13 @@ void gameFrame(double delta_time, TickInput tick_input)
                                         }
                                     }
                                 }
+                                if (next_world_state.pack.pack_detached && getTileType(getNextCoords(next_world_state.pack.coords, DOWN)) == NONE)
+                                {
+                                    Int3 new_coords = int3Add(next_world_state.pack.coords, int3Negate(AXIS_Y));
+                                    setTileType(PACK, new_coords);
+                                    setTileType(NONE, next_world_state.pack.coords);
+                                    next_world_state.pack.coords = new_coords;
+                                }
                             }
                             setTileType(NONE, next_world_state.player.coords);
                             next_world_state.player.coords = next_player_coords;
@@ -1617,7 +1655,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                              intCoordsToNorm(next_player_coords), 
                                                              &next_world_state.player.position_norm,
                                                              IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                             1, animation_time); // passing 1 as id for player 
+                                                             1, animation_time); 
                                 setTileType(NONE, next_world_state.player.coords);
                                 next_world_state.player.coords = next_player_coords;
                                 setTileType(PLAYER, next_world_state.player.coords);	
@@ -1629,16 +1667,110 @@ void gameFrame(double delta_time, TickInput tick_input)
                 }
                 else
                 {
-                    // player turns
-                    if (input_direction != oppositeDirection(next_world_state.player.direction)) 
+                    if (input_direction != oppositeDirection(next_world_state.player.direction)) // check if turning (as opposed to trying to reverse)
                     {
-                        createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
-                                					 directionToQuaternion(next_world_state.player.direction, true), 
-                                                     directionToQuaternion(input_direction, true), 
-                                                     &next_world_state.player.rotation_quat,
-                                                     1, TURN_ANIMATION_TIME); // passing 1 as id for player 
-                        next_world_state.player.direction = input_direction;
-                        setTileDirection(next_world_state.player.direction, next_world_state.player.coords);
+                        if (next_world_state.pack.pack_detached)
+                        {
+                            createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
+                                                         directionToQuaternion(next_world_state.player.direction, true), 
+                                                         directionToQuaternion(input_direction, true), 
+                                                         &next_world_state.player.rotation_quat,
+                                                         1, TURN_ANIMATION_TIME); 
+                            next_world_state.player.direction = input_direction;
+                            setTileDirection(next_world_state.player.direction, next_world_state.player.coords);
+                        }
+                        else
+                        {
+							Direction polarity_direction = NORTH;
+                            int32 clockwise_calculation = next_world_state.player.direction - input_direction;
+							if (clockwise_calculation == -1 || clockwise_calculation == 3) polarity_direction = (input_direction + 1) % 4;
+							else 														   polarity_direction = (input_direction + 3) % 4;
+
+                            Int3 orthogonal_tile_coords = getNextCoords(next_world_state.player.coords, oppositeDirection(input_direction));			
+                            Int3 diagonal_tile_coords = getNextCoords(orthogonal_tile_coords, polarity_direction);
+                            Direction diagonal_push_direction = oppositeDirection(input_direction);	
+                            Direction orthogonal_push_direction = oppositeDirection(polarity_direction); 
+
+                            TileType diagonal_tile_type = getTileType(diagonal_tile_coords); 
+                            TileType orthogonal_tile_type = getTileType(orthogonal_tile_coords);
+
+							bool allow_turn_diagonal = false;
+                            bool allow_turn_orthogonal = false;
+                            bool push_diagonal = false;					
+                            bool push_orthogonal = false;				
+
+                            switch (diagonal_tile_type)
+                            {
+                            	case NONE:
+                                {
+                                	allow_turn_diagonal = true;
+                                    break;
+                                }
+                                case BOX:
+                                case CRYSTAL:
+                                {
+                                    if (canPush(diagonal_tile_coords, diagonal_push_direction))
+                                    {
+                                        push_diagonal = true;
+                                        allow_turn_diagonal = true;
+                                    }
+                                    break;
+                                }
+                                default: break;
+                            }
+
+                            if (allow_turn_diagonal == true) switch (orthogonal_tile_type)
+                            {
+                            	case NONE:
+                                {
+                                	allow_turn_orthogonal = true;
+                                    break;
+                                }
+                                case BOX:
+                                case CRYSTAL:
+                                {
+                                    if (canPush(orthogonal_tile_coords, orthogonal_push_direction))
+                                    {
+                                        push_orthogonal = true;
+                                        allow_turn_orthogonal = true;
+                                    }
+                                    break;
+                                }
+                                default: break;
+                            }
+
+                            if (allow_turn_orthogonal)
+                            {
+                            	// rotate player
+                                createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
+                                                             directionToQuaternion(next_world_state.player.direction, true), 
+                                                             directionToQuaternion(input_direction, true), 
+                                                             &next_world_state.player.rotation_quat,
+                                                             1, TURN_ANIMATION_TIME); 
+                                next_world_state.player.direction = input_direction;
+                                setTileDirection(next_world_state.player.direction, next_world_state.player.coords);
+
+                                if (push_diagonal)   push(diagonal_tile_coords,   diagonal_push_direction);
+                                if (push_orthogonal) push(orthogonal_tile_coords, orthogonal_push_direction);
+
+                                // TODO(spike): createPackRotationAnimation()
+                                createInterpolationAnimation(intCoordsToNorm(next_world_state.pack.coords),
+                            								 intCoordsToNorm(orthogonal_tile_coords),
+                                                             &next_world_state.pack.position_norm,
+                                                             directionToQuaternion(next_world_state.pack.direction, true),
+                                                             directionToQuaternion(input_direction, true),
+                                                             &next_world_state.pack.rotation_quat,
+                                                             2, TURN_ANIMATION_TIME);
+                                setTileType(NONE, next_world_state.pack.coords);
+                                setTileDirection(NORTH, next_world_state.pack.coords);
+
+                                next_world_state.pack.coords = orthogonal_tile_coords;
+                                setTileType(PACK, next_world_state.pack.coords);
+
+                                next_world_state.pack.direction = input_direction;
+                                setTileDirection(input_direction, next_world_state.pack.coords);
+                            }
+                        }
                     }
                     time_until_input = TURN_ANIMATION_TIME;
         		}
@@ -1711,6 +1843,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         entity_pointer->id = -1;
                     }
                     setTileType(NONE, raycast_output.hit_coords);
+                    setTileDirection(NORTH, raycast_output.hit_coords);
                 }
                 else if (tick_input.right_mouse_press && raycast_output.hit) 
                 {
@@ -1720,10 +1853,32 @@ void gameFrame(double delta_time, TickInput tick_input)
                         setTileType(editor_state.picked_tile, raycast_output.place_coords); 
                         setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
                     }
-                    else if (editor_state.picked_tile == PLAYER)
+                    else if (editor_state.picked_tile == PLAYER) // TODO(spike): collapse these two
                     {
+                        // remove other instances of player
+                        for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
+                        {
+							if (next_world_state.buffer[buffer_index] != PLAYER) continue;
+                            setTileType(NONE, raycast_output.hit_coords);
+                            setTileDirection(NORTH, raycast_output.hit_coords);
+                        }
 						next_world_state.player.coords = raycast_output.place_coords;
                         next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
+                        next_world_state.player.id = 1;
+                        setTileType(editor_state.picked_tile, raycast_output.place_coords);
+                    }
+                    else if (editor_state.picked_tile == PACK)
+                    {
+                        // remove other instances of pack
+                        for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
+                        {
+							if (next_world_state.buffer[buffer_index] != PACK) continue;
+                            setTileType(NONE, raycast_output.hit_coords);
+                            setTileDirection(NORTH, raycast_output.hit_coords);
+                        }
+						next_world_state.pack.coords = raycast_output.place_coords;
+                        next_world_state.pack.position_norm = intCoordsToNorm(next_world_state.pack.coords);
+                        next_world_state.pack.id = 2;
                         setTileType(editor_state.picked_tile, raycast_output.place_coords);
                     }
                     else
@@ -1761,7 +1916,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
 				editor_state.picked_tile++;
                 //if    (editor_state.picked_tile == PLAYER) editor_state.picked_tile = MIRROR;
-                if 		(editor_state.picked_tile == CRYSTAL + 1) editor_state.picked_tile = SOURCE_RED;
+                if 		(editor_state.picked_tile == PACK + 1) editor_state.picked_tile = SOURCE_RED;
                 else if (editor_state.picked_tile == SOURCE_WHITE + 1) editor_state.picked_tile = VOID;
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
@@ -1806,9 +1961,22 @@ void gameFrame(double delta_time, TickInput tick_input)
                     */
                 }
             }
+            // pack gets own special case (but in here, because still affected by slo-mo)
+            if (next_world_state.pack.pack_detached && getTileType(getNextCoords(next_world_state.pack.coords, DOWN)) == NONE)
+            {
+                Int3 new_coords = int3Add(next_world_state.pack.coords, int3Negate(AXIS_Y));
+                setTileType(PACK, new_coords);
+                setTileType(NONE, next_world_state.pack.coords);
+                next_world_state.pack.coords = new_coords;
+                createInterpolationAnimation(intCoordsToNorm(int3Add(new_coords, AXIS_Y)),
+                                             intCoordsToNorm(new_coords),
+                                             &next_world_state.pack.position_norm,
+                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                             getEntityId(next_world_state.pack.coords), FALL_ANIMATION_TIME);
+            }
         }
         // player gets own special case
-        if (getTileType(getNextCoords(next_world_state.player.coords, DOWN)) == NONE && !next_world_state.player.hit_by_red) // no-grav if red
+        if (!next_world_state.player.hit_by_red && getTileType(getNextCoords(next_world_state.player.coords, DOWN)) == NONE) // no-grav if red
         {
             Int3 new_coords = int3Add(next_world_state.player.coords, int3Negate(AXIS_Y)); 
             setTileType(PLAYER, new_coords);
@@ -1835,11 +2003,12 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // clear and then reupdate laser buffer based on actions that happened this frame
-		memset(laser_buffer, 0, sizeof(laser_buffer));
 		int32 laser_tile_count = updateLaserBuffer();
 
         // finished updating state
         world_state = next_world_state;
+
+		// DRAW 
 
         // draw lasers
         for (int laser_index = 0; laser_index < laser_tile_count; laser_index++)
@@ -1895,7 +2064,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
         {
 			TileType tile = world_state.buffer[tile_index];
-			if (tile == PLAYER || tile == BOX || tile == MIRROR || isSource(tile) || tile == CRYSTAL) continue;
+			if (tile == PLAYER || tile == BOX || tile == MIRROR || isSource(tile) || tile == CRYSTAL || tile == PACK) continue;
 			if (tile != NONE)   drawAsset(getPath(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false));
         }
 
@@ -1903,7 +2072,8 @@ void gameFrame(double delta_time, TickInput tick_input)
         drawEntityLoop(world_state.boxes,    box_path,     CUBE_3D, DEFAULT_SCALE);
         drawEntityLoop(world_state.mirrors,  mirror_path,  CUBE_3D, DEFAULT_SCALE);
         drawEntityLoop(world_state.crystals, crystal_path, CUBE_3D, DEFAULT_SCALE);
-        drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
+        if (world_state.player.id != -1) drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
+		if (world_state.pack.id   != -1) drawAsset(pack_path,   CUBE_3D, world_state.pack.position_norm,   PLAYER_SCALE, world_state.pack.rotation_quat);
 
 		// draw colored entites
 		for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)

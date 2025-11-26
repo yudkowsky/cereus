@@ -35,7 +35,6 @@ typedef struct CachedAsset
     VkDeviceMemory memory;
     VkImageView view;
     char path[256];
-    int32 unlit;
 }
 CachedAsset;
 
