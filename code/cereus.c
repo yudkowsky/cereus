@@ -1655,8 +1655,20 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                              intCoordsToNorm(next_player_coords), 
                                                              &next_world_state.player.position_norm,
                                                              IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                             1, animation_time); 
-                                setTileType(NONE, next_world_state.player.coords);
+                                                             1, animation_time); // passing 1 as id for player 
+                                // move pack also
+                                if (next_world_state.pack.pack_detached) setTileType(NONE, next_world_state.player.coords);
+                                else 
+                                {
+                                    setTileType(NONE, next_world_state.pack.coords);
+                                    setTileType(PACK, next_world_state.player.coords);
+                                    createInterpolationAnimation(intCoordsToNorm(next_world_state.pack.coords),
+                                                                 intCoordsToNorm(next_world_state.player.coords),
+                                                                 &next_world_state.pack.position_norm,
+                                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                                 2, animation_time);
+                                    next_world_state.pack.coords = next_world_state.player.coords;
+                                }
                                 next_world_state.player.coords = next_player_coords;
                                 setTileType(PLAYER, next_world_state.player.coords);	
                             }
