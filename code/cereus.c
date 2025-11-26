@@ -1926,6 +1926,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 		// falling object calculations
         // objects that should fall: boxes, mirrors, crystals, and the player (below)
 
+		// TODO(spike): collapse this falling area with the one above (function with do_animation input)
+
         Entity* object_group_to_fall[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
         if (!next_world_state.player.hit_by_blue) // slo-mo if blue
         {
@@ -1987,6 +1989,21 @@ void gameFrame(double delta_time, TickInput tick_input)
                                          &next_world_state.player.position_norm,
                                          IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                          getEntityId(next_world_state.player.coords), FALL_ANIMATION_TIME);
+
+            // get rid of pack if falling causes them to become decoupled
+            if (getTileType(getNextCoords(next_world_state.player.coords, oppositeDirection(next_world_state.player.direction))) != PACK)
+            {
+                next_world_state.pack.pack_detached = true;
+            }
+        }
+
+        // reattach pack
+        if (next_world_state.pack.pack_detached)
+        {
+            if (getTileType(getNextCoords(next_world_state.player.coords, oppositeDirection(next_world_state.player.direction))) == PACK)
+            {
+                next_world_state.pack.pack_detached = false;
+            }
         }
 
         // do animations
