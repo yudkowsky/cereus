@@ -1432,7 +1432,16 @@ void recordStateForUndo()
     undo_buffer_position = (undo_buffer_position + 1) % UNDO_BUFFER_SIZE;
 }
 
-void gameInitialise(void) 
+void resetVisuals(Entity* pointer)
+{
+    if (pointer->id == -1) return;
+    pointer->position_norm = intCoordsToNorm(pointer->coords);
+    pointer->rotation_quat = directionToQuaternion(pointer->direction, true);
+}
+
+// GAME
+
+void gameInitialise(char* command_line) 
 {	
     loadFileToBuffer(level_path);
 
@@ -1526,12 +1535,25 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (undo_buffer_position != 0) next_undo_buffer_position = undo_buffer_position - 1;
                 else next_undo_buffer_position = UNDO_BUFFER_SIZE - 1;
 
-                if (undo_buffer[next_undo_buffer_position].player.id != 0)
+                if (undo_buffer[next_undo_buffer_position].player.id != 0) // check that there is anything in the buffer (using something that should never usually happen)
                 {
-                    memset(animations, 0, sizeof(animations));
                     next_world_state = undo_buffer[next_undo_buffer_position];
                     memset(&undo_buffer[undo_buffer_position], 0, sizeof(WorldState));
                     undo_buffer_position = next_undo_buffer_position;
+
+                    // set position_norm and rotation_quat to coords and direction respectively
+                    memset(animations, 0, sizeof(animations));
+                	Entity* pointers[3] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals};
+                    for (int pointer_group_index = 0; pointer_group_index < 3; pointer_group_index++)
+                    {
+                        for (int pointer_instance_index = 0; pointer_instance_index < MAX_ENTITY_INSTANCE_COUNT; pointer_instance_index++)
+                        {
+                            Entity* pointer_instance = &pointers[pointer_group_index][pointer_instance_index];
+                            resetVisuals(pointer_instance);
+                        }
+                    }
+                    resetVisuals(&next_world_state.player);
+                    resetVisuals(&next_world_state.pack);
                 }
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
@@ -1540,7 +1562,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 recordStateForUndo();
                 memset(animations, 0, sizeof(animations));
                 Camera temp_camera = camera;
-                gameInitialise();
+                gameInitialise(level_path);
                 camera = temp_camera;
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
@@ -2146,7 +2168,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (world_state.player.id != -1) drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
 		if (world_state.pack.id   != -1) drawAsset(pack_path,   CUBE_3D, world_state.pack.position_norm,   PLAYER_SCALE, world_state.pack.rotation_quat);
 
-		// draw colored entites
+		// draw sources 
 		for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)
         {
             if (world_state.sources[source_index].id == -1) continue;

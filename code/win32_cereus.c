@@ -172,7 +172,6 @@ int CALLBACK WinMain(
 	int       initial_show_state)
 {
 	(void)_;
-    (void)command_line;
 
 	WNDCLASSEXW window_class = {0};
 
@@ -222,7 +221,7 @@ int CALLBACK WinMain(
     MSG queued_message = {0};
     bool running = true;
 	
-    gameInitialise(); 
+    gameInitialise(command_line); 
 
     while (running)
     {
