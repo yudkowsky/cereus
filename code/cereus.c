@@ -1535,6 +1535,15 @@ void gameFrame(double delta_time, TickInput tick_input)
                 }
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
+            if (time_until_input == 0 && tick_input.r_press)
+            {
+                recordStateForUndo();
+                memset(animations, 0, sizeof(animations));
+                Camera temp_camera = camera;
+                gameInitialise();
+                camera = temp_camera;
+                time_until_input = INPUT_TIME_UNTIL_ALLOW;
+            }
             if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press))
             {
 				// PLAYER MOVEMENT
