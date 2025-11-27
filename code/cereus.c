@@ -160,7 +160,7 @@ const int32 MAX_ENTITY_PUSH_COUNT = 32;
 const int32 MAX_ANIMATION_COUNT = 32;
 const int32 MAX_LASER_TRAVEL_DISTANCE = 48;
 const int32 MAX_PSEUDO_SOURCE_COUNT = 128;
-const float LASER_OBJECT_COLLISION_VARIABLE = 0.5;
+const int32 UNDO_BUFFER_SIZE = 256; // remember to modify undo_buffer
 
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
@@ -177,11 +177,13 @@ Camera camera = {0};
 float camera_yaw = 0.0f;
 float camera_pitch = 0.0f;
 
-char* level_path = "w:/cereus/data/levels/level-2.txt"; // absolute path required to modify original file
+char* level_path = "w:/cereus/data/levels/level-4.txt"; // absolute path required to modify original file
 Int3 level_dim = {0};
 
 WorldState world_state = {0};
 WorldState next_world_state = {0};
+WorldState undo_buffer[256] = {0};
+int32 undo_buffer_position = 0;
 EditorState editor_state = {0};
 Animation animations[32];
 LaserBuffer laser_buffer[1024] = {0};
@@ -1422,6 +1424,14 @@ int32 updateLaserBuffer(void)
     return laser_tile_count;
 }
 
+// UNDO
+
+void recordStateForUndo()
+{
+    undo_buffer[undo_buffer_position] = world_state;
+    undo_buffer_position = (undo_buffer_position + 1) % UNDO_BUFFER_SIZE;
+}
+
 void gameInitialise(void) 
 {	
     loadFileToBuffer(level_path);
@@ -1508,6 +1518,21 @@ void gameFrame(double delta_time, TickInput tick_input)
 			if (time_until_input == 0 && tick_input.e_press) 
             {
                 editor_state.editor_mode = true;
+                time_until_input = INPUT_TIME_UNTIL_ALLOW;
+            }
+            if (time_until_input == 0 && tick_input.z_press)
+            {
+                int32 next_undo_buffer_position = 0;
+                if (undo_buffer_position != 0) next_undo_buffer_position = undo_buffer_position - 1;
+                else next_undo_buffer_position = UNDO_BUFFER_SIZE - 1;
+
+                if (undo_buffer[next_undo_buffer_position].player.id != 0)
+                {
+                    memset(animations, 0, sizeof(animations));
+                    next_world_state = undo_buffer[next_undo_buffer_position];
+                    memset(&undo_buffer[undo_buffer_position], 0, sizeof(WorldState));
+                    undo_buffer_position = next_undo_buffer_position;
+                }
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
             if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press))
@@ -1600,6 +1625,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             next_world_state.player.coords = next_player_coords;
                             setTileType(PLAYER, next_world_state.player.coords);	
 
+                            recordStateForUndo();
                         }
                         else // speculative movement over gap, with the hopes that we will be red
                         {
@@ -1631,6 +1657,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     setTileType(PACK, new_coords);
                                     setTileType(NONE, next_world_state.pack.coords);
                                     next_world_state.pack.coords = new_coords;
+
+                                    recordStateForUndo();
                                 }
                             }
                             setTileType(NONE, next_world_state.player.coords);
@@ -1683,6 +1711,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     {
                         if (next_world_state.pack.pack_detached)
                         {
+                            // if pack detached, always allow turn
                             createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
                                                          directionToQuaternion(next_world_state.player.direction, true), 
                                                          directionToQuaternion(input_direction, true), 
@@ -1690,6 +1719,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                          1, TURN_ANIMATION_TIME); 
                             next_world_state.player.direction = input_direction;
                             setTileDirection(next_world_state.player.direction, next_world_state.player.coords);
+
+                            recordStateForUndo();
                         }
                         else
                         {
@@ -1781,6 +1812,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                                 next_world_state.pack.direction = input_direction;
                                 setTileDirection(input_direction, next_world_state.pack.coords);
+
+                                recordStateForUndo();
                             }
                         }
                     }
