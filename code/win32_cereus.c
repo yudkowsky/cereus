@@ -221,7 +221,13 @@ int CALLBACK WinMain(
     MSG queued_message = {0};
     bool running = true;
 	
-    gameInitialise(command_line); 
+    char* file_path = 0;
+    if (command_line[0] != '\0')
+    {
+        file_path = command_line;
+    }
+
+    gameInitialise(file_path); 
 
     while (running)
     {

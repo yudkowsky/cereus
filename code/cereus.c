@@ -177,7 +177,8 @@ Camera camera = {0};
 float camera_yaw = 0.0f;
 float camera_pitch = 0.0f;
 
-char* level_path = "w:/cereus/data/levels/level-4.txt"; // absolute path required to modify original file
+char* level_path = "w:/cereus/data/levels/level-4.txt"; // absolute path required to modify original file. used by default if no command line input
+char level_path_buffer[256] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
 WorldState world_state = {0};
@@ -1434,7 +1435,6 @@ void recordStateForUndo()
 
 void resetVisuals(Entity* pointer)
 {
-    if (pointer->id == -1) return;
     pointer->position_norm = intCoordsToNorm(pointer->coords);
     pointer->rotation_quat = directionToQuaternion(pointer->direction, true);
 }
@@ -1443,6 +1443,13 @@ void resetVisuals(Entity* pointer)
 
 void gameInitialise(char* command_line) 
 {	
+    if (command_line != 0) 
+    {
+        strcat(level_path_buffer, command_line);
+        strcat(level_path_buffer, ".txt");
+        level_path = level_path_buffer;
+    }
+
     loadFileToBuffer(level_path);
 
     memset(next_world_state.boxes,    -1, sizeof(next_world_state.boxes)); 
@@ -1549,6 +1556,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         for (int pointer_instance_index = 0; pointer_instance_index < MAX_ENTITY_INSTANCE_COUNT; pointer_instance_index++)
                         {
                             Entity* pointer_instance = &pointers[pointer_group_index][pointer_instance_index];
+                            if (pointer_instance->id == -1) continue;
                             resetVisuals(pointer_instance);
                         }
                     }
