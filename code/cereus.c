@@ -933,18 +933,9 @@ void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direc
     Vec3 pivot_to_pack_start = vec3Subtract(pack_position, player_position);
     float d_theta_per_frame = (TAU*0.25f)/(float)TURN_ANIMATION_TIME;
     float angle_sign = clockwise ? 1.0f : -1.0f;
-
     Direction previous_pack_direction = NORTH;
-    if (clockwise) 
-    {
-        previous_pack_direction = pack_direction - 1;
-        if (previous_pack_direction == -1) previous_pack_direction = EAST;
-    }
-    else
-    {
-        previous_pack_direction = pack_direction + 1;
-        if (previous_pack_direction == 4) previous_pack_direction = NORTH;
-    }
+    if (clockwise) previous_pack_direction = pack_direction - 1 % 4;
+    else		   previous_pack_direction = pack_direction + 1 % 4;
 
     for (int frame_index = 0; frame_index < TURN_ANIMATION_TIME; frame_index++)
     {
@@ -1905,23 +1896,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 if (push_diagonal)   push(diagonal_tile_coords,   diagonal_push_direction);
                                 if (push_orthogonal) push(orthogonal_tile_coords, orthogonal_push_direction);
 
-                                createPackRotationAnimation(intCoordsToNorm(next_world_state.player.coords), intCoordsToNorm(next_world_state.pack.coords), oppositeDirection(input_direction), clockwise, &next_world_state.pack.position_norm, &next_world_state.pack.rotation_quat, 2);
-                                /*
-                                createInterpolationAnimation(intCoordsToNorm(next_world_state.pack.coords),
-                            								 intCoordsToNorm(orthogonal_tile_coords),
-                                                             &next_world_state.pack.position_norm,
-                                                             directionToQuaternion(next_world_state.pack.direction, true),
-                                                             directionToQuaternion(input_direction, true),
-                                                             &next_world_state.pack.rotation_quat,
-                                                             2, TURN_ANIMATION_TIME);
-                                */
-                                
+                                createPackRotationAnimation(intCoordsToNorm(next_world_state.player.coords), 
+                                        					intCoordsToNorm(next_world_state.pack.coords), 
+                                                            oppositeDirection(input_direction), clockwise, 
+                                                            &next_world_state.pack.position_norm, &next_world_state.pack.rotation_quat, 2);
                                 setTileType(NONE, next_world_state.pack.coords);
                                 setTileDirection(NORTH, next_world_state.pack.coords);
-
                                 next_world_state.pack.coords = orthogonal_tile_coords;
                                 setTileType(PACK, next_world_state.pack.coords);
-
                                 next_world_state.pack.direction = input_direction;
                                 setTileDirection(input_direction, next_world_state.pack.coords);
 
