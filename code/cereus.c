@@ -1426,7 +1426,7 @@ int32 updateLaserBuffer(void)
     return laser_tile_count;
 }
 
-// UNDO
+// UNDO / RESTART
 
 void recordStateForUndo()
 {
@@ -1438,6 +1438,22 @@ void resetVisuals(Entity* pointer)
 {
     pointer->position_norm = intCoordsToNorm(pointer->coords);
     pointer->rotation_quat = directionToQuaternion(pointer->direction, true);
+}
+
+void resetStandardVisuals()
+{
+    Entity* pointers[3] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals};
+    for (int pointer_group_index = 0; pointer_group_index < 3; pointer_group_index++)
+    {
+        for (int pointer_instance_index = 0; pointer_instance_index < MAX_ENTITY_INSTANCE_COUNT; pointer_instance_index++)
+        {
+            Entity* pointer_instance = &pointers[pointer_group_index][pointer_instance_index];
+            if (pointer_instance->id == -1) continue;
+            resetVisuals(pointer_instance);
+        }
+    }
+    resetVisuals(&next_world_state.player);
+    resetVisuals(&next_world_state.pack);
 }
 
 // GAME
@@ -1464,7 +1480,7 @@ void gameInitialiseState()
 			pointer[count].coords = bufferIndexToCoords(buffer_index);
             pointer[count].position_norm = intCoordsToNorm(pointer[count].coords);
             pointer[count].direction = next_world_state.buffer[buffer_index + 1]; 
-            pointer[count].rotation_quat = directionToQuaternion(pointer[count].direction, false);
+            pointer[count].rotation_quat = directionToQuaternion(pointer[count].direction, true);
             pointer[count].color = getEntityColor(pointer[count].coords);
             pointer[count].id = getEntityCount(pointer) + entityIdOffset(pointer);
             pointer = 0;
@@ -1545,6 +1561,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             if (time_until_input == 0 && tick_input.z_press)
             {
+                // undo
                 int32 next_undo_buffer_position = 0;
                 if (undo_buffer_position != 0) next_undo_buffer_position = undo_buffer_position - 1;
                 else next_undo_buffer_position = UNDO_BUFFER_SIZE - 1;
@@ -1554,26 +1571,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                     next_world_state = undo_buffer[next_undo_buffer_position];
                     memset(&undo_buffer[undo_buffer_position], 0, sizeof(WorldState));
                     undo_buffer_position = next_undo_buffer_position;
-
-                    // set position_norm and rotation_quat to coords and direction respectively
                     memset(animations, 0, sizeof(animations));
-                	Entity* pointers[3] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals};
-                    for (int pointer_group_index = 0; pointer_group_index < 3; pointer_group_index++)
-                    {
-                        for (int pointer_instance_index = 0; pointer_instance_index < MAX_ENTITY_INSTANCE_COUNT; pointer_instance_index++)
-                        {
-                            Entity* pointer_instance = &pointers[pointer_group_index][pointer_instance_index];
-                            if (pointer_instance->id == -1) continue;
-                            resetVisuals(pointer_instance);
-                        }
-                    }
-                    resetVisuals(&next_world_state.player);
-                    resetVisuals(&next_world_state.pack);
+                    resetStandardVisuals(); // set position_norm and rotation_quat to coords and direction respectively
                 }
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
             if (time_until_input == 0 && tick_input.r_press)
             {
+                // restart
                 recordStateForUndo();
                 memset(animations, 0, sizeof(animations));
                 Camera temp_camera = camera;
@@ -2015,7 +2020,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         updateLaserBuffer();
 
 		// falling object calculations
-        // objects that should fall: boxes, mirrors, crystals, and the player (below)
+        // objects that should fall: boxes, mirrors, crystals, and the player and pack (below)
 
 		// TODO(spike): collapse this falling area with the one above (function with do_animation input)
 
@@ -2039,19 +2044,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                      IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                                      getEntityId(group_pointer[entity_index].coords), FALL_ANIMATION_TIME);
                     }
-                    /*
-                    // delete if void below
-                    else if (getTileType(getNextCoords(group_pointer[entity_index].coords, DOWN)) == VOID)
-                    {
-                        Int3 new_coords = int3Add(group_pointer[entity_index].coords, int3Negate(AXIS_Y));
-                        
-                        createInterpolationAnimation(intCoordsToNorm(int3Add(new_coords, AXIS_Y)), 
-                                                     intCoordsToNorm(new_coords), 
-                                                     &group_pointer[entity_index].position_norm,
-                                                     IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                     getEntityId(group_pointer[entity_index].coords));
-                    }
-                    */
                 }
             }
             // pack gets own special case (but in here, because still affected by slo-mo)
