@@ -4,7 +4,6 @@
 #include <string.h> // TODO(spike): temporary, for memset
 #include <math.h> // TODO(spike): also temporary, for sin/cos
 #include <stdio.h> // TODO(spike): "temporary", for fopen 
-// #include <windows.h> // TODO(spike): ok, actually temporary this time, for outputdebugstring
 
 #define local_persist static
 #define global_variable static
@@ -188,7 +187,7 @@ WorldState undo_buffer[256] = {0};
 int32 undo_buffer_position = 0;
 EditorState editor_state = {0};
 Animation animations[32];
-LaserBuffer laser_buffer[1024] = {0};
+LaserBuffer laser_buffer[2048] = {0};
 
 int32 time_until_input = 0;
 

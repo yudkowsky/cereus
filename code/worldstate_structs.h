@@ -14,9 +14,9 @@ typedef struct AssetToLoad
 {
     char* path;
 	AssetType type;
-    Vec3 coords[1024];
-	Vec3 scale[1024];
-    Vec4 rotation[1024];
+    Vec3 coords[8192];
+	Vec3 scale[8192];
+    Vec4 rotation[8192];
     int32 instance_count;
 }
 AssetToLoad;
