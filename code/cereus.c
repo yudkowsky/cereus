@@ -177,7 +177,8 @@ Camera camera = {0};
 float camera_yaw = 0.0f;
 float camera_pitch = 0.0f;
 
-char* level_path = "w:/cereus/data/levels/level-4.txt"; // absolute path required to modify original file. used by default if no command line input
+char* level_path = "w:/cereus/data/levels/broken-bridges.txt"; // absolute path required to modify original file. used by default if no command line input
+char* system_command_line = "broken-bridges";
 char level_path_buffer[256] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
@@ -1441,15 +1442,8 @@ void resetVisuals(Entity* pointer)
 
 // GAME
 
-void gameInitialise(char* command_line) 
-{	
-    if (command_line != 0) 
-    {
-        strcat(level_path_buffer, command_line);
-        strcat(level_path_buffer, ".txt");
-        level_path = level_path_buffer;
-    }
-
+void gameInitialiseState()
+{
     loadFileToBuffer(level_path);
 
     memset(next_world_state.boxes,    -1, sizeof(next_world_state.boxes)); 
@@ -1502,6 +1496,19 @@ void gameInitialise(char* command_line)
     Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera_pitch);
     camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
     world_state = next_world_state;
+}
+
+void gameInitialise(char* command_line) 
+{	
+    system_command_line = command_line;
+    if (command_line != 0) 
+    {
+        strcat(level_path_buffer, command_line);
+        strcat(level_path_buffer, ".txt");
+        level_path = level_path_buffer;
+    }
+
+    gameInitialiseState();
 }
 
 void gameFrame(double delta_time, TickInput tick_input)
@@ -1570,7 +1577,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 recordStateForUndo();
                 memset(animations, 0, sizeof(animations));
                 Camera temp_camera = camera;
-                gameInitialise(level_path);
+                gameInitialiseState();
                 camera = temp_camera;
                 time_until_input = INPUT_TIME_UNTIL_ALLOW;
             }
