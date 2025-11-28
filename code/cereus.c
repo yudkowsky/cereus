@@ -266,6 +266,11 @@ Vec4 quaternionConjugate(Vec4 quaternion)
     return (Vec4){ -quaternion.x, -quaternion.y, -quaternion.z, quaternion.w };
 }
 
+Vec4 quaternionNegate(Vec4 quaternion)
+{
+    return (Vec4){ -quaternion.x, -quaternion.y, -quaternion.z, -quaternion.w };
+}
+
 Vec4 quaternionMultiply(Vec4 a, Vec4 b)
 {
     return (Vec4){ a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
@@ -912,19 +917,51 @@ void createRollingAnimation(Vec3 position, Direction direction, Vec3* position_t
     }
 }
 
-void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, bool clockwise, Vec3* position_to_change, Vec4* rotation_to_change, int32 entity_id)
+void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direction pack_direction, bool clockwise, Vec3* position_to_change, Vec4* rotation_to_change, int32 entity_id)
 {
     int32 next_free_array[2] = {0};
     int32* next_free_output = find_next_free_in_animations(next_free_array, entity_id);
     int32 animation_index = next_free_output[0];
     int32 queue_time = next_free_output[1];
+
+    animations[animation_index].id = entity_id;
+    animations[animation_index].frames_left = TURN_ANIMATION_TIME + queue_time; 
+    animations[animation_index].rotation_to_change = rotation_to_change;
+    animations[animation_index].position_to_change = position_to_change;
     
-	/*
+    Vec3 pivot_point = player_position;
+    Vec3 pivot_to_pack_start = vec3Subtract(pack_position, player_position);
+    float d_theta_per_frame = (TAU*0.25f)/(float)TURN_ANIMATION_TIME;
+    float angle_sign = clockwise ? 1.0f : -1.0f;
 
+    Direction previous_pack_direction = NORTH;
+    if (clockwise) 
+    {
+        previous_pack_direction = pack_direction - 1;
+        if (previous_pack_direction == -1) previous_pack_direction = EAST;
+    }
+    else
+    {
+        previous_pack_direction = pack_direction + 1;
+        if (previous_pack_direction == 4) previous_pack_direction = NORTH;
+    }
 
+    for (int frame_index = 0; frame_index < TURN_ANIMATION_TIME; frame_index++)
+    {
+        // rotation
+        Vec4 quat_prev = directionToQuaternion(previous_pack_direction, true);
+		Vec4 quat_next = directionToQuaternion(pack_direction, true);
+        if (quaternionDot(quat_prev, quat_next) < 0.0f) quat_next = quaternionNegate(quat_next); // resolve quat sign issue 
+        float param = (float)(frame_index + 1) / (float)(TURN_ANIMATION_TIME);
+        animations[animation_index].rotation[TURN_ANIMATION_TIME-(1+frame_index)] 
+        = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(quat_prev, 1.0f - param), quaternionScalarMultiply(quat_next, param)));
 
-
-    */
+        // translation
+        float theta = angle_sign * (frame_index+1) * d_theta_per_frame;
+        Vec4 roll = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), theta);
+        Vec3 relative_rotation = vec3RotateByQuaternion(pivot_to_pack_start, roll);
+        animations[animation_index].position[TURN_ANIMATION_TIME-(1+frame_index)] = vec3Add(pivot_point, relative_rotation);
+    }
 }
 
 // PUSH HELPER (ALTHOUGH 3/4 OF THIS IS FOR LASERS)
@@ -1792,9 +1829,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                         else
                         {
 							Direction polarity_direction = NORTH;
+                            int clockwise = false;
                             int32 clockwise_calculation = next_world_state.player.direction - input_direction;
-							if (clockwise_calculation == -1 || clockwise_calculation == 3) polarity_direction = (input_direction + 1) % 4;
-							else 														   polarity_direction = (input_direction + 3) % 4;
+                            if (clockwise_calculation == -1 || clockwise_calculation == 3) clockwise = true;
+							if (clockwise) polarity_direction = (input_direction + 1) % 4;
+							else 		   polarity_direction = (input_direction + 3) % 4;
 
                             Int3 orthogonal_tile_coords = getNextCoords(next_world_state.player.coords, oppositeDirection(input_direction));			
                             Int3 diagonal_tile_coords = getNextCoords(orthogonal_tile_coords, polarity_direction);
@@ -1866,7 +1905,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 if (push_diagonal)   push(diagonal_tile_coords,   diagonal_push_direction);
                                 if (push_orthogonal) push(orthogonal_tile_coords, orthogonal_push_direction);
 
-                                // TODO(spike): createPackRotationAnimation()
+                                createPackRotationAnimation(intCoordsToNorm(next_world_state.player.coords), intCoordsToNorm(next_world_state.pack.coords), oppositeDirection(input_direction), clockwise, &next_world_state.pack.position_norm, &next_world_state.pack.rotation_quat, 2);
+                                /*
                                 createInterpolationAnimation(intCoordsToNorm(next_world_state.pack.coords),
                             								 intCoordsToNorm(orthogonal_tile_coords),
                                                              &next_world_state.pack.position_norm,
@@ -1874,6 +1914,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                              directionToQuaternion(input_direction, true),
                                                              &next_world_state.pack.rotation_quat,
                                                              2, TURN_ANIMATION_TIME);
+                                */
+                                
                                 setTileType(NONE, next_world_state.pack.coords);
                                 setTileDirection(NORTH, next_world_state.pack.coords);
 
