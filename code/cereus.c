@@ -808,14 +808,11 @@ Vec3 rollingAxis(Direction direction)
 
 // ANIMATIONS
 
-// automatically queues if given object is already being moved around. assumes object is entity, because requires id - easily fixable if required. assumes max two animations on any given object (max one queued)
-void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change, int32 entity_id, int32 animation_frames)
+// returns animation_index and queue_time
+int32* find_next_free_in_animations(int32* next_free_array, int32 entity_id) 
 {
-	// get id from position a - i should be calling for the animation right before pos a is updated
-    int32 queue_time = 0; // frames which allow for previous animation to finish, if one exists
-
-    // find next free in animations. 
     int32 animation_index = -1;
+    int32 queue_time = 0;
     for (int find_anim_index = 0; find_anim_index < MAX_ANIMATION_COUNT; find_anim_index++)
     {
         if (animation_index == -1 && animations[find_anim_index].frames_left == 0)
@@ -828,6 +825,19 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
 			queue_time = animations[find_anim_index].frames_left;
         }
     }
+    next_free_array[0] = animation_index;
+    next_free_array[1] = queue_time;
+    return next_free_array;
+}
+
+// automatically queues if given object is already being moved around. assumes object is entity, because requires id - easily fixable if required. assumes max two animations on any given object (max one queued)
+void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change, int32 entity_id, int32 animation_frames)
+{
+    // find next free in animations. 
+    int32 next_free_array[2] = {0};
+    int32* next_free_output = find_next_free_in_animations(next_free_array, entity_id);
+    int32 animation_index = next_free_output[0];
+    int32 queue_time = next_free_output[1];
 
 	animations[animation_index].id = entity_id;
 
@@ -860,23 +870,11 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
 
 void createRollingAnimation(Vec3 position, Direction direction, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change, int32 entity_id, int32 animation_frames)
 {	
-    int32 queue_time = 0;
+    int32 next_free_array[2] = {0};
+    int32* next_free_output = find_next_free_in_animations(next_free_array, entity_id);
+    int32 animation_index = next_free_output[0];
+    int32 queue_time = next_free_output[1];
 
-    // find next free in animations
-    int32 animation_index = -1;
-    for (int find_anim_index = 0; find_anim_index < MAX_ANIMATION_COUNT; find_anim_index++)
-    {
-        if (animations[find_anim_index].frames_left == 0)
-        {
-            animation_index = find_anim_index;
-            animations[animation_index] = (Animation){0};
-        }
-        if (animations[find_anim_index].id == entity_id && animations[find_anim_index].frames_left != 0)
-        {
-            queue_time = animations[find_anim_index].frames_left;
-        }
-    }
-    
     animations[animation_index].id = entity_id;
     animations[animation_index].frames_left = animation_frames + queue_time; 
     animations[animation_index].rotation_to_change = rotation_to_change;
@@ -912,6 +910,21 @@ void createRollingAnimation(Vec3 position, Direction direction, Vec3* position_t
         Vec3 relative_rotation = vec3RotateByQuaternion(pivot_to_cube_center, roll);
         animations[animation_index].position[animation_frames-(1+frame_index)] = vec3Add(pivot_point, relative_rotation);
     }
+}
+
+void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, bool clockwise, Vec3* position_to_change, Vec4* rotation_to_change, int32 entity_id)
+{
+    int32 next_free_array[2] = {0};
+    int32* next_free_output = find_next_free_in_animations(next_free_array, entity_id);
+    int32 animation_index = next_free_output[0];
+    int32 queue_time = next_free_output[1];
+    
+	/*
+
+
+
+
+    */
 }
 
 // PUSH HELPER (ALTHOUGH 3/4 OF THIS IS FOR LASERS)
