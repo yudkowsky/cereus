@@ -160,6 +160,7 @@ const int32 MAX_ANIMATION_COUNT = 32;
 const int32 MAX_LASER_TRAVEL_DISTANCE = 48;
 const int32 MAX_PSEUDO_SOURCE_COUNT = 128;
 const int32 UNDO_BUFFER_SIZE = 256; // remember to modify undo_buffer
+const int32 PACK_TURN_HITBOX_TIME = 6;
 
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
@@ -187,7 +188,9 @@ WorldState undo_buffer[256] = {0};
 int32 undo_buffer_position = 0;
 EditorState editor_state = {0};
 Animation animations[32];
-LaserBuffer laser_buffer[2048] = {0};
+LaserBuffer laser_buffer[1024] = {0};
+int32 pack_turn_hitbox_timer = 0;
+Int3 pack_turn_hitbox_coords = {0};
 
 int32 time_until_input = 0;
 
@@ -1410,6 +1413,7 @@ int32 updateLaserBuffer(void)
                 else break;
             }
             else if (getTileType(current_coords) != NONE) break;
+            else if (pack_turn_hitbox_timer && int3IsEqual(pack_turn_hitbox_coords, current_coords)) break;
 
             if      (laser_color.red)   laser_buffer[laser_tile_count].color.red   = true; 
             else if (laser_color.green) laser_buffer[laser_tile_count].color.green = true; // else here ensures magenta -> red, yellow -> red, cyan -> green for non-primaries;
@@ -1834,7 +1838,10 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                             if (allow_turn_orthogonal)
                             {
-                            	// rotate player
+                            	// actually turning rotate player
+								pack_turn_hitbox_timer = PACK_TURN_HITBOX_TIME;
+                                pack_turn_hitbox_coords = diagonal_tile_coords;
+
                                 createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
                                                              directionToQuaternion(next_world_state.player.direction, true), 
                                                              directionToQuaternion(input_direction, true), 
@@ -2101,7 +2108,10 @@ void gameFrame(double delta_time, TickInput tick_input)
             animations[animation_index].frames_left--;
         }
 
-        // clear and then reupdate laser buffer based on actions that happened this frame
+        // decrement pack turn hitbox if required
+		if (pack_turn_hitbox_timer) pack_turn_hitbox_timer--;
+
+        // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
 
         // finished updating state
