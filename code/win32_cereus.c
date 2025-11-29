@@ -12,7 +12,22 @@ int screen_height = 1080;
 //int screen_width = 800;
 //int screen_height = 450;
 
+HWND global_window_handle = 0;
 TickInput tick_input = {0};
+bool cursor_locked = false;
+
+void centerCursorInWindow(void)
+{
+    if (!global_window_handle || !cursor_locked) return;
+    RECT client_rect;
+    if (!GetClientRect(global_window_handle, &client_rect)) return;
+
+    POINT center;
+    center.x = (client_rect.right - client_rect.left) / 2;
+    center.y = (client_rect.bottom - client_rect.top) / 2;
+    ClientToScreen(global_window_handle, &center);
+    SetCursorPos(center.x, center.y);
+}
 
 LRESULT CALLBACK windowMessageProcessor(
     HWND window_handle, 
@@ -22,6 +37,19 @@ LRESULT CALLBACK windowMessageProcessor(
 {
     switch (message_id)
     {
+        case WM_ACTIVATE:
+        {
+			if (LOWORD(wParam) == WA_ACTIVE || LOWORD(wParam) == WA_CLICKACTIVE)
+            {
+                cursor_locked = true;
+                centerCursorInWindow();
+            }
+			else
+            {
+                cursor_locked = false;
+            }
+            break;
+        }
         case WM_DESTROY:
             PostQuitMessage(0);
             return 0;
@@ -195,6 +223,8 @@ int CALLBACK WinMain(
 		module_handle, 
 		0);
 
+    global_window_handle = window_handle;
+
     ShowWindow(window_handle, initial_show_state);
 
     while (ShowCursor(FALSE) >= 0) 
@@ -244,13 +274,14 @@ int CALLBACK WinMain(
         LARGE_INTEGER current_tick;
         QueryPerformanceCounter(&current_tick);
         double delta_time = (current_tick.QuadPart - last_tick.QuadPart) * seconds_per_tick;
-
         last_tick = current_tick;
 
         gameFrame(delta_time, tick_input); 
 
         tick_input.mouse_dx = 0;
         tick_input.mouse_dy = 0;
+
+        centerCursorInWindow();
     }
 
     return (int)queued_message.wParam;
