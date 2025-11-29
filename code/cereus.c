@@ -152,7 +152,7 @@ const float RAYCAST_SEEK_LENGTH = 20.0f;
 
 const int32 EDITOR_INPUT_TIME_UNTIL_ALLOW = 8;
 const int32 PUSH_ANIMATION_TIME = 8;
-const int32 ROLL_ANIMATION_TIME = 12;
+const int32 ROLL_ANIMATION_TIME = 16;
 const int32 TURN_ANIMATION_TIME = 8;
 const int32 FALL_ANIMATION_TIME = 8;
 const int32 FAILED_TURN_ANIMATION_TIME = 6;
@@ -850,9 +850,9 @@ int32* find_next_free_in_animations(int32* next_free_array, int32 entity_id)
             animation_index = find_anim_index;
             animations[animation_index] = (Animation){0};
         }
-        if (animations[find_anim_index].id == entity_id && animations[find_anim_index].frames_left != 0) // this is the part that assumes that only one animation is queued
+        if (animations[find_anim_index].id == entity_id && animations[find_anim_index].frames_left != 0) 
         {
-			queue_time = animations[find_anim_index].frames_left;
+            if (queue_time < animations[find_anim_index].frames_left) queue_time = animations[find_anim_index].frames_left;
         }
     }
     next_free_array[0] = animation_index;
@@ -1888,7 +1888,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                           &next_world_state.pack.position_norm, 2);
                             }
                         }
-                        if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME;
+                        if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME - PUSH_ANIMATION_TIME; // below we set time_until_input += PUSH, so we add on the difference here.
                     }
                     else
                     {
@@ -1899,7 +1899,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                   intCoordsToNorm(next_world_state.player.coords),
                                                   &next_world_state.pack.position_norm, 2);
                     }
-                    time_until_input = PUSH_ANIMATION_TIME;
+                    time_until_input += PUSH_ANIMATION_TIME;
                 }
                 else
                 {
