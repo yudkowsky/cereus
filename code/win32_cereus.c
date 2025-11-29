@@ -42,11 +42,13 @@ LRESULT CALLBACK windowMessageProcessor(
 			if (LOWORD(wParam) == WA_ACTIVE || LOWORD(wParam) == WA_CLICKACTIVE)
             {
                 cursor_locked = true;
+                while (ShowCursor(FALSE) >= 0) { }
                 centerCursorInWindow();
             }
 			else
             {
                 cursor_locked = false;
+                while (ShowCursor(TRUE) < 0) { }
             }
             break;
         }
@@ -226,11 +228,6 @@ int CALLBACK WinMain(
     global_window_handle = window_handle;
 
     ShowWindow(window_handle, initial_show_state);
-
-    while (ShowCursor(FALSE) >= 0) 
-    {
-        // fuction does the decrementing
-    }
 
 	RAWINPUTDEVICE raw_input_device = {0};
     raw_input_device.usUsagePage = 0x01; // generic desktop controls
