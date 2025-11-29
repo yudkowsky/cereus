@@ -137,7 +137,7 @@ typedef struct LaserBuffer
 }
 LaserBuffer;
 
-const double PHYSICS_INCREMENT = 1.0/60.0;
+const double PHYSICS_INCREMENT = 1.0/30.0;
 double accumulator = 0;
 
 const float TAU = 6.2831853071f;
@@ -958,8 +958,16 @@ void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direc
     float d_theta_per_frame = (TAU*0.25f)/(float)TURN_ANIMATION_TIME;
     float angle_sign = clockwise ? 1.0f : -1.0f;
     Direction previous_pack_direction = NORTH;
-    if (clockwise) previous_pack_direction = pack_direction - 1 % 4;
-    else		   previous_pack_direction = pack_direction + 1 % 4;
+    if (clockwise) 
+    {
+        previous_pack_direction = pack_direction - 1;
+        if (previous_pack_direction == -1) previous_pack_direction = EAST;
+    }
+    else 
+    {
+        previous_pack_direction = pack_direction + 1;
+        if (previous_pack_direction == 4) previous_pack_direction = NORTH;
+    }
 
     for (int frame_index = 0; frame_index < TURN_ANIMATION_TIME; frame_index++)
     {
@@ -1915,11 +1923,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                             }
                             else
                             {
-                                /*
+                                
                                 // failed turn animation
                                 createFailedPlayerRotationAnimation(directionToQuaternion(next_world_state.player.direction, true),
                                         							directionToQuaternion(input_direction, true),
                                                                     &next_world_state.player.rotation_quat, 1);
+                                /*
                                 createFailedPackRotationAnimation(intCoordsToNorm(next_world_state.player.coords), 
                                         						  intCoordsToNorm(next_world_state.pack.coords), 
                                                             	  oppositeDirection(input_direction), clockwise, 
