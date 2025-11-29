@@ -1788,6 +1788,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 }
                                 next_world_state.player.coords = next_player_coords;
                                 setTileType(PLAYER, next_world_state.player.coords);	
+
+                                recordStateForUndo();
                             }
                         }
                         if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME;
