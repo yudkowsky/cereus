@@ -149,7 +149,7 @@ const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 const Vec3 ORTHOGONAL_LASER_SCALE = { 0.125f, 0.125f, 1.0f   };
 const Vec3 DIAGONAL_LASER_SCALE   = { 0.125f, 0.125f, 1.415f };
 const float RAYCAST_SEEK_LENGTH = 20.0f;
-const int32 INPUT_TIME_UNTIL_ALLOW = 8;
+const int32 INPUT_TIME_UNTIL_ALLOW = 12;
 const int32 PUSH_ANIMATION_TIME = 8;
 const int32 ROLL_ANIMATION_TIME = 12;
 const int32 TURN_ANIMATION_TIME = 8;
@@ -343,7 +343,7 @@ Vec3 vec3Subtract(Vec3 a, Vec3 b) {
 
 Vec3 vec3ScalarMultiply(Vec3 position, float scalar) {
     return (Vec3){ position.x*scalar, position.y*scalar, position.z*scalar }; }
-    
+
 // BUFFER / STATE INTERFACING
 
 int32 coordsToBufferIndexType(Int3 coords)
@@ -796,18 +796,39 @@ RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance)
 
 // ANIMATION HELPER 
 
+Int3 getNextCoords(Int3 coords, Direction direction)
+{
+	switch (direction)
+    {
+        case NORTH: return int3Add(coords, int3Negate(AXIS_Z)); 
+        case WEST:  return int3Add(coords, int3Negate(AXIS_X));
+        case SOUTH: return int3Add(coords, AXIS_Z);
+        case EAST:  return int3Add(coords, AXIS_X);
+        case UP:	return int3Add(coords, AXIS_Y);
+        case DOWN:	return int3Add(coords, int3Negate(AXIS_Y));
+
+        case NORTH_WEST: return int3Add(coords, int3Add(int3Negate(AXIS_Z), int3Negate(AXIS_X)));
+        case NORTH_EAST: return int3Add(coords, int3Add(int3Negate(AXIS_Z), AXIS_X));
+        case SOUTH_WEST: return int3Add(coords, int3Add(AXIS_Z, int3Negate(AXIS_X)));
+        case SOUTH_EAST: return int3Add(coords, int3Add(AXIS_Z, AXIS_X));
+                               
+        case UP_NORTH:   return int3Add(coords, int3Add(int3Negate(AXIS_Z), AXIS_Y));
+        case UP_SOUTH:   return int3Add(coords, int3Add(AXIS_Z, AXIS_Y));
+        case UP_WEST:	 return int3Add(coords, int3Add(int3Negate(AXIS_X), AXIS_Y));
+        case UP_EAST:    return int3Add(coords, int3Add(AXIS_X, AXIS_Y));
+                               
+        case DOWN_NORTH: return int3Add(coords, int3Add(int3Negate(AXIS_Z), int3Negate(AXIS_Y)));
+        case DOWN_SOUTH: return int3Add(coords, int3Add(AXIS_Z, int3Negate(AXIS_Y)));
+        case DOWN_WEST:  return int3Add(coords, int3Add(int3Negate(AXIS_X), int3Negate(AXIS_Y)));
+        case DOWN_EAST:  return int3Add(coords, int3Add(AXIS_X, int3Negate(AXIS_Y)));
+    }
+    return (Int3){0};
+}
+
 Vec3 rollingAxis(Direction direction)
 {
 	Vec3 up = { 0.0f, 1.0f, 0.0f };
-    Vec3 rolling = {0};
-    switch (direction)
-    {
-        case NORTH: rolling = intCoordsToNorm(int3Negate(AXIS_Z)); break;
-        case WEST:  rolling = intCoordsToNorm(int3Negate(AXIS_X)); break;
-        case SOUTH: rolling = intCoordsToNorm(AXIS_Z);	      	   break;
-        case EAST:  rolling = intCoordsToNorm(AXIS_X);		 	   break;
-        default: return IDENTITY_TRANSLATION;
-    }
+    Vec3 rolling = intCoordsToNorm(getNextCoords(normCoordsToInt(IDENTITY_TRANSLATION), direction));
 	return vec3CrossProduct(up, rolling);
 }
 
@@ -955,37 +976,6 @@ void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direc
     }
 }
 
-// PUSH HELPER (ALTHOUGH 3/4 OF THIS IS FOR LASERS)
-
-Int3 getNextCoords(Int3 coords, Direction direction)
-{
-	switch (direction)
-    {
-        case NORTH: return int3Add(coords, int3Negate(AXIS_Z)); 
-        case WEST:  return int3Add(coords, int3Negate(AXIS_X));
-        case SOUTH: return int3Add(coords, AXIS_Z);
-        case EAST:  return int3Add(coords, AXIS_X);
-        case UP:	return int3Add(coords, AXIS_Y);
-        case DOWN:	return int3Add(coords, int3Negate(AXIS_Y));
-
-        case NORTH_WEST: return int3Add(coords, int3Add(int3Negate(AXIS_Z), int3Negate(AXIS_X)));
-        case NORTH_EAST: return int3Add(coords, int3Add(int3Negate(AXIS_Z), AXIS_X));
-        case SOUTH_WEST: return int3Add(coords, int3Add(AXIS_Z, int3Negate(AXIS_X)));
-        case SOUTH_EAST: return int3Add(coords, int3Add(AXIS_Z, AXIS_X));
-                               
-        case UP_NORTH:   return int3Add(coords, int3Add(int3Negate(AXIS_Z), AXIS_Y));
-        case UP_SOUTH:   return int3Add(coords, int3Add(AXIS_Z, AXIS_Y));
-        case UP_WEST:	 return int3Add(coords, int3Add(int3Negate(AXIS_X), AXIS_Y));
-        case UP_EAST:    return int3Add(coords, int3Add(AXIS_X, AXIS_Y));
-                               
-        case DOWN_NORTH: return int3Add(coords, int3Add(int3Negate(AXIS_Z), int3Negate(AXIS_Y)));
-        case DOWN_SOUTH: return int3Add(coords, int3Add(AXIS_Z, int3Negate(AXIS_Y)));
-        case DOWN_WEST:  return int3Add(coords, int3Add(int3Negate(AXIS_X), int3Negate(AXIS_Y)));
-        case DOWN_EAST:  return int3Add(coords, int3Add(AXIS_X, int3Negate(AXIS_Y)));
-    }
-    return (Int3){0};
-}
-
 // PUSH / ROLL ENTITES
 
 bool canPush(Int3 coords, Direction direction)
@@ -1005,7 +995,7 @@ bool canPush(Int3 coords, Direction direction)
     return false; // only here if hit the max entity push count
 }
 
-void pushWithoutAnimation(Int3 coords, Direction direction)
+int32 pushWithoutAnimation(Int3 coords, Direction direction)
 {
     Push entities_to_push = {0}; 
 	Int3 current_coords = coords;
@@ -1025,6 +1015,7 @@ void pushWithoutAnimation(Int3 coords, Direction direction)
         if (entity_index == 0) setTileType(NONE, entities_to_push.pointer_to_entity[entity_index]->coords);
         setTileType(entities_to_push.type[entity_index], entities_to_push.new_coords[entity_index]);
     }
+    return entities_to_push.count;
 }
 
 void push(Int3 coords, Direction direction)
@@ -1043,15 +1034,18 @@ void push(Int3 coords, Direction direction)
     }
     for (int entity_index = 0; entity_index < entities_to_push.count; entity_index++)
     {
-        int32 id = getEntityId(entities_to_push.previous_coords[entity_index]);
         if (entity_index == 0) setTileType(NONE, entities_to_push.pointer_to_entity[entity_index]->coords); 
         entities_to_push.pointer_to_entity[entity_index]->coords = entities_to_push.new_coords[entity_index];
-        createInterpolationAnimation(intCoordsToNorm(entities_to_push.previous_coords[entity_index]),
-                                     intCoordsToNorm(entities_to_push.new_coords[entity_index]),
-                                     &entities_to_push.pointer_to_entity[entity_index]->position_norm,
+        setTileType(entities_to_push.type[entity_index], entities_to_push.new_coords[entity_index]);
+    }
+    for (int anim_index = 0; anim_index < entities_to_push.count; anim_index++)
+    {
+        int32 id = getEntityId(entities_to_push.new_coords[anim_index]);
+        createInterpolationAnimation(intCoordsToNorm(entities_to_push.previous_coords[anim_index]),
+                                     intCoordsToNorm(entities_to_push.new_coords[anim_index]),
+                                     &entities_to_push.pointer_to_entity[anim_index]->position_norm,
                                      IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                      id, PUSH_ANIMATION_TIME); 
-        setTileType(entities_to_push.type[entity_index], entities_to_push.new_coords[entity_index]);
     }
 }
 
