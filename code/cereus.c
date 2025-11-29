@@ -137,7 +137,7 @@ typedef struct LaserBuffer
 }
 LaserBuffer;
 
-const double PHYSICS_INCREMENT = 1.0/30.0;
+const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
 const float TAU = 6.2831853071f;
@@ -150,12 +150,13 @@ const Vec3 ORTHOGONAL_LASER_SCALE = { 0.125f, 0.125f, 1.0f   };
 const Vec3 DIAGONAL_LASER_SCALE   = { 0.125f, 0.125f, 1.415f };
 const float RAYCAST_SEEK_LENGTH = 20.0f;
 
-const int32 INPUT_TIME_UNTIL_ALLOW = 8; // TODO(spike): remove this entirely in favor of explicit timesteps based on action taken (maybe just rename this one to edtior)
+const int32 EDITOR_INPUT_TIME_UNTIL_ALLOW = 8;
 const int32 PUSH_ANIMATION_TIME = 8;
 const int32 ROLL_ANIMATION_TIME = 12;
 const int32 TURN_ANIMATION_TIME = 8;
 const int32 FALL_ANIMATION_TIME = 8;
 const int32 FAILED_TURN_ANIMATION_TIME = 6;
+const int32 FAILED_WALK_ANIMATION_TIME = 6;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
@@ -862,15 +863,12 @@ int32* find_next_free_in_animations(int32* next_free_array, int32 entity_id)
 // automatically queues if given object is already being moved around. assumes object is entity, because requires id - easily fixable if required. assumes max two animations on any given object (max one queued)
 void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change, int32 entity_id, int32 animation_frames)
 {
-    // find next free in animations. 
     int32 next_free_array[2] = {0};
     int32* next_free_output = find_next_free_in_animations(next_free_array, entity_id);
     int32 animation_index = next_free_output[0];
     int32 queue_time = next_free_output[1];
 
 	animations[animation_index].id = entity_id;
-
-    // set frame count. the last frame here is the true/correct position
     animations[animation_index].frames_left = animation_frames + queue_time; 
 
 	Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(position_b, position_a), (float)(1.0f/animation_frames));
@@ -972,8 +970,8 @@ void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direc
     for (int frame_index = 0; frame_index < TURN_ANIMATION_TIME; frame_index++)
     {
         // rotation
-        Vec4 quat_prev = directionToQuaternion(previous_pack_direction, true);
-		Vec4 quat_next = directionToQuaternion(pack_direction, true);
+        Vec4 quat_prev = directionToQuaternion(oppositeDirection(previous_pack_direction), true);
+		Vec4 quat_next = directionToQuaternion(oppositeDirection(pack_direction), true);
         if (quaternionDot(quat_prev, quat_next) < 0.0f) quat_next = quaternionNegate(quat_next); // resolve quat sign issue 
         float param = (float)(frame_index + 1) / (float)(TURN_ANIMATION_TIME);
         animations[animation_index].rotation[TURN_ANIMATION_TIME-(1+frame_index)] 
@@ -985,6 +983,28 @@ void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direc
         Vec3 relative_rotation = vec3RotateByQuaternion(pivot_to_pack_start, roll);
         animations[animation_index].position[TURN_ANIMATION_TIME-(1+frame_index)] = vec3Add(pivot_point, relative_rotation);
     }
+}
+
+void createFailedWalkAnimation(Vec3 start_position, Vec3 next_position, Vec3* position_to_change, int32 entity_id)
+{
+    int32 next_free_array[2] = {0};
+    int32* next_free_output = find_next_free_in_animations(next_free_array, entity_id);
+    int32 animation_index = next_free_output[0];
+    int32 queue_time = next_free_output[1];
+
+	animations[animation_index].id = entity_id;
+    animations[animation_index].frames_left = FAILED_WALK_ANIMATION_TIME + queue_time; 
+    animations[animation_index].position_to_change = position_to_change;
+
+	Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(next_position, start_position), (float)(1.0f/FAILED_WALK_ANIMATION_TIME) / 2);
+
+	for (int frame_index = 0; frame_index < FAILED_WALK_ANIMATION_TIME / 2; frame_index++)
+	{
+    	Vec3 position = vec3Add(start_position, vec3ScalarMultiply(translation_per_frame, (float)(1+frame_index)));
+        animations[animation_index].position[FAILED_WALK_ANIMATION_TIME-(1+frame_index)] = position;
+        animations[animation_index].position[1+frame_index] = position;
+    }
+    animations[animation_index].position[0] = start_position;
 }
 
 void createFailedPlayerRotationAnimation(Vec4 start_rotation, Vec4 input_direction_as_quat, Vec4* rotation_to_change, int32 entity_id)
@@ -1001,12 +1021,63 @@ void createFailedPlayerRotationAnimation(Vec4 start_rotation, Vec4 input_directi
     if (quaternionDot(start_rotation, input_direction_as_quat) < 0.0f) input_direction_as_quat = quaternionScalarMultiply(input_direction_as_quat, -1.0f);
     for (int frame_index = 0; frame_index < FAILED_TURN_ANIMATION_TIME / 2; frame_index++)
 	{
-        // same interpolation for loop, but fill both the end and start of the array, so it bounces back
-        float param = (float)(frame_index + 1) / FAILED_TURN_ANIMATION_TIME;
+        // similar interpolation for loop, but fill both the end and start of the array, so it bounces back
+        float param = ((float)(frame_index + 1) / FAILED_TURN_ANIMATION_TIME) / 2;
         Vec4 rotation = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(start_rotation, 1.0f - param), quaternionScalarMultiply(input_direction_as_quat, param)));
         animations[animation_index].rotation[FAILED_TURN_ANIMATION_TIME - (1+frame_index)] = rotation;
         animations[animation_index].rotation[1+frame_index] = rotation;
     }
+    animations[animation_index].rotation[0] = start_rotation;
+}
+
+void createFailedPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direction pack_direction, bool clockwise, Vec3* position_to_change, Vec4* rotation_to_change, int32 entity_id)
+{
+    int32 next_free_array[2] = {0};
+    int32* next_free_output = find_next_free_in_animations(next_free_array, entity_id);
+    int32 animation_index = next_free_output[0];
+    int32 queue_time = next_free_output[1];
+
+    animations[animation_index].id = entity_id;
+    animations[animation_index].frames_left = FAILED_TURN_ANIMATION_TIME + queue_time; 
+    animations[animation_index].rotation_to_change = rotation_to_change;
+    animations[animation_index].position_to_change = position_to_change;
+    
+    Vec3 pivot_point = player_position;
+    Vec3 pivot_to_pack_start = vec3Subtract(pack_position, player_position);
+    float d_theta_per_frame = (TAU*0.25f)/(float)TURN_ANIMATION_TIME;
+    float angle_sign = clockwise ? 1.0f : -1.0f;
+    Direction previous_pack_direction = NORTH;
+    if (clockwise) 
+    {
+        previous_pack_direction = pack_direction - 1;
+        if (previous_pack_direction == -1) previous_pack_direction = EAST;
+    }
+    else 
+    {
+        previous_pack_direction = pack_direction + 1;
+        if (previous_pack_direction == 4) previous_pack_direction = NORTH;
+    }
+
+    for (int frame_index = 0; frame_index < FAILED_TURN_ANIMATION_TIME / 2; frame_index++)
+    {
+        // rotation
+        Vec4 quat_prev = directionToQuaternion(oppositeDirection(previous_pack_direction), true);
+		Vec4 quat_next = directionToQuaternion(oppositeDirection(pack_direction), true);
+        if (quaternionDot(quat_prev, quat_next) < 0.0f) quat_next = quaternionNegate(quat_next); // resolve quat sign issue 
+        float param = ((float)(frame_index + 1) / FAILED_TURN_ANIMATION_TIME) / 2;
+        Vec4 rotation = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(quat_prev, 1.0f - param), quaternionScalarMultiply(quat_next, param)));
+        animations[animation_index].rotation[FAILED_TURN_ANIMATION_TIME-(1+frame_index)] = rotation;
+        animations[animation_index].rotation[1+frame_index] = rotation;
+
+        // translation
+        float theta = (angle_sign * (frame_index+1) * d_theta_per_frame) / 2;
+        Vec4 roll = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), theta);
+        Vec3 relative_rotation = vec3RotateByQuaternion(pivot_to_pack_start, roll);
+        animations[animation_index].position[FAILED_TURN_ANIMATION_TIME-(1+frame_index)] = vec3Add(pivot_point, relative_rotation);
+        animations[animation_index].position[1+frame_index] = vec3Add(pivot_point, relative_rotation);
+    }
+    animations[animation_index].rotation[0] = directionToQuaternion(oppositeDirection(previous_pack_direction), true);
+    animations[animation_index].position[0] = pack_position;
 }
 
 // PUSH / ROLL ENTITES
@@ -1491,7 +1562,7 @@ void recordStateForUndo()
 void resetVisuals(Entity* pointer)
 {
     pointer->position_norm = intCoordsToNorm(pointer->coords);
-    pointer->rotation_quat = directionToQuaternion(pointer->direction, true);
+    //pointer->rotation_quat = directionToQuaternion(pointer->direction, true); // don't seem to need right now, and causes bug with undoing from a turn -> pack direction is flipped (if pack direction is not north after the undo)
 }
 
 void resetStandardVisuals()
@@ -1611,7 +1682,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 			if (time_until_input == 0 && tick_input.e_press) 
             {
                 editor_state.editor_mode = true;
-                time_until_input = INPUT_TIME_UNTIL_ALLOW;
+                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
             if (time_until_input == 0 && tick_input.z_press)
             {
@@ -1623,12 +1694,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (undo_buffer[next_undo_buffer_position].player.id != 0) // check that there is anything in the buffer (using something that should never usually happen)
                 {
                     next_world_state = undo_buffer[next_undo_buffer_position];
-                    memset(&undo_buffer[undo_buffer_position], 0, sizeof(WorldState));
+                   	memset(&undo_buffer[undo_buffer_position], 0, sizeof(WorldState));
                     undo_buffer_position = next_undo_buffer_position;
                     memset(animations, 0, sizeof(animations));
                     resetStandardVisuals(); // set position_norm and rotation_quat to coords and direction respectively
                 }
-                time_until_input = INPUT_TIME_UNTIL_ALLOW;
+                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
             if (time_until_input == 0 && tick_input.r_press)
             {
@@ -1638,7 +1709,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 Camera temp_camera = camera;
                 gameInitialiseState();
                 camera = temp_camera;
-                time_until_input = INPUT_TIME_UNTIL_ALLOW;
+                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
             if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press))
             {
@@ -1807,10 +1878,28 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                                 recordStateForUndo();
                             }
+                            else
+                            {
+                                createFailedWalkAnimation(intCoordsToNorm(next_world_state.player.coords),
+                                        				  intCoordsToNorm(next_player_coords),
+                                                          &next_world_state.player.position_norm, 1);
+                                createFailedWalkAnimation(intCoordsToNorm(next_world_state.pack.coords),
+                                        				  intCoordsToNorm(next_world_state.player.coords),
+                                                          &next_world_state.pack.position_norm, 2);
+                            }
                         }
                         if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME;
-                        else					 time_until_input = PUSH_ANIMATION_TIME;
                     }
+                    else
+                    {
+                        createFailedWalkAnimation(intCoordsToNorm(next_world_state.player.coords),
+                                                  intCoordsToNorm(next_player_coords),
+                                                  &next_world_state.player.position_norm, 1);
+                        createFailedWalkAnimation(intCoordsToNorm(next_world_state.pack.coords),
+                                                  intCoordsToNorm(next_world_state.player.coords),
+                                                  &next_world_state.pack.position_norm, 2);
+                    }
+                    time_until_input = PUSH_ANIMATION_TIME;
                 }
                 else
                 {
@@ -1916,7 +2005,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 setTileDirection(NORTH, next_world_state.pack.coords);
                                 next_world_state.pack.coords = orthogonal_tile_coords;
                                 setTileType(PACK, next_world_state.pack.coords);
-                                next_world_state.pack.direction = input_direction;
+                                next_world_state.pack.direction = oppositeDirection(input_direction);
                                 setTileDirection(input_direction, next_world_state.pack.coords);
 
                                 recordStateForUndo();
@@ -1928,12 +2017,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 createFailedPlayerRotationAnimation(directionToQuaternion(next_world_state.player.direction, true),
                                         							directionToQuaternion(input_direction, true),
                                                                     &next_world_state.player.rotation_quat, 1);
-                                /*
                                 createFailedPackRotationAnimation(intCoordsToNorm(next_world_state.player.coords), 
                                         						  intCoordsToNorm(next_world_state.pack.coords), 
                                                             	  oppositeDirection(input_direction), clockwise, 
                                                             	  &next_world_state.pack.position_norm, &next_world_state.pack.rotation_quat, 2);
-                                */
                             }
                         }
                     }
@@ -1980,7 +2067,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 			if (time_until_input == 0 && tick_input.e_press) 
             {
                 editor_state.editor_mode = false;
-                time_until_input = INPUT_TIME_UNTIL_ALLOW;
+                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
 
 			if (time_until_input == 0 && tick_input.j_press)
@@ -1988,7 +2075,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (normCoordsWithinLevelBounds(camera.coords))
                 {
 					setTileType(VOID, normCoordsToInt(camera.coords));
-                    time_until_input = INPUT_TIME_UNTIL_ALLOW;
+                    time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
                 }
             }
 
@@ -2075,7 +2162,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 }
                 else if (tick_input.middle_mouse_press && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
 
-                time_until_input = INPUT_TIME_UNTIL_ALLOW;
+                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
 			else if (time_until_input == 0 && tick_input.l_press)
             {
@@ -2083,7 +2170,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 //if    (editor_state.picked_tile == PLAYER) editor_state.picked_tile = MIRROR;
                 if 		(editor_state.picked_tile == PACK + 1) editor_state.picked_tile = SOURCE_RED;
                 else if (editor_state.picked_tile == SOURCE_WHITE + 1) editor_state.picked_tile = VOID;
-                time_until_input = INPUT_TIME_UNTIL_ALLOW;
+                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
         }
         updateLaserBuffer();
@@ -2172,7 +2259,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // decrement pack turn hitbox if required
-		if (pack_turn_hitbox_timer == 0) pack_turn_hitbox_timer--;
+		if (pack_turn_hitbox_timer) pack_turn_hitbox_timer--;
 
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
