@@ -138,7 +138,7 @@ typedef struct LaserBuffer
 LaserBuffer;
 
 const double PHYSICS_INCREMENT = 1.0/60.0;
-double accumulator = 0.0;
+double accumulator = 0;
 
 const float TAU = 6.2831853071f;
 
@@ -149,11 +149,14 @@ const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 const Vec3 ORTHOGONAL_LASER_SCALE = { 0.125f, 0.125f, 1.0f   };
 const Vec3 DIAGONAL_LASER_SCALE   = { 0.125f, 0.125f, 1.415f };
 const float RAYCAST_SEEK_LENGTH = 20.0f;
-const int32 INPUT_TIME_UNTIL_ALLOW = 12;
+
+const int32 INPUT_TIME_UNTIL_ALLOW = 8; // TODO(spike): remove this entirely in favor of explicit timesteps based on action taken (maybe just rename this one to edtior)
 const int32 PUSH_ANIMATION_TIME = 8;
 const int32 ROLL_ANIMATION_TIME = 12;
 const int32 TURN_ANIMATION_TIME = 8;
 const int32 FALL_ANIMATION_TIME = 8;
+const int32 FAILED_TURN_ANIMATION_TIME = 6;
+
 const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
 const int32 MAX_ANIMATION_COUNT = 32;
@@ -976,6 +979,28 @@ void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direc
     }
 }
 
+void createFailedPlayerRotationAnimation(Vec4 start_rotation, Vec4 input_direction_as_quat, Vec4* rotation_to_change, int32 entity_id)
+{
+    int32 next_free_array[2] = {0};
+    int32* next_free_output = find_next_free_in_animations(next_free_array, entity_id);
+    int32 animation_index = next_free_output[0];
+    int32 queue_time = next_free_output[1];
+
+    animations[animation_index].id = entity_id;
+    animations[animation_index].frames_left = FAILED_TURN_ANIMATION_TIME + queue_time; 
+    animations[animation_index].rotation_to_change = rotation_to_change;
+
+    if (quaternionDot(start_rotation, input_direction_as_quat) < 0.0f) input_direction_as_quat = quaternionScalarMultiply(input_direction_as_quat, -1.0f);
+    for (int frame_index = 0; frame_index < FAILED_TURN_ANIMATION_TIME / 2; frame_index++)
+	{
+        // same interpolation for loop, but fill both the end and start of the array, so it bounces back
+        float param = (float)(frame_index + 1) / FAILED_TURN_ANIMATION_TIME;
+        Vec4 rotation = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(start_rotation, 1.0f - param), quaternionScalarMultiply(input_direction_as_quat, param)));
+        animations[animation_index].rotation[FAILED_TURN_ANIMATION_TIME - (1+frame_index)] = rotation;
+        animations[animation_index].rotation[1+frame_index] = rotation;
+    }
+}
+
 // PUSH / ROLL ENTITES
 
 bool canPush(Int3 coords, Direction direction)
@@ -1011,8 +1036,8 @@ Push pushWithoutAnimation(Int3 coords, Direction direction)
     }
     for (int entity_index = 0; entity_index < entities_to_push.count; entity_index++)
     {
-        entities_to_push.pointer_to_entity[entity_index]->coords = entities_to_push.new_coords[entity_index];
         if (entity_index == 0) setTileType(NONE, entities_to_push.pointer_to_entity[entity_index]->coords);
+        entities_to_push.pointer_to_entity[entity_index]->coords = entities_to_push.new_coords[entity_index];
         setTileType(entities_to_push.type[entity_index], entities_to_push.new_coords[entity_index]);
     }
     return entities_to_push;
@@ -1888,6 +1913,19 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                                 recordStateForUndo();
                             }
+                            else
+                            {
+                                /*
+                                // failed turn animation
+                                createFailedPlayerRotationAnimation(directionToQuaternion(next_world_state.player.direction, true),
+                                        							directionToQuaternion(input_direction, true),
+                                                                    &next_world_state.player.rotation_quat, 1);
+                                createFailedPackRotationAnimation(intCoordsToNorm(next_world_state.player.coords), 
+                                        						  intCoordsToNorm(next_world_state.pack.coords), 
+                                                            	  oppositeDirection(input_direction), clockwise, 
+                                                            	  &next_world_state.pack.position_norm, &next_world_state.pack.rotation_quat, 2);
+                                */
+                            }
                         }
                     }
                     time_until_input = TURN_ANIMATION_TIME;
@@ -2125,7 +2163,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // decrement pack turn hitbox if required
-		if (pack_turn_hitbox_timer) pack_turn_hitbox_timer--;
+		if (pack_turn_hitbox_timer == 0) pack_turn_hitbox_timer--;
 
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
