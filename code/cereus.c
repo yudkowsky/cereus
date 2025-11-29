@@ -995,7 +995,7 @@ bool canPush(Int3 coords, Direction direction)
     return false; // only here if hit the max entity push count
 }
 
-int32 pushWithoutAnimation(Int3 coords, Direction direction)
+Push pushWithoutAnimation(Int3 coords, Direction direction)
 {
     Push entities_to_push = {0}; 
 	Int3 current_coords = coords;
@@ -1015,29 +1015,12 @@ int32 pushWithoutAnimation(Int3 coords, Direction direction)
         if (entity_index == 0) setTileType(NONE, entities_to_push.pointer_to_entity[entity_index]->coords);
         setTileType(entities_to_push.type[entity_index], entities_to_push.new_coords[entity_index]);
     }
-    return entities_to_push.count;
+    return entities_to_push;
 }
 
 void push(Int3 coords, Direction direction)
 {
-    Push entities_to_push = {0}; 
-	Int3 current_coords = coords;
-    for (int push_index = 0; push_index < MAX_ENTITY_PUSH_COUNT; push_index++)
-    {
-        entities_to_push.type[push_index] = getTileType(current_coords);
-		entities_to_push.previous_coords[push_index] = current_coords;
-        entities_to_push.pointer_to_entity[push_index] = getEntityPointer(current_coords);
-        current_coords = getNextCoords(current_coords, direction);
-        entities_to_push.new_coords[push_index] = current_coords; 
-        entities_to_push.count++;
-        if (getTileType(current_coords) == NONE) break;
-    }
-    for (int entity_index = 0; entity_index < entities_to_push.count; entity_index++)
-    {
-        if (entity_index == 0) setTileType(NONE, entities_to_push.pointer_to_entity[entity_index]->coords); 
-        entities_to_push.pointer_to_entity[entity_index]->coords = entities_to_push.new_coords[entity_index];
-        setTileType(entities_to_push.type[entity_index], entities_to_push.new_coords[entity_index]);
-    }
+    Push entities_to_push = pushWithoutAnimation(coords, direction);
     for (int anim_index = 0; anim_index < entities_to_push.count; anim_index++)
     {
         int32 id = getEntityId(entities_to_push.new_coords[anim_index]);
