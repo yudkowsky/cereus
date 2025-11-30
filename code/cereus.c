@@ -1612,7 +1612,8 @@ void doFallingObjects(bool do_animation)
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
             Int3 single_object_next_coords = getNextCoords(group_pointer[entity_index].coords, DOWN);
-			if (getTileType(single_object_next_coords) == NONE)
+            bool pack_turn_hitbox_obstructing = (pack_turn_hitbox_timer > 0) & int3IsEqual(pack_turn_hitbox_coords, single_object_next_coords);
+			if (getTileType(single_object_next_coords) == NONE && !pack_turn_hitbox_obstructing) 
             {
 				Int3 current_stack_coords = group_pointer[entity_index].coords;
                 int32 stack_size = 1;
