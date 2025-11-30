@@ -1,6 +1,5 @@
 #include "win32_cereus_bridge.h"
 #include "worldstate_structs.h"
-
 #include <string.h> // TODO(spike): temporary, for memset
 #include <math.h> // TODO(spike): also temporary, for sin/cos
 #include <stdio.h> // TODO(spike): "temporary", for fopen 
@@ -8,6 +7,8 @@
 #define local_persist static
 #define global_variable static
 #define internal static
+
+#define FOR(i, n) for (int i = 0; i < n; i++)
 
 typedef enum TileType
 {
@@ -165,6 +166,7 @@ const int32 MAX_LASER_TRAVEL_DISTANCE = 48;
 const int32 MAX_PSEUDO_SOURCE_COUNT = 128;
 const int32 UNDO_BUFFER_SIZE = 256; // remember to modify undo_buffer
 const int32 PACK_TURN_HITBOX_TIME = 6;
+const int32 MAX_PUSHABLE_STACK_SIZE = 32;
 
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
@@ -1007,6 +1009,16 @@ void createFailedWalkAnimation(Vec3 start_position, Vec3 next_position, Vec3* po
     animations[animation_index].position[0] = start_position;
 }
 
+void doFailedWalkAnimations(Int3 next_player_coords, bool pack_attached)
+{
+    createFailedWalkAnimation(intCoordsToNorm(next_world_state.player.coords),
+                              intCoordsToNorm(next_player_coords),
+                              &next_world_state.player.position_norm, 1);
+    if (pack_attached) createFailedWalkAnimation(intCoordsToNorm(next_world_state.pack.coords),
+                      					         intCoordsToNorm(next_world_state.player.coords),
+                              					 &next_world_state.pack.position_norm, 2);
+}
+
 void createFailedPlayerRotationAnimation(Vec4 start_rotation, Vec4 input_direction_as_quat, Vec4* rotation_to_change, int32 entity_id)
 {
     int32 next_free_array[2] = {0};
@@ -1734,6 +1746,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     else if (tick_input.s_press) next_player_coords = int3Add(next_world_state.player.coords, AXIS_Z);
                     else if (tick_input.d_press) next_player_coords = int3Add(next_world_state.player.coords, AXIS_X);
                     TileType next_tile = getTileType(next_player_coords);
+                    int32 stack_size = 0;
 					if (!isSource(next_tile)) switch (next_tile)
                     {
                         case VOID: break;
@@ -1745,6 +1758,18 @@ void gameFrame(double delta_time, TickInput tick_input)
                         {
                             if (canPush(next_player_coords, input_direction)) 
                             {
+                                Int3 current_stack_coords = next_player_coords;
+                                FOR(stack_index, MAX_PUSHABLE_STACK_SIZE)
+                                {
+                                	current_stack_coords = getNextCoords(current_stack_coords, UP);
+                                    TileType next_tile_type = getTileType(current_stack_coords);
+                                    if (next_tile_type == BOX || next_tile_type == CRYSTAL || next_tile_type == MIRROR || next_tile_type == PACK)
+                                    {
+										if (canPush(current_stack_coords, input_direction)) stack_size++;
+										else break;
+                                    }
+                                    else break;
+                                }
                                 try_to_push = true;
 								move_player = true;
                             }
@@ -1754,9 +1779,9 @@ void gameFrame(double delta_time, TickInput tick_input)
                         {
                             if (canPush(next_player_coords, input_direction))
                             {
-                                // currently not allowing roll unless there is free space ahead
                                 TileType push_tile = getTileType(getNextCoords(next_player_coords, input_direction));
-                                if (push_tile != NONE) break; // push(getNextCoords(next_player_coords, input_direction), input_direction);
+                                TileType above_tile = getTileType(getNextCoords(next_player_coords, UP));
+                                if (push_tile != NONE || above_tile != NONE) break;
                                 try_to_roll = true;
                                 move_player = true;
                             }
@@ -1773,7 +1798,16 @@ void gameFrame(double delta_time, TickInput tick_input)
                         TileType tile_below = getTileType(int3Add(next_player_coords, int3Negate(AXIS_Y)));
                         if (tile_below != NONE || next_world_state.player.hit_by_red)
                         {
-                            if (try_to_push) 	  push(next_player_coords, input_direction);
+                            if (try_to_push) 	  
+                            {
+                                Int3 stack_entity_coords = next_player_coords;
+                                push(next_player_coords, input_direction);
+                                FOR(stack_index, stack_size)
+                                {
+                                    stack_entity_coords = getNextCoords(stack_entity_coords, UP);
+                                    push(stack_entity_coords, input_direction);
+                                }
+                            }
                             else if (try_to_roll) roll(next_player_coords, input_direction);
 
                             // standard movement
