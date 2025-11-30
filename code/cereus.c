@@ -1548,7 +1548,7 @@ int32 updateLaserBuffer(void)
                 else break;
             }
             else if (getTileType(current_coords) != NONE) break;
-            else if (pack_turn_hitbox_timer && int3IsEqual(pack_turn_hitbox_coords, current_coords)) break;
+            else if (pack_turn_hitbox_timer != 0 && int3IsEqual(pack_turn_hitbox_coords, current_coords)) break;
 
             if      (laser_color.red)   laser_buffer[laser_tile_count].color.red   = true; 
             else if (laser_color.green) laser_buffer[laser_tile_count].color.green = true; // else here ensures magenta -> red, yellow -> red, cyan -> green for non-primaries;
@@ -1592,6 +1592,61 @@ void resetStandardVisuals()
     }
     resetVisuals(&next_world_state.player);
     resetVisuals(&next_world_state.pack);
+}
+
+// FALLING LOGIC
+
+bool isPushable(TileType tile)
+{
+    if (tile == BOX || tile == CRYSTAL || tile == MIRROR || tile == PACK) return true;
+    else return false;
+}
+
+// TODO(spike): currently doesn't support pack as falling object
+void doFallingObjects(bool do_animation)
+{
+	Entity* object_group_to_fall[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
+	FOR(to_fall_index, 3)
+    {
+		Entity* group_pointer = object_group_to_fall[to_fall_index];
+        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+        {
+            Int3 single_object_next_coords = getNextCoords(group_pointer[entity_index].coords, DOWN);
+			if (getTileType(single_object_next_coords) == NONE)
+            {
+				Int3 current_stack_coords = group_pointer[entity_index].coords;
+                int32 stack_size = 1;
+                FOR(find_stack_size_index, MAX_PUSHABLE_STACK_SIZE)
+                {
+                    current_stack_coords = getNextCoords(current_stack_coords, UP);
+                    TileType next_tile_type = getTileType(current_stack_coords);
+                    if (!isPushable(next_tile_type)) break;
+                    stack_size++;
+                }
+
+                Int3 current_start_coords = group_pointer[entity_index].coords;
+				Int3 current_end_coords = single_object_next_coords;
+                FOR(stack_fall_index, stack_size)
+                {
+					// move down
+                    Entity* entity_pointer = getEntityPointer(current_start_coords);
+                    if (do_animation)
+                    {
+                        createInterpolationAnimation(intCoordsToNorm(current_start_coords), 
+                                					 intCoordsToNorm(current_end_coords),
+                                                     &entity_pointer->position_norm,
+                            						 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                     getEntityId(current_start_coords), FALL_ANIMATION_TIME);
+                    }
+                    setTileType(getTileType(current_start_coords), current_end_coords);
+                    setTileType(NONE, current_start_coords);
+                    entity_pointer->coords = current_end_coords;
+                    current_end_coords = current_start_coords;
+                    current_start_coords = getNextCoords(current_start_coords, UP);
+                }
+            }
+        }
+    }
 }
 
 // GAME
@@ -1640,8 +1695,6 @@ void gameInitialiseState()
             next_world_state.pack.id = 2;
         }
     }
-    //next_world_state.player.coords = (Int3){3,1,3};
-    next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
 
 	camera.coords = (Vec3){15, 12, 19};
     camera_yaw = 0; // towards -z; north
@@ -1764,6 +1817,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 {
                                 	current_stack_coords = getNextCoords(current_stack_coords, UP);
                                     TileType next_tile_type = getTileType(current_stack_coords);
+                                    // TODO(spike): use isPushable
                                     if (next_tile_type == BOX || next_tile_type == CRYSTAL || next_tile_type == MIRROR || next_tile_type == PACK)
                                     {
 										if (canPush(current_stack_coords, input_direction)) stack_size++;
@@ -1802,7 +1856,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             if (try_to_push) 	  
                             {
                                 Int3 stack_entity_coords = next_player_coords;
-                                push(next_player_coords, input_direction);
+                                push(next_player_coords, input_direction); // TODO(spike): see if can get rid of; swap order in loop
                                 FOR(stack_index, stack_size)
                                 {
                                     stack_entity_coords = getNextCoords(stack_entity_coords, UP);
@@ -1845,33 +1899,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             if (try_to_push) pushWithoutAnimation(next_player_coords, input_direction);
                             if (try_to_roll) rollWithoutAnimation(next_player_coords, input_direction);
 
-							// do falling logic without the animation
-                            Entity* object_group_to_fall[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
-                            if (!next_world_state.player.hit_by_blue) // slo-mo if blue
-                            {
-                                for (int to_fall_index = 0; to_fall_index < 3; to_fall_index++)
-                                {
-                                    Entity* group_pointer = object_group_to_fall[to_fall_index];
-                                    for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
-                                    {
-                                        if (getTileType(getNextCoords(group_pointer[entity_index].coords, DOWN)) == NONE)
-                                        {
-                                            Int3 new_coords = int3Add(group_pointer[entity_index].coords, int3Negate(AXIS_Y)); 
-                                            setTileType(getTileType(group_pointer[entity_index].coords), new_coords);
-                                            setTileType(NONE, group_pointer[entity_index].coords);
-                                        }
-                                    }
-                                }
-                                if (next_world_state.pack.pack_detached && getTileType(getNextCoords(next_world_state.pack.coords, DOWN)) == NONE)
-                                {
-                                    Int3 new_coords = int3Add(next_world_state.pack.coords, int3Negate(AXIS_Y));
-                                    setTileType(PACK, new_coords);
-                                    setTileType(NONE, next_world_state.pack.coords);
-                                    next_world_state.pack.coords = new_coords;
+                            doFallingObjects(false);
 
-                                    recordStateForUndo();
-                                }
-                            }
                             setTileType(NONE, next_world_state.player.coords);
                             next_world_state.player.coords = next_player_coords;
                             setTileType(PLAYER, next_world_state.player.coords);	
@@ -2197,8 +2226,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 		// falling object calculations
         // objects that should fall: boxes, mirrors, crystals, and the player and pack (below)
 
-		// TODO(spike): collapse this falling area with the one above (function with do_animation input)
-
+        /*
         Entity* object_group_to_fall[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
         if (!next_world_state.player.hit_by_blue) // slo-mo if blue
         {
@@ -2207,18 +2235,22 @@ void gameFrame(double delta_time, TickInput tick_input)
                 Entity* group_pointer = object_group_to_fall[to_fall_index];
                 for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
                 {
-                    if (getTileType(getNextCoords(group_pointer[entity_index].coords, DOWN)) == NONE)
-                    {
-                        Int3 new_coords = int3Add(group_pointer[entity_index].coords, int3Negate(AXIS_Y)); 
-                        setTileType(getTileType(group_pointer[entity_index].coords), new_coords);
-                        setTileType(NONE, group_pointer[entity_index].coords);
-                        group_pointer[entity_index].coords = new_coords;
-                        createInterpolationAnimation(intCoordsToNorm(int3Add(new_coords, AXIS_Y)), 
-                                                     intCoordsToNorm(new_coords), 
-                                                     &group_pointer[entity_index].position_norm,
-                                                     IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                     getEntityId(group_pointer[entity_index].coords), FALL_ANIMATION_TIME);
-                    }
+					if (group_pointer[entity_index].id == -1) continue;
+
+                	Int3 prev_coords = group_pointer[entity_index].coords;
+                    Int3 new_coords = getNextCoords(prev_coords, DOWN); 
+
+                    if (getTileType(new_coords) != NONE) continue;
+                    if (pack_turn_hitbox_timer != 0 && int3IsEqual(new_coords, pack_turn_hitbox_coords)) continue; 
+
+                    setTileType(getTileType(prev_coords), new_coords);
+                    setTileType(NONE, prev_coords);
+                    group_pointer[entity_index].coords = new_coords;
+                    createInterpolationAnimation(intCoordsToNorm(int3Add(new_coords, AXIS_Y)), 
+                                                 intCoordsToNorm(new_coords), 
+                                                 &group_pointer[entity_index].position_norm,
+                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                 getEntityId(group_pointer[entity_index].coords), FALL_ANIMATION_TIME);
                 }
             }
             // pack gets own special case (but in here, because still affected by slo-mo)
@@ -2235,6 +2267,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                                              getEntityId(next_world_state.pack.coords), FALL_ANIMATION_TIME);
             }
         }
+        */
+
+		if (!next_world_state.player.hit_by_blue) doFallingObjects(true);
+
         // player gets own special case
         if (!next_world_state.player.hit_by_red && getTileType(getNextCoords(next_world_state.player.coords, DOWN)) == NONE) // no-grav if red
         {
@@ -2273,12 +2309,15 @@ void gameFrame(double delta_time, TickInput tick_input)
                 Vec3 next_pos = animations[animation_index].position[animations[animation_index].frames_left-1];
                 if (!vec3IsZero(next_pos)) *animations[animation_index].position_to_change = next_pos; 
             }
-			if (animations[animation_index].rotation_to_change != 0) *animations[animation_index].rotation_to_change = animations[animation_index].rotation[animations[animation_index].frames_left-1];
+			if (animations[animation_index].rotation_to_change != 0) 
+            {
+				*animations[animation_index].rotation_to_change = animations[animation_index].rotation[animations[animation_index].frames_left-1];
+            }
             animations[animation_index].frames_left--;
         }
 
         // decrement pack turn hitbox if required
-		if (pack_turn_hitbox_timer != 0) pack_turn_hitbox_timer--;
+		if (pack_turn_hitbox_timer > 0) pack_turn_hitbox_timer--;
 
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
