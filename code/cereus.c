@@ -1105,6 +1105,7 @@ bool canPush(Int3 coords, Direction direction)
         current_tile = getTileType(current_coords);
         if (!intCoordsWithinLevelBounds(current_coords)) return false;
         if (isSource(current_tile)) return false;
+        if (current_tile == MIRROR) return false;
         if (current_tile == WALL) return false;
         if (current_tile == NONE) return true;
     }
@@ -1912,27 +1913,11 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                                 recordStateForUndo();
                             }
-                            else
-                            {
-                                createFailedWalkAnimation(intCoordsToNorm(next_world_state.player.coords),
-                                        				  intCoordsToNorm(next_player_coords),
-                                                          &next_world_state.player.position_norm, 1);
-                                createFailedWalkAnimation(intCoordsToNorm(next_world_state.pack.coords),
-                                        				  intCoordsToNorm(next_world_state.player.coords),
-                                                          &next_world_state.pack.position_norm, 2);
-                            }
+                            else doFailedWalkAnimations(next_player_coords, true);
                         }
                         if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME - PUSH_ANIMATION_TIME; // below we set time_until_input += PUSH, so we add on the difference here.
                     }
-                    else
-                    {
-                        createFailedWalkAnimation(intCoordsToNorm(next_world_state.player.coords),
-                                                  intCoordsToNorm(next_player_coords),
-                                                  &next_world_state.player.position_norm, 1);
-                        createFailedWalkAnimation(intCoordsToNorm(next_world_state.pack.coords),
-                                                  intCoordsToNorm(next_world_state.player.coords),
-                                                  &next_world_state.pack.position_norm, 2);
-                    }
+                    else doFailedWalkAnimations(next_player_coords, true);
                     time_until_input += PUSH_ANIMATION_TIME;
                 }
                 else
@@ -2293,7 +2278,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // decrement pack turn hitbox if required
-		if (pack_turn_hitbox_timer) pack_turn_hitbox_timer--;
+		if (pack_turn_hitbox_timer != 0) pack_turn_hitbox_timer--;
 
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
