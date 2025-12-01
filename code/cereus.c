@@ -1092,6 +1092,25 @@ void createFailedPackRotationAnimation(Vec3 player_position, Vec3 pack_position,
     animations[animation_index].position[0] = pack_position;
 }
 
+/*
+void createMirrorRotationAnimation(Vec4* rotation_to_change, bool clockwise, int32 entity_id)
+{
+    int32 next_free_array[2] = {0};
+    int32* next_free_output = find_next_free_in_animations(next_free_array, entity_id);
+    int32 animation_index = next_free_output[0];
+    int32 queue_time = next_free_output[1];
+
+    animations[animation_index].id = entity_id;
+    animations[animation_index].frames_left = TURN_ANIMATION_TIME + queue_time; 
+    animations[animation_index].rotation_to_change = rotation_to_change;
+
+    for (int frame_index = 0; frame_index < TURN_ANIMATION_TIME / 2; frame_index++)
+    {
+        Vec4 
+    }
+}
+*/
+
 // PUSH / ROLL ENTITES
 
 bool canPush(Int3 coords, Direction direction)
@@ -1611,6 +1630,7 @@ void doFallingObjects(bool do_animation)
 		Entity* group_pointer = object_group_to_fall[to_fall_index];
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
+            if (group_pointer[entity_index].id == -1) continue;
             Int3 single_object_next_coords = getNextCoords(group_pointer[entity_index].coords, DOWN);
             bool pack_turn_hitbox_obstructing = (pack_turn_hitbox_timer > 0) & int3IsEqual(pack_turn_hitbox_coords, single_object_next_coords);
 			if (getTileType(single_object_next_coords) == NONE && !pack_turn_hitbox_obstructing) 
@@ -1647,6 +1667,86 @@ void doFallingObjects(bool do_animation)
                 }
             }
         }
+    }
+}
+
+// HEAD ROTATION / MOVEMENT
+
+void doHeadRotation(bool clockwise)
+{
+    // TODO(spike): collapse getting stack size at a position to a function
+    Int3 current_stack_coords = next_world_state.player.coords;
+    int32 stack_size = 0;
+	FOR(find_stack_size_index, MAX_PUSHABLE_STACK_SIZE)
+    {
+        current_stack_coords = getNextCoords(current_stack_coords, UP);
+        TileType next_tile_type = getTileType(current_stack_coords);
+        if (!isPushable(next_tile_type)) break;
+        stack_size++;
+    }
+
+    Int3 current_tile_coords = getNextCoords(next_world_state.player.coords, UP);
+	FOR(stack_rotate_index, stack_size)
+    {
+        Entity* entity = getEntityPointer(current_tile_coords);
+        bool up_or_down = false;
+        Direction current_direction = getTileDirection(current_tile_coords);
+        Direction next_direction = NORTH;
+        switch (current_direction)
+        {
+            case NORTH:
+            case WEST:
+            case SOUTH:
+            case EAST:
+            {
+                if (clockwise) 
+                {
+                    next_direction = current_direction + 1;
+                    if (next_direction == UP) next_direction = NORTH;
+                }
+                else 
+                {
+                    next_direction = current_direction - 1;
+                    if (next_direction == -1) next_direction = EAST;
+                }
+				break;
+            }
+            case UP:
+            {
+				next_direction = DOWN;
+                up_or_down = true;
+                break;
+            }
+            case DOWN:
+            {
+				next_direction = UP;
+                up_or_down = true;
+				break;
+            }
+            default: break;
+        }
+
+        int32 id = getEntityId(current_tile_coords);
+
+        if (!up_or_down) createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
+                                     				  directionToQuaternion(current_direction, true), 
+                                     				  directionToQuaternion(next_direction, true), 
+                                     				  &entity->rotation_quat,
+                                     				  id, TURN_ANIMATION_TIME); 
+        else 
+        {
+			Vec4 start = entity->rotation_quat;
+            float sign = clockwise ? 1.0f : -1.0f;
+            Vec4 delta = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), sign * 0.25f * TAU);
+            Vec4 end = quaternionNormalize(quaternionMultiply(delta, start));
+            createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0,
+                    					 start, end, &entity->rotation_quat,
+                                         id, TURN_ANIMATION_TIME);
+        }
+        
+		setTileDirection(next_direction, current_tile_coords);
+		entity->direction = next_direction;
+		current_tile_coords = getNextCoords(current_tile_coords, UP);
     }
 }
 
@@ -1954,9 +2054,16 @@ void gameFrame(double delta_time, TickInput tick_input)
                 {
                     if (input_direction != oppositeDirection(next_world_state.player.direction)) // check if turning (as opposed to trying to reverse)
                     {
+                        Direction polarity_direction = NORTH;
+                        int clockwise = false;
+                        int32 clockwise_calculation = next_world_state.player.direction - input_direction;
+                        if (clockwise_calculation == -1 || clockwise_calculation == 3) clockwise = true;
+
                         if (next_world_state.pack.pack_detached)
                         {
                             // if pack detached, always allow turn
+                            if (isPushable(getTileType(getNextCoords(next_world_state.player.coords, UP)))) doHeadRotation(clockwise);
+
                             createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
                                                          directionToQuaternion(next_world_state.player.direction, true), 
                                                          directionToQuaternion(input_direction, true), 
@@ -1969,10 +2076,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                         }
                         else
                         {
-							Direction polarity_direction = NORTH;
-                            int clockwise = false;
-                            int32 clockwise_calculation = next_world_state.player.direction - input_direction;
-                            if (clockwise_calculation == -1 || clockwise_calculation == 3) clockwise = true;
 							if (clockwise) polarity_direction = (input_direction + 1) % 4;
 							else 		   polarity_direction = (input_direction + 3) % 4;
 
@@ -2034,6 +2137,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             	// actually turning rotate player
 								pack_turn_hitbox_timer = PACK_TURN_HITBOX_TIME;
                                 pack_turn_hitbox_coords = diagonal_tile_coords;
+
+                                if (isPushable(getTileType(getNextCoords(next_world_state.player.coords, UP)))) doHeadRotation(clockwise);
 
                                 createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
                                                              directionToQuaternion(next_world_state.player.direction, true), 
