@@ -152,12 +152,15 @@ const Vec3 DIAGONAL_LASER_SCALE   = { 0.125f, 0.125f, 1.415f };
 const float RAYCAST_SEEK_LENGTH = 20.0f;
 
 const int32 EDITOR_INPUT_TIME_UNTIL_ALLOW = 8;
+const int32 MOVE_ANIMATION_TIME = 8;
 const int32 PUSH_ANIMATION_TIME = 8;
 const int32 ROLL_ANIMATION_TIME = 16;
 const int32 TURN_ANIMATION_TIME = 8;
 const int32 FALL_ANIMATION_TIME = 8;
 const int32 FAILED_TURN_ANIMATION_TIME = 6;
-const int32 FAILED_WALK_ANIMATION_TIME = 6;
+const int32 FAILED_MOVE_ANIMATION_TIME = 6;
+const int32 PACK_TURN_HITBOX_PRIMARY_TIME = 4;
+const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 6;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
@@ -165,7 +168,6 @@ const int32 MAX_ANIMATION_COUNT = 32;
 const int32 MAX_LASER_TRAVEL_DISTANCE = 48;
 const int32 MAX_PSEUDO_SOURCE_COUNT = 128;
 const int32 UNDO_BUFFER_SIZE = 256; // remember to modify undo_buffer
-const int32 PACK_TURN_HITBOX_TIME = 6;
 const int32 MAX_PUSHABLE_STACK_SIZE = 32;
 
 const Int3 AXIS_X = { 1, 0, 0 };
@@ -195,8 +197,10 @@ int32 undo_buffer_position = 0;
 EditorState editor_state = {0};
 Animation animations[32];
 LaserBuffer laser_buffer[1024] = {0};
-int32 pack_turn_hitbox_timer = 0;
-Int3 pack_turn_hitbox_coords = {0};
+int32 pack_hitbox_timer_primary = 0;
+Int3 pack_hitbox_coords_primary = {0};
+int32 pack_hitbox_timer_secondary = 0;
+Int3 pack_hitbox_coords_secondary = {0};
 
 int32 time_until_input = 0;
 
@@ -997,15 +1001,15 @@ void createFailedWalkAnimation(Vec3 start_position, Vec3 next_position, Vec3* po
     int32 queue_time = next_free_output[1];
 
 	animations[animation_index].id = entity_id;
-    animations[animation_index].frames_left = FAILED_WALK_ANIMATION_TIME + queue_time; 
+    animations[animation_index].frames_left = FAILED_MOVE_ANIMATION_TIME + queue_time; 
     animations[animation_index].position_to_change = position_to_change;
 
-	Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(next_position, start_position), (float)(1.0f/FAILED_WALK_ANIMATION_TIME) / 2);
+	Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(next_position, start_position), (float)(1.0f/FAILED_MOVE_ANIMATION_TIME) / 2);
 
-	for (int frame_index = 0; frame_index < FAILED_WALK_ANIMATION_TIME / 2; frame_index++)
+	for (int frame_index = 0; frame_index < FAILED_MOVE_ANIMATION_TIME / 2; frame_index++)
 	{
     	Vec3 position = vec3Add(start_position, vec3ScalarMultiply(translation_per_frame, (float)(1+frame_index)));
-        animations[animation_index].position[FAILED_WALK_ANIMATION_TIME-(1+frame_index)] = position;
+        animations[animation_index].position[FAILED_MOVE_ANIMATION_TIME-(1+frame_index)] = position;
         animations[animation_index].position[1+frame_index] = position;
     }
     animations[animation_index].position[0] = start_position;
@@ -1093,25 +1097,6 @@ void createFailedPackRotationAnimation(Vec3 player_position, Vec3 pack_position,
     animations[animation_index].rotation[0] = directionToQuaternion(oppositeDirection(previous_pack_direction), true);
     animations[animation_index].position[0] = pack_position;
 }
-
-/*
-void createMirrorRotationAnimation(Vec4* rotation_to_change, bool clockwise, int32 entity_id)
-{
-    int32 next_free_array[2] = {0};
-    int32* next_free_output = find_next_free_in_animations(next_free_array, entity_id);
-    int32 animation_index = next_free_output[0];
-    int32 queue_time = next_free_output[1];
-
-    animations[animation_index].id = entity_id;
-    animations[animation_index].frames_left = TURN_ANIMATION_TIME + queue_time; 
-    animations[animation_index].rotation_to_change = rotation_to_change;
-
-    for (int frame_index = 0; frame_index < TURN_ANIMATION_TIME / 2; frame_index++)
-    {
-        Vec4 
-    }
-}
-*/
 
 // PUSH / ROLL ENTITES
 
@@ -1579,7 +1564,7 @@ int32 updateLaserBuffer(void)
                 else break;
             }
             else if (getTileType(current_coords) != NONE) break;
-            else if (pack_turn_hitbox_timer != 0 && int3IsEqual(pack_turn_hitbox_coords, current_coords)) break;
+            else if (pack_hitbox_timer_secondary != 0 && int3IsEqual(pack_hitbox_coords_secondary, current_coords)) break;
 
             if      (laser_color.red)   laser_buffer[laser_tile_count].color.red   = true; 
             else if (laser_color.green) laser_buffer[laser_tile_count].color.green = true; // else here ensures magenta -> red, yellow -> red, cyan -> green for non-primaries;
@@ -1658,8 +1643,9 @@ void doFallingObjects(bool do_animation)
         {
             if (group_pointer[entity_index].id == -1) continue;
             Int3 single_object_next_coords = getNextCoords(group_pointer[entity_index].coords, DOWN);
-            bool pack_turn_hitbox_obstructing = (pack_turn_hitbox_timer > 0) & int3IsEqual(pack_turn_hitbox_coords, single_object_next_coords);
-			if (getTileType(single_object_next_coords) == NONE && !pack_turn_hitbox_obstructing) 
+            bool pack_hitbox_primary_obstructing   = (pack_hitbox_timer_primary   > 0)   & int3IsEqual(pack_hitbox_coords_primary,   single_object_next_coords);
+            bool pack_hitbox_secondary_obstructing = (pack_hitbox_timer_secondary > 0) & int3IsEqual(pack_hitbox_coords_secondary, single_object_next_coords);
+			if (getTileType(single_object_next_coords) == NONE && !pack_hitbox_primary_obstructing && !pack_hitbox_secondary_obstructing) 
             {
 				int32 stack_size = getPushableStackSize(group_pointer[entity_index].coords);
 
@@ -1787,6 +1773,44 @@ void doHeadMovement(Direction direction, bool animations_on)
         pushWithoutAnimation(stack_entity_coords, direction);
         stack_entity_coords = getNextCoords(stack_entity_coords, UP);
     }
+}
+
+void doStandardMovement(Direction input_direction, TileType next_tile, Int3 next_player_coords)
+{
+    if (!next_world_state.pack.pack_detached)
+    {
+        pack_hitbox_timer_primary = MOVE_ANIMATION_TIME;
+        pack_hitbox_coords_primary = next_world_state.pack.coords;
+    }
+
+    doHeadMovement(input_direction, true);
+
+    // standard movement
+    int32 animation_time = 0;
+    if (next_tile == MIRROR) animation_time = ROLL_ANIMATION_TIME;
+    else 					 animation_time = PUSH_ANIMATION_TIME;
+    createInterpolationAnimation(intCoordsToNorm(next_world_state.player.coords), 
+                                 intCoordsToNorm(next_player_coords), 
+                                 &next_world_state.player.position_norm,
+                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                 1, animation_time); // passing 1 as id for player 
+    // move pack also
+    if (next_world_state.pack.pack_detached) setTileType(NONE, next_world_state.player.coords);
+    else 
+    {
+        setTileType(NONE, next_world_state.pack.coords);
+        setTileType(PACK, next_world_state.player.coords);
+        createInterpolationAnimation(intCoordsToNorm(next_world_state.pack.coords),
+                                     intCoordsToNorm(next_world_state.player.coords),
+                                     &next_world_state.pack.position_norm,
+                                     IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                     2, animation_time);
+        next_world_state.pack.coords = next_world_state.player.coords;
+    }
+    next_world_state.player.coords = next_player_coords;
+    setTileType(PLAYER, next_world_state.player.coords);	
+
+    recordStateForUndo();
 }
 
 // GAME
@@ -2003,34 +2027,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             }
                             else if (try_to_roll) roll(next_player_coords, input_direction);
 
-                            doHeadMovement(input_direction, true);
-
-                            // standard movement
-                            int32 animation_time = 0;
-                            if (next_tile == MIRROR) animation_time = ROLL_ANIMATION_TIME;
-                            else 					 animation_time = PUSH_ANIMATION_TIME;
-                            createInterpolationAnimation(intCoordsToNorm(next_world_state.player.coords), 
-                                                         intCoordsToNorm(next_player_coords), 
-                                                         &next_world_state.player.position_norm,
-                                                         IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                         1, animation_time); // passing 1 as id for player 
-                            // move pack also
-                            if (next_world_state.pack.pack_detached) setTileType(NONE, next_world_state.player.coords);
-                            else 
-                            {
-                                setTileType(NONE, next_world_state.pack.coords);
-                                setTileType(PACK, next_world_state.player.coords);
-                                createInterpolationAnimation(intCoordsToNorm(next_world_state.pack.coords),
-                                        					 intCoordsToNorm(next_world_state.player.coords),
-                                                             &next_world_state.pack.position_norm,
-                                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                             2, animation_time);
-                                next_world_state.pack.coords = next_world_state.player.coords;
-                            }
-                            next_world_state.player.coords = next_player_coords;
-                            setTileType(PLAYER, next_world_state.player.coords);	
-
-                            recordStateForUndo();
+                            doStandardMovement(input_direction, next_tile, next_player_coords);
                         }
                         else // speculative movement over gap, with the hopes that we will be red
                         {
@@ -2047,6 +2044,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                             next_world_state.player.coords = next_player_coords;
                             setTileType(PLAYER, next_world_state.player.coords);	
 
+                            // this code probably needs some testing
+							if (!next_world_state.pack.pack_detached)
+                            {
+                                setTileType(NONE, next_world_state.pack.coords);
+                                next_world_state.pack.coords = getNextCoords(next_player_coords, oppositeDirection(input_direction));
+                                setTileType(PACK, next_world_state.pack.coords);
+                            }
+
                             updateLaserBuffer();
 
                             bool leap_of_faith_worked = false;
@@ -2057,34 +2062,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 								if (try_to_push) push(next_player_coords, input_direction);
                                 if (try_to_roll) roll(next_player_coords, input_direction);
 
-								doHeadMovement(input_direction, true);
-
-                                // standard movement
-                                int32 animation_time = 0;
-                                if (next_tile == MIRROR) animation_time = ROLL_ANIMATION_TIME;
-                                else 					 animation_time = PUSH_ANIMATION_TIME;
-                                createInterpolationAnimation(intCoordsToNorm(next_world_state.player.coords), 
-                                                             intCoordsToNorm(next_player_coords), 
-                                                             &next_world_state.player.position_norm,
-                                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                             1, animation_time); // passing 1 as id for player 
-                                // move pack also
-                                if (next_world_state.pack.pack_detached) setTileType(NONE, next_world_state.player.coords);
-                                else 
-                                {
-                                    setTileType(NONE, next_world_state.pack.coords);
-                                    setTileType(PACK, next_world_state.player.coords);
-                                    createInterpolationAnimation(intCoordsToNorm(next_world_state.pack.coords),
-                                                                 intCoordsToNorm(next_world_state.player.coords),
-                                                                 &next_world_state.pack.position_norm,
-                                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                                 2, animation_time);
-                                    next_world_state.pack.coords = next_world_state.player.coords;
-                                }
-                                next_world_state.player.coords = next_player_coords;
-                                setTileType(PLAYER, next_world_state.player.coords);	
-
-                                recordStateForUndo();
+                                doStandardMovement(input_direction, next_tile, next_player_coords);
                             }
                             else doFailedWalkAnimations(next_player_coords, true);
                         }
@@ -2178,8 +2156,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                             if (allow_turn_orthogonal)
                             {
                             	// actually turning rotate player
-								pack_turn_hitbox_timer = PACK_TURN_HITBOX_TIME;
-                                pack_turn_hitbox_coords = diagonal_tile_coords;
+								pack_hitbox_timer_primary = PACK_TURN_HITBOX_PRIMARY_TIME;
+                                pack_hitbox_coords_primary = next_world_state.pack.coords;
+
+								pack_hitbox_timer_secondary = PACK_TURN_HITBOX_SECONDARY_TIME;
+                                pack_hitbox_coords_secondary = diagonal_tile_coords;
 
                                 if (isPushable(getTileType(getNextCoords(next_world_state.player.coords, UP)))) doHeadRotation(clockwise);
 
@@ -2372,52 +2353,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
         updateLaserBuffer();
 
-		// falling object calculations
-        // objects that should fall: boxes, mirrors, crystals, and the player and pack (below)
-
-        /*
-        Entity* object_group_to_fall[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
-        if (!next_world_state.player.hit_by_blue) // slo-mo if blue
-        {
-            for (int to_fall_index = 0; to_fall_index < 3; to_fall_index++)
-            {
-                Entity* group_pointer = object_group_to_fall[to_fall_index];
-                for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
-                {
-					if (group_pointer[entity_index].id == -1) continue;
-
-                	Int3 prev_coords = group_pointer[entity_index].coords;
-                    Int3 new_coords = getNextCoords(prev_coords, DOWN); 
-
-                    if (getTileType(new_coords) != NONE) continue;
-                    if (pack_turn_hitbox_timer != 0 && int3IsEqual(new_coords, pack_turn_hitbox_coords)) continue; 
-
-                    setTileType(getTileType(prev_coords), new_coords);
-                    setTileType(NONE, prev_coords);
-                    group_pointer[entity_index].coords = new_coords;
-                    createInterpolationAnimation(intCoordsToNorm(int3Add(new_coords, AXIS_Y)), 
-                                                 intCoordsToNorm(new_coords), 
-                                                 &group_pointer[entity_index].position_norm,
-                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                 getEntityId(group_pointer[entity_index].coords), FALL_ANIMATION_TIME);
-                }
-            }
-            // pack gets own special case (but in here, because still affected by slo-mo)
-            if (next_world_state.pack.pack_detached && getTileType(getNextCoords(next_world_state.pack.coords, DOWN)) == NONE)
-            {
-                Int3 new_coords = int3Add(next_world_state.pack.coords, int3Negate(AXIS_Y));
-                setTileType(PACK, new_coords);
-                setTileType(NONE, next_world_state.pack.coords);
-                next_world_state.pack.coords = new_coords;
-                createInterpolationAnimation(intCoordsToNorm(int3Add(new_coords, AXIS_Y)),
-                                             intCoordsToNorm(new_coords),
-                                             &next_world_state.pack.position_norm,
-                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                             getEntityId(next_world_state.pack.coords), FALL_ANIMATION_TIME);
-            }
-        }
-        */
-
 		if (!next_world_state.player.hit_by_blue) doFallingObjects(true);
 
         // player gets own special case
@@ -2465,8 +2400,9 @@ void gameFrame(double delta_time, TickInput tick_input)
             animations[animation_index].frames_left--;
         }
 
-        // decrement pack turn hitbox if required
-		if (pack_turn_hitbox_timer > 0) pack_turn_hitbox_timer--;
+        // decrement ephemeral pack hitboxes if required
+		if (pack_hitbox_timer_primary > 0)   pack_hitbox_timer_primary--;
+		if (pack_hitbox_timer_secondary > 0) pack_hitbox_timer_secondary--;
 
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
