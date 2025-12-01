@@ -1621,6 +1621,20 @@ bool isPushable(TileType tile)
     else return false;
 }
 
+int32 getPushableStackSize(Int3 first_entity_coords)
+{
+	Int3 current_stack_coords = first_entity_coords;
+    int32 stack_size = 1;
+    FOR(find_stack_size_index, MAX_PUSHABLE_STACK_SIZE)
+    {
+        current_stack_coords = getNextCoords(current_stack_coords, UP);
+        TileType next_tile_type = getTileType(current_stack_coords);
+        if (!isPushable(next_tile_type)) break;
+        stack_size++;
+    }
+    return stack_size;
+}
+
 // TODO(spike): currently doesn't support pack as falling object
 void doFallingObjects(bool do_animation)
 {
@@ -1635,15 +1649,7 @@ void doFallingObjects(bool do_animation)
             bool pack_turn_hitbox_obstructing = (pack_turn_hitbox_timer > 0) & int3IsEqual(pack_turn_hitbox_coords, single_object_next_coords);
 			if (getTileType(single_object_next_coords) == NONE && !pack_turn_hitbox_obstructing) 
             {
-				Int3 current_stack_coords = group_pointer[entity_index].coords;
-                int32 stack_size = 1;
-                FOR(find_stack_size_index, MAX_PUSHABLE_STACK_SIZE)
-                {
-                    current_stack_coords = getNextCoords(current_stack_coords, UP);
-                    TileType next_tile_type = getTileType(current_stack_coords);
-                    if (!isPushable(next_tile_type)) break;
-                    stack_size++;
-                }
+				int32 stack_size = getPushableStackSize(group_pointer[entity_index].coords);
 
                 Int3 current_start_coords = group_pointer[entity_index].coords;
 				Int3 current_end_coords = single_object_next_coords;
@@ -1674,16 +1680,7 @@ void doFallingObjects(bool do_animation)
 
 void doHeadRotation(bool clockwise)
 {
-    // TODO(spike): collapse getting stack size at a position to a function
-    Int3 current_stack_coords = next_world_state.player.coords;
-    int32 stack_size = 0;
-	FOR(find_stack_size_index, MAX_PUSHABLE_STACK_SIZE)
-    {
-        current_stack_coords = getNextCoords(current_stack_coords, UP);
-        TileType next_tile_type = getTileType(current_stack_coords);
-        if (!isPushable(next_tile_type)) break;
-        stack_size++;
-    }
+    int32 stack_size = getPushableStackSize(getNextCoords(next_world_state.player.coords, UP));
 
     Int3 current_tile_coords = getNextCoords(next_world_state.player.coords, UP);
 	FOR(stack_rotate_index, stack_size)
@@ -1747,6 +1744,36 @@ void doHeadRotation(bool clockwise)
 		setTileDirection(next_direction, current_tile_coords);
 		entity->direction = next_direction;
 		current_tile_coords = getNextCoords(current_tile_coords, UP);
+    }
+}
+
+void doHeadMovement(Direction direction, bool animations_on)
+{
+    int32 stack_size = 0;
+    Int3 coords_above_player = getNextCoords(next_world_state.player.coords, UP);
+    Int3 current_stack_coords = coords_above_player;
+    FOR(find_stack_size_index, MAX_PUSHABLE_STACK_SIZE)
+    {
+        TileType next_tile_type = getTileType(current_stack_coords);
+        if (isPushable(next_tile_type))
+        {
+            if (canPush(current_stack_coords, direction)) stack_size++;
+            else break;
+        }
+        else break;
+        current_stack_coords = getNextCoords(current_stack_coords, UP);
+    }
+
+    Int3 stack_entity_coords = coords_above_player; 
+    if (animations_on) FOR(stack_index, stack_size)
+    {
+        push(stack_entity_coords, direction);
+        stack_entity_coords = getNextCoords(stack_entity_coords, UP);
+    }
+    else FOR(stack_index, stack_size)
+    {
+        pushWithoutAnimation(stack_entity_coords, direction);
+        stack_entity_coords = getNextCoords(stack_entity_coords, UP);
     }
 }
 
@@ -1901,7 +1928,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     else if (tick_input.s_press) next_player_coords = int3Add(next_world_state.player.coords, AXIS_Z);
                     else if (tick_input.d_press) next_player_coords = int3Add(next_world_state.player.coords, AXIS_X);
                     TileType next_tile = getTileType(next_player_coords);
-                    int32 stack_size = 0;
+                    int32 stack_size = 1;
 					if (!isSource(next_tile)) switch (next_tile)
                     {
                         case VOID: break;
@@ -1918,8 +1945,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 {
                                 	current_stack_coords = getNextCoords(current_stack_coords, UP);
                                     TileType next_tile_type = getTileType(current_stack_coords);
-                                    // TODO(spike): use isPushable
-                                    if (next_tile_type == BOX || next_tile_type == CRYSTAL || next_tile_type == MIRROR || next_tile_type == PACK)
+                                    if (isPushable(next_tile_type))
                                     {
 										if (canPush(current_stack_coords, input_direction)) stack_size++;
 										else break;
@@ -1957,14 +1983,15 @@ void gameFrame(double delta_time, TickInput tick_input)
                             if (try_to_push) 	  
                             {
                                 Int3 stack_entity_coords = next_player_coords;
-                                push(next_player_coords, input_direction); // TODO(spike): see if can get rid of; swap order in loop
                                 FOR(stack_index, stack_size)
                                 {
-                                    stack_entity_coords = getNextCoords(stack_entity_coords, UP);
                                     push(stack_entity_coords, input_direction);
+                                    stack_entity_coords = getNextCoords(stack_entity_coords, UP);
                                 }
                             }
                             else if (try_to_roll) roll(next_player_coords, input_direction);
+
+                            doHeadMovement(input_direction, true);
 
                             // standard movement
                             int32 animation_time = 0;
@@ -2000,7 +2027,9 @@ void gameFrame(double delta_time, TickInput tick_input)
                             if (try_to_push) pushWithoutAnimation(next_player_coords, input_direction);
                             if (try_to_roll) rollWithoutAnimation(next_player_coords, input_direction);
 
-                            doFallingObjects(false);
+                            bool animations_on = false;
+                            doFallingObjects(animations_on);
+                            doHeadMovement(input_direction, animations_on);
 
                             setTileType(NONE, next_world_state.player.coords);
                             next_world_state.player.coords = next_player_coords;
