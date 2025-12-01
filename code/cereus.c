@@ -209,6 +209,8 @@ char* mirror_path  = "data/sprites/mirror.png";
 char* crystal_path = "data/sprites/crystal.png";
 char* pack_path    = "data/sprites/pack.png";
 
+char* player_red_path   = "data/sprites/player-red.png";
+
 char* laser_red_path     = "data/sprites/laser-red.png";
 char* laser_green_path   = "data/sprites/laser-green.png";
 char* laser_blue_path    = "data/sprites/laser-blue.png";
@@ -1147,9 +1149,19 @@ Push pushWithoutAnimation(Int3 coords, Direction direction)
     }
     for (int entity_index = 0; entity_index < entities_to_push.count; entity_index++)
     {
-        if (entity_index == 0) setTileType(NONE, entities_to_push.pointer_to_entity[entity_index]->coords);
-        entities_to_push.pointer_to_entity[entity_index]->coords = entities_to_push.new_coords[entity_index];
-        setTileType(entities_to_push.type[entity_index], entities_to_push.new_coords[entity_index]);
+    	Entity* entity = entities_to_push.pointer_to_entity[entity_index];
+        Int3 prev_coords = entities_to_push.previous_coords[entity_index];
+        Int3 new_coords = entities_to_push.new_coords[entity_index];
+        TileType tile_type = entities_to_push.type[entity_index];
+
+        if (entity_index == 0) 
+        {
+            setTileType(NONE, prev_coords);
+            setTileDirection(NORTH, prev_coords);
+        }
+        setTileType(tile_type, new_coords);
+        setTileDirection(entity->direction, new_coords);
+		entity->coords = new_coords;
     }
     return entities_to_push;
 }
@@ -1688,7 +1700,7 @@ void doHeadRotation(bool clockwise)
         Entity* entity = getEntityPointer(current_tile_coords);
         bool up_or_down = false;
         Direction current_direction = getTileDirection(current_tile_coords);
-        Direction next_direction = NORTH;
+        Direction next_direction = NORTH_WEST;
         switch (current_direction)
         {
             case NORTH:
@@ -2044,6 +2056,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             {
 								if (try_to_push) push(next_player_coords, input_direction);
                                 if (try_to_roll) roll(next_player_coords, input_direction);
+
+								doHeadMovement(input_direction, true);
 
                                 // standard movement
                                 int32 animation_time = 0;
@@ -2524,7 +2538,14 @@ void gameFrame(double delta_time, TickInput tick_input)
         drawEntityLoop(world_state.boxes,    box_path,     CUBE_3D, DEFAULT_SCALE);
         drawEntityLoop(world_state.mirrors,  mirror_path,  CUBE_3D, DEFAULT_SCALE);
         drawEntityLoop(world_state.crystals, crystal_path, CUBE_3D, DEFAULT_SCALE);
-        if (world_state.player.id != -1) drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
+        if (!world_state.player.hit_by_red)
+        {
+            if (world_state.player.id != -1) drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
+        }
+        else
+        {
+            if (world_state.player.id != -1) drawAsset(player_red_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
+        }
 		if (world_state.pack.id   != -1) drawAsset(pack_path,   CUBE_3D, world_state.pack.position_norm,   PLAYER_SCALE, world_state.pack.rotation_quat);
 
 		// draw sources 
