@@ -1114,6 +1114,7 @@ bool canPush(Int3 coords, Direction direction)
         if (!intCoordsWithinLevelBounds(current_coords)) return false;
         if (isSource(current_tile)) return false;
         if (current_tile == MIRROR) return false;
+        if (current_tile == GRID) return false;
         if (current_tile == WALL) return false;
         if (current_tile == NONE) return true;
     }
@@ -1757,8 +1758,14 @@ void doHeadMovement(Direction direction, bool animations_on)
         TileType next_tile_type = getTileType(current_stack_coords);
         if (isPushable(next_tile_type))
         {
-            if (canPush(current_stack_coords, direction)) stack_size++;
-            else break;
+            if (canPush(current_stack_coords, direction)) 
+            {
+                stack_size++;
+            }
+            else 
+            {
+                break;
+            }
         }
         else break;
         current_stack_coords = getNextCoords(current_stack_coords, UP);
@@ -2476,9 +2483,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         drawEntityLoop(world_state.boxes,    box_path,     CUBE_3D, DEFAULT_SCALE);
         drawEntityLoop(world_state.mirrors,  mirror_path,  CUBE_3D, DEFAULT_SCALE);
         drawEntityLoop(world_state.crystals, crystal_path, CUBE_3D, DEFAULT_SCALE);
-
-
-
 
         if (world_state.player.id != -1)
         {
