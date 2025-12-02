@@ -616,14 +616,15 @@ void loadFileToBuffer(char* path)
     level_dim.z = byte;
 
     uint8 buffer[32768]; // level_dim.x*level_dim.y*level_dim.z * 2 for color bytes
-	fread(&buffer, 1, level_dim.x*level_dim.y*level_dim.z, file);
+	fread(&buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
 	fclose(file);
-    memcpy(next_world_state.buffer, buffer, level_dim.x*level_dim.y*level_dim.z);
+    memcpy(next_world_state.buffer, buffer, level_dim.x*level_dim.y*level_dim.z * 2);
 }
 
 void writeBufferToFile(char* path)
 {
     FILE *file = fopen(path, "rb+");
+
     fseek(file, 4, SEEK_CUR);
 	fwrite(world_state.buffer, 1, 32768, file);
     fclose(file);
@@ -1017,12 +1018,12 @@ void createFailedWalkAnimation(Vec3 start_position, Vec3 next_position, Vec3* po
     animations[animation_index].position[0] = start_position;
 }
 
-void doFailedWalkAnimations(Int3 next_player_coords, bool pack_attached)
+void doFailedWalkAnimations(Int3 next_player_coords)
 {
     createFailedWalkAnimation(intCoordsToNorm(next_world_state.player.coords),
                               intCoordsToNorm(next_player_coords),
                               &next_world_state.player.position_norm, 1);
-    if (pack_attached) createFailedWalkAnimation(intCoordsToNorm(next_world_state.pack.coords),
+    if (!next_world_state.pack.pack_detached) createFailedWalkAnimation(intCoordsToNorm(next_world_state.pack.coords),
                       					         intCoordsToNorm(next_world_state.player.coords),
                               					 &next_world_state.pack.position_norm, 2);
 }
@@ -1098,6 +1099,17 @@ void createFailedPackRotationAnimation(Vec3 player_position, Vec3 pack_position,
     }
     animations[animation_index].rotation[0] = directionToQuaternion(oppositeDirection(previous_pack_direction), true);
     animations[animation_index].position[0] = pack_position;
+}
+
+void doFailedTurnAnimations(Direction input_direction, bool clockwise)
+{
+    createFailedPlayerRotationAnimation(directionToQuaternion(next_world_state.player.direction, true),
+                                        directionToQuaternion(input_direction, true),
+                                        &next_world_state.player.rotation_quat, 1);
+    createFailedPackRotationAnimation(intCoordsToNorm(next_world_state.player.coords), 
+                                      intCoordsToNorm(next_world_state.pack.coords), 
+                                      oppositeDirection(input_direction), clockwise, 
+                                      &next_world_state.pack.position_norm, &next_world_state.pack.rotation_quat, 2);
 }
 
 // PUSH / ROLL ENTITES
@@ -1567,7 +1579,11 @@ int32 updateLaserBuffer(void)
                 else break;
             }
             else if (getTileType(current_coords) != NONE) break;
-            else if (pack_hitbox_timer_secondary != 0 && int3IsEqual(pack_hitbox_coords_secondary, current_coords)) break;
+            if (!next_world_state.pack.pack_detached)
+            {
+                if (pack_hitbox_timer_primary   != 0 && int3IsEqual(pack_hitbox_coords_primary,   current_coords)) break;
+            	if (pack_hitbox_timer_secondary != 0 && int3IsEqual(pack_hitbox_coords_secondary, current_coords)) break;
+            }
 
             if      (laser_color.red)   laser_buffer[laser_tile_count].color.red   = true; 
             else if (laser_color.green) laser_buffer[laser_tile_count].color.green = true; // else here ensures magenta -> red, yellow -> red, cyan -> green for non-primaries;
@@ -1646,7 +1662,7 @@ void doFallingObjects(bool do_animation)
         {
             if (group_pointer[entity_index].id == -1) continue;
             Int3 single_object_next_coords = getNextCoords(group_pointer[entity_index].coords, DOWN);
-            bool pack_hitbox_primary_obstructing   = (pack_hitbox_timer_primary   > 0)   & int3IsEqual(pack_hitbox_coords_primary,   single_object_next_coords);
+            bool pack_hitbox_primary_obstructing   = (pack_hitbox_timer_primary   > 0) & int3IsEqual(pack_hitbox_coords_primary,   single_object_next_coords);
             bool pack_hitbox_secondary_obstructing = (pack_hitbox_timer_secondary > 0) & int3IsEqual(pack_hitbox_coords_secondary, single_object_next_coords);
 			if (getTileType(single_object_next_coords) == NONE && !pack_hitbox_primary_obstructing && !pack_hitbox_secondary_obstructing) 
             {
@@ -2073,11 +2089,11 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                                 doStandardMovement(input_direction, next_tile, next_player_coords);
                             }
-                            else doFailedWalkAnimations(next_player_coords, true);
+                            else doFailedWalkAnimations(next_player_coords);
                         }
                         if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME - PUSH_ANIMATION_TIME; // below we set time_until_input += PUSH, so we add on the difference here.
                     }
-                    else doFailedWalkAnimations(next_player_coords, true);
+                    else doFailedWalkAnimations(next_player_coords);
                     time_until_input += PUSH_ANIMATION_TIME;
                 }
                 else
@@ -2199,15 +2215,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             }
                             else
                             {
-                                
                                 // failed turn animation
-                                createFailedPlayerRotationAnimation(directionToQuaternion(next_world_state.player.direction, true),
-                                        							directionToQuaternion(input_direction, true),
-                                                                    &next_world_state.player.rotation_quat, 1);
-                                createFailedPackRotationAnimation(intCoordsToNorm(next_world_state.player.coords), 
-                                        						  intCoordsToNorm(next_world_state.pack.coords), 
-                                                            	  oppositeDirection(input_direction), clockwise, 
-                                                            	  &next_world_state.pack.position_norm, &next_world_state.pack.rotation_quat, 2);
+                                doFailedTurnAnimations(input_direction, clockwise);
                             }
                         }
                     }
