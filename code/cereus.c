@@ -213,7 +213,9 @@ char* mirror_path  = "data/sprites/mirror.png";
 char* crystal_path = "data/sprites/crystal.png";
 char* pack_path    = "data/sprites/pack.png";
 
-char* player_red_path   = "data/sprites/player-red.png";
+char* red_player_path     = "data/sprites/player-red.png";
+char* blue_player_path    = "data/sprites/player-blue.png";
+char* magenta_player_path = "data/sprites/player-magenta.png";
 
 char* laser_red_path     = "data/sprites/laser-red.png";
 char* laser_green_path   = "data/sprites/laser-green.png";
@@ -2474,13 +2476,16 @@ void gameFrame(double delta_time, TickInput tick_input)
         drawEntityLoop(world_state.boxes,    box_path,     CUBE_3D, DEFAULT_SCALE);
         drawEntityLoop(world_state.mirrors,  mirror_path,  CUBE_3D, DEFAULT_SCALE);
         drawEntityLoop(world_state.crystals, crystal_path, CUBE_3D, DEFAULT_SCALE);
-        if (!world_state.player.hit_by_red)
+
+
+
+
+        if (world_state.player.id != -1)
         {
-            if (world_state.player.id != -1) drawAsset(player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
-        }
-        else
-        {
-            if (world_state.player.id != -1) drawAsset(player_red_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
+			if      (!next_world_state.player.hit_by_red && !next_world_state.player.hit_by_blue) drawAsset(player_path, 		 CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
+			else if ( next_world_state.player.hit_by_red && !next_world_state.player.hit_by_blue) drawAsset(red_player_path, 	 CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
+			else if (!next_world_state.player.hit_by_red &&  next_world_state.player.hit_by_blue) drawAsset(blue_player_path, 	 CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
+			else if ( next_world_state.player.hit_by_red &&  next_world_state.player.hit_by_blue) drawAsset(magenta_player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
         }
 		if (world_state.pack.id   != -1) drawAsset(pack_path,   CUBE_3D, world_state.pack.position_norm,   PLAYER_SCALE, world_state.pack.rotation_quat);
 
