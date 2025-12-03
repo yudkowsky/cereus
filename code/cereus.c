@@ -1651,10 +1651,9 @@ int32 getPushableStackSize(Int3 first_entity_coords)
     return stack_size;
 }
 
-// TODO(spike): currently doesn't support pack as falling object
 void doFallingObjects(bool do_animation)
 {
-	Entity* object_group_to_fall[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
+	Entity* object_group_to_fall[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
 	FOR(to_fall_index, 3)
     {
 		Entity* group_pointer = object_group_to_fall[to_fall_index];
@@ -1673,24 +1672,55 @@ void doFallingObjects(bool do_animation)
                 FOR(stack_fall_index, stack_size)
                 {
 					// move down
-                    Entity* entity_pointer = getEntityPointer(current_start_coords);
+                    Entity* entity = getEntityPointer(current_start_coords);
                     if (do_animation)
                     {
                         createInterpolationAnimation(intCoordsToNorm(current_start_coords), 
                                 					 intCoordsToNorm(current_end_coords),
-                                                     &entity_pointer->position_norm,
+                                                     &entity->position_norm,
                             						 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                                      getEntityId(current_start_coords), FALL_ANIMATION_TIME);
                     }
                     setTileType(getTileType(current_start_coords), current_end_coords);
                     setTileType(NONE, current_start_coords);
-                    entity_pointer->coords = current_end_coords;
+                    entity->coords = current_end_coords;
                     current_end_coords = current_start_coords;
                     current_start_coords = getNextCoords(current_start_coords, UP);
                 }
             }
         }
     }
+}
+
+// assumes pack is detached
+void doFallingPack(bool do_animation)
+{
+    if (next_world_state.pack.id == -1) return;
+    if (getTileType(getNextCoords(next_world_state.pack.coords, DOWN)) == NONE)
+    {
+        int32 stack_size = getPushableStackSize(next_world_state.pack.coords);
+
+        Int3 current_start_coords = next_world_state.pack.coords;
+        Int3 current_end_coords = getNextCoords(next_world_state.pack.coords, DOWN);
+        FOR(stack_fall_index, stack_size)
+        {
+            Entity* entity = &next_world_state.pack;
+            if (do_animation)
+            {
+                createInterpolationAnimation(intCoordsToNorm(current_start_coords),
+                                             intCoordsToNorm(current_end_coords),
+                                             &entity->position_norm,
+                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                             getEntityId(current_start_coords), FALL_ANIMATION_TIME);
+            }
+            setTileType(PACK, current_end_coords);
+            setTileType(NONE, current_start_coords);
+            entity->coords = current_end_coords;
+            entity->position_norm = intCoordsToNorm(entity->coords);
+            current_end_coords = current_start_coords;
+            current_start_coords = getNextCoords(current_start_coords, UP);
+        }
+	}
 }
 
 // HEAD ROTATION / MOVEMENT
@@ -2062,7 +2092,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                             if (try_to_roll) rollWithoutAnimation(next_player_coords, input_direction);
 
                             bool animations_on = false;
+                            // TODO(spike): should these two calls be wrapped in !hit_by_blue?
                             doFallingObjects(animations_on);
+                            if (next_world_state.pack.pack_detached) doFallingPack(animations_on);
+
                             doHeadMovement(input_direction, animations_on);
 
                             setTileType(NONE, next_world_state.player.coords);
@@ -2371,7 +2404,11 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
         updateLaserBuffer();
 
-		if (!next_world_state.player.hit_by_blue) doFallingObjects(true);
+		if (!next_world_state.player.hit_by_blue) 
+        {
+            doFallingObjects(true);
+            if (next_world_state.pack.pack_detached) doFallingPack(true);
+        }
 
         // player gets own special case
         if (!next_world_state.player.hit_by_red && getTileType(getNextCoords(next_world_state.player.coords, DOWN)) == NONE) // no-grav if red
@@ -2390,6 +2427,11 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (getTileType(getNextCoords(next_world_state.player.coords, oppositeDirection(next_world_state.player.direction))) != PACK)
             {
                 next_world_state.pack.pack_detached = true;
+            }
+            else
+            {
+                // otherwise, pack would not become detached, so make pack fall also
+                doFallingPack(true);
             }
         }
 
