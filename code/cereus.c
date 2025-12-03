@@ -151,22 +151,23 @@ const Vec3 ORTHOGONAL_LASER_SCALE = { 0.125f, 0.125f, 1.0f   };
 const Vec3 DIAGONAL_LASER_SCALE   = { 0.125f, 0.125f, 1.415f };
 const float RAYCAST_SEEK_LENGTH = 20.0f;
 
-const int32 EDITOR_INPUT_TIME_UNTIL_ALLOW = 8;
-const int32 MOVE_ANIMATION_TIME = 8;
-const int32 PUSH_ANIMATION_TIME = 8;
-const int32 ROLL_ANIMATION_TIME = 16;
-const int32 TURN_ANIMATION_TIME = 8;
-const int32 FALL_ANIMATION_TIME = 8;
+const int32 EDITOR_INPUT_TIME_UNTIL_ALLOW = 9;
+const int32 MOVE_ANIMATION_TIME = 9;
+const int32 PUSH_ANIMATION_TIME = 9;
+const int32 ROLL_ANIMATION_TIME = 18;
+const int32 TURN_ANIMATION_TIME = 9;
+const int32 FALL_ANIMATION_TIME = 9;
 const int32 FAILED_TURN_ANIMATION_TIME = 6;
 const int32 FAILED_MOVE_ANIMATION_TIME = 6;
-const int32 PACK_TURN_HITBOX_PRIMARY_TIME = 4;
+const int32 PACK_TURN_HITBOX_PRIMARY_TIME = 3;
 const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 6;
+const int32 FRAMES_PER_FALLING_OBJECT = 4;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
 const int32 MAX_ANIMATION_COUNT = 32;
 const int32 MAX_LASER_TRAVEL_DISTANCE = 48;
-const int32 MAX_PSEUDO_SOURCE_COUNT = 128;
+const int32 MAX_PSEUDO_SOURCE_COUNT = 32;
 const int32 UNDO_BUFFER_SIZE = 256; // remember to modify undo_buffer
 const int32 MAX_PUSHABLE_STACK_SIZE = 32;
 
@@ -185,8 +186,8 @@ Camera camera = {0};
 float camera_yaw = 0.0f;
 float camera_pitch = 0.0f;
 
-char* level_path = "w:/cereus/data/levels/broken-bridges.txt"; // absolute path required to modify original file. used by default if no command line input
-char* system_command_line = "broken-bridges";
+char* level_path = "w:/cereus/data/levels/red-tutorial.txt"; // absolute path required to modify original file. used by default if no command line input
+char* system_command_line = "red-tutorial";
 char level_path_buffer[256] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
@@ -201,6 +202,7 @@ int32 pack_hitbox_timer_primary = 0;
 Int3 pack_hitbox_coords_primary = {0};
 int32 pack_hitbox_timer_secondary = 0;
 Int3 pack_hitbox_coords_secondary = {0};
+int32 falling_object_timer = 0;
 
 int32 time_until_input = 0;
 
@@ -328,7 +330,7 @@ Vec3 intCoordsToNorm(Int3 int_coords) {
 Int3 normCoordsToInt(Vec3 norm_coords) {
 	return (Int3){ (int32)floorf(norm_coords.x + 0.5f), (int32)floorf(norm_coords.y + 0.5f), (int32)floorf(norm_coords.z + 0.5f) }; }
 
-bool intCoordsWithinLevelBounds(Int3 coords) {
+bool intCoordsWithinLevelBounds(Int3 coords) { 
     return (coords.x >= 0 && coords.y >= 0 && coords.z >= 0 && coords.x < level_dim.x && coords.y < level_dim.y && coords.z < level_dim.z); }
 
 bool normCoordsWithinLevelBounds(Vec3 coords) {
@@ -1521,9 +1523,8 @@ int32 updateLaserBuffer(void)
     memset(laser_buffer, 0, sizeof(laser_buffer));
     int32 laser_tile_count = 0;
     int32 total_source_count = getEntityCount(next_world_state.sources);
-    Entity sources_as_primary[128]; 
-    memset(sources_as_primary, -1, sizeof(sources_as_primary)); // TODO(spike): better zeroing function to be used here also
-    memcpy(sources_as_primary, next_world_state.sources, sizeof(Entity) * MAX_PSEUDO_SOURCE_COUNT);
+    Entity sources_as_primary[32]; 
+	memcpy(sources_as_primary, next_world_state.sources, sizeof(Entity) * MAX_PSEUDO_SOURCE_COUNT);
         
     // set these to 0 before we start checking
     next_world_state.player.hit_by_red   = false;
@@ -1653,7 +1654,10 @@ int32 getPushableStackSize(Int3 first_entity_coords)
 
 void doFallingObjects(bool do_animation)
 {
-	Entity* object_group_to_fall[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
+    if (falling_object_timer-- != 0) return;
+    falling_object_timer = FRAMES_PER_FALLING_OBJECT;
+
+ 	Entity* object_group_to_fall[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
 	FOR(to_fall_index, 3)
     {
 		Entity* group_pointer = object_group_to_fall[to_fall_index];
@@ -1696,12 +1700,13 @@ void doFallingObjects(bool do_animation)
 void doFallingPack(bool do_animation)
 {
     if (next_world_state.pack.id == -1) return;
-    if (getTileType(getNextCoords(next_world_state.pack.coords, DOWN)) == NONE)
+	Int3 next_coords = getNextCoords(next_world_state.pack.coords, DOWN);
+    if (getTileType(next_coords) == NONE)
     {
         int32 stack_size = getPushableStackSize(next_world_state.pack.coords);
 
         Int3 current_start_coords = next_world_state.pack.coords;
-        Int3 current_end_coords = getNextCoords(next_world_state.pack.coords, DOWN);
+        Int3 current_end_coords = next_coords; 
         FOR(stack_fall_index, stack_size)
         {
             Entity* entity = &next_world_state.pack;
@@ -2406,7 +2411,10 @@ void gameFrame(double delta_time, TickInput tick_input)
 
 		if (!next_world_state.player.hit_by_blue) 
         {
+			// need to check if updating laser buffer w/o pack temp hitbox would've hit player, and in that case ignore pack hitbox..? 
+
             doFallingObjects(true);
+
             if (next_world_state.pack.pack_detached) doFallingPack(true);
         }
 
@@ -2463,7 +2471,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // decrement ephemeral pack hitboxes if required
 		if (pack_hitbox_timer_primary > 0)   pack_hitbox_timer_primary--;
 		if (pack_hitbox_timer_secondary > 0) pack_hitbox_timer_secondary--;
-
+        
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
 
@@ -2555,7 +2563,10 @@ void gameFrame(double delta_time, TickInput tick_input)
         // write to file
         if (editor_state.editor_mode && tick_input.i_press) writeBufferToFile(level_path);
 
-		if (time_until_input != 0) time_until_input--;
+		if (time_until_input > 0) 
+        {
+            time_until_input--;
+        }
 
         rendererSubmitFrame(assets_to_load, camera);
         memset(assets_to_load, 0, sizeof(assets_to_load));
