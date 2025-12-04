@@ -202,8 +202,7 @@ int32 pack_hitbox_timer_primary = 0;
 Int3 pack_hitbox_coords_primary = {0};
 int32 pack_hitbox_timer_secondary = 0;
 Int3 pack_hitbox_coords_secondary = {0};
-int32 falling_object_timer = 0;
-
+bool player_input_this_frame = 0; // fill this, and guard falling on this
 int32 time_until_input = 0;
 
 char* void_path    = "data/sprites/void.png";
@@ -1654,9 +1653,6 @@ int32 getPushableStackSize(Int3 first_entity_coords)
 
 void doFallingObjects(bool do_animation)
 {
-    if (falling_object_timer-- != 0) return;
-    falling_object_timer = FRAMES_PER_FALLING_OBJECT;
-
  	Entity* object_group_to_fall[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
 	FOR(to_fall_index, 3)
     {
@@ -2004,6 +2000,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press))
             {
 				// PLAYER MOVEMENT
+                player_input_this_frame = true;
                 
                 Direction input_direction = 0;
                 Int3 next_player_coords = {0};
@@ -2091,13 +2088,15 @@ void gameFrame(double delta_time, TickInput tick_input)
                         }
                         else // speculative movement over gap, with the hopes that we will be red
                         {
+							// TODO(spike): all this code needs to be rethought, or at least thoroughly tested
+
                             WorldState world_state_savestate = next_world_state;
 
                             if (try_to_push) pushWithoutAnimation(next_player_coords, input_direction);
                             if (try_to_roll) rollWithoutAnimation(next_player_coords, input_direction);
 
                             bool animations_on = false;
-                            // TODO(spike): should these two calls be wrapped in !hit_by_blue?
+                            // TODO(spike): should these two calls be wrapped in !hit_by_blue? do testing here
                             doFallingObjects(animations_on);
                             if (next_world_state.pack.pack_detached) doFallingPack(animations_on);
 
@@ -2107,7 +2106,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             next_world_state.player.coords = next_player_coords;
                             setTileType(PLAYER, next_world_state.player.coords);	
 
-                            // this code probably needs some testing
+                            // TODO(spike): this code probably needs some testing
 							if (!next_world_state.pack.pack_detached)
                             {
                                 setTileType(NONE, next_world_state.pack.coords);
@@ -2261,6 +2260,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                     time_until_input = TURN_ANIMATION_TIME;
         		}
             }
+            else
+            {
+                // no input this frame
+                player_input_this_frame = false;
+            }
         }
         else
         {
@@ -2409,12 +2413,9 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
         updateLaserBuffer();
 
-		if (!next_world_state.player.hit_by_blue) 
+		if (player_input_this_frame && !next_world_state.player.hit_by_blue) 
         {
-			// need to check if updating laser buffer w/o pack temp hitbox would've hit player, and in that case ignore pack hitbox..? 
-
             doFallingObjects(true);
-
             if (next_world_state.pack.pack_detached) doFallingPack(true);
         }
 
