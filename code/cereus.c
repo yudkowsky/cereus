@@ -156,12 +156,12 @@ const int32 MOVE_ANIMATION_TIME = 9;
 const int32 PUSH_ANIMATION_TIME = 9;
 const int32 ROLL_ANIMATION_TIME = 18;
 const int32 TURN_ANIMATION_TIME = 9;
-const int32 FALL_ANIMATION_TIME = 9;
+const int32 FALL_ANIMATION_TIME = 6;
 const int32 FAILED_TURN_ANIMATION_TIME = 6;
 const int32 FAILED_MOVE_ANIMATION_TIME = 6;
 const int32 PACK_TURN_HITBOX_PRIMARY_TIME = 3;
 const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 6;
-const int32 FRAMES_PER_FALLING_OBJECT = 4;
+const int32 FRAMES_PER_FALLING_OBJECT = 6;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
@@ -177,10 +177,10 @@ const Int3 AXIS_Z = { 0, 0, 1 };
 const Vec3 IDENTITY_TRANSLATION = { 0, 0, 0 };
 const Vec4 IDENTITY_QUATERNION = { 0, 0, 0, 1};
 
-const int32 ID_OFFSET_BOX     = 100 * 1; 
-const int32 ID_OFFSET_MIRROR  = 100 * 2; 
-const int32 ID_OFFSET_CRYSTAL = 100 * 3; 
-const int32 ID_OFFSET_SOURCE  = 100 * 4; 
+const int32 ID_OFFSET_BOX     = 100 * 1;
+const int32 ID_OFFSET_MIRROR  = 100 * 28;
+const int32 ID_OFFSET_CRYSTAL = 100 * 3;
+const int32 ID_OFFSET_SOURCE  = 100 * 4;
 
 Camera camera = {0};
 float camera_yaw = 0.0f;
@@ -202,7 +202,7 @@ int32 pack_hitbox_timer_primary = 0;
 Int3 pack_hitbox_coords_primary = {0};
 int32 pack_hitbox_timer_secondary = 0;
 Int3 pack_hitbox_coords_secondary = {0};
-bool player_input_this_frame = 0; // fill this, and guard falling on this
+int32 falling_object_timer = 0;
 int32 time_until_input = 0;
 
 char* void_path    = "data/sprites/void.png";
@@ -329,7 +329,7 @@ Vec3 intCoordsToNorm(Int3 int_coords) {
 Int3 normCoordsToInt(Vec3 norm_coords) {
 	return (Int3){ (int32)floorf(norm_coords.x + 0.5f), (int32)floorf(norm_coords.y + 0.5f), (int32)floorf(norm_coords.z + 0.5f) }; }
 
-bool intCoordsWithinLevelBounds(Int3 coords) { 
+bool intCoordsWithinLevelBounds(Int3 coords) {
     return (coords.x >= 0 && coords.y >= 0 && coords.z >= 0 && coords.x < level_dim.x && coords.y < level_dim.y && coords.z < level_dim.z); }
 
 bool normCoordsWithinLevelBounds(Vec3 coords) {
@@ -1572,14 +1572,12 @@ int32 updateLaserBuffer(void)
             else if (getTileType(current_coords) == MIRROR)
             {
                 bool can_reflect = canMirrorReflect(current_direction, getEntityDirection(current_coords));
-                if (can_reflect) 
-                {
-                    current_direction = getNextLaserDirectionMirror(current_direction, getEntityDirection(current_coords));
-                }
+                if (can_reflect) current_direction = getNextLaserDirectionMirror(current_direction, getEntityDirection(current_coords));
                 else break;
             }
             else if (getTileType(current_coords) != NONE) break;
-            if (!next_world_state.pack.pack_detached)
+
+          	if (!next_world_state.pack.pack_detached)
             {
                 if (pack_hitbox_timer_primary   != 0 && int3IsEqual(pack_hitbox_coords_primary,   current_coords)) break;
             	if (pack_hitbox_timer_secondary != 0 && int3IsEqual(pack_hitbox_coords_secondary, current_coords)) break;
@@ -1653,7 +1651,10 @@ int32 getPushableStackSize(Int3 first_entity_coords)
 
 void doFallingObjects(bool do_animation)
 {
- 	Entity* object_group_to_fall[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
+	if (falling_object_timer-- != 0) return;
+    falling_object_timer = FRAMES_PER_FALLING_OBJECT / 2 ;
+
+ 	Entity* object_group_to_fall[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
 	FOR(to_fall_index, 3)
     {
 		Entity* group_pointer = object_group_to_fall[to_fall_index];
@@ -1661,8 +1662,8 @@ void doFallingObjects(bool do_animation)
         {
             if (group_pointer[entity_index].id == -1) continue;
             Int3 single_object_next_coords = getNextCoords(group_pointer[entity_index].coords, DOWN);
-            bool pack_hitbox_primary_obstructing   = (pack_hitbox_timer_primary   > 0) & int3IsEqual(pack_hitbox_coords_primary,   single_object_next_coords);
-            bool pack_hitbox_secondary_obstructing = (pack_hitbox_timer_secondary > 0) & int3IsEqual(pack_hitbox_coords_secondary, single_object_next_coords);
+            bool pack_hitbox_primary_obstructing   = (pack_hitbox_timer_primary   > 0) & int3IsEqual(pack_hitbox_coords_primary,   single_object_next_coords); // fall anyway, but pass a longer queue to animation
+        	bool pack_hitbox_secondary_obstructing = (pack_hitbox_timer_secondary > 0) & int3IsEqual(pack_hitbox_coords_secondary, single_object_next_coords);
 			if (getTileType(single_object_next_coords) == NONE && !pack_hitbox_primary_obstructing && !pack_hitbox_secondary_obstructing) 
             {
 				int32 stack_size = getPushableStackSize(group_pointer[entity_index].coords);
@@ -1675,6 +1676,7 @@ void doFallingObjects(bool do_animation)
                     Entity* entity = getEntityPointer(current_start_coords);
                     if (do_animation)
                     {
+                        // TODO(spike): pass extra queue time to this fn
                         createInterpolationAnimation(intCoordsToNorm(current_start_coords), 
                                 					 intCoordsToNorm(current_end_coords),
                                                      &entity->position_norm,
@@ -1999,9 +2001,9 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press))
             {
-				// PLAYER MOVEMENT
-                player_input_this_frame = true;
-                
+				// player made input this frame (may be unsuccessful)
+                falling_object_timer = 4;
+
                 Direction input_direction = 0;
                 Int3 next_player_coords = {0};
                 if 		(tick_input.w_press) input_direction = NORTH; 
@@ -2088,8 +2090,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                         }
                         else // speculative movement over gap, with the hopes that we will be red
                         {
-							// TODO(spike): all this code needs to be rethought, or at least thoroughly tested
-
                             WorldState world_state_savestate = next_world_state;
 
                             if (try_to_push) pushWithoutAnimation(next_player_coords, input_direction);
@@ -2260,11 +2260,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                     time_until_input = TURN_ANIMATION_TIME;
         		}
             }
-            else
-            {
-                // no input this frame
-                player_input_this_frame = false;
-            }
         }
         else
         {
@@ -2413,7 +2408,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
         updateLaserBuffer();
 
-		if (player_input_this_frame && !next_world_state.player.hit_by_blue) 
+		if (!next_world_state.player.hit_by_blue) 
         {
             doFallingObjects(true);
             if (next_world_state.pack.pack_detached) doFallingPack(true);
@@ -2472,7 +2467,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // decrement ephemeral pack hitboxes if required
 		if (pack_hitbox_timer_primary > 0)   pack_hitbox_timer_primary--;
 		if (pack_hitbox_timer_secondary > 0) pack_hitbox_timer_secondary--;
-        
+
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
 
