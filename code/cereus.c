@@ -188,14 +188,45 @@ const int32 ID_OFFSET_MIRROR  = 100 * 2;
 const int32 ID_OFFSET_CRYSTAL = 100 * 3;
 const int32 ID_OFFSET_SOURCE  = 100 * 4;
 
-Camera camera = {0};
-float camera_yaw = 0.0f;
-float camera_pitch = 0.0f;
+const char* const void_path    = "data/sprites/void.png";
+const char* const grid_path    = "data/sprites/grid.png";
+const char* const wall_path    = "data/sprites/wall.png";
+const char* const box_path     = "data/sprites/box.png";
+const char* const player_path  = "data/sprites/player.png";
+const char* const mirror_path  = "data/sprites/mirror.png";
+const char* const crystal_path = "data/sprites/crystal.png";
+const char* const pack_path    = "data/sprites/pack.png";
+
+const char* const red_player_path     = "data/sprites/player-red.png";
+const char* const blue_player_path    = "data/sprites/player-blue.png";
+const char* const magenta_player_path = "data/sprites/player-magenta.png";
+
+const char* const laser_red_path     = "data/sprites/laser-red.png";
+const char* const laser_green_path   = "data/sprites/laser-green.png";
+const char* const laser_blue_path    = "data/sprites/laser-blue.png";
+const char* const laser_magenta_path = "data/sprites/laser-magenta.png";
+const char* const laser_yellow_path  = "data/sprites/laser-yellow.png";
+const char* const laser_cyan_path    = "data/sprites/laser-cyan.png";
+const char* const laser_white_path   = "data/sprites/laser-white.png";
+
+const char* const source_red_path     = "data/sprites/source-red.png";
+const char* const source_green_path   = "data/sprites/source-green.png";
+const char* const source_blue_path    = "data/sprites/source-blue.png";
+const char* const source_magenta_path = "data/sprites/source-magenta.png";
+const char* const source_yellow_path  = "data/sprites/source-yellow.png";
+const char* const source_cyan_path    = "data/sprites/source-cyan.png";
+const char* const source_white_path   = "data/sprites/source-white.png";
 
 char* level_path = "w:/cereus/data/levels/red-tutorial.txt"; // absolute path required to modify original file. used by default if no command line input
 char* system_command_line = "red-tutorial";
 char level_path_buffer[256] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
+
+Camera camera = {0};
+float camera_yaw = 0.0f;
+float camera_pitch = 0.0f;
+
+AssetToLoad assets_to_load[256] = {0};
 
 WorldState world_state = {0};
 WorldState next_world_state = {0};
@@ -210,37 +241,6 @@ int32 pack_hitbox_timer_secondary = 0;
 Int3 pack_hitbox_coords_secondary = {0};
 int32 falling_object_timer = 0;
 int32 time_until_input = 0;
-
-char* void_path    = "data/sprites/void.png";
-char* grid_path    = "data/sprites/grid.png";
-char* wall_path    = "data/sprites/wall.png";
-char* box_path     = "data/sprites/box.png";
-char* player_path  = "data/sprites/player.png";
-char* mirror_path  = "data/sprites/mirror.png";
-char* crystal_path = "data/sprites/crystal.png";
-char* pack_path    = "data/sprites/pack.png";
-
-char* red_player_path     = "data/sprites/player-red.png";
-char* blue_player_path    = "data/sprites/player-blue.png";
-char* magenta_player_path = "data/sprites/player-magenta.png";
-
-char* laser_red_path     = "data/sprites/laser-red.png";
-char* laser_green_path   = "data/sprites/laser-green.png";
-char* laser_blue_path    = "data/sprites/laser-blue.png";
-char* laser_magenta_path = "data/sprites/laser-magenta.png";
-char* laser_yellow_path  = "data/sprites/laser-yellow.png";
-char* laser_cyan_path    = "data/sprites/laser-cyan.png";
-char* laser_white_path   = "data/sprites/laser-white.png";
-
-char* source_red_path     = "data/sprites/source-red.png";
-char* source_green_path   = "data/sprites/source-green.png";
-char* source_blue_path    = "data/sprites/source-blue.png";
-char* source_magenta_path = "data/sprites/source-magenta.png";
-char* source_yellow_path  = "data/sprites/source-yellow.png";
-char* source_cyan_path    = "data/sprites/source-cyan.png";
-char* source_white_path   = "data/sprites/source-white.png";
-
-AssetToLoad assets_to_load[256] = {0};
 
 // CAMERA STUFF
 
