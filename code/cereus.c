@@ -63,6 +63,7 @@ typedef struct Entity
 
     // for pushables
     int32 previously_above_ground;
+    int32 in_motion;
 
     // for sources/lasers/other colored objects
     Color color;
@@ -164,8 +165,9 @@ const int32 FAILED_TURN_ANIMATION_TIME = 6;
 const int32 FAILED_MOVE_ANIMATION_TIME = 6;
 const int32 PACK_TURN_HITBOX_PRIMARY_TIME = 3;
 const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 5;
-const int32 PREVIOUSLY_ABOVE_GROUND_TIMER = 6;
 const int32 FRAMES_PER_FALLING_OBJECT = 6;
+const int32 PREVIOUSLY_ABOVE_GROUND_TIME = 6;
+const int32 IN_MOTION_TIME = 2;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
@@ -1165,7 +1167,7 @@ Push pushWithoutAnimation(Int3 coords, Direction direction)
         Int3 new_coords = entities_to_push.new_coords[entity_index];
         TileType tile_type = entities_to_push.type[entity_index];
 
-		if (getTileType(getNextCoords(prev_coords, DOWN)) != NONE) entity->previously_above_ground = PREVIOUSLY_ABOVE_GROUND_TIMER;
+		if (getTileType(getNextCoords(prev_coords, DOWN)) != NONE) entity->previously_above_ground = PREVIOUSLY_ABOVE_GROUND_TIME;
 
         if (entity_index == 0) 
         {
@@ -1693,6 +1695,7 @@ void doFallingObjects(bool do_animation)
                     entity->coords = current_end_coords;
                     current_end_coords = current_start_coords;
                     current_start_coords = getNextCoords(current_start_coords, UP);
+                    entity->in_motion = IN_MOTION_TIME;
                 }
             }
         }
@@ -1727,6 +1730,7 @@ void doFallingPack(bool do_animation)
             entity->position_norm = intCoordsToNorm(entity->coords);
             current_end_coords = current_start_coords;
             current_start_coords = getNextCoords(current_start_coords, UP);
+            entity->in_motion = IN_MOTION_TIME;
         }
 	}
 }
@@ -2077,8 +2081,15 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (move_player)
                     {
                         // don't allow walking off edge
-                        TileType tile_below = getTileType(int3Add(next_player_coords, int3Negate(AXIS_Y)));
-                        if (tile_below != NONE || next_world_state.player.hit_by_red)
+                        Int3 coords_below = getNextCoords(next_player_coords, DOWN);
+                        TileType tile_below = getTileType(coords_below);
+                        bool object_below_in_motion = false;
+                        if (isPushable(tile_below))
+                        {
+							Entity* entity = getEntityPointer(coords_below);
+							if (entity->in_motion) object_below_in_motion = true;
+                        }
+                        if ((tile_below != NONE && !object_below_in_motion) || next_world_state.player.hit_by_red)
                         {
                             if (try_to_push) 	  
                             {
@@ -2476,7 +2487,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
 
-        // zero previously_above_ground for all pushables
+        // decrement previously_above_ground and in_motion for all pushables
         Entity* falling_entity_groups[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
         FOR(falling_object_index, 3)
         {
@@ -2485,6 +2496,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 entity_group[entity_index].previously_above_ground--;
                 if (entity_group[entity_index].previously_above_ground < 0) entity_group[entity_index].previously_above_ground = 0;
+                entity_group[entity_index].in_motion--;
+                if (entity_group[entity_index].in_motion < 0) entity_group[entity_index].in_motion = 0;
             }
         }
 
