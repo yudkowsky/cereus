@@ -61,15 +61,18 @@ typedef struct Entity
     Vec4 rotation_quat;
     int32 id;
 
-    // only sources/lasers/other colored objects
+    // for pushables
+    int32 previously_above_ground;
+
+    // for sources/lasers/other colored objects
     Color color;
 
-    // only player
+    // for player
     bool hit_by_red;
     bool hit_by_green;
     bool hit_by_blue;
 
-    // only pack
+    // for pack
     bool pack_detached;
 }
 Entity;
@@ -161,7 +164,7 @@ const int32 FAILED_TURN_ANIMATION_TIME = 6;
 const int32 FAILED_MOVE_ANIMATION_TIME = 6;
 const int32 PACK_TURN_HITBOX_PRIMARY_TIME = 3;
 const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 5;
-
+const int32 PREVIOUSLY_ABOVE_GROUND_TIMER = 6;
 const int32 FRAMES_PER_FALLING_OBJECT = 6;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
@@ -176,7 +179,7 @@ const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
 const Int3 AXIS_Z = { 0, 0, 1 };
 const Vec3 IDENTITY_TRANSLATION = { 0, 0, 0 };
-const Vec4 IDENTITY_QUATERNION = { 0, 0, 0, 1};
+const Vec4 IDENTITY_QUATERNION = { 0, 0, 0, 1 };
 
 const int32 ID_OFFSET_BOX     = 100 * 1;
 const int32 ID_OFFSET_MIRROR  = 100 * 2;
@@ -1116,6 +1119,12 @@ void doFailedTurnAnimations(Direction input_direction, bool clockwise)
 
 // PUSH / ROLL ENTITES
 
+bool isPushable(TileType tile)
+{
+    if (tile == BOX || tile == CRYSTAL || tile == MIRROR || tile == PACK) return true;
+    else return false;
+}
+
 bool canPush(Int3 coords, Direction direction)
 {
     Int3 current_coords = coords;
@@ -1155,6 +1164,8 @@ Push pushWithoutAnimation(Int3 coords, Direction direction)
         Int3 prev_coords = entities_to_push.previous_coords[entity_index];
         Int3 new_coords = entities_to_push.new_coords[entity_index];
         TileType tile_type = entities_to_push.type[entity_index];
+
+		if (getTileType(getNextCoords(prev_coords, DOWN)) != NONE) entity->previously_above_ground = PREVIOUSLY_ABOVE_GROUND_TIMER;
 
         if (entity_index == 0) 
         {
@@ -1630,12 +1641,6 @@ void resetStandardVisuals()
 
 // FALLING LOGIC
 
-bool isPushable(TileType tile)
-{
-    if (tile == BOX || tile == CRYSTAL || tile == MIRROR || tile == PACK) return true;
-    else return false;
-}
-
 int32 getPushableStackSize(Int3 first_entity_coords)
 {
 	Int3 current_stack_coords = first_entity_coords;
@@ -1663,21 +1668,20 @@ void doFallingObjects(bool do_animation)
         {
             if (group_pointer[entity_index].id == -1) continue;
             Int3 single_object_next_coords = getNextCoords(group_pointer[entity_index].coords, DOWN);
-            bool pack_hitbox_primary_obstructing   = (pack_hitbox_timer_primary   > 0) & int3IsEqual(pack_hitbox_coords_primary,   single_object_next_coords); // fall anyway, but pass a longer queue to animation
+            bool pack_hitbox_primary_obstructing   = (pack_hitbox_timer_primary   > 0) & int3IsEqual(pack_hitbox_coords_primary,   single_object_next_coords);
         	bool pack_hitbox_secondary_obstructing = (pack_hitbox_timer_secondary > 0) & int3IsEqual(pack_hitbox_coords_secondary, single_object_next_coords);
 			if (getTileType(single_object_next_coords) == NONE && !pack_hitbox_primary_obstructing && !pack_hitbox_secondary_obstructing) 
             {
 				int32 stack_size = getPushableStackSize(group_pointer[entity_index].coords);
-
                 Int3 current_start_coords = group_pointer[entity_index].coords;
 				Int3 current_end_coords = single_object_next_coords;
                 FOR(stack_fall_index, stack_size)
                 {
 					// move down
                     Entity* entity = getEntityPointer(current_start_coords);
+                    if (entity->previously_above_ground > 0) break;
                     if (do_animation)
                     {
-                        // TODO(spike): pass extra queue time to this fn
                         createInterpolationAnimation(intCoordsToNorm(current_start_coords), 
                                 					 intCoordsToNorm(current_end_coords),
                                                      &entity->position_norm,
@@ -2471,6 +2475,18 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
+
+        // zero previously_above_ground for all pushables
+        Entity* falling_entity_groups[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
+        FOR(falling_object_index, 3)
+        {
+            Entity* entity_group = falling_entity_groups[falling_object_index];
+            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+            {
+                entity_group[entity_index].previously_above_ground--;
+                if (entity_group[entity_index].previously_above_ground < 0) entity_group[entity_index].previously_above_ground = 0;
+            }
+        }
 
         // finished updating state
         world_state = next_world_state;
