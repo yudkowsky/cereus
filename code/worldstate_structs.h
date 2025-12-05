@@ -30,6 +30,7 @@ Camera;
 
 typedef enum
 {
+    NO_DIRECTION = -1,
     NORTH = 0,
     WEST  = 1,
     SOUTH = 2,

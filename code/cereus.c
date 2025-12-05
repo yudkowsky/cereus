@@ -167,7 +167,7 @@ const int32 PACK_TURN_HITBOX_PRIMARY_TIME = 3;
 const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 5;
 const int32 FRAMES_PER_FALLING_OBJECT = 6;
 const int32 PREVIOUSLY_ABOVE_GROUND_TIME = 6;
-const int32 IN_MOTION_TIME = 2;
+const int32 IN_MOTION_TIME = 6;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
@@ -542,7 +542,7 @@ Vec4 directionToQuaternion(Direction direction, bool roll_z)
             do_yaw = true;
             break;
         case UP_NORTH:
-            yaw  = 0.0f;         roll = -0.125f * TAU;
+            yaw  = 0.0f;         roll = 0.125f * TAU;
             do_yaw = true;       do_roll = true;
             break;
         case UP_SOUTH:
@@ -843,8 +843,9 @@ Int3 getNextCoords(Int3 coords, Direction direction)
         case DOWN_SOUTH: return int3Add(coords, int3Add(AXIS_Z, int3Negate(AXIS_Y)));
         case DOWN_WEST:  return int3Add(coords, int3Add(int3Negate(AXIS_X), int3Negate(AXIS_Y)));
         case DOWN_EAST:  return int3Add(coords, int3Add(AXIS_X, int3Negate(AXIS_Y)));
+
+        default: return (Int3){0};
     }
-    return (Int3){0};
 }
 
 Vec3 rollingAxis(Direction direction)
@@ -973,16 +974,16 @@ void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direc
     Vec3 pivot_to_pack_start = vec3Subtract(pack_position, player_position);
     float d_theta_per_frame = (TAU*0.25f)/(float)TURN_ANIMATION_TIME;
     float angle_sign = clockwise ? 1.0f : -1.0f;
-    Direction previous_pack_direction = NORTH;
+    Direction previous_pack_direction = NO_DIRECTION;
     if (clockwise) 
     {
         previous_pack_direction = pack_direction - 1;
-        if (previous_pack_direction == -1) previous_pack_direction = EAST;
+        if (previous_pack_direction == NO_DIRECTION) previous_pack_direction = EAST;
     }
     else 
     {
         previous_pack_direction = pack_direction + 1;
-        if (previous_pack_direction == 4) previous_pack_direction = NORTH;
+        if (previous_pack_direction == UP) previous_pack_direction = NORTH;
     }
 
     for (int frame_index = 0; frame_index < TURN_ANIMATION_TIME; frame_index++)
@@ -2480,6 +2481,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             animations[animation_index].frames_left--;
         }
 
+        // TODO(spike): check what happens if this is put after laser buffer draw? might help that flashing laser issue?
         // decrement ephemeral pack hitboxes if required
 		if (pack_hitbox_timer_primary > 0)   pack_hitbox_timer_primary--;
 		if (pack_hitbox_timer_secondary > 0) pack_hitbox_timer_secondary--;
@@ -2494,10 +2496,13 @@ void gameFrame(double delta_time, TickInput tick_input)
             Entity* entity_group = falling_entity_groups[falling_object_index];
             FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
             {
-                entity_group[entity_index].previously_above_ground--;
-                if (entity_group[entity_index].previously_above_ground < 0) entity_group[entity_index].previously_above_ground = 0;
-                entity_group[entity_index].in_motion--;
-                if (entity_group[entity_index].in_motion < 0) entity_group[entity_index].in_motion = 0;
+                if (entity_group[entity_index].previously_above_ground > 0) entity_group[entity_index].previously_above_ground--;
+                if (entity_group[entity_index].in_motion > 0)
+                {
+                    // if above ground, stop
+                    if (getTileType(getNextCoords(entity_group[entity_index].coords, DOWN)) != NONE) entity_group[entity_index].in_motion = 0;
+                    else entity_group[entity_index].in_motion--;
+                }
             }
         }
 
@@ -2560,7 +2565,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
         {
 			TileType tile = world_state.buffer[tile_index];
-			if (tile == PLAYER || tile == BOX || tile == MIRROR || isSource(tile) || tile == CRYSTAL || tile == PACK) continue;
+			if (tile == PLAYER || isSource(tile) || isPushable(tile)) continue;
 			if (tile != NONE)   drawAsset(getPath(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false));
         }
 
@@ -2589,10 +2594,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // write to file
         if (editor_state.editor_mode && tick_input.i_press) writeBufferToFile(level_path);
 
-		if (time_until_input > 0) 
-        {
-            time_until_input--;
-        }
+		if (time_until_input > 0) time_until_input--;
 
         rendererSubmitFrame(assets_to_load, camera);
         memset(assets_to_load, 0, sizeof(assets_to_load));
