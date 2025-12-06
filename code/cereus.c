@@ -70,7 +70,7 @@ typedef struct Entity
 
     // for player
     bool hit_by_red;
-    bool hit_by_green;
+    Direction hit_by_green;
     bool hit_by_blue;
 
     // for pack
@@ -168,6 +168,8 @@ const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 5;
 const int32 FRAMES_PER_FALLING_OBJECT = 6;
 const int32 PREVIOUSLY_ABOVE_GROUND_TIME = 6;
 const int32 IN_MOTION_TIME = 6;
+const int32 SUCCESSFUL_TP_TIME = 8;
+const int32 FAILED_TP_TIME = 8;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
@@ -181,7 +183,7 @@ const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
 const Int3 AXIS_Z = { 0, 0, 1 };
 const Vec3 IDENTITY_TRANSLATION = { 0, 0, 0 };
-const Vec4 IDENTITY_QUATERNION = { 0, 0, 0, 1 };
+const Vec4 IDENTITY_QUATERNION  = { 0, 0, 0, 1 };
 
 const int32 ID_OFFSET_BOX     = 100 * 1;
 const int32 ID_OFFSET_MIRROR  = 100 * 2;
@@ -1542,7 +1544,7 @@ int32 updateLaserBuffer(void)
         
     // set these to 0 before we start checking
     next_world_state.player.hit_by_red   = false;
-    next_world_state.player.hit_by_green = false;
+    next_world_state.player.hit_by_green = NO_DIRECTION;
     next_world_state.player.hit_by_blue  = false;
 
     for (int source_index = 0; source_index < MAX_PSEUDO_SOURCE_COUNT; source_index++)
@@ -1573,7 +1575,7 @@ int32 updateLaserBuffer(void)
             if (getTileType(current_coords) == PLAYER)
             {
                 if (laser_color.red)   next_world_state.player.hit_by_red   = true;
-                if (laser_color.green) next_world_state.player.hit_by_green = true;
+                if (laser_color.green) next_world_state.player.hit_by_green = current_direction;
                 if (laser_color.blue)  next_world_state.player.hit_by_blue  = true;
                 break;
             }
@@ -1610,6 +1612,19 @@ int32 updateLaserBuffer(void)
     }
 
     return laser_tile_count;
+}
+
+Int3 getGreenEndpoint(Int3 coords, Direction direction)
+{
+    Int3 current_coords = coords; 
+    Direction current_direction = direction;
+	FOR(seek_index, MAX_LASER_TRAVEL_DISTANCE)
+    {
+		current_coords = getNextCoords(current_coords, current_direction);
+        if (!intCoordsWithinLevelBounds(current_coords)) return (Int3){ 0, 0, 0 };
+        if (getTileType(current_coords) != NONE) break;
+    }
+    return getNextCoords(current_coords, oppositeDirection(current_direction));
 }
 
 // UNDO / RESTART
@@ -2023,132 +2038,177 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                 if (input_direction == next_world_state.player.direction)
                 {
-               		// already facing this direction; attempt to move 
-                    bool try_to_push = false;
-                    bool try_to_roll = false;
-
-                    bool move_player = false;
-                    if 		(tick_input.w_press) next_player_coords = int3Add(next_world_state.player.coords, int3Negate(AXIS_Z));
-                    else if (tick_input.a_press) next_player_coords = int3Add(next_world_state.player.coords, int3Negate(AXIS_X));
-                    else if (tick_input.s_press) next_player_coords = int3Add(next_world_state.player.coords, AXIS_Z);
-                    else if (tick_input.d_press) next_player_coords = int3Add(next_world_state.player.coords, AXIS_X);
-                    TileType next_tile = getTileType(next_player_coords);
-                    int32 stack_size = 1;
-					if (!isSource(next_tile)) switch (next_tile)
+                    Entity* player = &next_world_state.player;
+                    Entity* pack = &next_world_state.pack;
+               		// check if green for teleport before attempt to move
+                    if (player->hit_by_green == input_direction || player->hit_by_green == oppositeDirection(input_direction))
                     {
-                        case VOID: break;
-                        case GRID: break;
-                        case WALL: break;
-                        case BOX:
-                        case CRYSTAL:
-                        case PACK:
+                        // seek towards start of laser to get endpoint, and then go to the endpoint
+                        // check if endpoint is valid before teleport (i.e, if pack can go there - if over air, teleport anyway, probably?)
+                        bool obstructed_tp_location = false;
+                        Int3 tp_coords = getGreenEndpoint(player->coords, input_direction);
+                        if (int3IsEqual(tp_coords, normCoordsToInt(IDENTITY_TRANSLATION))) obstructed_tp_location = true; // OOB
+                        if (!pack->pack_detached)
                         {
-                            if (canPush(next_player_coords, input_direction)) 
-                            {
-                                Int3 current_stack_coords = next_player_coords;
-                                FOR(stack_index, MAX_PUSHABLE_STACK_SIZE)
-                                {
-                                	current_stack_coords = getNextCoords(current_stack_coords, UP);
-                                    TileType next_tile_type = getTileType(current_stack_coords);
-                                    if (isPushable(next_tile_type))
-                                    {
-										if (canPush(current_stack_coords, input_direction)) stack_size++;
-										else break;
-                                    }
-                                    else break;
-                                }
-                                try_to_push = true;
-								move_player = true;
-                            }
-                            break;
+							if (getTileType(getNextCoords(tp_coords, oppositeDirection(input_direction))) != NONE) obstructed_tp_location = true;
                         }
-                        case MIRROR:
+                        if (obstructed_tp_location == false)
                         {
-                            if (canPush(next_player_coords, input_direction))
+                            setTileType(NONE, player->coords);
+                            setTileDirection(NORTH, player->coords);
+                            player->coords = tp_coords;
+                            player->position_norm = intCoordsToNorm(tp_coords);
+                            // zero queued animations
+							setTileType(PLAYER, tp_coords);
+                            setTileDirection(input_direction, tp_coords);
+                            if (!pack->pack_detached)
                             {
-                                TileType push_tile = getTileType(getNextCoords(next_player_coords, input_direction));
-                                TileType above_tile = getTileType(getNextCoords(next_player_coords, UP));
-                                if (push_tile != NONE || above_tile != NONE) break;
-                                try_to_roll = true;
-                                move_player = true;
+                                Int3 pack_coords = getNextCoords(tp_coords, oppositeDirection(input_direction));
+                                setTileType(NONE, pack->coords);
+                                setTileDirection(NORTH, pack->coords);
+                                pack->coords = pack_coords; 
+                                pack->position_norm = intCoordsToNorm(pack_coords);
+                                // zero queued animations
+                                setTileType(PLAYER, pack_coords);
+                                setTileDirection(input_direction, pack_coords);
                             }
-                            break;
+                            time_until_input = SUCCESSFUL_TP_TIME;
                         }
-                        default:
+                        else
                         {
-                            move_player = true;
+                            // tp obstructed
+                            time_until_input = FAILED_TP_TIME;
                         }
                     }
-                    if (move_player)
+                    else
                     {
-                        // don't allow walking off edge
-                        Int3 coords_below = getNextCoords(next_player_coords, DOWN);
-                        TileType tile_below = getTileType(coords_below);
-                        bool object_below_in_motion = false;
-                        if (isPushable(tile_below))
+                        // no green; normal movement attempt
+                        bool try_to_push = false;
+                        bool try_to_roll = false;
+
+                        bool move_player = false;
+                        if 		(tick_input.w_press) next_player_coords = int3Add(next_world_state.player.coords, int3Negate(AXIS_Z));
+                        else if (tick_input.a_press) next_player_coords = int3Add(next_world_state.player.coords, int3Negate(AXIS_X));
+                        else if (tick_input.s_press) next_player_coords = int3Add(next_world_state.player.coords, AXIS_Z);
+                        else if (tick_input.d_press) next_player_coords = int3Add(next_world_state.player.coords, AXIS_X);
+                        TileType next_tile = getTileType(next_player_coords);
+                        int32 stack_size = 1;
+                        if (!isSource(next_tile)) switch (next_tile)
                         {
-							Entity* entity = getEntityPointer(coords_below);
-							if (entity->in_motion) object_below_in_motion = true;
-                        }
-                        if ((tile_below != NONE && !object_below_in_motion) || next_world_state.player.hit_by_red)
-                        {
-                            if (try_to_push) 	  
+                            case VOID: break;
+                            case GRID: break;
+                            case WALL: break;
+                            case BOX:
+                            case CRYSTAL:
+                            case PACK:
                             {
-                                Int3 stack_entity_coords = next_player_coords;
-                                FOR(stack_index, stack_size)
+                                if (canPush(next_player_coords, input_direction)) 
                                 {
-                                    push(stack_entity_coords, input_direction);
-                                    stack_entity_coords = getNextCoords(stack_entity_coords, UP);
+                                    Int3 current_stack_coords = next_player_coords;
+                                    FOR(stack_index, MAX_PUSHABLE_STACK_SIZE)
+                                    {
+                                        current_stack_coords = getNextCoords(current_stack_coords, UP);
+                                        TileType next_tile_type = getTileType(current_stack_coords);
+                                        if (isPushable(next_tile_type))
+                                        {
+                                            if (canPush(current_stack_coords, input_direction)) stack_size++;
+                                            else break;
+                                        }
+                                        else break;
+                                    }
+                                    try_to_push = true;
+                                    move_player = true;
                                 }
+                                break;
                             }
-                            else if (try_to_roll) roll(next_player_coords, input_direction);
-
-                            doStandardMovement(input_direction, next_tile, next_player_coords);
+                            case MIRROR:
+                            {
+                                if (canPush(next_player_coords, input_direction))
+                                {
+                                    TileType push_tile = getTileType(getNextCoords(next_player_coords, input_direction));
+                                    TileType above_tile = getTileType(getNextCoords(next_player_coords, UP));
+                                    if (push_tile != NONE || above_tile != NONE) break;
+                                    try_to_roll = true;
+                                    move_player = true;
+                                }
+                                break;
+                            }
+                            default:
+                            {
+                                move_player = true;
+                            }
                         }
-                        else // speculative movement over gap, with the hopes that we will be red
+                        if (move_player)
                         {
-                            WorldState world_state_savestate = next_world_state;
-
-                            if (try_to_push) pushWithoutAnimation(next_player_coords, input_direction);
-                            if (try_to_roll) rollWithoutAnimation(next_player_coords, input_direction);
-
-                            bool animations_on = false;
-                            // TODO(spike): should these two calls be wrapped in !hit_by_blue? do testing here
-                            doFallingObjects(animations_on);
-                            if (next_world_state.pack.pack_detached) doFallingPack(animations_on);
-
-                            doHeadMovement(input_direction, animations_on);
-
-                            setTileType(NONE, next_world_state.player.coords);
-                            next_world_state.player.coords = next_player_coords;
-                            setTileType(PLAYER, next_world_state.player.coords);	
-
-                            // TODO(spike): this code probably needs some testing
-							if (!next_world_state.pack.pack_detached)
+                            // don't allow walking off edge
+                            Int3 coords_below = getNextCoords(next_player_coords, DOWN);
+                            TileType tile_below = getTileType(coords_below);
+                            bool object_below_in_motion = false;
+                            if (isPushable(tile_below))
                             {
-                                setTileType(NONE, next_world_state.pack.coords);
-                                next_world_state.pack.coords = getNextCoords(next_player_coords, oppositeDirection(input_direction));
-                                setTileType(PACK, next_world_state.pack.coords);
+                                Entity* entity = getEntityPointer(coords_below);
+                                if (entity->in_motion) object_below_in_motion = true;
                             }
-
-                            updateLaserBuffer();
-
-                            bool leap_of_faith_worked = false;
-                            if (next_world_state.player.hit_by_red) leap_of_faith_worked = true;
-                            next_world_state = world_state_savestate;
-                            if (leap_of_faith_worked)
+                            if ((tile_below != NONE && !object_below_in_motion) || next_world_state.player.hit_by_red)
                             {
-								if (try_to_push) push(next_player_coords, input_direction);
-                                if (try_to_roll) roll(next_player_coords, input_direction);
+                                if (try_to_push) 	  
+                                {
+                                    Int3 stack_entity_coords = next_player_coords;
+                                    FOR(stack_index, stack_size)
+                                    {
+                                        push(stack_entity_coords, input_direction);
+                                        stack_entity_coords = getNextCoords(stack_entity_coords, UP);
+                                    }
+                                }
+                                else if (try_to_roll) roll(next_player_coords, input_direction);
 
                                 doStandardMovement(input_direction, next_tile, next_player_coords);
                             }
-                            else doFailedWalkAnimations(next_player_coords);
+                            else // speculative movement over gap, with the hopes that we will be red
+                            {
+                                WorldState world_state_savestate = next_world_state;
+
+                                if (try_to_push) pushWithoutAnimation(next_player_coords, input_direction);
+                                if (try_to_roll) rollWithoutAnimation(next_player_coords, input_direction);
+
+                                bool animations_on = false;
+                                // TODO(spike): should these two calls be wrapped in !hit_by_blue? do testing here
+                                doFallingObjects(animations_on);
+                                if (next_world_state.pack.pack_detached) doFallingPack(animations_on);
+
+                                doHeadMovement(input_direction, animations_on);
+
+                                setTileType(NONE, next_world_state.player.coords);
+                                next_world_state.player.coords = next_player_coords;
+                                setTileType(PLAYER, next_world_state.player.coords);	
+
+                                // TODO(spike): this code probably needs some testing
+                                if (!next_world_state.pack.pack_detached)
+                                {
+                                    setTileType(NONE, next_world_state.pack.coords);
+                                    next_world_state.pack.coords = getNextCoords(next_player_coords, oppositeDirection(input_direction));
+                                    setTileType(PACK, next_world_state.pack.coords);
+                                }
+
+                                updateLaserBuffer();
+
+                                bool leap_of_faith_worked = false;
+                                if (next_world_state.player.hit_by_red) leap_of_faith_worked = true;
+                                next_world_state = world_state_savestate;
+                                if (leap_of_faith_worked)
+                                {
+                                    if (try_to_push) push(next_player_coords, input_direction);
+                                    if (try_to_roll) roll(next_player_coords, input_direction);
+
+                                    doStandardMovement(input_direction, next_tile, next_player_coords);
+                                }
+                                else doFailedWalkAnimations(next_player_coords);
+                            }
+                            if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME - PUSH_ANIMATION_TIME; // below we set time_until_input += PUSH, so we add on the difference here.
                         }
-                        if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME - PUSH_ANIMATION_TIME; // below we set time_until_input += PUSH, so we add on the difference here.
+                        else doFailedWalkAnimations(next_player_coords);
+                        time_until_input += PUSH_ANIMATION_TIME;
                     }
-                    else doFailedWalkAnimations(next_player_coords);
-                    time_until_input += PUSH_ANIMATION_TIME;
                 }
                 else
                 {
