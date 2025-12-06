@@ -1618,19 +1618,6 @@ int32 updateLaserBuffer(void)
     return laser_tile_count;
 }
 
-Int3 getGreenEndpoint(Int3 coords, Direction direction)
-{
-    Int3 current_coords = coords; 
-    Direction current_direction = direction;
-	FOR(seek_index, MAX_LASER_TRAVEL_DISTANCE)
-    {
-		current_coords = getNextCoords(current_coords, current_direction);
-        if (!intCoordsWithinLevelBounds(current_coords)) return (Int3){ 0, 0, 0 };
-        if (getTileType(current_coords) != NONE) break;
-    }
-    return getNextCoords(current_coords, oppositeDirection(current_direction));
-}
-
 // UNDO / RESTART
 
 void recordStateForUndo()
@@ -2050,32 +2037,52 @@ void gameFrame(double delta_time, TickInput tick_input)
                         // seek towards start of laser to get endpoint, and then go to the endpoint
                         // check if endpoint is valid before teleport (i.e, if pack can go there - if over air, teleport anyway, probably?)
                         bool obstructed_tp_location = false;
-                        Int3 tp_coords = getGreenEndpoint(player->coords, input_direction);
-                        if (int3IsEqual(tp_coords, normCoordsToInt(IDENTITY_TRANSLATION))) obstructed_tp_location = true; // OOB
+
+                        Int3 current_coords = player->coords; 
+                        Direction current_direction = input_direction;
+                        FOR(seek_index, MAX_LASER_TRAVEL_DISTANCE)
+                        {
+                            current_coords = getNextCoords(current_coords, current_direction);
+                            if (!intCoordsWithinLevelBounds(current_coords)) obstructed_tp_location = true;
+                            if (getTileType(current_coords) == MIRROR)
+                            {
+                                current_direction = getNextLaserDirectionMirror(current_direction, getTileDirection(current_coords));
+                                current_coords = getNextCoords(current_coords, current_direction);
+                                continue;
+                            }
+                            if (getTileType(current_coords) != NONE) break;
+                        }
+                        Int3 tp_coords = getNextCoords(current_coords, oppositeDirection(current_direction));
+
                         if (!pack->pack_detached) 
                         {
-                            TileType to_be_pack_tile = getTileType(getNextCoords(tp_coords, oppositeDirection(input_direction)));
+                            TileType to_be_pack_tile = getTileType(getNextCoords(tp_coords, oppositeDirection(current_direction)));
                             if (to_be_pack_tile != NONE && to_be_pack_tile != PLAYER) obstructed_tp_location = true;
                         }
+
                         if (obstructed_tp_location == false)
                         {
                             setTileType(NONE, player->coords);
                             setTileDirection(NORTH, player->coords);
                             player->coords = tp_coords;
                             player->position_norm = intCoordsToNorm(tp_coords);
+                            player->direction = current_direction;
+                            player->rotation_quat = directionToQuaternion(current_direction, true);
                             // zero queued animations
 							setTileType(PLAYER, tp_coords);
-                            setTileDirection(input_direction, tp_coords);
+                            setTileDirection(current_direction, tp_coords);
                             if (!pack->pack_detached)
                             {
-                                Int3 pack_coords = getNextCoords(tp_coords, oppositeDirection(input_direction));
+                                Int3 pack_coords = getNextCoords(tp_coords, oppositeDirection(current_direction));
                                 setTileType(NONE, pack->coords);
                                 setTileDirection(NORTH, pack->coords);
                                 pack->coords = pack_coords; 
                                 pack->position_norm = intCoordsToNorm(pack_coords);
+                                pack->direction = current_direction;
+                                pack->rotation_quat = directionToQuaternion(current_direction, true);
                                 // zero queued animations
                                 setTileType(PLAYER, pack_coords);
-                                setTileDirection(input_direction, pack_coords);
+                                setTileDirection(current_direction, pack_coords);
                             }
                             time_until_input = SUCCESSFUL_TP_TIME;
                         }
