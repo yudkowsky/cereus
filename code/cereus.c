@@ -53,6 +53,17 @@ typedef enum Color
 }
 Color;
 
+typedef struct GreenHit
+{
+    bool north;
+    bool west;
+    bool south;
+    bool east;
+    bool up;
+    bool down;
+}
+GreenHit;
+
 typedef struct Entity
 {
     Int3 coords;
@@ -70,7 +81,7 @@ typedef struct Entity
 
     // for player
     bool hit_by_red;
-    Direction hit_by_green;
+    GreenHit green_hit;
     bool hit_by_blue;
 
     // for pack
@@ -1555,8 +1566,8 @@ int32 updateLaserBuffer(void)
         
     // set these to 0 before we start checking
     next_world_state.player.hit_by_red   = false;
-    next_world_state.player.hit_by_green = NO_DIRECTION;
     next_world_state.player.hit_by_blue  = false;
+    next_world_state.player.green_hit = (GreenHit){0};
 
     for (int source_index = 0; source_index < MAX_PSEUDO_SOURCE_COUNT; source_index++)
     {
@@ -1586,7 +1597,19 @@ int32 updateLaserBuffer(void)
             if (getTileType(current_coords) == PLAYER)
             {
                 if (laser_color.red)   next_world_state.player.hit_by_red   = true;
-                if (laser_color.green) next_world_state.player.hit_by_green = current_direction;
+                if (laser_color.green) 
+                {
+                    switch (current_direction)
+                    {
+                        case NORTH: next_world_state.player.green_hit.north = true; break;
+                        case WEST:  next_world_state.player.green_hit.west  = true; break;
+                        case SOUTH: next_world_state.player.green_hit.south = true; break;
+                        case EAST:  next_world_state.player.green_hit.east  = true; break;
+                        case UP:    next_world_state.player.green_hit.up    = true; break;
+                        case DOWN:  next_world_state.player.green_hit.down  = true; break;
+                        default: break;
+                    }
+                }
                 if (laser_color.blue)  next_world_state.player.hit_by_blue  = true;
                 break;
             }
@@ -2035,8 +2058,20 @@ void gameFrame(double delta_time, TickInput tick_input)
                 {
                     Entity* player = &next_world_state.player;
                     Entity* pack = &next_world_state.pack;
-               		// check if green for teleport before attempt to move
-                    if (player->hit_by_green == oppositeDirection(input_direction))
+
+                    // check if player is hit by laser from oppositeDirection(input_direction)
+                    bool hit_by_direction = false;
+                    switch (input_direction)
+                    {
+                        case NORTH: if (player->green_hit.south) hit_by_direction = true; break;
+                        case WEST:  if (player->green_hit.east)  hit_by_direction = true; break;
+                        case SOUTH: if (player->green_hit.north) hit_by_direction = true; break;
+                        case EAST:  if (player->green_hit.west)  hit_by_direction = true; break;
+                        case UP:    if (player->green_hit.down)  hit_by_direction = true; break;
+                        case DOWN:  if (player->green_hit.up)    hit_by_direction = true; break;
+                        default: break;
+                    }
+                    if (hit_by_direction)
                     {
                         // seek towards start of laser to get endpoint, and then go to the endpoint
                         // check if endpoint is valid before teleport (i.e, if pack can go there - if over air, teleport anyway, probably?)
@@ -2660,12 +2695,14 @@ void gameFrame(double delta_time, TickInput tick_input)
             Entity* player = &world_state.player;
 
             // TODO(spike): this is terrible
-            if      (player->hit_by_red && player->hit_by_green != NO_DIRECTION && player->hit_by_blue) drawAsset(white_player_path,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (player->hit_by_red && player->hit_by_green != NO_DIRECTION             		  ) drawAsset(yellow_player_path,  CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (player->hit_by_red &&              		   				   player->hit_by_blue) drawAsset(magenta_player_path, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (             		   player->hit_by_green != NO_DIRECTION && player->hit_by_blue) drawAsset(cyan_player_path,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (player->hit_by_red                             				  				  ) drawAsset(red_player_path,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (             		   player->hit_by_green != NO_DIRECTION             		  ) drawAsset(green_player_path,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+    		bool hit_by_green = false;
+            if (player->green_hit.north || player->green_hit.west || player->green_hit.south || player->green_hit.east || player->green_hit.up || player->green_hit.down) hit_by_green = true;
+            if      (player->hit_by_red && hit_by_green && player->hit_by_blue) drawAsset(white_player_path,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (player->hit_by_red && hit_by_green             		  ) drawAsset(yellow_player_path,  CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (player->hit_by_red &&      	       player->hit_by_blue) drawAsset(magenta_player_path, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (             		   hit_by_green && player->hit_by_blue) drawAsset(cyan_player_path,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (player->hit_by_red                 	  				  ) drawAsset(red_player_path,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (             		   hit_by_green             		  ) drawAsset(green_player_path,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
             else if (                            				   				   player->hit_by_blue) drawAsset(blue_player_path,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
             else drawAsset(player_path, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
         }
