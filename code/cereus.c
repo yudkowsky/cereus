@@ -200,16 +200,20 @@ const char* const crystal_path = "data/sprites/crystal.png";
 const char* const pack_path    = "data/sprites/pack.png";
 
 const char* const red_player_path     = "data/sprites/player-red.png";
+const char* const green_player_path   = "data/sprites/player-green.png";
 const char* const blue_player_path    = "data/sprites/player-blue.png";
 const char* const magenta_player_path = "data/sprites/player-magenta.png";
+const char* const yellow_player_path  = "data/sprites/player-yellow.png";
+const char* const cyan_player_path    = "data/sprites/player-cyan.png";
+const char* const white_player_path   = "data/sprites/player-white.png";
 
-const char* const laser_red_path     = "data/sprites/laser-red.png";
-const char* const laser_green_path   = "data/sprites/laser-green.png";
-const char* const laser_blue_path    = "data/sprites/laser-blue.png";
-const char* const laser_magenta_path = "data/sprites/laser-magenta.png";
-const char* const laser_yellow_path  = "data/sprites/laser-yellow.png";
-const char* const laser_cyan_path    = "data/sprites/laser-cyan.png";
-const char* const laser_white_path   = "data/sprites/laser-white.png";
+const char* const laser_red_path      = "data/sprites/laser-red.png";
+const char* const laser_green_path    = "data/sprites/laser-green.png";
+const char* const laser_blue_path     = "data/sprites/laser-blue.png";
+const char* const laser_magenta_path  = "data/sprites/laser-magenta.png";
+const char* const laser_yellow_path   = "data/sprites/laser-yellow.png";
+const char* const laser_cyan_path     = "data/sprites/laser-cyan.png";
+const char* const laser_white_path    = "data/sprites/laser-white.png";
 
 const char* const source_red_path     = "data/sprites/source-red.png";
 const char* const source_green_path   = "data/sprites/source-green.png";
@@ -2041,16 +2045,17 @@ void gameFrame(double delta_time, TickInput tick_input)
                     Entity* player = &next_world_state.player;
                     Entity* pack = &next_world_state.pack;
                		// check if green for teleport before attempt to move
-                    if (player->hit_by_green == input_direction || player->hit_by_green == oppositeDirection(input_direction))
+                    if (player->hit_by_green == oppositeDirection(input_direction))
                     {
                         // seek towards start of laser to get endpoint, and then go to the endpoint
                         // check if endpoint is valid before teleport (i.e, if pack can go there - if over air, teleport anyway, probably?)
                         bool obstructed_tp_location = false;
                         Int3 tp_coords = getGreenEndpoint(player->coords, input_direction);
                         if (int3IsEqual(tp_coords, normCoordsToInt(IDENTITY_TRANSLATION))) obstructed_tp_location = true; // OOB
-                        if (!pack->pack_detached)
+                        if (!pack->pack_detached) 
                         {
-							if (getTileType(getNextCoords(tp_coords, oppositeDirection(input_direction))) != NONE) obstructed_tp_location = true;
+                            TileType to_be_pack_tile = getTileType(getNextCoords(tp_coords, oppositeDirection(input_direction)));
+                            if (to_be_pack_tile != NONE && to_be_pack_tile != PLAYER) obstructed_tp_location = true;
                         }
                         if (obstructed_tp_location == false)
                         {
@@ -2636,10 +2641,17 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         if (world_state.player.id != -1)
         {
-			if      (!next_world_state.player.hit_by_red && !next_world_state.player.hit_by_blue) drawAsset(player_path, 		 CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
-			else if ( next_world_state.player.hit_by_red && !next_world_state.player.hit_by_blue) drawAsset(red_player_path, 	 CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
-			else if (!next_world_state.player.hit_by_red &&  next_world_state.player.hit_by_blue) drawAsset(blue_player_path, 	 CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
-			else if ( next_world_state.player.hit_by_red &&  next_world_state.player.hit_by_blue) drawAsset(magenta_player_path, CUBE_3D, world_state.player.position_norm, PLAYER_SCALE, world_state.player.rotation_quat);
+            Entity* player = &world_state.player;
+
+            // TODO(spike): this is terrible
+            if      (player->hit_by_red && player->hit_by_green != NO_DIRECTION && player->hit_by_blue) drawAsset(white_player_path,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (player->hit_by_red && player->hit_by_green != NO_DIRECTION             		  ) drawAsset(yellow_player_path,  CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (player->hit_by_red &&              		   				   player->hit_by_blue) drawAsset(magenta_player_path, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (             		   player->hit_by_green != NO_DIRECTION && player->hit_by_blue) drawAsset(cyan_player_path,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (player->hit_by_red                             				  				  ) drawAsset(red_player_path,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (             		   player->hit_by_green != NO_DIRECTION             		  ) drawAsset(green_player_path,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (                            				   				   player->hit_by_blue) drawAsset(blue_player_path,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else drawAsset(player_path, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
         }
 		if (world_state.pack.id   != -1) drawAsset(pack_path,   CUBE_3D, world_state.pack.position_norm,   PLAYER_SCALE, world_state.pack.rotation_quat);
 
