@@ -211,6 +211,9 @@ const char* const mirror_path  = "data/sprites/mirror.png";
 const char* const crystal_path = "data/sprites/crystal.png";
 const char* const pack_path    = "data/sprites/pack.png";
 
+const char* const player_ghost_path = "data/sprites/player-ghost.png";
+const char* const pack_ghost_path   = "data/sprites/pack-ghost.png";
+
 const char* const red_player_path     = "data/sprites/player-red.png";
 const char* const green_player_path   = "data/sprites/player-green.png";
 const char* const blue_player_path    = "data/sprites/player-blue.png";
@@ -260,6 +263,12 @@ Int3 pack_hitbox_coords_secondary = {0};
 int32 falling_object_timer = 0;
 int32 falling_player_timer = 0;
 int32 time_until_input = 0;
+bool do_player_ghost = false;
+bool do_pack_ghost = false;
+Int3 player_ghost_coords = {0};
+Int3 pack_ghost_coords = {0};
+Direction player_ghost_direction = NO_DIRECTION;
+Direction pack_ghost_direction = NO_DIRECTION;
 
 // CAMERA STUFF
 
@@ -2099,7 +2108,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             if (to_be_pack_tile != NONE && to_be_pack_tile != PLAYER) obstructed_tp_location = true;
                         }
 
-                        if (obstructed_tp_location == false)
+                        if (!obstructed_tp_location)
                         {
                             setTileType(NONE, player->coords);
                             setTileDirection(NORTH, player->coords);
@@ -2580,6 +2589,59 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
+		// render and calculate ghosts
+        Entity* player = &next_world_state.player;
+        Entity* pack = &next_world_state.pack;
+        bool facing_green = false;
+        switch (player->direction)
+        {
+            case NORTH: if (player->green_hit.south) facing_green = true; break;
+            case WEST:  if (player->green_hit.east)  facing_green = true; break;
+            case SOUTH: if (player->green_hit.north) facing_green = true; break;
+            case EAST:  if (player->green_hit.west)  facing_green = true; break;
+            case UP:    if (player->green_hit.down)  facing_green = true; break;
+            case DOWN:  if (player->green_hit.up)    facing_green = true; break;
+            default: break;
+        }
+        if (facing_green)
+        {
+            // seek towards start of laser to get endpoint, and then go to the endpoint
+            // check if endpoint is valid before teleport (i.e, if pack can go there - if over air, teleport anyway, probably?)
+            bool obstructed_tp_location = false;
+
+            Int3 current_coords = player->coords; 
+            Direction current_direction = player->direction;
+            FOR(seek_index, MAX_LASER_TRAVEL_DISTANCE)
+            {
+                current_coords = getNextCoords(current_coords, current_direction);
+                if (!intCoordsWithinLevelBounds(current_coords)) obstructed_tp_location = true;
+                if (getTileType(current_coords) == MIRROR)
+                {
+                    current_direction = getNextLaserDirectionMirror(current_direction, getTileDirection(current_coords));
+                    current_coords = getNextCoords(current_coords, current_direction);
+                    continue;
+                }
+                if (getTileType(current_coords) != NONE) break;
+            }
+            Int3 tp_coords = getNextCoords(current_coords, oppositeDirection(current_direction));
+            player_ghost_coords = tp_coords;
+            player_ghost_direction = current_direction;
+
+            if (!pack->pack_detached) 
+            {
+                TileType to_be_pack_tile = getTileType(getNextCoords(tp_coords, oppositeDirection(current_direction)));
+                if (to_be_pack_tile != NONE && to_be_pack_tile != PLAYER) obstructed_tp_location = true;
+                pack_ghost_coords = getNextCoords(tp_coords, oppositeDirection(current_direction));
+                pack_ghost_direction = current_direction;
+            }
+
+            if (!obstructed_tp_location)
+            {
+                do_player_ghost = true;
+                do_pack_ghost = true;
+            }
+        }
+
         // do animations
 		for (int animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
         {
@@ -2692,7 +2754,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         if (world_state.player.id != -1)
         {
-            Entity* player = &world_state.player;
+            player = &world_state.player;
 
             // TODO(spike): this is terrible
     		bool hit_by_green = false;
@@ -2705,8 +2767,14 @@ void gameFrame(double delta_time, TickInput tick_input)
             else if (             		   hit_by_green             		  ) drawAsset(green_player_path,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
             else if (                            				   				   player->hit_by_blue) drawAsset(blue_player_path,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
             else drawAsset(player_path, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+
+            if (do_player_ghost) drawAsset(player_ghost_path, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, true));
+            if (do_pack_ghost)   drawAsset(pack_ghost_path,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, true));
+
+            do_player_ghost = false;
+            do_pack_ghost = false;
         }
-		if (world_state.pack.id   != -1) drawAsset(pack_path,   CUBE_3D, world_state.pack.position_norm,   PLAYER_SCALE, world_state.pack.rotation_quat);
+		if (world_state.pack.id != -1) drawAsset(pack_path, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat);
 
 		// draw sources 
 		for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)
