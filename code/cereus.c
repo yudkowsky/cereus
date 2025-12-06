@@ -2065,72 +2065,42 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                 if (input_direction == next_world_state.player.direction)
                 {
+                    // TODO(spike): move these outside
                     Entity* player = &next_world_state.player;
                     Entity* pack = &next_world_state.pack;
 
-                    // check if player is hit by laser from oppositeDirection(input_direction)
-                    bool hit_by_direction = false;
-                    switch (input_direction)
-                    {
-                        case NORTH: if (player->green_hit.south) hit_by_direction = true; break;
-                        case WEST:  if (player->green_hit.east)  hit_by_direction = true; break;
-                        case SOUTH: if (player->green_hit.north) hit_by_direction = true; break;
-                        case EAST:  if (player->green_hit.west)  hit_by_direction = true; break;
-                        case UP:    if (player->green_hit.down)  hit_by_direction = true; break;
-                        case DOWN:  if (player->green_hit.up)    hit_by_direction = true; break;
-                        default: break;
-                    }
-                    if (hit_by_direction)
+                    if (do_player_ghost)
                     {
                         // seek towards start of laser to get endpoint, and then go to the endpoint
                         // check if endpoint is valid before teleport (i.e, if pack can go there - if over air, teleport anyway, probably?)
-                        bool obstructed_tp_location = false;
 
-                        Int3 current_coords = player->coords; 
-                        Direction current_direction = input_direction;
-                        FOR(seek_index, MAX_LASER_TRAVEL_DISTANCE)
-                        {
-                            current_coords = getNextCoords(current_coords, current_direction);
-                            if (!intCoordsWithinLevelBounds(current_coords)) obstructed_tp_location = true;
-                            if (getTileType(current_coords) == MIRROR)
-                            {
-                                current_direction = getNextLaserDirectionMirror(current_direction, getTileDirection(current_coords));
-                                current_coords = getNextCoords(current_coords, current_direction);
-                                continue;
-                            }
-                            if (getTileType(current_coords) != NONE) break;
-                        }
-                        Int3 tp_coords = getNextCoords(current_coords, oppositeDirection(current_direction));
-
-                        if (!pack->pack_detached) 
-                        {
-                            TileType to_be_pack_tile = getTileType(getNextCoords(tp_coords, oppositeDirection(current_direction)));
-                            if (to_be_pack_tile != NONE && to_be_pack_tile != PLAYER) obstructed_tp_location = true;
-                        }
+						bool obstructed_tp_location = true;
+                        if (do_pack_ghost) obstructed_tp_location = false;
+                        else if (do_player_ghost && pack->pack_detached) obstructed_tp_location = false;
 
                         if (!obstructed_tp_location)
                         {
                             setTileType(NONE, player->coords);
                             setTileDirection(NORTH, player->coords);
                             zeroAnimations(1);
-                            player->coords = tp_coords;
-                            player->position_norm = intCoordsToNorm(tp_coords);
-                            player->direction = current_direction;
-                            player->rotation_quat = directionToQuaternion(current_direction, true);
-							setTileType(PLAYER, tp_coords);
-                            setTileDirection(current_direction, tp_coords);
+                            player->coords = player_ghost_coords;
+                            player->position_norm = intCoordsToNorm(player_ghost_coords);
+                            player->direction = player_ghost_direction;
+                            player->rotation_quat = directionToQuaternion(player_ghost_direction, true);
+							setTileType(PLAYER, player_ghost_coords);
+                            setTileDirection(player_ghost_direction, player_ghost_coords);
                             if (!pack->pack_detached)
                             {
-                                Int3 pack_coords = getNextCoords(tp_coords, oppositeDirection(current_direction));
+                                Int3 pack_coords = getNextCoords(player_ghost_coords, oppositeDirection(pack_ghost_direction));
                                 setTileType(NONE, pack->coords);
                                 setTileDirection(NORTH, pack->coords);
                                 zeroAnimations(2);
                                 pack->coords = pack_coords; 
                                 pack->position_norm = intCoordsToNorm(pack_coords);
-                                pack->direction = current_direction;
-                                pack->rotation_quat = directionToQuaternion(current_direction, true);
+                                pack->direction = pack_ghost_direction;
+                                pack->rotation_quat = directionToQuaternion(pack_ghost_direction, true);
                                 setTileType(PLAYER, pack_coords);
-                                setTileDirection(current_direction, pack_coords);
+                                setTileDirection(pack_ghost_direction, pack_coords);
                             }
                             time_until_input = SUCCESSFUL_TP_TIME;
                         }
@@ -2641,6 +2611,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                 do_pack_ghost = true;
             }
         }
+        else
+        {
+            do_player_ghost = false;
+            do_pack_ghost = false;
+        }
 
         // do animations
 		for (int animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
@@ -2770,9 +2745,6 @@ void gameFrame(double delta_time, TickInput tick_input)
 
             if (do_player_ghost) drawAsset(player_ghost_path, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, true));
             if (do_pack_ghost)   drawAsset(pack_ghost_path,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, true));
-
-            do_player_ghost = false;
-            do_pack_ghost = false;
         }
 		if (world_state.pack.id != -1) drawAsset(pack_path, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat);
 
