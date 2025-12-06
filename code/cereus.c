@@ -165,9 +165,10 @@ const int32 FAILED_TURN_ANIMATION_TIME = 6;
 const int32 FAILED_MOVE_ANIMATION_TIME = 6;
 const int32 PACK_TURN_HITBOX_PRIMARY_TIME = 3;
 const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 5;
-const int32 FRAMES_PER_FALLING_OBJECT = 6;
+const int32 FALLING_OBJECT_TIME_HITBOX = 3;
 const int32 PREVIOUSLY_ABOVE_GROUND_TIME = 6;
 const int32 IN_MOTION_TIME = 6;
+const int32 PLAYER_IN_MOTION_TIME = 8;
 const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
 
@@ -223,8 +224,8 @@ const char* const source_yellow_path  = "data/sprites/source-yellow.png";
 const char* const source_cyan_path    = "data/sprites/source-cyan.png";
 const char* const source_white_path   = "data/sprites/source-white.png";
 
-char* level_path = "w:/cereus/data/levels/red-tutorial.txt"; // absolute path required to modify original file. used by default if no command line input
-char* system_command_line = "red-tutorial";
+char* level_path = "w:/cereus/data/levels/testing.txt"; // absolute path required to modify original file. used by default if no command line input
+char* system_command_line = "testing";
 char level_path_buffer[256] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
@@ -246,6 +247,7 @@ Int3 pack_hitbox_coords_primary = {0};
 int32 pack_hitbox_timer_secondary = 0;
 Int3 pack_hitbox_coords_secondary = {0};
 int32 falling_object_timer = 0;
+int32 falling_player_timer = 0;
 int32 time_until_input = 0;
 
 // CAMERA STUFF
@@ -883,6 +885,11 @@ int32* find_next_free_in_animations(int32* next_free_array, int32 entity_id)
     next_free_array[0] = animation_index;
     next_free_array[1] = queue_time;
     return next_free_array;
+}
+
+void zeroAnimations(int32 id)
+{
+    FOR(animation_index, MAX_ANIMATION_COUNT) if (animations[animation_index].id == id) memset(&animations[animation_index], 0, sizeof(Animation));
 }
 
 // automatically queues if given object is already being moved around. assumes object is entity, because requires id - easily fixable if required. assumes max two animations on any given object (max one queued)
@@ -1666,9 +1673,6 @@ int32 getPushableStackSize(Int3 first_entity_coords)
 
 void doFallingObjects(bool do_animation)
 {
-	if (falling_object_timer-- != 0) return;
-    falling_object_timer = FRAMES_PER_FALLING_OBJECT / 2 ;
-
  	Entity* object_group_to_fall[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
 	FOR(to_fall_index, 3)
     {
@@ -2018,7 +2022,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press))
             {
 				// player made input this frame (may be unsuccessful)
-                falling_object_timer = 4;
+				falling_object_timer = FALLING_OBJECT_TIME_HITBOX;
 
                 Direction input_direction = 0;
                 Int3 next_player_coords = {0};
@@ -2064,11 +2068,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                         {
                             setTileType(NONE, player->coords);
                             setTileDirection(NORTH, player->coords);
+                            zeroAnimations(1);
                             player->coords = tp_coords;
                             player->position_norm = intCoordsToNorm(tp_coords);
                             player->direction = current_direction;
                             player->rotation_quat = directionToQuaternion(current_direction, true);
-                            // zero queued animations
 							setTileType(PLAYER, tp_coords);
                             setTileDirection(current_direction, tp_coords);
                             if (!pack->pack_detached)
@@ -2076,11 +2080,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 Int3 pack_coords = getNextCoords(tp_coords, oppositeDirection(current_direction));
                                 setTileType(NONE, pack->coords);
                                 setTileDirection(NORTH, pack->coords);
+                                zeroAnimations(2);
                                 pack->coords = pack_coords; 
                                 pack->position_norm = intCoordsToNorm(pack_coords);
                                 pack->direction = current_direction;
                                 pack->rotation_quat = directionToQuaternion(current_direction, true);
-                                // zero queued animations
                                 setTileType(PLAYER, pack_coords);
                                 setTileDirection(current_direction, pack_coords);
                             }
@@ -2150,7 +2154,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 move_player = true;
                             }
                         }
-                        if (move_player)
+						if (move_player)
                         {
                             // don't allow walking off edge
                             Int3 coords_below = getNextCoords(next_player_coords, DOWN);
@@ -2214,11 +2218,11 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                                     doStandardMovement(input_direction, next_tile, next_player_coords);
                                 }
-                                else doFailedWalkAnimations(next_player_coords);
+                                else if (next_world_state.player.in_motion == 0) doFailedWalkAnimations(next_player_coords);
                             }
                             if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME - PUSH_ANIMATION_TIME; // below we set time_until_input += PUSH, so we add on the difference here.
                         }
-                        else doFailedWalkAnimations(next_player_coords);
+						else if (next_world_state.player.in_motion == 0) doFailedWalkAnimations(next_player_coords);
                         time_until_input += PUSH_ANIMATION_TIME;
                     }
                 }
@@ -2497,15 +2501,18 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
         updateLaserBuffer();
 
-		if (!next_world_state.player.hit_by_blue) 
+        // falling objects
+		if (!next_world_state.player.hit_by_blue && falling_object_timer == 0) 
         {
+            falling_object_timer = FALL_ANIMATION_TIME;
             doFallingObjects(true);
             if (next_world_state.pack.pack_detached) doFallingPack(true);
         }
-
-        // player gets own special case
-        if (!next_world_state.player.hit_by_red && getTileType(getNextCoords(next_world_state.player.coords, DOWN)) == NONE) // no-grav if red
+        // falling player gets own special case
+        if (!next_world_state.player.hit_by_red && getTileType(getNextCoords(next_world_state.player.coords, DOWN)) == NONE && falling_player_timer == 0) // no-grav if red
         {
+            falling_player_timer = FALL_ANIMATION_TIME;
+            next_world_state.player.in_motion = FALL_ANIMATION_TIME + 1;
             Int3 new_coords = int3Add(next_world_state.player.coords, int3Negate(AXIS_Y)); 
             setTileType(PLAYER, new_coords);
             setTileType(NONE, next_world_state.player.coords);
@@ -2515,7 +2522,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                                          &next_world_state.player.position_norm,
                                          IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                          getEntityId(next_world_state.player.coords), FALL_ANIMATION_TIME);
-
             // get rid of pack if falling causes them to become decoupled
             if (getTileType(getNextCoords(next_world_state.player.coords, oppositeDirection(next_world_state.player.direction))) != PACK)
             {
@@ -2527,6 +2533,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                 doFallingPack(true);
             }
         }
+		if (falling_object_timer > 0) falling_object_timer--;
+        if (falling_player_timer > 0) falling_player_timer--;
 
         // reattach pack
         if (next_world_state.pack.pack_detached)
@@ -2577,6 +2585,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 }
             }
         }
+        if (next_world_state.player.in_motion > 0) next_world_state.player.in_motion--;
 
         // finished updating state
         world_state = next_world_state;
