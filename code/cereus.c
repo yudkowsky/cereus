@@ -179,9 +179,6 @@ const int32 FAILED_MOVE_ANIMATION_TIME = 8;
 const int32 PACK_TURN_HITBOX_PRIMARY_TIME = 3;
 const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 5;
 
-const int32 FALLING_TIME = 9; // FALL_ANIMATION_TIME + 1: one more than frames taken to fall; falling happens if this is equal to 1. if equal to 0, object is solidly on the ground.
-const int32 TIME_BEFORE_PLAYER_WALKS_INTO_SPACE_OF_FALLING_OBJECT = 8;
-
 const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
 
@@ -1255,7 +1252,7 @@ Push pushWithoutAnimation(Int3 coords, Direction direction)
 		if (entity->falling_time > 0) entities_to_push.pause_for_falling = true;
 		else
         {
-            if (getTileType(getNextCoords(prev_coords, DOWN)) != NONE) entity->previously_moving_sideways = PUSH_ANIMATION_TIME;
+            if (getTileType(getNextCoords(prev_coords, DOWN)) != NONE) entity->previously_moving_sideways = PUSH_ANIMATION_TIME + 1;
 
             if (entity_index == 0) 
             {
@@ -1791,7 +1788,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
     {
         Entity* entity_in_stack = getEntityPointer(current_start_coords);
         if (entity_in_stack->id == -1) return false; // should never happen, shouldn't have id == -1 in the middle of a stack somewhere
-        if (entity_in_stack->previously_moving_sideways > 0) return false; 
+        if (entity_in_stack->previously_moving_sideways > 1) return false; 
 
         if (entity_in_stack->falling_time == 0)
         {
@@ -1814,7 +1811,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         entity_in_stack->coords = current_end_coords;
         current_end_coords = current_start_coords;
         current_start_coords = getNextCoords(current_start_coords, UP);
-        entity_in_stack->falling_time = FALLING_TIME;
+        entity_in_stack->falling_time = FALL_ANIMATION_TIME + 1;
 	}
     return false;
 }
@@ -1966,7 +1963,7 @@ void doStandardMovement(Direction input_direction, TileType next_tile, Int3 next
     if (next_tile == MIRROR) animation_time = ROLL_ANIMATION_TIME;
     else 					 animation_time = PUSH_ANIMATION_TIME;
 
-    next_world_state.player.previously_moving_sideways = PUSH_ANIMATION_TIME;
+    next_world_state.player.previously_moving_sideways = PUSH_ANIMATION_TIME + 1;
 
     createInterpolationAnimation(intCoordsToNorm(next_world_state.player.coords), 
                                  intCoordsToNorm(next_player_coords), 
@@ -1977,7 +1974,7 @@ void doStandardMovement(Direction input_direction, TileType next_tile, Int3 next
     if (next_world_state.pack.pack_detached) setTileType(NONE, next_world_state.player.coords);
     else 
     {
-        next_world_state.pack.previously_moving_sideways = PUSH_ANIMATION_TIME;
+        next_world_state.pack.previously_moving_sideways = PUSH_ANIMATION_TIME + 1;
 
         setTileType(NONE, next_world_state.pack.coords);
         setTileType(PACK, next_world_state.player.coords);
@@ -2209,10 +2206,9 @@ void gameFrame(double delta_time, TickInput tick_input)
                             case CRYSTAL:
                             case PACK:
                             {
-                                if (entityInMotion(next_player_coords))
-                                {
-									pause_before_moving = true;
-                                }
+                                // check if item infront is moving (or if last frame of movement then allow because of animation timings, only if will be able to move onto that next tile)
+								Entity* entity = getEntityPointer(next_player_coords);	
+                                if (entityInMotion(next_player_coords) && !(entity->previously_moving_sideways == 1 && getTileType(getNextCoords(next_player_coords, DOWN)) != NONE)) pause_before_moving = true;
                                 else if (canPush(next_player_coords, input_direction)) 
                                 {
                                     Int3 current_stack_coords = next_player_coords;
@@ -2256,8 +2252,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             TileType tile_below = getTileType(coords_below);
                             if (isPushable(tile_below))
                             {
-                                Entity* entity = getEntityPointer(coords_below);
-                                if (FALLING_TIME - TIME_BEFORE_PLAYER_WALKS_INTO_SPACE_OF_FALLING_OBJECT < entity->falling_time) pause_before_moving = true;
+                                if (entityInMotion(coords_below)) pause_before_moving = true;
                             }
                             if (tile_below != NONE || next_world_state.player.hit_by_red)
                             {
