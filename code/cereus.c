@@ -160,7 +160,7 @@ double accumulator = 0;
 const float TAU = 6.2831853071f;
 
 const float SENSITIVITY = 0.005f;
-const float MOVE_STEP = 0.05f;
+const float MOVE_STEP = 0.075f;
 const Vec3 DEFAULT_SCALE = { 1.0f,  1.0f,  1.0f  };
 const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 const Vec3 ORTHOGONAL_LASER_SCALE = { 0.125f, 0.125f, 1.0f   };
@@ -182,13 +182,12 @@ const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 5;
 
 const int32 PREVIOUSLY_ABOVE_GROUND_TIME = 6; // PACK_TURN_HITBOX_SECONDARY_TIME + 1;
 
-const int32 OBJECT_FALLING_TIME = 8;
-const int32 PLAYER_FALLING_TIME = 8;
+const int32 FALLING_TIME = 8;
 
 const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
 
-const int32 TIME_BEFORE_PLAYER_WALKS_INTO_SPACE_OF_FALLING_OBJECT = 3; // must be less than or equal to OBJECT_FALLING_TIME
+const int32 TIME_BEFORE_PLAYER_WALKS_INTO_SPACE_OF_FALLING_OBJECT = 3; // must be less than or equal to FALLING_TIME
 const int32 LOGICAL_PAUSE_BEFORE_FALLING = 3;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
@@ -1738,6 +1737,48 @@ int32 getPushableStackSize(Int3 first_entity_coords)
     return stack_size;
 }
 
+// returns true iff object is able to fall as usual, but object collides with something instead.
+bool doFallingEntity(Entity* entity, bool do_animation)
+{
+    if (entity->id == -1) return false;
+	Int3 next_coords = getNextCoords(entity->coords, DOWN);
+    bool pack_hitbox_primary_obstructing   = false;
+    bool pack_hitbox_secondary_obstructing = false;
+    if (entity != &next_world_state.pack)
+    {
+        pack_hitbox_primary_obstructing   = (pack_hitbox_timer_primary   > 0) & int3IsEqual(pack_hitbox_coords_primary,   next_coords);
+        pack_hitbox_secondary_obstructing = (pack_hitbox_timer_secondary > 0) & int3IsEqual(pack_hitbox_coords_secondary, next_coords);
+	}
+    if (getTileType(next_coords) != NONE || pack_hitbox_primary_obstructing || pack_hitbox_secondary_obstructing) return true;
+
+    int32 stack_size = getPushableStackSize(entity->coords);
+    Int3 current_start_coords = entity->coords;
+    Int3 current_end_coords = next_coords; 
+    FOR(stack_fall_index, stack_size)
+    {
+        Entity* entity_in_stack = getEntityPointer(current_start_coords);
+        if (entity_in_stack->id == -1) continue; // should never happen, shouldn't have id == -1 in the middle of a stack somewhere
+        if (entity_in_stack->falling_time > 0) return false;
+        if (entity_in_stack->previously_above_ground > 0) return false; // TODO(spike): i think i need to fill this for pack (should only matter diagonal blue pushing off of edge case)
+        if (do_animation)
+        {
+            createInterpolationAnimation(intCoordsToNorm(current_start_coords),
+                                         intCoordsToNorm(current_end_coords),
+                                         &entity_in_stack->position_norm,
+                                         IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                         entity_in_stack->id, FALL_ANIMATION_TIME);
+        }
+        setTileType(getTileType(current_start_coords), current_end_coords); 
+        setTileType(NONE, current_start_coords);
+        entity_in_stack->coords = current_end_coords;
+        entity_in_stack->falling_time = FALLING_TIME;
+
+        current_end_coords = current_start_coords;
+        current_start_coords = getNextCoords(current_start_coords, UP);
+	}
+    return false;
+}
+
 void doFallingObjects(bool do_animation)
 {
  	Entity* object_group_to_fall[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
@@ -1746,71 +1787,9 @@ void doFallingObjects(bool do_animation)
 		Entity* group_pointer = object_group_to_fall[to_fall_index];
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            if (group_pointer[entity_index].id == -1) continue;
-            Int3 single_object_next_coords = getNextCoords(group_pointer[entity_index].coords, DOWN);
-            bool pack_hitbox_primary_obstructing   = (pack_hitbox_timer_primary   > 0) & int3IsEqual(pack_hitbox_coords_primary,   single_object_next_coords);
-        	bool pack_hitbox_secondary_obstructing = (pack_hitbox_timer_secondary > 0) & int3IsEqual(pack_hitbox_coords_secondary, single_object_next_coords);
-			if (getTileType(single_object_next_coords) != NONE || pack_hitbox_primary_obstructing || pack_hitbox_secondary_obstructing) continue;
-
-            int32 stack_size = getPushableStackSize(group_pointer[entity_index].coords);
-            Int3 current_start_coords = group_pointer[entity_index].coords;
-            Int3 current_end_coords = single_object_next_coords;
-            FOR(stack_fall_index, stack_size)
-            {
-                // move down
-                Entity* entity = getEntityPointer(current_start_coords);
-                if (entity->falling_time > 0) continue; // TODO(spike) or break;?
-                if (entity->previously_above_ground > 0) break;
-                if (do_animation)
-                {
-                    createInterpolationAnimation(intCoordsToNorm(current_start_coords), 
-                                                 intCoordsToNorm(current_end_coords),
-                                                 &entity->position_norm,
-                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                 getEntityId(current_start_coords), FALL_ANIMATION_TIME);
-                }
-                setTileType(getTileType(current_start_coords), current_end_coords);
-                setTileType(NONE, current_start_coords);
-                entity->coords = current_end_coords;
-                current_end_coords = current_start_coords;
-                current_start_coords = getNextCoords(current_start_coords, UP);
-                entity->falling_time = OBJECT_FALLING_TIME;
-            }
+            doFallingEntity(&group_pointer[entity_index], true);
         }
     }
-}
-
-// assumes pack is detached
-void doFallingPack(bool do_animation)
-{
-    if (next_world_state.pack.id == -1) return;
-	Int3 next_coords = getNextCoords(next_world_state.pack.coords, DOWN);
-    if (getTileType(next_coords) == NONE)
-    {
-        int32 stack_size = getPushableStackSize(next_world_state.pack.coords);
-
-        Int3 current_start_coords = next_world_state.pack.coords;
-        Int3 current_end_coords = next_coords; 
-        FOR(stack_fall_index, stack_size)
-        {
-            Entity* entity = &next_world_state.pack;
-            if (do_animation)
-            {
-                createInterpolationAnimation(intCoordsToNorm(current_start_coords),
-                                             intCoordsToNorm(current_end_coords),
-                                             &entity->position_norm,
-                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                             getEntityId(current_start_coords), FALL_ANIMATION_TIME);
-            }
-            setTileType(PACK, current_end_coords);
-            setTileType(NONE, current_start_coords);
-            entity->coords = current_end_coords;
-            entity->position_norm = intCoordsToNorm(entity->coords);
-            current_end_coords = current_start_coords;
-            current_start_coords = getNextCoords(current_start_coords, UP);
-            entity->falling_time = PLAYER_FALLING_TIME;
-        }
-	}
 }
 
 // HEAD ROTATION / MOVEMENT
@@ -2210,7 +2189,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             if (isPushable(tile_below))
                             {
                                 Entity* entity = getEntityPointer(coords_below);
-                                if (OBJECT_FALLING_TIME - TIME_BEFORE_PLAYER_WALKS_INTO_SPACE_OF_FALLING_OBJECT < entity->falling_time) pause_before_moving = true;
+                                if (FALLING_TIME - TIME_BEFORE_PLAYER_WALKS_INTO_SPACE_OF_FALLING_OBJECT < entity->falling_time) pause_before_moving = true;
                             }
                             if (tile_below != NONE || next_world_state.player.hit_by_red)
                             {
@@ -2246,9 +2225,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 if (try_to_roll) rollWithoutAnimation(next_player_coords, input_direction);
 
                                 bool animations_on = false;
-                                // TODO(spike): should these two calls be wrapped in !hit_by_blue? do testing here
-                                doFallingObjects(animations_on);
-                                if (next_world_state.pack.pack_detached) doFallingPack(animations_on);
+                                // TODO(spike): also needs testing
+                                if (!next_world_state.player.hit_by_blue)
+                                {
+                                    doFallingObjects(animations_on);
+                                    if (next_world_state.pack.pack_detached) doFallingEntity(&next_world_state.pack, animations_on);
+                                }
 
                                 doHeadMovement(input_direction, animations_on);
 
@@ -2557,21 +2539,50 @@ void gameFrame(double delta_time, TickInput tick_input)
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
         }
+
         updateLaserBuffer();
 
         // falling objects
-		if (!next_world_state.player.hit_by_blue) 
+		if (!next_world_state.player.hit_by_blue) doFallingObjects(true);
+
+		/*
+
+		have a counter on which the player falls
+        if pack not detached, check if this logical fall would make it detach. if so, it won't need to fall, but mark it as detached.
+        	if logical fall wouldn't make it detach, have it fall
+        else (pack detached), have it fall 
+
+		*/
+
+        if (!next_world_state.player.hit_by_red)
         {
-            doFallingObjects(true);
-            if (next_world_state.pack.pack_detached) 
+            // not red, pack only falls if player falls
+            if (!doFallingEntity(&next_world_state.player, true))
             {
-                doFallingPack(true);
+                if (doFallingEntity(&next_world_state.pack, true))
+                {
+                    // pack wants to fall but cannot
+                    next_world_state.pack.pack_detached = true;
+                }
             }
         }
+        else
+        {
+            // red, so pack only falls if is detached from player
+            if (next_world_state.pack.pack_detached)
+            {
+                doFallingEntity(&next_world_state.pack, true);
+            }
+        }
+
+
+
+
         // falling player gets own special case
+        /*
         if (!next_world_state.player.hit_by_red && getTileType(getNextCoords(next_world_state.player.coords, DOWN)) == NONE && falling_player_timer == 0) // no-grav if red
         {
-            next_world_state.player.falling_time = PLAYER_FALLING_TIME;
+            next_world_state.player.falling_time = FALLING_TIME;
             Int3 new_coords = int3Add(next_world_state.player.coords, int3Negate(AXIS_Y)); 
             setTileType(PLAYER, new_coords);
             setTileType(NONE, next_world_state.player.coords);
@@ -2589,10 +2600,10 @@ void gameFrame(double delta_time, TickInput tick_input)
             else
             {
                 // otherwise, pack would not become detached, so make pack fall also
-                doFallingPack(true);
+                //doFallingPack(true);
             }
         }
-        if (falling_player_timer > 0) falling_player_timer--;
+        */
 
         // reattach pack
         if (next_world_state.pack.pack_detached)
@@ -2696,7 +2707,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (entity_group[entity_index].falling_time > 0) 			entity_group[entity_index].falling_time--;
             }
         }
-        if (next_world_state.player.falling_time > 0) next_world_state.player.falling_time--;
+        if (pack->falling_time   > 0) pack->falling_time--; 
+        if (player->falling_time > 0) player->falling_time--;
 
         // finished updating state
         world_state = next_world_state;
@@ -2770,7 +2782,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             player = &world_state.player;
 
-            // TODO(spike): this is terrible
+            // TODO(spike): this is terrible (fix with shaders)
     		bool hit_by_green = false;
             if (player->green_hit.north || player->green_hit.west || player->green_hit.south || player->green_hit.east || player->green_hit.up || player->green_hit.down) hit_by_green = true;
             if      (player->hit_by_red && hit_by_green && player->hit_by_blue) drawAsset(white_player_path,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
