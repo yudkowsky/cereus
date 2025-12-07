@@ -182,7 +182,7 @@ const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 5;
 const int32 FALLING_TIME = 9; // FALL_ANIMATION_TIME + 1: one more than frames taken to fall; falling happens if this is equal to 1. if equal to 0, object is solidly on the ground.
 const int32 TIME_BEFORE_FIRST_LOGIC_FALL = 10;
 const int32 PREVIOUSLY_MOVING_SIDEWAYS_TIME = 6; // PACK_TURN_HITBOX_SECONDARY_TIME + 1;
-const int32 TIME_BEFORE_PLAYER_WALKS_INTO_SPACE_OF_FALLING_OBJECT = 3; // must be less than or equal to FALLING_TIME
+const int32 TIME_BEFORE_PLAYER_WALKS_INTO_SPACE_OF_FALLING_OBJECT = 8;
 
 const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
@@ -1804,6 +1804,13 @@ void handleFallingTimers(Entity* entity)
 	else if (entity->falling_time > 0) entity->falling_time--;
 }
 
+bool entityInMotion(Int3 coords)
+{
+	Entity* entity = getEntityPointer(coords);
+    if (entity->previously_moving_sideways != 0 || entity->falling_time != 0) return true;
+    else return false;
+}
+
 // HEAD ROTATION / MOVEMENT
 
 void doHeadRotation(bool clockwise)
@@ -2158,6 +2165,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         else if (tick_input.d_press) next_player_coords = int3Add(next_world_state.player.coords, AXIS_X);
                         TileType next_tile = getTileType(next_player_coords);
                         int32 stack_size = 1;
+                        bool pause_before_moving = false;
                         if (!isSource(next_tile)) switch (next_tile)
                         {
                             case VOID: break;
@@ -2167,7 +2175,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                             case CRYSTAL:
                             case PACK:
                             {
-                                if (canPush(next_player_coords, input_direction)) 
+                                if (entityInMotion(next_player_coords))
+                                {
+									pause_before_moving = true;
+                                }
+                                else if (canPush(next_player_coords, input_direction)) 
                                 {
                                     Int3 current_stack_coords = next_player_coords;
                                     FOR(stack_index, MAX_PUSHABLE_STACK_SIZE)
@@ -2208,7 +2220,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                             // don't allow walking off edge
                             Int3 coords_below = getNextCoords(next_player_coords, DOWN);
                             TileType tile_below = getTileType(coords_below);
-                            bool pause_before_moving = false;
                             if (isPushable(tile_below))
                             {
                                 Entity* entity = getEntityPointer(coords_below);
@@ -2284,6 +2295,13 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 else doFailedWalkAnimations(next_player_coords);
                             }
                             if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME - PUSH_ANIMATION_TIME; // below we set time_until_input += PUSH, so we add on the difference here.
+                        }
+						else if (pause_before_moving)
+                        {
+                            // pause by a frame and try again next frame (until object no longer in motion)
+                            pauseAnimation(PLAYER_ID, 1);
+                            if (!next_world_state.pack.pack_detached) pauseAnimation(PACK_ID, 1);
+                            time_until_input = 1 - PUSH_ANIMATION_TIME;
                         }
 						else doFailedWalkAnimations(next_player_coords);
                         time_until_input += PUSH_ANIMATION_TIME;
