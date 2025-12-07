@@ -73,7 +73,6 @@ typedef struct Entity
     int32 id;
     int32 previously_moving_sideways;
     int32 falling_time;
-    int32 first_fall_time;
 
     // for sources/lasers/other colored objects
     Color color;
@@ -96,6 +95,7 @@ typedef struct Animation
     Vec4* rotation_to_change;
     Vec3 position[32];
     Vec4 rotation[32];
+    bool falling;
 }
 Animation;
 
@@ -171,7 +171,7 @@ const int32 MOVE_ANIMATION_TIME = 9;
 const int32 PUSH_ANIMATION_TIME = 9;
 const int32 ROLL_ANIMATION_TIME = 18;
 const int32 TURN_ANIMATION_TIME = 9;
-const int32 FALL_ANIMATION_TIME = 8;
+const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
 
 const int32 FAILED_TURN_ANIMATION_TIME = 8;
 const int32 FAILED_MOVE_ANIMATION_TIME = 8;
@@ -180,8 +180,6 @@ const int32 PACK_TURN_HITBOX_PRIMARY_TIME = 3;
 const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 5;
 
 const int32 FALLING_TIME = 9; // FALL_ANIMATION_TIME + 1: one more than frames taken to fall; falling happens if this is equal to 1. if equal to 0, object is solidly on the ground.
-const int32 TIME_BEFORE_FIRST_LOGIC_FALL = 10;
-const int32 PREVIOUSLY_MOVING_SIDEWAYS_TIME = 6; // PACK_TURN_HITBOX_SECONDARY_TIME + 1;
 const int32 TIME_BEFORE_PLAYER_WALKS_INTO_SPACE_OF_FALLING_OBJECT = 8;
 
 const int32 SUCCESSFUL_TP_TIME = 8;
@@ -378,7 +376,7 @@ bool normCoordsWithinLevelBounds(Vec3 coords) {
 bool int3IsEqual(Int3 a, Int3 b) {
     return (a.x == b.x && a.y == b.y && a.z == b.z); }
 
-Vec3 vec3Negative(Vec3 coords) {
+Vec3 vec3Negate(Vec3 coords) {
     return (Vec3){ -coords.x, -coords.y, -coords.z }; }
 
 Int3 int3Negate(Int3 coords) {
@@ -919,7 +917,7 @@ void zeroAnimations(int32 id)
 }
 
 // automatically queues if given object is already being moved around. assumes object is entity, because requires id - easily fixable if required. assumes max two animations on any given object (max one queued)
-void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change, int32 entity_id, int32 animation_frames)
+void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change, int32 entity_id, int32 animation_frames, bool falling)
 {
     int32 next_free_array[2] = {0};
     int32* next_free_output = find_next_free_in_animations(next_free_array, entity_id);
@@ -928,6 +926,7 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
 
 	animations[animation_index].id = entity_id;
     animations[animation_index].frames_left = animation_frames + queue_time; 
+    animations[animation_index].falling = falling;
 
 	Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(position_b, position_a), (float)(1.0f/animation_frames));
 
@@ -1152,11 +1151,11 @@ void doFailedTurnAnimations(Direction input_direction, bool clockwise)
 {
     createFailedPlayerRotationAnimation(directionToQuaternion(next_world_state.player.direction, true),
                                         directionToQuaternion(input_direction, true),
-                                        &next_world_state.player.rotation_quat, 1);
+                                        &next_world_state.player.rotation_quat, PLAYER_ID);
     createFailedPackRotationAnimation(intCoordsToNorm(next_world_state.player.coords), 
                                       intCoordsToNorm(next_world_state.pack.coords), 
                                       oppositeDirection(input_direction), clockwise, 
-                                      &next_world_state.pack.position_norm, &next_world_state.pack.rotation_quat, 2);
+                                      &next_world_state.pack.position_norm, &next_world_state.pack.rotation_quat, PACK_ID);
 }
 
 void pauseAnimation(int32 id, int32 frame_count)
@@ -1166,6 +1165,43 @@ void pauseAnimation(int32 id, int32 frame_count)
 		if (animations[animation_index].id != id || animations[animation_index].frames_left == 0) continue;
         animations[animation_index].frames_left += frame_count;
     }
+}
+
+bool findFallingInAnimations(int32 id)
+{
+    FOR(animation_index, MAX_ANIMATION_COUNT)
+    {
+        if (animations[animation_index].id != id) continue;
+        if (animations[animation_index].falling == false) continue;
+        else return true;
+    }
+    return false;
+}
+
+// hard codes 10 frame animation total (forces logical pause = 2f)
+void createFirstFallAnimation(Vec3 start_position, Vec3* position_to_change, int32 entity_id)
+{
+    int32 next_free_array[2] = {0};
+    int32* next_free_output = find_next_free_in_animations(next_free_array, entity_id);
+    int32 animation_index = next_free_output[0];
+    int32 queue_time = next_free_output[1];
+
+    animations[animation_index].id = entity_id;
+    animations[animation_index].frames_left = 12 + queue_time; 
+    animations[animation_index].position_to_change = position_to_change;
+    animations[animation_index].falling = true;
+
+    FOR(first_8_frames_index, 8)
+    {
+        Vec3 delta_y = { 0.0f, -(float)(first_8_frames_index * first_8_frames_index) / 128, 0.0f };
+        animations[animation_index].position[12-first_8_frames_index] = vec3Add(start_position, delta_y);
+    }
+    FOR(next_4_frames_index, 4)
+    {
+        Vec3 delta_y = { 0.0f, -(float)(next_4_frames_index + 4) / 8, 0.0f };
+        animations[animation_index].position[12-(next_4_frames_index+8)] = vec3Add(start_position, delta_y);
+    }
+    animations[animation_index].position[0] = vec3Add(start_position, vec3Negate(intCoordsToNorm(AXIS_Y)));
 }
 
 // PUSH / ROLL ENTITES
@@ -1219,7 +1255,7 @@ Push pushWithoutAnimation(Int3 coords, Direction direction)
 		if (entity->falling_time > 0) entities_to_push.pause_for_falling = true;
 		else
         {
-            if (getTileType(getNextCoords(prev_coords, DOWN)) != NONE) entity->previously_moving_sideways = PREVIOUSLY_MOVING_SIDEWAYS_TIME;
+            if (getTileType(getNextCoords(prev_coords, DOWN)) != NONE) entity->previously_moving_sideways = PUSH_ANIMATION_TIME;
 
             if (entity_index == 0) 
             {
@@ -1254,7 +1290,7 @@ bool push(Int3 coords, Direction direction)
                                          intCoordsToNorm(entities_to_push.new_coords[anim_index]),
                                          &entities_to_push.pointer_to_entity[anim_index]->position_norm,
                                          IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                         id, PUSH_ANIMATION_TIME); 
+                                         id, PUSH_ANIMATION_TIME, false); 
         }
         return false;
     }
@@ -1755,31 +1791,30 @@ bool doFallingEntity(Entity* entity, bool do_animation)
     {
         Entity* entity_in_stack = getEntityPointer(current_start_coords);
         if (entity_in_stack->id == -1) return false; // should never happen, shouldn't have id == -1 in the middle of a stack somewhere
-        if (entity_in_stack->previously_moving_sideways> 0) return false; 
+        if (entity_in_stack->previously_moving_sideways > 0) return false; 
 
-        if (entity_in_stack->first_fall_time > 0)
+        if (entity_in_stack->falling_time == 0)
         {
-            entity_in_stack->falling_time = FALLING_TIME;
-            entity_in_stack->first_fall_time--;
-            return false;
+            if (do_animation) createFirstFallAnimation(intCoordsToNorm(current_start_coords), &entity_in_stack->position_norm, entity_in_stack->id);
         }
-
-        if (entity_in_stack->falling_time > 1) return false;
-        else entity_in_stack->falling_time = FALLING_TIME;
-
-        if (do_animation)
+        else
         {
-            createInterpolationAnimation(intCoordsToNorm(current_start_coords),
-                                         intCoordsToNorm(current_end_coords),
-                                         &entity_in_stack->position_norm,
-                                         IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                         entity_in_stack->id, FALL_ANIMATION_TIME);
+            if (entity_in_stack->falling_time != 1) return false;
+            if (do_animation)
+            {
+            	createInterpolationAnimation(intCoordsToNorm(current_start_coords),
+                                             intCoordsToNorm(current_end_coords),
+                                             &entity_in_stack->position_norm,
+                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                             entity_in_stack->id, FALL_ANIMATION_TIME, true);
+            }
         }
         setTileType(getTileType(current_start_coords), current_end_coords); 
         setTileType(NONE, current_start_coords);
         entity_in_stack->coords = current_end_coords;
         current_end_coords = current_start_coords;
         current_start_coords = getNextCoords(current_start_coords, UP);
+        entity_in_stack->falling_time = FALLING_TIME;
 	}
     return false;
 }
@@ -1799,9 +1834,8 @@ void doFallingObjects(bool do_animation)
 
 void handleFallingTimers(Entity* entity)
 {
-    if (entity->previously_moving_sideways> 0) entity->previously_moving_sideways--;
-	if (entity->falling_time == 0 && entity->first_fall_time == 0) entity->first_fall_time = TIME_BEFORE_FIRST_LOGIC_FALL;
-	else if (entity->falling_time > 0) entity->falling_time--;
+    if (entity->previously_moving_sideways > 0) entity->previously_moving_sideways--;
+	if (entity->falling_time > 0) entity->falling_time--;
 }
 
 bool entityInMotion(Int3 coords)
@@ -1864,7 +1898,7 @@ void doHeadRotation(bool clockwise)
                                      				  directionToQuaternion(current_direction, true), 
                                      				  directionToQuaternion(next_direction, true), 
                                      				  &entity->rotation_quat,
-                                     				  id, TURN_ANIMATION_TIME); 
+                                     				  id, TURN_ANIMATION_TIME, false); 
         else 
         {
 			Vec4 start = entity->rotation_quat;
@@ -1873,7 +1907,7 @@ void doHeadRotation(bool clockwise)
             Vec4 end = quaternionNormalize(quaternionMultiply(delta, start));
             createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0,
                     					 start, end, &entity->rotation_quat,
-                                         id, TURN_ANIMATION_TIME);
+                                         id, TURN_ANIMATION_TIME, false);
         }
         
 		setTileDirection(next_direction, current_tile_coords);
@@ -1932,18 +1966,18 @@ void doStandardMovement(Direction input_direction, TileType next_tile, Int3 next
     if (next_tile == MIRROR) animation_time = ROLL_ANIMATION_TIME;
     else 					 animation_time = PUSH_ANIMATION_TIME;
 
-    next_world_state.player.previously_moving_sideways = PREVIOUSLY_MOVING_SIDEWAYS_TIME;
+    next_world_state.player.previously_moving_sideways = PUSH_ANIMATION_TIME;
 
     createInterpolationAnimation(intCoordsToNorm(next_world_state.player.coords), 
                                  intCoordsToNorm(next_player_coords), 
                                  &next_world_state.player.position_norm,
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                 1, animation_time); // passing 1 as id for player 
+                                 PLAYER_ID, animation_time, false); 
     // move pack also
     if (next_world_state.pack.pack_detached) setTileType(NONE, next_world_state.player.coords);
     else 
     {
-        next_world_state.pack.previously_moving_sideways = PREVIOUSLY_MOVING_SIDEWAYS_TIME;
+        next_world_state.pack.previously_moving_sideways = PUSH_ANIMATION_TIME;
 
         setTileType(NONE, next_world_state.pack.coords);
         setTileType(PACK, next_world_state.player.coords);
@@ -1951,7 +1985,7 @@ void doStandardMovement(Direction input_direction, TileType next_tile, Int3 next
                                      intCoordsToNorm(next_world_state.player.coords),
                                      &next_world_state.pack.position_norm,
                                      IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                     2, animation_time);
+                                     PACK_ID, animation_time, false);
         next_world_state.pack.coords = next_world_state.player.coords;
     }
     next_world_state.player.coords = next_player_coords;
@@ -2312,7 +2346,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (input_direction != oppositeDirection(next_world_state.player.direction)) // check if turning (as opposed to trying to reverse)
                     {
                         Direction polarity_direction = NORTH;
-                        int clockwise = false;
+                        int32 clockwise = false;
                         int32 clockwise_calculation = next_world_state.player.direction - input_direction;
                         if (clockwise_calculation == -1 || clockwise_calculation == 3) clockwise = true;
 
@@ -2325,7 +2359,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                          directionToQuaternion(next_world_state.player.direction, true), 
                                                          directionToQuaternion(input_direction, true), 
                                                          &next_world_state.player.rotation_quat,
-                                                         1, TURN_ANIMATION_TIME); 
+                                                         1, TURN_ANIMATION_TIME, false); 
                             next_world_state.player.direction = input_direction;
                             setTileDirection(next_world_state.player.direction, next_world_state.player.coords);
 
@@ -2404,7 +2438,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                              directionToQuaternion(next_world_state.player.direction, true), 
                                                              directionToQuaternion(input_direction, true), 
                                                              &next_world_state.player.rotation_quat,
-                                                             1, TURN_ANIMATION_TIME); 
+                                                             1, TURN_ANIMATION_TIME, false); 
                                 next_world_state.player.direction = input_direction;
                                 setTileDirection(next_world_state.player.direction, next_world_state.player.coords);
 
