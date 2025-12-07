@@ -71,9 +71,7 @@ typedef struct Entity
     Direction direction;
     Vec4 rotation_quat;
     int32 id;
-
-    // for pushables
-    int32 previously_above_ground;
+    int32 previously_moving_sideways;
     int32 falling_time;
 
     // for sources/lasers/other colored objects
@@ -180,9 +178,9 @@ const int32 FAILED_MOVE_ANIMATION_TIME = 8;
 const int32 PACK_TURN_HITBOX_PRIMARY_TIME = 3;
 const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 5;
 
-const int32 PREVIOUSLY_ABOVE_GROUND_TIME = 6; // PACK_TURN_HITBOX_SECONDARY_TIME + 1;
+const int32 PREVIOUSLY_MOVING_SIDEWAYS_TIME = 6; // PACK_TURN_HITBOX_SECONDARY_TIME + 1;
 
-const int32 FALLING_TIME = 8;
+const int32 FALLING_TIME = 9; // one more than frames taken to fall; falling happens if this is equal to 1. if equal to 0, object is solidly on the ground.
 
 const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
@@ -1222,7 +1220,7 @@ Push pushWithoutAnimation(Int3 coords, Direction direction)
 		if (entity->falling_time > 0) entities_to_push.pause_for_falling = true;
 		else
         {
-            if (getTileType(getNextCoords(prev_coords, DOWN)) != NONE) entity->previously_above_ground = PREVIOUSLY_ABOVE_GROUND_TIME;
+            if (getTileType(getNextCoords(prev_coords, DOWN)) != NONE) entity->previously_moving_sideways = PREVIOUSLY_MOVING_SIDEWAYS_TIME;
 
             if (entity_index == 0) 
             {
@@ -1758,8 +1756,8 @@ bool doFallingEntity(Entity* entity, bool do_animation)
     {
         Entity* entity_in_stack = getEntityPointer(current_start_coords);
         if (entity_in_stack->id == -1) continue; // should never happen, shouldn't have id == -1 in the middle of a stack somewhere
-        if (entity_in_stack->falling_time > 0) return false;
-        if (entity_in_stack->previously_above_ground > 0) return false; // TODO(spike): i think i need to fill this for pack (should only matter diagonal blue pushing off of edge case)
+        if (entity_in_stack->falling_time > 1) return false;
+        if (entity_in_stack->previously_moving_sideways> 0) return false; 
         if (do_animation)
         {
             createInterpolationAnimation(intCoordsToNorm(current_start_coords),
@@ -1787,7 +1785,7 @@ void doFallingObjects(bool do_animation)
 		Entity* group_pointer = object_group_to_fall[to_fall_index];
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            doFallingEntity(&group_pointer[entity_index], true);
+            doFallingEntity(&group_pointer[entity_index], do_animation);
         }
     }
 }
@@ -1909,10 +1907,12 @@ void doStandardMovement(Direction input_direction, TileType next_tile, Int3 next
 
     doHeadMovement(input_direction, true);
 
-    // standard movement
     int32 animation_time = 0;
     if (next_tile == MIRROR) animation_time = ROLL_ANIMATION_TIME;
     else 					 animation_time = PUSH_ANIMATION_TIME;
+
+    next_world_state.player.previously_moving_sideways = PREVIOUSLY_MOVING_SIDEWAYS_TIME;
+
     createInterpolationAnimation(intCoordsToNorm(next_world_state.player.coords), 
                                  intCoordsToNorm(next_player_coords), 
                                  &next_world_state.player.position_norm,
@@ -1922,6 +1922,8 @@ void doStandardMovement(Direction input_direction, TileType next_tile, Int3 next
     if (next_world_state.pack.pack_detached) setTileType(NONE, next_world_state.player.coords);
     else 
     {
+        next_world_state.pack.previously_moving_sideways = PREVIOUSLY_MOVING_SIDEWAYS_TIME;
+
         setTileType(NONE, next_world_state.pack.coords);
         setTileType(PACK, next_world_state.player.coords);
         createInterpolationAnimation(intCoordsToNorm(next_world_state.pack.coords),
@@ -2065,7 +2067,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 camera = temp_camera;
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
-            if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press))
+            if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && next_world_state.player.falling_time == 0)
             {
 				// player made input this frame (may be unsuccessful)
                 Direction input_direction = 0;
@@ -2542,28 +2544,28 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         updateLaserBuffer();
 
-        // falling objects
+        // falling logic
 		if (!next_world_state.player.hit_by_blue) doFallingObjects(true);
-
-		/*
-
-		have a counter on which the player falls
-        if pack not detached, check if this logical fall would make it detach. if so, it won't need to fall, but mark it as detached.
-        	if logical fall wouldn't make it detach, have it fall
-        else (pack detached), have it fall 
-
-		*/
 
         if (!next_world_state.player.hit_by_red)
         {
-            // not red, pack only falls if player falls
-            if (!doFallingEntity(&next_world_state.player, true))
+            if (!next_world_state.pack.pack_detached)
             {
-                if (doFallingEntity(&next_world_state.pack, true))
+                // not red and pack attached: player always falls. pack only falls if player falls
+                if (!doFallingEntity(&next_world_state.player, true))
                 {
-                    // pack wants to fall but cannot
-                    next_world_state.pack.pack_detached = true;
+                    if (doFallingEntity(&next_world_state.pack, true))
+                    {
+                        // pack wants to fall but cannot: we already know player can fall, so pack will become unattached
+                        next_world_state.pack.pack_detached = true;
+                    }
                 }
+            }
+            else
+            {
+                // not red and pack not attached, so pack and player both always fall
+                doFallingEntity(&next_world_state.player, true);
+				doFallingEntity(&next_world_state.pack, true);
             }
         }
         else
@@ -2574,36 +2576,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 doFallingEntity(&next_world_state.pack, true);
             }
         }
-
-
-
-
-        // falling player gets own special case
-        /*
-        if (!next_world_state.player.hit_by_red && getTileType(getNextCoords(next_world_state.player.coords, DOWN)) == NONE && falling_player_timer == 0) // no-grav if red
-        {
-            next_world_state.player.falling_time = FALLING_TIME;
-            Int3 new_coords = int3Add(next_world_state.player.coords, int3Negate(AXIS_Y)); 
-            setTileType(PLAYER, new_coords);
-            setTileType(NONE, next_world_state.player.coords);
-            next_world_state.player.coords = new_coords;
-            createInterpolationAnimation(intCoordsToNorm(int3Add(new_coords, AXIS_Y)), 
-                                         intCoordsToNorm(new_coords), 
-                                         &next_world_state.player.position_norm,
-                                         IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                         getEntityId(next_world_state.player.coords), FALL_ANIMATION_TIME);
-            // get rid of pack if falling causes them to become decoupled
-            if (getTileType(getNextCoords(next_world_state.player.coords, oppositeDirection(next_world_state.player.direction))) != PACK)
-            {
-                next_world_state.pack.pack_detached = true;
-            }
-            else
-            {
-                // otherwise, pack would not become detached, so make pack fall also
-                //doFallingPack(true);
-            }
-        }
-        */
 
         // reattach pack
         if (next_world_state.pack.pack_detached)
@@ -2696,19 +2668,21 @@ void gameFrame(double delta_time, TickInput tick_input)
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
 
-        // decrement previously_above_ground and in_motion for all pushables
+        // decrement previously_moving_sideways and falling_time for all pushables (and then pack+player)
         Entity* falling_entity_groups[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
         FOR(falling_object_index, 3)
         {
             Entity* entity_group = falling_entity_groups[falling_object_index];
             FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
             {
-                if (entity_group[entity_index].previously_above_ground > 0) entity_group[entity_index].previously_above_ground--;
-                if (entity_group[entity_index].falling_time > 0) 			entity_group[entity_index].falling_time--;
+                if (entity_group[entity_index].previously_moving_sideways> 0) entity_group[entity_index].previously_moving_sideways--;
+                if (entity_group[entity_index].falling_time > 0) entity_group[entity_index].falling_time--;
             }
         }
-        if (pack->falling_time   > 0) pack->falling_time--; 
         if (player->falling_time > 0) player->falling_time--;
+        if (pack->falling_time   > 0) pack->falling_time--; 
+        if (player->previously_moving_sideways> 0) player->previously_moving_sideways--;
+        if (pack->previously_moving_sideways> 0) pack->previously_moving_sideways--; 
 
         // finished updating state
         world_state = next_world_state;
