@@ -74,7 +74,7 @@ typedef struct Entity
 
     // for pushables
     int32 previously_above_ground;
-    int32 in_motion;
+    int32 falling_time;
 
     // for sources/lasers/other colored objects
     Color color;
@@ -129,6 +129,7 @@ RaycastHit;
  
 typedef struct Push 
 {
+    bool pause_for_falling;
     Int3 previous_coords[32];
     Int3 new_coords[32];
     TileType type[32];
@@ -172,31 +173,41 @@ const int32 PUSH_ANIMATION_TIME = 9;
 const int32 ROLL_ANIMATION_TIME = 18;
 const int32 TURN_ANIMATION_TIME = 9;
 const int32 FALL_ANIMATION_TIME = 6;
+
 const int32 FAILED_TURN_ANIMATION_TIME = 6;
 const int32 FAILED_MOVE_ANIMATION_TIME = 6;
+
 const int32 PACK_TURN_HITBOX_PRIMARY_TIME = 3;
 const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 5;
-const int32 FALLING_OBJECT_TIME_HITBOX = 3;
-const int32 PREVIOUSLY_ABOVE_GROUND_TIME = 6;
-const int32 IN_MOTION_TIME = 6;
-const int32 PLAYER_IN_MOTION_TIME = 8;
+
+const int32 PREVIOUSLY_ABOVE_GROUND_TIME = 6; // PACK_TURN_HITBOX_SECONDARY_TIME + 1;
+
+const int32 OBJECT_FALLING_TIME = 10;
+const int32 PLAYER_FALLING_TIME = 8;
+
 const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
+
+const int32 TIME_BEFORE_PLAYER_WALKS_INTO_SPACE_OF_FALLING_OBJECT = 3; // must be less than or equal to OBJECT_FALLING_TIME
+const int32 LOGICAL_PAUSE_BEFORE_FALLING = 3;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
 const int32 MAX_ANIMATION_COUNT = 32;
 const int32 MAX_LASER_TRAVEL_DISTANCE = 48;
 const int32 MAX_PSEUDO_SOURCE_COUNT = 32;
-const int32 UNDO_BUFFER_SIZE = 256; // remember to modify undo_buffer
 const int32 MAX_PUSHABLE_STACK_SIZE = 32;
 
+const int32 UNDO_BUFFER_SIZE = 256; // remember to modify undo_buffer
+ 
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
 const Int3 AXIS_Z = { 0, 0, 1 };
 const Vec3 IDENTITY_TRANSLATION = { 0, 0, 0 };
 const Vec4 IDENTITY_QUATERNION  = { 0, 0, 0, 1 };
 
+const int32 PLAYER_ID = 1;
+const int32 PACK_ID   = 2;
 const int32 ID_OFFSET_BOX     = 100 * 1;
 const int32 ID_OFFSET_MIRROR  = 100 * 2;
 const int32 ID_OFFSET_CRYSTAL = 100 * 3;
@@ -260,7 +271,6 @@ int32 pack_hitbox_timer_primary = 0;
 Int3 pack_hitbox_coords_primary = {0};
 int32 pack_hitbox_timer_secondary = 0;
 Int3 pack_hitbox_coords_secondary = {0};
-int32 falling_object_timer = 0;
 int32 falling_player_timer = 0;
 int32 time_until_input = 0;
 bool do_player_ghost = false;
@@ -1153,6 +1163,15 @@ void doFailedTurnAnimations(Direction input_direction, bool clockwise)
                                       &next_world_state.pack.position_norm, &next_world_state.pack.rotation_quat, 2);
 }
 
+void pauseAnimation(int32 id, int32 frame_count)
+{
+    FOR(animation_index, MAX_ANIMATION_COUNT)
+    {
+		if (animations[animation_index].id != id || animations[animation_index].frames_left == 0) continue;
+        animations[animation_index].frames_left += frame_count;
+    }
+}
+
 // PUSH / ROLL ENTITES
 
 bool isPushable(TileType tile)
@@ -1201,31 +1220,47 @@ Push pushWithoutAnimation(Int3 coords, Direction direction)
         Int3 new_coords = entities_to_push.new_coords[entity_index];
         TileType tile_type = entities_to_push.type[entity_index];
 
-		if (getTileType(getNextCoords(prev_coords, DOWN)) != NONE) entity->previously_above_ground = PREVIOUSLY_ABOVE_GROUND_TIME;
-
-        if (entity_index == 0) 
+		if (entity->falling_time > 0) entities_to_push.pause_for_falling = true;
+		else
         {
-            setTileType(NONE, prev_coords);
-            setTileDirection(NORTH, prev_coords);
+            if (getTileType(getNextCoords(prev_coords, DOWN)) != NONE) entity->previously_above_ground = PREVIOUSLY_ABOVE_GROUND_TIME;
+
+            if (entity_index == 0) 
+            {
+                setTileType(NONE, prev_coords);
+                setTileDirection(NORTH, prev_coords);
+            }
+            setTileType(tile_type, new_coords);
+            setTileDirection(entity->direction, new_coords);
+            entity->coords = new_coords;
         }
-        setTileType(tile_type, new_coords);
-        setTileDirection(entity->direction, new_coords);
-		entity->coords = new_coords;
     }
     return entities_to_push;
 }
 
-void push(Int3 coords, Direction direction)
+bool push(Int3 coords, Direction direction)
 {
     Push entities_to_push = pushWithoutAnimation(coords, direction);
-    for (int anim_index = 0; anim_index < entities_to_push.count; anim_index++)
+
+	if (entities_to_push.pause_for_falling)
     {
-        int32 id = getEntityId(entities_to_push.new_coords[anim_index]);
-        createInterpolationAnimation(intCoordsToNorm(entities_to_push.previous_coords[anim_index]),
-                                     intCoordsToNorm(entities_to_push.new_coords[anim_index]),
-                                     &entities_to_push.pointer_to_entity[anim_index]->position_norm,
-                                     IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                     id, PUSH_ANIMATION_TIME); 
+        pauseAnimation(PLAYER_ID, 1);
+        if (!next_world_state.pack.pack_detached) pauseAnimation(PACK_ID, 1);
+        time_until_input = 1 - PUSH_ANIMATION_TIME;
+        return true;
+    }
+	else
+    {
+        for (int anim_index = 0; anim_index < entities_to_push.count; anim_index++)
+        {
+            int32 id = getEntityId(entities_to_push.new_coords[anim_index]);
+            createInterpolationAnimation(intCoordsToNorm(entities_to_push.previous_coords[anim_index]),
+                                         intCoordsToNorm(entities_to_push.new_coords[anim_index]),
+                                         &entities_to_push.pointer_to_entity[anim_index]->position_norm,
+                                         IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                         id, PUSH_ANIMATION_TIME); 
+        }
+        return false;
     }
 }
 
@@ -1738,7 +1773,7 @@ void doFallingObjects(bool do_animation)
                     entity->coords = current_end_coords;
                     current_end_coords = current_start_coords;
                     current_start_coords = getNextCoords(current_start_coords, UP);
-                    entity->in_motion = IN_MOTION_TIME;
+                    entity->falling_time = OBJECT_FALLING_TIME;
                 }
             }
         }
@@ -1773,7 +1808,7 @@ void doFallingPack(bool do_animation)
             entity->position_norm = intCoordsToNorm(entity->coords);
             current_end_coords = current_start_coords;
             current_start_coords = getNextCoords(current_start_coords, UP);
-            entity->in_motion = IN_MOTION_TIME;
+            entity->falling_time = PLAYER_FALLING_TIME;
         }
 	}
 }
@@ -2054,8 +2089,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press))
             {
 				// player made input this frame (may be unsuccessful)
-				falling_object_timer = FALLING_OBJECT_TIME_HITBOX;
-
                 Direction input_direction = 0;
                 Int3 next_player_coords = {0};
                 if 		(tick_input.w_press) input_direction = NORTH; 
@@ -2082,7 +2115,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         {
                             setTileType(NONE, player->coords);
                             setTileDirection(NORTH, player->coords);
-                            zeroAnimations(1);
+                            zeroAnimations(PLAYER_ID);
                             player->coords = player_ghost_coords;
                             player->position_norm = intCoordsToNorm(player_ghost_coords);
                             player->direction = player_ghost_direction;
@@ -2094,7 +2127,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 Int3 pack_coords = getNextCoords(player_ghost_coords, oppositeDirection(pack_ghost_direction));
                                 setTileType(NONE, pack->coords);
                                 setTileDirection(NORTH, pack->coords);
-                                zeroAnimations(2);
+                                zeroAnimations(PACK_ID);
                                 pack->coords = pack_coords; 
                                 pack->position_norm = intCoordsToNorm(pack_coords);
                                 pack->direction = pack_ghost_direction;
@@ -2173,28 +2206,39 @@ void gameFrame(double delta_time, TickInput tick_input)
                             // don't allow walking off edge
                             Int3 coords_below = getNextCoords(next_player_coords, DOWN);
                             TileType tile_below = getTileType(coords_below);
-                            bool object_below_in_motion = false;
+                            bool pause_before_moving = false;
                             if (isPushable(tile_below))
                             {
                                 Entity* entity = getEntityPointer(coords_below);
-                                if (entity->in_motion) object_below_in_motion = true;
+                                if (OBJECT_FALLING_TIME - TIME_BEFORE_PLAYER_WALKS_INTO_SPACE_OF_FALLING_OBJECT < entity->falling_time) pause_before_moving = true;
                             }
-                            if ((tile_below != NONE && !object_below_in_motion) || next_world_state.player.hit_by_red)
+                            if (tile_below != NONE || next_world_state.player.hit_by_red)
                             {
-                                if (try_to_push) 	  
+                                if (!pause_before_moving)
                                 {
-                                    Int3 stack_entity_coords = next_player_coords;
-                                    FOR(stack_index, stack_size)
+                                    int32 pause = false;
+                                    if (try_to_push) 	  
                                     {
-                                        push(stack_entity_coords, input_direction);
-                                        stack_entity_coords = getNextCoords(stack_entity_coords, UP);
+                                        Int3 stack_entity_coords = next_player_coords;
+                                        FOR(stack_index, stack_size)
+                                        {
+                                            pause = push(stack_entity_coords, input_direction);
+                                            stack_entity_coords = getNextCoords(stack_entity_coords, UP);
+                                        }
                                     }
-                                }
-                                else if (try_to_roll) roll(next_player_coords, input_direction);
+                                    else if (try_to_roll) roll(next_player_coords, input_direction);
 
-                                doStandardMovement(input_direction, next_tile, next_player_coords);
+                                    if (!pause) doStandardMovement(input_direction, next_tile, next_player_coords);
+                                }
+                                else
+                                {
+                                    // pause by a frame and try again next frame (until object no longer in motion)
+                                    pauseAnimation(PLAYER_ID, 1);
+                                    if (!next_world_state.pack.pack_detached) pauseAnimation(PACK_ID, 1);
+                                    time_until_input = 1 - PUSH_ANIMATION_TIME;
+                                }
                             }
-                            else // speculative movement over gap, with the hopes that we will be red
+                            else
                             {
                                 WorldState world_state_savestate = next_world_state;
 
@@ -2232,11 +2276,11 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                                     doStandardMovement(input_direction, next_tile, next_player_coords);
                                 }
-                                else if (next_world_state.player.in_motion == 0) doFailedWalkAnimations(next_player_coords);
+                                else doFailedWalkAnimations(next_player_coords);
                             }
                             if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME - PUSH_ANIMATION_TIME; // below we set time_until_input += PUSH, so we add on the difference here.
                         }
-						else if (next_world_state.player.in_motion == 0) doFailedWalkAnimations(next_player_coords);
+						else doFailedWalkAnimations(next_player_coords);
                         time_until_input += PUSH_ANIMATION_TIME;
                     }
                 }
@@ -2516,17 +2560,18 @@ void gameFrame(double delta_time, TickInput tick_input)
         updateLaserBuffer();
 
         // falling objects
-		if (!next_world_state.player.hit_by_blue && falling_object_timer == 0) 
+		if (!next_world_state.player.hit_by_blue) 
         {
-            falling_object_timer = FALL_ANIMATION_TIME;
             doFallingObjects(true);
-            if (next_world_state.pack.pack_detached) doFallingPack(true);
+            if (next_world_state.pack.pack_detached) 
+            {
+                doFallingPack(true);
+            }
         }
         // falling player gets own special case
         if (!next_world_state.player.hit_by_red && getTileType(getNextCoords(next_world_state.player.coords, DOWN)) == NONE && falling_player_timer == 0) // no-grav if red
         {
-            falling_player_timer = FALL_ANIMATION_TIME;
-            next_world_state.player.in_motion = FALL_ANIMATION_TIME + 1;
+            next_world_state.player.falling_time = PLAYER_FALLING_TIME;
             Int3 new_coords = int3Add(next_world_state.player.coords, int3Negate(AXIS_Y)); 
             setTileType(PLAYER, new_coords);
             setTileType(NONE, next_world_state.player.coords);
@@ -2547,7 +2592,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 doFallingPack(true);
             }
         }
-		if (falling_object_timer > 0) falling_object_timer--;
         if (falling_player_timer > 0) falling_player_timer--;
 
         // reattach pack
@@ -2649,15 +2693,10 @@ void gameFrame(double delta_time, TickInput tick_input)
             FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
             {
                 if (entity_group[entity_index].previously_above_ground > 0) entity_group[entity_index].previously_above_ground--;
-                if (entity_group[entity_index].in_motion > 0)
-                {
-                    // if above ground, stop
-                    if (getTileType(getNextCoords(entity_group[entity_index].coords, DOWN)) != NONE) entity_group[entity_index].in_motion = 0;
-                    else entity_group[entity_index].in_motion--;
-                }
+                if (entity_group[entity_index].falling_time > 0) 			entity_group[entity_index].falling_time--;
             }
         }
-        if (next_world_state.player.in_motion > 0) next_world_state.player.in_motion--;
+        if (next_world_state.player.falling_time > 0) next_world_state.player.falling_time--;
 
         // finished updating state
         world_state = next_world_state;
