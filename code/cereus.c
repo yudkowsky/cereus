@@ -182,7 +182,7 @@ const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 5;
 
 const int32 PREVIOUSLY_ABOVE_GROUND_TIME = 6; // PACK_TURN_HITBOX_SECONDARY_TIME + 1;
 
-const int32 OBJECT_FALLING_TIME = 10;
+const int32 OBJECT_FALLING_TIME = 8;
 const int32 PLAYER_FALLING_TIME = 8;
 
 const int32 SUCCESSFUL_TP_TIME = 8;
@@ -1750,31 +1750,31 @@ void doFallingObjects(bool do_animation)
             Int3 single_object_next_coords = getNextCoords(group_pointer[entity_index].coords, DOWN);
             bool pack_hitbox_primary_obstructing   = (pack_hitbox_timer_primary   > 0) & int3IsEqual(pack_hitbox_coords_primary,   single_object_next_coords);
         	bool pack_hitbox_secondary_obstructing = (pack_hitbox_timer_secondary > 0) & int3IsEqual(pack_hitbox_coords_secondary, single_object_next_coords);
-			if (getTileType(single_object_next_coords) == NONE && !pack_hitbox_primary_obstructing && !pack_hitbox_secondary_obstructing) 
+			if (getTileType(single_object_next_coords) != NONE || pack_hitbox_primary_obstructing || pack_hitbox_secondary_obstructing) continue;
+
+            int32 stack_size = getPushableStackSize(group_pointer[entity_index].coords);
+            Int3 current_start_coords = group_pointer[entity_index].coords;
+            Int3 current_end_coords = single_object_next_coords;
+            FOR(stack_fall_index, stack_size)
             {
-				int32 stack_size = getPushableStackSize(group_pointer[entity_index].coords);
-                Int3 current_start_coords = group_pointer[entity_index].coords;
-				Int3 current_end_coords = single_object_next_coords;
-                FOR(stack_fall_index, stack_size)
+                // move down
+                Entity* entity = getEntityPointer(current_start_coords);
+                if (entity->falling_time > 0) continue; // TODO(spike) or break;?
+                if (entity->previously_above_ground > 0) break;
+                if (do_animation)
                 {
-					// move down
-                    Entity* entity = getEntityPointer(current_start_coords);
-                    if (entity->previously_above_ground > 0) break;
-                    if (do_animation)
-                    {
-                        createInterpolationAnimation(intCoordsToNorm(current_start_coords), 
-                                					 intCoordsToNorm(current_end_coords),
-                                                     &entity->position_norm,
-                            						 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                     getEntityId(current_start_coords), FALL_ANIMATION_TIME);
-                    }
-                    setTileType(getTileType(current_start_coords), current_end_coords);
-                    setTileType(NONE, current_start_coords);
-                    entity->coords = current_end_coords;
-                    current_end_coords = current_start_coords;
-                    current_start_coords = getNextCoords(current_start_coords, UP);
-                    entity->falling_time = OBJECT_FALLING_TIME;
+                    createInterpolationAnimation(intCoordsToNorm(current_start_coords), 
+                                                 intCoordsToNorm(current_end_coords),
+                                                 &entity->position_norm,
+                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                 getEntityId(current_start_coords), FALL_ANIMATION_TIME);
                 }
+                setTileType(getTileType(current_start_coords), current_end_coords);
+                setTileType(NONE, current_start_coords);
+                entity->coords = current_end_coords;
+                current_end_coords = current_start_coords;
+                current_start_coords = getNextCoords(current_start_coords, UP);
+                entity->falling_time = OBJECT_FALLING_TIME;
             }
         }
     }
