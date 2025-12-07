@@ -73,6 +73,7 @@ typedef struct Entity
     int32 id;
     int32 previously_moving_sideways;
     int32 falling_time;
+    int32 first_fall_time;
 
     // for sources/lasers/other colored objects
     Color color;
@@ -178,15 +179,13 @@ const int32 FAILED_MOVE_ANIMATION_TIME = 8;
 const int32 PACK_TURN_HITBOX_PRIMARY_TIME = 3;
 const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 5;
 
+const int32 FALLING_TIME = 9; // FALL_ANIMATION_TIME + 1: one more than frames taken to fall; falling happens if this is equal to 1. if equal to 0, object is solidly on the ground.
+const int32 TIME_BEFORE_FIRST_LOGIC_FALL = 10;
 const int32 PREVIOUSLY_MOVING_SIDEWAYS_TIME = 6; // PACK_TURN_HITBOX_SECONDARY_TIME + 1;
-
-const int32 FALLING_TIME = 9; // one more than frames taken to fall; falling happens if this is equal to 1. if equal to 0, object is solidly on the ground.
+const int32 TIME_BEFORE_PLAYER_WALKS_INTO_SPACE_OF_FALLING_OBJECT = 3; // must be less than or equal to FALLING_TIME
 
 const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
-
-const int32 TIME_BEFORE_PLAYER_WALKS_INTO_SPACE_OF_FALLING_OBJECT = 3; // must be less than or equal to FALLING_TIME
-const int32 LOGICAL_PAUSE_BEFORE_FALLING = 3;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
@@ -1755,9 +1754,19 @@ bool doFallingEntity(Entity* entity, bool do_animation)
     FOR(stack_fall_index, stack_size)
     {
         Entity* entity_in_stack = getEntityPointer(current_start_coords);
-        if (entity_in_stack->id == -1) continue; // should never happen, shouldn't have id == -1 in the middle of a stack somewhere
-        if (entity_in_stack->falling_time > 1) return false;
+        if (entity_in_stack->id == -1) return false; // should never happen, shouldn't have id == -1 in the middle of a stack somewhere
         if (entity_in_stack->previously_moving_sideways> 0) return false; 
+
+        if (entity_in_stack->first_fall_time > 0)
+        {
+            entity_in_stack->falling_time = FALLING_TIME;
+            entity_in_stack->first_fall_time--;
+            return false;
+        }
+
+        if (entity_in_stack->falling_time > 1) return false;
+        else entity_in_stack->falling_time = FALLING_TIME;
+
         if (do_animation)
         {
             createInterpolationAnimation(intCoordsToNorm(current_start_coords),
@@ -1769,8 +1778,6 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         setTileType(getTileType(current_start_coords), current_end_coords); 
         setTileType(NONE, current_start_coords);
         entity_in_stack->coords = current_end_coords;
-        entity_in_stack->falling_time = FALLING_TIME;
-
         current_end_coords = current_start_coords;
         current_start_coords = getNextCoords(current_start_coords, UP);
 	}
@@ -1788,6 +1795,13 @@ void doFallingObjects(bool do_animation)
             doFallingEntity(&group_pointer[entity_index], do_animation);
         }
     }
+}
+
+void handleFallingTimers(Entity* entity)
+{
+    if (entity->previously_moving_sideways> 0) entity->previously_moving_sideways--;
+	if (entity->falling_time == 0 && entity->first_fall_time == 0) entity->first_fall_time = TIME_BEFORE_FIRST_LOGIC_FALL;
+	else if (entity->falling_time > 0) entity->falling_time--;
 }
 
 // HEAD ROTATION / MOVEMENT
@@ -1945,10 +1959,17 @@ void gameInitialiseState()
 {
     loadFileToBuffer(level_path);
 
-    memset(next_world_state.boxes,    -1, sizeof(next_world_state.boxes)); 
-    memset(next_world_state.mirrors,  -1, sizeof(next_world_state.mirrors));
-    memset(next_world_state.crystals, -1, sizeof(next_world_state.crystals));
-    memset(next_world_state.sources,  -1, sizeof(next_world_state.sources));
+    memset(next_world_state.boxes,    0, sizeof(next_world_state.boxes)); 
+    memset(next_world_state.mirrors,  0, sizeof(next_world_state.mirrors));
+    memset(next_world_state.crystals, 0, sizeof(next_world_state.crystals));
+    memset(next_world_state.sources,  0, sizeof(next_world_state.sources));
+	FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+    {
+        next_world_state.boxes[entity_index].id = -1;
+        next_world_state.mirrors[entity_index].id = -1;
+        next_world_state.crystals[entity_index].id = -1;
+        next_world_state.sources[entity_index].id = -1;
+    }
     Entity *pointer = 0;
     for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
     {
@@ -1974,7 +1995,7 @@ void gameInitialiseState()
             next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
             next_world_state.player.direction = next_world_state.buffer[buffer_index + 1];
             next_world_state.player.rotation_quat = directionToQuaternion(next_world_state.player.direction, false);
-            next_world_state.player.id = 1;
+            next_world_state.player.id = PLAYER_ID;
         }
         else if (next_world_state.buffer[buffer_index] == PACK) // likewise special case for pack
         {
@@ -1982,7 +2003,7 @@ void gameInitialiseState()
             next_world_state.pack.position_norm = intCoordsToNorm(next_world_state.pack.coords);
             next_world_state.pack.direction = next_world_state.buffer[buffer_index + 1];
             next_world_state.pack.rotation_quat = directionToQuaternion(next_world_state.pack.direction, false);
-            next_world_state.pack.id = 2;
+            next_world_state.pack.id = PACK_ID;
         }
     }
 
@@ -2660,29 +2681,28 @@ void gameFrame(double delta_time, TickInput tick_input)
             animations[animation_index].frames_left--;
         }
 
-        // TODO(spike): check what happens if this is put after laser buffer draw? might help that flashing laser issue?
+        // TODO(spike): check what happens if this is put after laser buffer draw? might help that flashing laser issue? is this still a problem after refactor
+        // TODO(spike): maybe these should be per entity, so that boxes and such can also have ephemeral hitboxes when passing into / out of space? but maybe there exists better solution than this
         // decrement ephemeral pack hitboxes if required
 		if (pack_hitbox_timer_primary > 0)   pack_hitbox_timer_primary--;
 		if (pack_hitbox_timer_secondary > 0) pack_hitbox_timer_secondary--;
 
-        // final redo of laser buffer, after all logic is complete, for drawing
-		int32 laser_tile_count = updateLaserBuffer();
-
-        // decrement previously_moving_sideways and falling_time for all pushables (and then pack+player)
-        Entity* falling_entity_groups[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
+        // decrement falling timers
+        Entity* falling_entity_groups[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals }; // TODO(spike): i do this array enough that i should probably just make it global
         FOR(falling_object_index, 3)
         {
             Entity* entity_group = falling_entity_groups[falling_object_index];
             FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
             {
-                if (entity_group[entity_index].previously_moving_sideways> 0) entity_group[entity_index].previously_moving_sideways--;
-                if (entity_group[entity_index].falling_time > 0) entity_group[entity_index].falling_time--;
+                handleFallingTimers(&entity_group[entity_index]);
             }
         }
-        if (player->falling_time > 0) player->falling_time--;
-        if (pack->falling_time   > 0) pack->falling_time--; 
-        if (player->previously_moving_sideways> 0) player->previously_moving_sideways--;
-        if (pack->previously_moving_sideways> 0) pack->previously_moving_sideways--; 
+
+        handleFallingTimers(player);
+		handleFallingTimers(pack);
+
+        // final redo of laser buffer, after all logic is complete, for drawing
+		int32 laser_tile_count = updateLaserBuffer();
 
         // finished updating state
         world_state = next_world_state;
