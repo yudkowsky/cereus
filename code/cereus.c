@@ -1401,36 +1401,29 @@ Direction getNextMirrorState(Direction start_direction, Direction push_direction
     }
 }
 
+// TODO(spike): compact these into one (like with push / pushWithoutAnimation)
 void rollWithoutAnimation(Int3 coords, Direction direction)
 {
-    Entity* pointer = getEntityPointer(coords);
+    Entity* entity = getEntityPointer(coords);
 	setTileType(NONE, coords);
-    setTileType(MIRROR, getNextCoords(coords, direction));
-	pointer->coords = getNextCoords(coords, direction);
-	Direction new_direction = getNextMirrorState(pointer->direction, direction);
-    pointer->direction = new_direction;
-    setTileDirection(new_direction, pointer->coords);
+    setTileDirection(NORTH, coords);
+	entity->coords = getNextCoords(coords, direction);
+	Direction new_direction = getNextMirrorState(entity->direction, direction);
+    entity->direction = new_direction;
+    setTileType(MIRROR, entity->coords);
+    setTileDirection(new_direction, entity->coords);
 }
 
 void roll(Int3 coords, Direction direction)
 {
     int32 id = getEntityId(coords);
-    Entity* pointer = getEntityPointer(coords);
-	setTileType(NONE, coords);
-    setTileType(MIRROR, getNextCoords(coords, direction));
-	pointer->coords = getNextCoords(coords, direction);
-	Vec4 quaternion_transform = quaternionNormalize(quaternionMultiply(quaternionFromAxisAngle(rollingAxis(direction), 0.25f*TAU), directionToQuaternion(pointer->direction, true)));
-    
-    createRollingAnimation(intCoordsToNorm(coords), 
-            			   direction,
-                           &pointer->position_norm, 
-                           directionToQuaternion(pointer->direction, true), 
-                           quaternion_transform,
-        				   &pointer->rotation_quat,
+    Entity* entity = getEntityPointer(coords);
+	Vec4 quaternion_transform = quaternionNormalize(quaternionMultiply(quaternionFromAxisAngle(rollingAxis(direction), 0.25f*TAU), directionToQuaternion(entity->direction, true)));
+    createRollingAnimation(intCoordsToNorm(coords), direction, &entity->position_norm, 
+                           directionToQuaternion(entity->direction, true), quaternion_transform, &entity->rotation_quat,
                            id, ROLL_ANIMATION_TIME);
-	Direction new_direction = getNextMirrorState(pointer->direction, direction);
-    pointer->direction = new_direction;
-    setTileDirection(new_direction, pointer->coords);
+	rollWithoutAnimation(coords, direction);
+    entity->previously_moving_sideways = ROLL_ANIMATION_TIME;
 }
 
 // LASERS
@@ -2253,7 +2246,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 {
                                     pushStack(next_player_coords, input_direction, true, false);
                                 }
-                                else if (do_roll) roll(next_player_coords, input_direction);
+                                else if (do_roll) 
+                                {
+                                    roll(next_player_coords, input_direction);
+                                }
 
                                 doStandardMovement(input_direction, next_tile, next_player_coords);
                                 time_until_input = PUSH_ANIMATION_TIME;
