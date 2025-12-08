@@ -179,8 +179,7 @@ const int32 ROLL_ANIMATION_TIME = 18;
 const int32 TURN_ANIMATION_TIME = 9;
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
 
-const int32 FAILED_TURN_ANIMATION_TIME = 8;
-const int32 FAILED_MOVE_ANIMATION_TIME = 8;
+const int32 FAILED_ANIMATION_TIME = 8;
 
 const int32 PACK_TURN_HITBOX_PRIMARY_TIME = 3;
 const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 5;
@@ -1053,15 +1052,15 @@ void createFailedWalkAnimation(Vec3 start_position, Vec3 next_position, Vec3* po
     int32 queue_time = next_free_output[1];
 
 	animations[animation_index].id = entity_id;
-    animations[animation_index].frames_left = FAILED_MOVE_ANIMATION_TIME + queue_time; 
+    animations[animation_index].frames_left = FAILED_ANIMATION_TIME + queue_time; 
     animations[animation_index].position_to_change = position_to_change;
 
-	Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(next_position, start_position), (float)(1.0f/FAILED_MOVE_ANIMATION_TIME) / 2);
+	Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(next_position, start_position), (float)(1.0f/FAILED_ANIMATION_TIME) / 2);
 
-	for (int frame_index = 0; frame_index < FAILED_MOVE_ANIMATION_TIME / 2; frame_index++)
+	for (int frame_index = 0; frame_index < FAILED_ANIMATION_TIME / 2; frame_index++)
 	{
     	Vec3 position = vec3Add(start_position, vec3ScalarMultiply(translation_per_frame, (float)(1+frame_index)));
-        animations[animation_index].position[FAILED_MOVE_ANIMATION_TIME-(1+frame_index)] = position;
+        animations[animation_index].position[FAILED_ANIMATION_TIME-(1+frame_index)] = position;
         animations[animation_index].position[1+frame_index] = position;
     }
     animations[animation_index].position[0] = start_position;
@@ -1085,16 +1084,16 @@ void createFailedPlayerRotationAnimation(Vec4 start_rotation, Vec4 input_directi
     int32 queue_time = next_free_output[1];
 
     animations[animation_index].id = entity_id;
-    animations[animation_index].frames_left = FAILED_TURN_ANIMATION_TIME + queue_time; 
+    animations[animation_index].frames_left = FAILED_ANIMATION_TIME + queue_time; 
     animations[animation_index].rotation_to_change = rotation_to_change;
 
     if (quaternionDot(start_rotation, input_direction_as_quat) < 0.0f) input_direction_as_quat = quaternionScalarMultiply(input_direction_as_quat, -1.0f);
-    for (int frame_index = 0; frame_index < FAILED_TURN_ANIMATION_TIME / 2; frame_index++)
+    for (int frame_index = 0; frame_index < FAILED_ANIMATION_TIME / 2; frame_index++)
 	{
         // similar interpolation for loop, but fill both the end and start of the array, so it bounces back
-        float param = ((float)(frame_index + 1) / FAILED_TURN_ANIMATION_TIME) / 2;
+        float param = ((float)(frame_index + 1) / FAILED_ANIMATION_TIME) / 2;
         Vec4 rotation = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(start_rotation, 1.0f - param), quaternionScalarMultiply(input_direction_as_quat, param)));
-        animations[animation_index].rotation[FAILED_TURN_ANIMATION_TIME - (1+frame_index)] = rotation;
+        animations[animation_index].rotation[FAILED_ANIMATION_TIME - (1+frame_index)] = rotation;
         animations[animation_index].rotation[1+frame_index] = rotation;
     }
     animations[animation_index].rotation[0] = start_rotation;
@@ -1108,7 +1107,7 @@ void createFailedPackRotationAnimation(Vec3 player_position, Vec3 pack_position,
     int32 queue_time = next_free_output[1];
 
     animations[animation_index].id = entity_id;
-    animations[animation_index].frames_left = FAILED_TURN_ANIMATION_TIME + queue_time; 
+    animations[animation_index].frames_left = FAILED_ANIMATION_TIME + queue_time; 
     animations[animation_index].rotation_to_change = rotation_to_change;
     animations[animation_index].position_to_change = position_to_change;
     
@@ -1128,22 +1127,22 @@ void createFailedPackRotationAnimation(Vec3 player_position, Vec3 pack_position,
         if (previous_pack_direction == 4) previous_pack_direction = NORTH;
     }
 
-    for (int frame_index = 0; frame_index < FAILED_TURN_ANIMATION_TIME / 2; frame_index++)
+    for (int frame_index = 0; frame_index < FAILED_ANIMATION_TIME / 2; frame_index++)
     {
         // rotation
         Vec4 quat_prev = directionToQuaternion(oppositeDirection(previous_pack_direction), true);
 		Vec4 quat_next = directionToQuaternion(oppositeDirection(pack_direction), true);
         if (quaternionDot(quat_prev, quat_next) < 0.0f) quat_next = quaternionNegate(quat_next); // resolve quat sign issue 
-        float param = ((float)(frame_index + 1) / FAILED_TURN_ANIMATION_TIME) / 2;
+        float param = ((float)(frame_index + 1) / FAILED_ANIMATION_TIME) / 2;
         Vec4 rotation = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(quat_prev, 1.0f - param), quaternionScalarMultiply(quat_next, param)));
-        animations[animation_index].rotation[FAILED_TURN_ANIMATION_TIME-(1+frame_index)] = rotation;
+        animations[animation_index].rotation[FAILED_ANIMATION_TIME-(1+frame_index)] = rotation;
         animations[animation_index].rotation[1+frame_index] = rotation;
 
         // translation
         float theta = (angle_sign * (frame_index+1) * d_theta_per_frame) / 2;
         Vec4 roll = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), theta);
         Vec3 relative_rotation = vec3RotateByQuaternion(pivot_to_pack_start, roll);
-        animations[animation_index].position[FAILED_TURN_ANIMATION_TIME-(1+frame_index)] = vec3Add(pivot_point, relative_rotation);
+        animations[animation_index].position[FAILED_ANIMATION_TIME-(1+frame_index)] = vec3Add(pivot_point, relative_rotation);
         animations[animation_index].position[1+frame_index] = vec3Add(pivot_point, relative_rotation);
     }
     animations[animation_index].rotation[0] = directionToQuaternion(oppositeDirection(previous_pack_direction), true);
@@ -2222,7 +2221,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             case MIRROR:
                             {
                                 // TODO(spike): compact this logic a bit (and add a pause condition)
-                                if (canPush(next_player_coords, input_direction))
+                                PushResult push_check = canPush(next_player_coords, input_direction);
+                                if (push_check == CAN_PUSH)
                                 {
                                     TileType push_tile = getTileType(getNextCoords(next_player_coords, input_direction));
                                     TileType above_tile = getTileType(getNextCoords(next_player_coords, UP));
@@ -2305,7 +2305,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                             }
                             if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME; 
                         }
-						else if (do_failed_animations) doFailedWalkAnimations(next_player_coords);
+						else if (do_failed_animations) 
+                        {
+                            doFailedWalkAnimations(next_player_coords);
+                            time_until_input = FAILED_ANIMATION_TIME;
+                        }
                     }
                 }
                 else
