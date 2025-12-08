@@ -1155,6 +1155,7 @@ void doFailedTurnAnimations(Direction input_direction, bool clockwise)
                                       &next_world_state.pack.position_norm, &next_world_state.pack.rotation_quat, PACK_ID);
 }
 
+/*
 void pauseAnimation(int32 id, int32 frame_count)
 {
     FOR(animation_index, MAX_ANIMATION_COUNT)
@@ -1163,6 +1164,7 @@ void pauseAnimation(int32 id, int32 frame_count)
         animations[animation_index].frames_left += frame_count;
     }
 }
+*/
 
 bool entityInMotion(Entity* entity)
 {
@@ -1241,12 +1243,26 @@ Push pushWithoutAnimation(Int3 coords, Direction direction)
 	Int3 current_coords = coords;
     for (int push_index = 0; push_index < MAX_ENTITY_PUSH_COUNT; push_index++)
     {
+        Entity* entity = getEntityPointer(current_coords);
         entities_to_push.type[push_index] = getTileType(current_coords);
 		entities_to_push.previous_coords[push_index] = current_coords;
-        entities_to_push.pointer_to_entity[push_index] = getEntityPointer(current_coords);
+        entities_to_push.pointer_to_entity[push_index] = entity; 
+
         current_coords = getNextCoords(current_coords, direction);
+
         entities_to_push.new_coords[push_index] = current_coords; 
         entities_to_push.count++;
+
+		Int3 coords_ahead = getNextCoords(entity->coords, direction);
+        //Int3 coords_below = getNextCoords(entity->coords, DOWN);
+        //Int3 coords_below_and_ahead = getNextCoords(getNextCoords(entity->coords, DOWN), direction);
+        if (entityInMotion(entity)) entities_to_push.pause_for_movement = true;
+		if (isPushable(getTileType(coords_ahead)) && entityInMotion(getEntityPointer(coords_ahead))) entities_to_push.pause_for_movement = true;
+        //if (isPushable(getTileType(coords_below)) && entityInMotion(getEntityPointer(coords_below))) entities_to_push.pause_for_movement = true;
+        //if (isPushable(getTileType(coords_below_and_ahead)) && entityInMotion(getEntityPointer(coords_below_and_ahead))) entities_to_push.pause_for_movement = true;
+
+        if (entities_to_push.pause_for_movement) return entities_to_push;
+
         if (getTileType(current_coords) == NONE) break;
     }
     for (int entity_index = 0; entity_index < entities_to_push.count; entity_index++)
@@ -1256,21 +1272,16 @@ Push pushWithoutAnimation(Int3 coords, Direction direction)
         Int3 new_coords = entities_to_push.new_coords[entity_index];
         TileType tile_type = entities_to_push.type[entity_index];
 
-		if (entityInMotion(entity)) entities_to_push.pause_for_movement = true;
-		else if (isPushable(getTileType(getNextCoords(entity->coords, DOWN))) && entityInMotion(getEntityPointer(getNextCoords(entity->coords, DOWN)))) entities_to_push.pause_for_movement = true;
-		else
-        {
-            if (getTileType(getNextCoords(prev_coords, DOWN)) != NONE) entity->previously_moving_sideways = PUSH_ANIMATION_TIME;
+		entity->previously_moving_sideways = PUSH_ANIMATION_TIME;
 
-            if (entity_index == 0) 
-            {
-                setTileType(NONE, prev_coords);
-                setTileDirection(NORTH, prev_coords);
-            }
-            setTileType(tile_type, new_coords);
-            setTileDirection(entity->direction, new_coords);
-            entity->coords = new_coords;
+        if (entity_index == 0) 
+        {
+            setTileType(NONE, prev_coords);
+            setTileDirection(NORTH, prev_coords);
         }
+        setTileType(tile_type, new_coords);
+        setTileDirection(entity->direction, new_coords);
+        entity->coords = new_coords;
     }
     entities_to_push.pause_for_movement = false;
     return entities_to_push;
@@ -1283,10 +1294,6 @@ bool push(Int3 coords, Direction direction)
 
 	if (entities_to_push.pause_for_movement)
     {
-        /*
-        pauseAnimation(PLAYER_ID, 1);
-        if (!next_world_state.pack.pack_detached) pauseAnimation(PACK_ID, 1);
-        */
         return true;
     }
 	else
@@ -2275,18 +2282,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     }
                                     else if (try_to_roll) roll(next_player_coords, input_direction);
 
-                                    if (!pause) 
+                                    if (!pause)
                                     {
                                         doStandardMovement(input_direction, next_tile, next_player_coords);
                                     	time_until_input = PUSH_ANIMATION_TIME;
                                     }
-                                }
-                                else
-                                {
-                                    /*
-                                    pauseAnimation(PLAYER_ID, 1);
-                                    if (!next_world_state.pack.pack_detached) pauseAnimation(PACK_ID, 1);
-                                    */
                                 }
                             }
                             else
@@ -2335,14 +2335,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             }
                             if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME; 
                         }
-						else if (pause_before_moving)
-                        {
-                            /*
-                            pauseAnimation(PLAYER_ID, 1);
-                            if (!next_world_state.pack.pack_detached) pauseAnimation(PACK_ID, 1);
-                            */
-                        }
-						else doFailedWalkAnimations(next_player_coords);
+						else if (!pause_before_moving) doFailedWalkAnimations(next_player_coords);
                     }
                 }
                 else
