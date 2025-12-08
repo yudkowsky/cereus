@@ -139,7 +139,7 @@ typedef struct Push
     Int3 previous_coords;
     Int3 new_coords;
     TileType type;
-    Entity* pointer_to_entity;
+    Entity* entity;
 }
 Push;
 
@@ -462,34 +462,34 @@ Color getEntityColor(Int3 coords)
 Entity* getEntityPointer(Int3 coords)
 {
 	TileType tile = getTileType(coords);
-    Entity *group_pointer = 0;
-    if (isSource(tile)) group_pointer = next_world_state.sources;
+    Entity *entity_group = 0;
+    if (isSource(tile)) entity_group = next_world_state.sources;
     else switch(tile)
     {
-        case BOX:     group_pointer = next_world_state.boxes;    break;
-        case MIRROR:  group_pointer = next_world_state.mirrors;  break;
-        case CRYSTAL: group_pointer = next_world_state.crystals; break;
+        case BOX:     entity_group = next_world_state.boxes;    break;
+        case MIRROR:  entity_group = next_world_state.mirrors;  break;
+        case CRYSTAL: entity_group = next_world_state.crystals; break;
         case PLAYER:  return &next_world_state.player;
         case PACK:	  return &next_world_state.pack;
         default: return 0;
     }
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
     {
-        if (int3IsEqual(group_pointer[entity_index].coords, coords)) return &group_pointer[entity_index];
+        if (int3IsEqual(entity_group[entity_index].coords, coords)) return &entity_group[entity_index];
     }
     return 0;
 }
 
 int32 getEntityId(Int3 coords)
 {
-	Entity *entity_pointer = getEntityPointer(coords);
-    return entity_pointer->id;
+	Entity *entity = getEntityPointer(coords);
+    return entity->id;
 }
 
 Direction getEntityDirection(Int3 coords) 
 {
-	Entity *entity_pointer = getEntityPointer(coords);
-    return entity_pointer->direction;
+	Entity *entity = getEntityPointer(coords);
+    return entity->direction;
 }
 
 Direction oppositeDirection(Direction direction)
@@ -506,23 +506,23 @@ Direction oppositeDirection(Direction direction)
     }
 }
 
-int32 getEntityCount(Entity *pointer_to_array)
+int32 getEntityCount(Entity *entity_group)
 {
     int32 count = 0;
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
 	{
-		if (pointer_to_array[entity_index].id == -1) continue;
+		if (entity_group[entity_index].id == -1) continue;
         count++;
     }
     return count;
 }
 
-int32 entityIdOffset(Entity *pointer)
+int32 entityIdOffset(Entity *entity)
 {
-    if (pointer == next_world_state.boxes)    return ID_OFFSET_BOX;
-    if (pointer == next_world_state.mirrors)  return ID_OFFSET_MIRROR;
-    if (pointer == next_world_state.crystals) return ID_OFFSET_CRYSTAL;
-    if (pointer == next_world_state.sources)  return ID_OFFSET_SOURCE;
+    if (entity == next_world_state.boxes)    return ID_OFFSET_BOX;
+    if (entity == next_world_state.mirrors)  return ID_OFFSET_MIRROR;
+    if (entity == next_world_state.crystals) return ID_OFFSET_CRYSTAL;
+    if (entity == next_world_state.sources)  return ID_OFFSET_SOURCE;
     return 0;
 }
 
@@ -625,17 +625,17 @@ Vec4 directionToQuaternion(Direction direction, bool roll_z)
     return IDENTITY_QUATERNION;
 }
 
-void setEntityInstanceInGroup(Entity* group_pointer, Int3 coords, Direction direction, Color color) 
+void setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction direction, Color color) 
 {
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
     {
-        if (group_pointer[entity_index].id != -1) continue;
-        group_pointer[entity_index].coords = coords;
-        group_pointer[entity_index].position_norm = intCoordsToNorm(coords); 
-        group_pointer[entity_index].direction = direction;
-        group_pointer[entity_index].rotation_quat = directionToQuaternion(direction, true);
-        group_pointer[entity_index].id = entity_index + entityIdOffset(group_pointer);
-        group_pointer[entity_index].color = color;
+        if (entity_group[entity_index].id != -1) continue;
+        entity_group[entity_index].coords = coords;
+        entity_group[entity_index].position_norm = intCoordsToNorm(coords); 
+        entity_group[entity_index].direction = direction;
+        entity_group[entity_index].rotation_quat = directionToQuaternion(direction, true);
+        entity_group[entity_index].id = entity_index + entityIdOffset(entity_group);
+        entity_group[entity_index].color = color;
         setTileDirection(direction, coords);
         break;
     }
@@ -746,12 +746,12 @@ void drawAsset(char* path, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotatio
     }
 }
 
-void drawEntityLoop(Entity* group_pointer, char* path, AssetType type, Vec3 scale)
+void drawEntityLoop(Entity* entity_group, char* path, AssetType type, Vec3 scale)
 {
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
     {
-        if (group_pointer[entity_index].id == -1) continue;
-        drawAsset(path, type, group_pointer[entity_index].position_norm, scale, group_pointer[entity_index].rotation_quat);
+        if (entity_group[entity_index].id == -1) continue;
+        drawAsset(path, type, entity_group[entity_index].position_norm, scale, entity_group[entity_index].rotation_quat);
     }
 }
 
@@ -1288,7 +1288,7 @@ Push pushWithoutAnimation(Int3 coords, Direction direction)
     Entity* entity = getEntityPointer(coords);
     entity_to_push.type = getTileType(coords);
     entity_to_push.previous_coords = coords;
-    entity_to_push.pointer_to_entity = entity; 
+    entity_to_push.entity = entity; 
     entity_to_push.new_coords = getNextCoords(coords, direction);
 
     entity->previously_moving_sideways = PUSH_ANIMATION_TIME;
@@ -1311,7 +1311,7 @@ void push(Int3 coords, Direction direction)
     int32 id = getEntityId(entity_to_push.new_coords);
     createInterpolationAnimation(intCoordsToNorm(entity_to_push.previous_coords),
                                  intCoordsToNorm(entity_to_push.new_coords),
-                                 &entity_to_push.pointer_to_entity->position_norm,
+                                 &entity_to_push.entity->position_norm,
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                  id, PUSH_ANIMATION_TIME, false); 
 }
@@ -1658,12 +1658,12 @@ LaserColor colorToLaserColor(Color color)
     return laser_color;
 }
 
-void addPrimarySource(Entity* new_source_pointer, Entity* original_source_pointer, int32 *total_source_count, Color color)
+void addPrimarySource(Entity* new_source, Entity* original_source, int32 *total_source_count, Color color)
 {
-    new_source_pointer->coords = original_source_pointer->coords;
-    new_source_pointer->direction = original_source_pointer->direction;
-    new_source_pointer->id = 10000 + original_source_pointer->id;
-    new_source_pointer->color = color;
+    new_source->coords = original_source->coords;
+    new_source->direction = original_source->direction;
+    new_source->id = 10000 + original_source->id;
+    new_source->color = color;
     (*total_source_count)++;
 }
 
@@ -1688,20 +1688,20 @@ int32 updateLaserBuffer(void)
 
     for (int source_index = 0; source_index < MAX_PSEUDO_SOURCE_COUNT; source_index++)
     {
-        Entity* entity_pointer = &sources_as_primary[source_index];
-        if (entity_pointer->id == -1) continue;
-        Direction current_direction = entity_pointer->direction;
-        Int3 current_coords = getNextCoords(entity_pointer->coords, current_direction);
+        Entity* entity = &sources_as_primary[source_index];
+        if (entity->id == -1) continue;
+        Direction current_direction = entity->direction;
+        Int3 current_coords = getNextCoords(entity->coords, current_direction);
 
-        switch (entity_pointer->color) 
+        switch (entity->color) 
         {
-            case MAGENTA: addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, BLUE);  break;
-            case YELLOW:  addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, GREEN); break;
-            case CYAN:    addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, BLUE); break;
+            case MAGENTA: addPrimarySource(&sources_as_primary[total_source_count], entity, &total_source_count, BLUE);  break;
+            case YELLOW:  addPrimarySource(&sources_as_primary[total_source_count], entity, &total_source_count, GREEN); break;
+            case CYAN:    addPrimarySource(&sources_as_primary[total_source_count], entity, &total_source_count, BLUE); break;
             case WHITE:
             {
-                addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, GREEN); 
-                addPrimarySource(&sources_as_primary[total_source_count], entity_pointer, &total_source_count, BLUE); // creates a duplicate ID here. still unclear if i even want to use these though
+                addPrimarySource(&sources_as_primary[total_source_count], entity, &total_source_count, GREEN); 
+                addPrimarySource(&sources_as_primary[total_source_count], entity, &total_source_count, BLUE); // creates a duplicate ID here. still unclear if i even want to use these though
                 break;
             }
             default: break;
@@ -1709,7 +1709,7 @@ int32 updateLaserBuffer(void)
 
         for (int laser_index = 0; laser_index < MAX_LASER_TRAVEL_DISTANCE; laser_index++)
         {
-            LaserColor laser_color = colorToLaserColor(entity_pointer->color);
+            LaserColor laser_color = colorToLaserColor(entity->color);
             if (!intCoordsWithinLevelBounds(current_coords)) break;
             if (getTileType(current_coords) == PLAYER)
             {
@@ -1773,22 +1773,22 @@ void recordStateForUndo()
     undo_buffer_position = (undo_buffer_position + 1) % UNDO_BUFFER_SIZE;
 }
 
-void resetVisuals(Entity* pointer)
+void resetVisuals(Entity* entity)
 {
-    pointer->position_norm = intCoordsToNorm(pointer->coords);
-    //pointer->rotation_quat = directionToQuaternion(pointer->direction, true); // don't seem to need right now, and causes bug with undoing from a turn -> pack direction is flipped (if pack direction is not north after the undo)
+    entity->position_norm = intCoordsToNorm(entity->coords);
+    //entity->rotation_quat = directionToQuaternion(entity->direction, true); // don't seem to need right now, and causes bug with undoing from a turn -> pack direction is flipped (if pack direction is not north after the undo)
 }
 
 void resetStandardVisuals()
 {
-    Entity* pointers[3] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals};
-    for (int pointer_group_index = 0; pointer_group_index < 3; pointer_group_index++)
+    Entity* entity_group[3] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals};
+    FOR(entity_group_index, 3)
     {
-        for (int pointer_instance_index = 0; pointer_instance_index < MAX_ENTITY_INSTANCE_COUNT; pointer_instance_index++)
+        FOR(entity_instance_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            Entity* pointer_instance = &pointers[pointer_group_index][pointer_instance_index];
-            if (pointer_instance->id == -1) continue;
-            resetVisuals(pointer_instance);
+            Entity* entity = &entity_group[entity_group_index][entity_instance_index];
+            if (entity->id == -1) continue;
+            resetVisuals(entity);
         }
     }
     resetVisuals(&next_world_state.player);
@@ -1852,10 +1852,10 @@ void doFallingObjects(bool do_animation)
  	Entity* object_group_to_fall[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
 	FOR(to_fall_index, 3)
     {
-		Entity* group_pointer = object_group_to_fall[to_fall_index];
+		Entity* entity_group = object_group_to_fall[to_fall_index];
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            doFallingEntity(&group_pointer[entity_index], do_animation);
+            doFallingEntity(&entity_group[entity_index], do_animation);
         }
     }
 }
@@ -2004,24 +2004,24 @@ void gameInitialiseState()
         next_world_state.crystals[entity_index].id = -1;
         next_world_state.sources[entity_index].id = -1;
     }
-    Entity *pointer = 0;
+    Entity *entity_group = 0;
     for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
     {
         TileType buffer_contents = next_world_state.buffer[buffer_index];
-        if (buffer_contents == BOX)     pointer = next_world_state.boxes;
-        if (buffer_contents == MIRROR)  pointer = next_world_state.mirrors;
-        if (buffer_contents == CRYSTAL) pointer = next_world_state.crystals;
-        if (isSource(buffer_contents))  pointer = next_world_state.sources;
-        if (pointer != 0)
+        if (buffer_contents == BOX)     entity_group = next_world_state.boxes;
+        if (buffer_contents == MIRROR)  entity_group = next_world_state.mirrors;
+        if (buffer_contents == CRYSTAL) entity_group = next_world_state.crystals;
+        if (isSource(buffer_contents))  entity_group = next_world_state.sources;
+        if (entity_group != 0)
         {
-            int32 count = getEntityCount(pointer);
-			pointer[count].coords = bufferIndexToCoords(buffer_index);
-            pointer[count].position_norm = intCoordsToNorm(pointer[count].coords);
-            pointer[count].direction = next_world_state.buffer[buffer_index + 1]; 
-            pointer[count].rotation_quat = directionToQuaternion(pointer[count].direction, true);
-            pointer[count].color = getEntityColor(pointer[count].coords);
-            pointer[count].id = getEntityCount(pointer) + entityIdOffset(pointer);
-            pointer = 0;
+            int32 count = getEntityCount(entity_group);
+			entity_group[count].coords = bufferIndexToCoords(buffer_index);
+            entity_group[count].position_norm = intCoordsToNorm(entity_group[count].coords);
+            entity_group[count].direction = next_world_state.buffer[buffer_index + 1]; 
+            entity_group[count].rotation_quat = directionToQuaternion(entity_group[count].direction, true);
+            entity_group[count].color = getEntityColor(entity_group[count].coords);
+            entity_group[count].id = getEntityCount(entity_group) + entityIdOffset(entity_group);
+            entity_group= 0;
         }
         else if (next_world_state.buffer[buffer_index] == PLAYER) // special case for player, since there is only one
         {
@@ -2505,19 +2505,19 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                 if (tick_input.left_mouse_press && raycast_output.hit) 
                 {
-                    Entity *entity_pointer = getEntityPointer(raycast_output.hit_coords);
-                    if (entity_pointer != 0)
+                    Entity *entity= getEntityPointer(raycast_output.hit_coords);
+                    if (entity!= 0)
                     {
-                        entity_pointer->coords = (Int3){0};
-                        entity_pointer->position_norm = (Vec3){0};
-                        entity_pointer->id = -1;
+                        entity->coords = (Int3){0};
+                        entity->position_norm = (Vec3){0};
+                        entity->id = -1;
                     }
                     setTileType(NONE, raycast_output.hit_coords);
                     setTileDirection(NORTH, raycast_output.hit_coords);
                 }
                 else if (tick_input.right_mouse_press && raycast_output.hit) 
                 {
-                    Entity *group_pointer = 0;
+                    Entity *entity_group = 0;
                     if (isSource(editor_state.picked_tile)) 
                     {
                         setTileType(editor_state.picked_tile, raycast_output.place_coords); 
@@ -2555,12 +2555,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                     {
                         switch (editor_state.picked_tile)
                         {
-                            case BOX:     group_pointer = next_world_state.boxes;    break;
-                            case MIRROR:  group_pointer = next_world_state.mirrors;  break;
-                            case CRYSTAL: group_pointer = next_world_state.crystals; break;
-                            default: group_pointer = 0;
+                            case BOX:     entity_group = next_world_state.boxes;    break;
+                            case MIRROR:  entity_group = next_world_state.mirrors;  break;
+                            case CRYSTAL: entity_group = next_world_state.crystals; break;
+                            default: entity_group = 0;
                         }
-                        if (group_pointer != 0) setEntityInstanceInGroup(group_pointer, raycast_output.place_coords, NORTH, NO_COLOR);
+                        if (entity_group != 0) setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
                         setTileType(editor_state.picked_tile, raycast_output.place_coords); 
                     }
                 }
@@ -2570,12 +2570,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (direction == DOWN) direction = NORTH;
                     else direction++;
                     setTileDirection(direction, raycast_output.hit_coords);
-                    Entity *entity_pointer = getEntityPointer(raycast_output.hit_coords);
-                    if (entity_pointer != 0)
+                    Entity *entity= getEntityPointer(raycast_output.hit_coords);
+                    if (entity!= 0)
                     {
-                        entity_pointer->direction = direction;
-						if (getTileType(entity_pointer->coords) == MIRROR) entity_pointer->rotation_quat = directionToQuaternion(direction, true); // unclear why this is required, something to do with my sprite layout
-						else entity_pointer->rotation_quat = directionToQuaternion(direction, false);
+                        entity->direction = direction;
+						if (getTileType(entity->coords) == MIRROR) entity->rotation_quat = directionToQuaternion(direction, true); // unclear why this is required, something to do with my sprite layout
+						else entity->rotation_quat = directionToQuaternion(direction, false);
                 	}
                 }
                 else if (tick_input.middle_mouse_press && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
