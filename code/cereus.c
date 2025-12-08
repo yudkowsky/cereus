@@ -53,6 +53,14 @@ typedef enum Color
 }
 Color;
 
+typedef enum PushResult
+{
+    CAN_PUSH = 0,
+	PAUSE_PUSH = 1,
+    FAILED_PUSH = 2
+}
+PushResult;
+
 typedef struct GreenHit
 {
     bool north;
@@ -128,12 +136,10 @@ RaycastHit;
  
 typedef struct Push 
 {
-    Int3 previous_coords[32];
-    Int3 new_coords[32];
-    TileType type[32];
-    Entity* pointer_to_entity[32];
-    int32 count;
-    bool pause_for_movement;
+    Int3 previous_coords;
+    Int3 new_coords;
+    TileType type;
+    Entity* pointer_to_entity;
 }
 Push;
 
@@ -1218,96 +1224,121 @@ bool isPushable(TileType tile)
     else return false;
 }
 
-bool canPush(Int3 coords, Direction direction)
+int32 getPushableStackSize(Int3 first_entity_coords)
+{
+	Int3 current_stack_coords = first_entity_coords;
+    int32 stack_size = 1;
+    FOR(find_stack_size_index, MAX_PUSHABLE_STACK_SIZE)
+    {
+        current_stack_coords = getNextCoords(current_stack_coords, UP);
+        TileType next_tile_type = getTileType(current_stack_coords);
+        if (!isPushable(next_tile_type)) break;
+        stack_size++;
+    }
+    return stack_size;
+}
+
+PushResult canPush(Int3 coords, Direction direction)
 {
     Int3 current_coords = coords;
     TileType current_tile;
-    //if (getTileType(getNextCoords(current_coords, DOWN)) == NONE && !next_world_state.player.hit_by_red) return false;
     for (int push_index = 0; push_index < MAX_ENTITY_PUSH_COUNT; push_index++) 
     {
+		Entity* entity = getEntityPointer(current_coords);
     	current_coords = getNextCoords(current_coords, direction);
         current_tile = getTileType(current_coords);
-        if (!intCoordsWithinLevelBounds(current_coords)) return false;
-        if (isSource(current_tile)) return false;
-        if (current_tile == MIRROR) return false;
-        if (current_tile == GRID) return false;
-        if (current_tile == WALL) return false;
-        if (current_tile == NONE) return true;
+
+        if (!intCoordsWithinLevelBounds(current_coords)) return FAILED_PUSH;
+        if (current_tile == NONE) return CAN_PUSH;
+
+        Int3 coords_ahead = getNextCoords(entity->coords, direction);
+        Int3 coords_below = getNextCoords(entity->coords, DOWN);
+        Int3 coords_below_and_ahead = getNextCoords(getNextCoords(entity->coords, DOWN), direction);
+		if (entityInMotion(entity)) return PAUSE_PUSH;
+		if (isPushable(getTileType(coords_ahead)) && entityInMotion(getEntityPointer(coords_ahead))) return PAUSE_PUSH;
+        if (isPushable(getTileType(coords_below)) && entityInMotion(getEntityPointer(coords_below))) return PAUSE_PUSH;
+        if (isPushable(getTileType(coords_below_and_ahead)) && entityInMotion(getEntityPointer(coords_below_and_ahead))) return PAUSE_PUSH;
+
+        if (isSource(current_tile)) return FAILED_PUSH;
+        if (current_tile == MIRROR) return FAILED_PUSH;
+        if (current_tile == GRID) return FAILED_PUSH;
+        if (current_tile == WALL) return FAILED_PUSH;
     }
     return false; // only here if hit the max entity push count
 }
 
+// TODO(spike): also rename
 Push pushWithoutAnimation(Int3 coords, Direction direction)
 {
-    Push entities_to_push = {0}; 
-	Int3 current_coords = coords;
-    for (int push_index = 0; push_index < MAX_ENTITY_PUSH_COUNT; push_index++)
-    {
-        Entity* entity = getEntityPointer(current_coords);
-        entities_to_push.type[push_index] = getTileType(current_coords);
-		entities_to_push.previous_coords[push_index] = current_coords;
-        entities_to_push.pointer_to_entity[push_index] = entity; 
+	Push entity_to_push = {0};
 
-        current_coords = getNextCoords(current_coords, direction);
+    Entity* entity = getEntityPointer(coords);
+    entity_to_push.type = getTileType(coords);
+    entity_to_push.previous_coords = coords;
+    entity_to_push.pointer_to_entity = entity; 
+    entity_to_push.new_coords = getNextCoords(coords, direction);
 
-        entities_to_push.new_coords[push_index] = current_coords; 
-        entities_to_push.count++;
+    entity->previously_moving_sideways = PUSH_ANIMATION_TIME;
 
-		Int3 coords_ahead = getNextCoords(entity->coords, direction);
-        //Int3 coords_below = getNextCoords(entity->coords, DOWN);
-        //Int3 coords_below_and_ahead = getNextCoords(getNextCoords(entity->coords, DOWN), direction);
-        if (entityInMotion(entity)) entities_to_push.pause_for_movement = true;
-		if (isPushable(getTileType(coords_ahead)) && entityInMotion(getEntityPointer(coords_ahead))) entities_to_push.pause_for_movement = true;
-        //if (isPushable(getTileType(coords_below)) && entityInMotion(getEntityPointer(coords_below))) entities_to_push.pause_for_movement = true;
-        //if (isPushable(getTileType(coords_below_and_ahead)) && entityInMotion(getEntityPointer(coords_below_and_ahead))) entities_to_push.pause_for_movement = true;
+    setTileType(NONE, entity_to_push.previous_coords);
+    setTileDirection(NORTH, entity_to_push.previous_coords);
 
-        if (entities_to_push.pause_for_movement) return entities_to_push;
+    setTileType(entity_to_push.type, entity_to_push.new_coords);
+    setTileDirection(entity->direction, entity_to_push.new_coords);
+    entity->coords = entity_to_push.new_coords;
 
-        if (getTileType(current_coords) == NONE) break;
-    }
-    for (int entity_index = 0; entity_index < entities_to_push.count; entity_index++)
-    {
-    	Entity* entity = entities_to_push.pointer_to_entity[entity_index];
-        Int3 prev_coords = entities_to_push.previous_coords[entity_index];
-        Int3 new_coords = entities_to_push.new_coords[entity_index];
-        TileType tile_type = entities_to_push.type[entity_index];
-
-		entity->previously_moving_sideways = PUSH_ANIMATION_TIME;
-
-        if (entity_index == 0) 
-        {
-            setTileType(NONE, prev_coords);
-            setTileDirection(NORTH, prev_coords);
-        }
-        setTileType(tile_type, new_coords);
-        setTileDirection(entity->direction, new_coords);
-        entity->coords = new_coords;
-    }
-    entities_to_push.pause_for_movement = false;
-    return entities_to_push;
+    return entity_to_push;
 }
 
-// returns true if pausing animation for movement
-bool push(Int3 coords, Direction direction)
+// TODO(spike): rename to pushOneTile or similar
+void push(Int3 coords, Direction direction)
 {
-    Push entities_to_push = pushWithoutAnimation(coords, direction);
+    Push entity_to_push = pushWithoutAnimation(coords, direction);
 
-	if (entities_to_push.pause_for_movement)
+    int32 id = getEntityId(entity_to_push.new_coords);
+    createInterpolationAnimation(intCoordsToNorm(entity_to_push.previous_coords),
+                                 intCoordsToNorm(entity_to_push.new_coords),
+                                 &entity_to_push.pointer_to_entity->position_norm,
+                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                 id, PUSH_ANIMATION_TIME, false); 
+}
+
+PushResult canPushStack(Int3 coords, Direction direction)
+{
+    int32 stack_size = getPushableStackSize(coords);
+    Int3 current_coords = coords;
+    FOR(stack_index, stack_size)
     {
-        return true;
+		PushResult push_result = canPush(current_coords, direction);
+        if (push_result == PAUSE_PUSH) return PAUSE_PUSH;
+        if (push_result == FAILED_PUSH) return FAILED_PUSH;
+        current_coords = getNextCoords(current_coords, UP);
     }
-	else
+    return CAN_PUSH;
+}
+
+// assumes stack is able to be pushed. TODO(spike): rename to pushAll or similar
+void pushStack(Int3 coords, Direction direction)
+{
+    Int3 current_coords = coords;
+    int32 push_size = 0;
+	FOR(push_index, MAX_ENTITY_PUSH_COUNT)
     {
-        for (int anim_index = 0; anim_index < entities_to_push.count; anim_index++)
+        if (getTileType(current_coords) == NONE) break;
+		current_coords = getNextCoords(current_coords, direction);
+        push_size++;
+    }
+    current_coords = getNextCoords(current_coords, oppositeDirection(direction));
+    for (int32 inverse_push_index = push_size; inverse_push_index != 0; inverse_push_index--)
+    {
+        int32 stack_size = getPushableStackSize(current_coords);
+        Int3 current_stack_coords = current_coords;
+        FOR(stack_index, stack_size)
         {
-            int32 id = getEntityId(entities_to_push.new_coords[anim_index]);
-            createInterpolationAnimation(intCoordsToNorm(entities_to_push.previous_coords[anim_index]),
-                                         intCoordsToNorm(entities_to_push.new_coords[anim_index]),
-                                         &entities_to_push.pointer_to_entity[anim_index]->position_norm,
-                                         IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                         id, PUSH_ANIMATION_TIME, false); 
+            push(current_stack_coords, direction);
+            current_stack_coords = getNextCoords(current_stack_coords, UP);
         }
-        return false;
+        current_coords = getNextCoords(current_coords, oppositeDirection(direction));
     }
 }
 
@@ -1771,20 +1802,6 @@ void resetStandardVisuals()
 
 // FALLING LOGIC
 
-int32 getPushableStackSize(Int3 first_entity_coords)
-{
-	Int3 current_stack_coords = first_entity_coords;
-    int32 stack_size = 1;
-    FOR(find_stack_size_index, MAX_PUSHABLE_STACK_SIZE)
-    {
-        current_stack_coords = getNextCoords(current_stack_coords, UP);
-        TileType next_tile_type = getTileType(current_stack_coords);
-        if (!isPushable(next_tile_type)) break;
-        stack_size++;
-    }
-    return stack_size;
-}
-
 // returns true iff object is able to fall as usual, but object collides with something instead.
 bool doFallingEntity(Entity* entity, bool do_animation)
 {
@@ -2198,17 +2215,16 @@ void gameFrame(double delta_time, TickInput tick_input)
                     else
                     {
                         // no green; normal movement attempt
-                        bool try_to_push = false;
-                        bool try_to_roll = false;
+                        bool do_push = false;
+                        bool do_roll = false;
 
                         bool move_player = false;
+                        bool do_failed_animations = false;
                         if 		(tick_input.w_press) next_player_coords = int3Add(next_world_state.player.coords, int3Negate(AXIS_Z));
                         else if (tick_input.a_press) next_player_coords = int3Add(next_world_state.player.coords, int3Negate(AXIS_X));
                         else if (tick_input.s_press) next_player_coords = int3Add(next_world_state.player.coords, AXIS_Z);
                         else if (tick_input.d_press) next_player_coords = int3Add(next_world_state.player.coords, AXIS_X);
                         TileType next_tile = getTileType(next_player_coords);
-                        int32 stack_size = 1;
-                        bool pause_before_moving = false;
                         if (!isSource(next_tile)) switch (next_tile)
                         {
                             case VOID: break;
@@ -2218,38 +2234,29 @@ void gameFrame(double delta_time, TickInput tick_input)
                             case CRYSTAL:
                             case PACK:
                             {
-                                // check if item infront is moving (or if last frame of movement then allow because of animation timings, only if will be able to move onto that next tile)
-								Entity* entity = getEntityPointer(next_player_coords);	
-                                if (entityInMotion(entity) && !(entity->previously_moving_sideways == 1 && getTileType(getNextCoords(next_player_coords, DOWN)) != NONE)) pause_before_moving = true;
-                                else if (canPush(next_player_coords, input_direction)) 
+                                //figure out if push, pause, or fail here.
+
+                                PushResult push_check = canPushStack(next_player_coords, input_direction);
+                                if (push_check == CAN_PUSH) 
                                 {
-                                    Int3 current_stack_coords = next_player_coords;
-                                    FOR(stack_index, MAX_PUSHABLE_STACK_SIZE)
-                                    {
-                                        current_stack_coords = getNextCoords(current_stack_coords, UP);
-                                        TileType next_tile_type = getTileType(current_stack_coords);
-                                        if (isPushable(next_tile_type))
-                                        {
-                                            if (canPush(current_stack_coords, input_direction)) stack_size++;
-                                            else break;
-                                        }
-                                        else break;
-                                    }
-                                    try_to_push = true;
+                                    do_push = true;
                                     move_player = true;
                                 }
+                                else if (push_check == FAILED_PUSH) do_failed_animations = true;
                                 break;
                             }
                             case MIRROR:
                             {
+                                // TODO(spike): compact this logic a bit (and add a pause condition)
                                 if (canPush(next_player_coords, input_direction))
                                 {
                                     TileType push_tile = getTileType(getNextCoords(next_player_coords, input_direction));
                                     TileType above_tile = getTileType(getNextCoords(next_player_coords, UP));
                                     if (push_tile != NONE || above_tile != NONE) break;
-                                    try_to_roll = true;
+                                    do_roll = true;
                                     move_player = true;
                                 }
+                                else do_failed_animations = true;
                                 break;
                             }
                             default:
@@ -2262,39 +2269,24 @@ void gameFrame(double delta_time, TickInput tick_input)
                             // don't allow walking off edge
                             Int3 coords_below = getNextCoords(next_player_coords, DOWN);
                             TileType tile_below = getTileType(coords_below);
-                            if (isPushable(tile_below))
-                            {
-                                if (entityInMotion(getEntityPointer(coords_below))) pause_before_moving = true;
-                            }
                             if (tile_below != NONE || next_world_state.player.hit_by_red)
                             {
-                                if (!pause_before_moving)
+                                if (do_push) 	  
                                 {
-                                    int32 pause = false;
-                                    if (try_to_push) 	  
-                                    {
-                                        Int3 stack_entity_coords = next_player_coords;
-                                        FOR(stack_index, stack_size)
-                                        {
-                                            pause = push(stack_entity_coords, input_direction);
-                                            stack_entity_coords = getNextCoords(stack_entity_coords, UP);
-                                        }
-                                    }
-                                    else if (try_to_roll) roll(next_player_coords, input_direction);
-
-                                    if (!pause)
-                                    {
-                                        doStandardMovement(input_direction, next_tile, next_player_coords);
-                                    	time_until_input = PUSH_ANIMATION_TIME;
-                                    }
+                                    pushStack(next_player_coords, input_direction);
                                 }
+                                else if (do_roll) roll(next_player_coords, input_direction);
+
+                                doStandardMovement(input_direction, next_tile, next_player_coords);
+                                time_until_input = PUSH_ANIMATION_TIME;
                             }
                             else
                             {
+                                // leap of faith logic - TODO(spike): probably outdated
                                 WorldState world_state_savestate = next_world_state;
 
-                                if (try_to_push) pushWithoutAnimation(next_player_coords, input_direction);
-                                if (try_to_roll) rollWithoutAnimation(next_player_coords, input_direction);
+                                if (do_push) pushWithoutAnimation(next_player_coords, input_direction);
+                                if (do_roll) rollWithoutAnimation(next_player_coords, input_direction);
 
                                 bool animations_on = false;
                                 // TODO(spike): also needs testing
@@ -2325,8 +2317,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 next_world_state = world_state_savestate;
                                 if (leap_of_faith_worked)
                                 {
-                                    if (try_to_push) push(next_player_coords, input_direction);
-                                    if (try_to_roll) roll(next_player_coords, input_direction);
+                                    if (do_push) push(next_player_coords, input_direction);
+                                    if (do_roll) roll(next_player_coords, input_direction);
 
                                     doStandardMovement(input_direction, next_tile, next_player_coords);
                                 }
@@ -2335,7 +2327,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             }
                             if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME; 
                         }
-						else if (!pause_before_moving) doFailedWalkAnimations(next_player_coords);
+						else if (do_failed_animations) doFailedWalkAnimations(next_player_coords);
                     }
                 }
                 else
