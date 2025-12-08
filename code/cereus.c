@@ -128,12 +128,12 @@ RaycastHit;
  
 typedef struct Push 
 {
-    bool pause_for_falling;
     Int3 previous_coords[32];
     Int3 new_coords[32];
     TileType type[32];
     Entity* pointer_to_entity[32];
     int32 count;
+    bool pause_for_movement;
 }
 Push;
 
@@ -1164,6 +1164,13 @@ void pauseAnimation(int32 id, int32 frame_count)
     }
 }
 
+bool entityInMotion(Entity* entity)
+{
+    if (entity == 0) return false; // if null pointer return not in motion
+    if (entity->previously_moving_sideways != 0 || entity->falling_time != 0) return true;
+    else return false;
+}
+
 bool findFallingInAnimations(int32 id)
 {
     FOR(animation_index, MAX_ANIMATION_COUNT)
@@ -1249,10 +1256,11 @@ Push pushWithoutAnimation(Int3 coords, Direction direction)
         Int3 new_coords = entities_to_push.new_coords[entity_index];
         TileType tile_type = entities_to_push.type[entity_index];
 
-		if (entity->falling_time > 0) entities_to_push.pause_for_falling = true;
+		if (entityInMotion(entity)) entities_to_push.pause_for_movement = true;
+		else if (isPushable(getTileType(getNextCoords(entity->coords, DOWN))) && entityInMotion(getEntityPointer(getNextCoords(entity->coords, DOWN)))) entities_to_push.pause_for_movement = true;
 		else
         {
-            if (getTileType(getNextCoords(prev_coords, DOWN)) != NONE) entity->previously_moving_sideways = PUSH_ANIMATION_TIME + 1;
+            if (getTileType(getNextCoords(prev_coords, DOWN)) != NONE) entity->previously_moving_sideways = PUSH_ANIMATION_TIME;
 
             if (entity_index == 0) 
             {
@@ -1264,18 +1272,21 @@ Push pushWithoutAnimation(Int3 coords, Direction direction)
             entity->coords = new_coords;
         }
     }
+    entities_to_push.pause_for_movement = false;
     return entities_to_push;
 }
 
+// returns true if pausing animation for movement
 bool push(Int3 coords, Direction direction)
 {
     Push entities_to_push = pushWithoutAnimation(coords, direction);
 
-	if (entities_to_push.pause_for_falling)
+	if (entities_to_push.pause_for_movement)
     {
+        /*
         pauseAnimation(PLAYER_ID, 1);
         if (!next_world_state.pack.pack_detached) pauseAnimation(PACK_ID, 1);
-        time_until_input = 1 - PUSH_ANIMATION_TIME;
+        */
         return true;
     }
 	else
@@ -1793,6 +1804,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         if (entity_in_stack->falling_time == 0)
         {
             if (do_animation) createFirstFallAnimation(intCoordsToNorm(current_start_coords), &entity_in_stack->position_norm, entity_in_stack->id);
+            entity_in_stack->falling_time = FALL_ANIMATION_TIME + 4 + 1; // 12 frames here instead of 8 because of acceleration period
         }
         else
         {
@@ -1804,6 +1816,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
                                              &entity_in_stack->position_norm,
                                              IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                              entity_in_stack->id, FALL_ANIMATION_TIME, true);
+                entity_in_stack->falling_time = FALL_ANIMATION_TIME + 1;
             }
         }
         setTileType(getTileType(current_start_coords), current_end_coords); 
@@ -1811,7 +1824,6 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         entity_in_stack->coords = current_end_coords;
         current_end_coords = current_start_coords;
         current_start_coords = getNextCoords(current_start_coords, UP);
-        entity_in_stack->falling_time = FALL_ANIMATION_TIME + 1;
 	}
     return false;
 }
@@ -1833,13 +1845,6 @@ void handleFallingTimers(Entity* entity)
 {
     if (entity->previously_moving_sideways > 0) entity->previously_moving_sideways--;
 	if (entity->falling_time > 0) entity->falling_time--;
-}
-
-bool entityInMotion(Int3 coords)
-{
-	Entity* entity = getEntityPointer(coords);
-    if (entity->previously_moving_sideways != 0 || entity->falling_time != 0) return true;
-    else return false;
 }
 
 // HEAD ROTATION / MOVEMENT
@@ -2208,7 +2213,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             {
                                 // check if item infront is moving (or if last frame of movement then allow because of animation timings, only if will be able to move onto that next tile)
 								Entity* entity = getEntityPointer(next_player_coords);	
-                                if (entityInMotion(next_player_coords) && !(entity->previously_moving_sideways == 1 && getTileType(getNextCoords(next_player_coords, DOWN)) != NONE)) pause_before_moving = true;
+                                if (entityInMotion(entity) && !(entity->previously_moving_sideways == 1 && getTileType(getNextCoords(next_player_coords, DOWN)) != NONE)) pause_before_moving = true;
                                 else if (canPush(next_player_coords, input_direction)) 
                                 {
                                     Int3 current_stack_coords = next_player_coords;
@@ -2252,7 +2257,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             TileType tile_below = getTileType(coords_below);
                             if (isPushable(tile_below))
                             {
-                                if (entityInMotion(coords_below)) pause_before_moving = true;
+                                if (entityInMotion(getEntityPointer(coords_below))) pause_before_moving = true;
                             }
                             if (tile_below != NONE || next_world_state.player.hit_by_red)
                             {
@@ -2270,14 +2275,18 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     }
                                     else if (try_to_roll) roll(next_player_coords, input_direction);
 
-                                    if (!pause) doStandardMovement(input_direction, next_tile, next_player_coords);
+                                    if (!pause) 
+                                    {
+                                        doStandardMovement(input_direction, next_tile, next_player_coords);
+                                    	time_until_input = PUSH_ANIMATION_TIME;
+                                    }
                                 }
                                 else
                                 {
-                                    // pause by a frame and try again next frame (until object no longer in motion)
+                                    /*
                                     pauseAnimation(PLAYER_ID, 1);
                                     if (!next_world_state.pack.pack_detached) pauseAnimation(PACK_ID, 1);
-                                    time_until_input = 1 - PUSH_ANIMATION_TIME;
+                                    */
                                 }
                             }
                             else
@@ -2322,24 +2331,25 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     doStandardMovement(input_direction, next_tile, next_player_coords);
                                 }
                                 else doFailedWalkAnimations(next_player_coords);
+                                time_until_input = PUSH_ANIMATION_TIME;
                             }
-                            if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME - PUSH_ANIMATION_TIME; // below we set time_until_input += PUSH, so we add on the difference here.
+                            if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME; 
                         }
 						else if (pause_before_moving)
                         {
-                            // pause by a frame and try again next frame (until object no longer in motion)
+                            /*
                             pauseAnimation(PLAYER_ID, 1);
                             if (!next_world_state.pack.pack_detached) pauseAnimation(PACK_ID, 1);
-                            time_until_input = 1 - PUSH_ANIMATION_TIME;
+                            */
                         }
 						else doFailedWalkAnimations(next_player_coords);
-                        time_until_input += PUSH_ANIMATION_TIME;
                     }
                 }
                 else
                 {
                     if (input_direction != oppositeDirection(next_world_state.player.direction)) // check if turning (as opposed to trying to reverse)
                     {
+                        // player is turning
                         Direction polarity_direction = NORTH;
                         int32 clockwise = false;
                         int32 clockwise_calculation = next_world_state.player.direction - input_direction;
@@ -2369,95 +2379,103 @@ void gameFrame(double delta_time, TickInput tick_input)
                             Int3 diagonal_tile_coords = getNextCoords(orthogonal_tile_coords, polarity_direction);
                             Direction diagonal_push_direction = oppositeDirection(input_direction);	
                             Direction orthogonal_push_direction = oppositeDirection(polarity_direction); 
+                            
+                            bool pause_turn = false;
+                            if (entityInMotion(getEntityPointer(orthogonal_tile_coords))) pause_turn = true;
+                            if (entityInMotion(getEntityPointer(diagonal_tile_coords))) pause_turn = true;
 
-                            TileType diagonal_tile_type = getTileType(diagonal_tile_coords); 
-                            TileType orthogonal_tile_type = getTileType(orthogonal_tile_coords);
-
-							bool allow_turn_diagonal = false;
-                            bool allow_turn_orthogonal = false;
-                            bool push_diagonal = false;					
-                            bool push_orthogonal = false;				
-
-                            switch (diagonal_tile_type)
+                            if (!pause_turn)
                             {
-                            	case NONE:
+
+                                TileType diagonal_tile_type = getTileType(diagonal_tile_coords); 
+                                TileType orthogonal_tile_type = getTileType(orthogonal_tile_coords);
+
+                                bool allow_turn_diagonal = false;
+                                bool allow_turn_orthogonal = false;
+                                bool push_diagonal = false;					
+                                bool push_orthogonal = false;				
+
+                                switch (diagonal_tile_type)
                                 {
-                                	allow_turn_diagonal = true;
-                                    break;
-                                }
-                                case BOX:
-                                case CRYSTAL:
-                                {
-                                    if (canPush(diagonal_tile_coords, diagonal_push_direction))
+                                    case NONE:
                                     {
-                                        push_diagonal = true;
                                         allow_turn_diagonal = true;
+                                        break;
                                     }
-                                    break;
-                                }
-                                default: break;
-                            }
-
-                            if (allow_turn_diagonal == true) switch (orthogonal_tile_type)
-                            {
-                            	case NONE:
-                                {
-                                	allow_turn_orthogonal = true;
-                                    break;
-                                }
-                                case BOX:
-                                case CRYSTAL:
-                                {
-                                    if (canPush(orthogonal_tile_coords, orthogonal_push_direction))
+                                    case BOX:
+                                    case CRYSTAL:
                                     {
-                                        push_orthogonal = true;
-                                        allow_turn_orthogonal = true;
+                                        if (canPush(diagonal_tile_coords, diagonal_push_direction))
+                                        {
+                                            push_diagonal = true;
+                                            allow_turn_diagonal = true;
+                                        }
+                                        break;
                                     }
-                                    break;
+                                    default: break;
                                 }
-                                default: break;
-                            }
 
-                            if (allow_turn_orthogonal)
-                            {
-                            	// actually turning rotate player
-								pack_hitbox_timer_primary = PACK_TURN_HITBOX_PRIMARY_TIME;
-                                pack_hitbox_coords_primary = next_world_state.pack.coords;
+                                if (allow_turn_diagonal == true) switch (orthogonal_tile_type)
+                                {
+                                    case NONE:
+                                    {
+                                        allow_turn_orthogonal = true;
+                                        break;
+                                    }
+                                    case BOX:
+                                    case CRYSTAL:
+                                    {
+                                        if (canPush(orthogonal_tile_coords, orthogonal_push_direction))
+                                        {
+                                            push_orthogonal = true;
+                                            allow_turn_orthogonal = true;
+                                        }
+                                        break;
+                                    }
+                                    default: break;
+                                }
 
-								pack_hitbox_timer_secondary = PACK_TURN_HITBOX_SECONDARY_TIME;
-                                pack_hitbox_coords_secondary = diagonal_tile_coords;
+                                if (allow_turn_orthogonal)
+                                {
+                                    // actually turning rotate player
+                                    pack_hitbox_timer_primary = PACK_TURN_HITBOX_PRIMARY_TIME;
+                                    pack_hitbox_coords_primary = next_world_state.pack.coords;
 
-                                if (isPushable(getTileType(getNextCoords(next_world_state.player.coords, UP)))) doHeadRotation(clockwise);
+                                    pack_hitbox_timer_secondary = PACK_TURN_HITBOX_SECONDARY_TIME;
+                                    pack_hitbox_coords_secondary = diagonal_tile_coords;
 
-                                createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
-                                                             directionToQuaternion(next_world_state.player.direction, true), 
-                                                             directionToQuaternion(input_direction, true), 
-                                                             &next_world_state.player.rotation_quat,
-                                                             1, TURN_ANIMATION_TIME, false); 
-                                next_world_state.player.direction = input_direction;
-                                setTileDirection(next_world_state.player.direction, next_world_state.player.coords);
+                                    if (isPushable(getTileType(getNextCoords(next_world_state.player.coords, UP)))) doHeadRotation(clockwise);
 
-                                if (push_diagonal)   push(diagonal_tile_coords,   diagonal_push_direction);
-                                if (push_orthogonal) push(orthogonal_tile_coords, orthogonal_push_direction);
+                                    createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
+                                                                 directionToQuaternion(next_world_state.player.direction, true), 
+                                                                 directionToQuaternion(input_direction, true), 
+                                                                 &next_world_state.player.rotation_quat,
+                                                                 1, TURN_ANIMATION_TIME, false); 
+                                    next_world_state.player.direction = input_direction;
+                                    setTileDirection(next_world_state.player.direction, next_world_state.player.coords);
 
-                                createPackRotationAnimation(intCoordsToNorm(next_world_state.player.coords), 
-                                        					intCoordsToNorm(next_world_state.pack.coords), 
-                                                            oppositeDirection(input_direction), clockwise, 
-                                                            &next_world_state.pack.position_norm, &next_world_state.pack.rotation_quat, 2);
-                                setTileType(NONE, next_world_state.pack.coords);
-                                setTileDirection(NORTH, next_world_state.pack.coords);
-                                next_world_state.pack.coords = orthogonal_tile_coords;
-                                setTileType(PACK, next_world_state.pack.coords);
-                                next_world_state.pack.direction = oppositeDirection(input_direction);
-                                setTileDirection(input_direction, next_world_state.pack.coords);
+                                    if (push_diagonal)   push(diagonal_tile_coords,   diagonal_push_direction);
+                                    if (push_orthogonal) push(orthogonal_tile_coords, orthogonal_push_direction);
 
-                                recordStateForUndo();
-                            }
-                            else
-                            {
-                                // failed turn animation
-                                doFailedTurnAnimations(input_direction, clockwise);
-                            }
+                                    createPackRotationAnimation(intCoordsToNorm(next_world_state.player.coords), 
+                                                                intCoordsToNorm(next_world_state.pack.coords), 
+                                                                oppositeDirection(input_direction), clockwise, 
+                                                                &next_world_state.pack.position_norm, &next_world_state.pack.rotation_quat, 2);
+                                    setTileType(NONE, next_world_state.pack.coords);
+                                    setTileDirection(NORTH, next_world_state.pack.coords);
+                                    next_world_state.pack.coords = orthogonal_tile_coords;
+                                    setTileType(PACK, next_world_state.pack.coords);
+                                    next_world_state.pack.direction = oppositeDirection(input_direction);
+                                    setTileDirection(input_direction, next_world_state.pack.coords);
+
+                                    recordStateForUndo();
+                                }
+                                else
+                                {
+                                    // failed turn animation
+                                    doFailedTurnAnimations(input_direction, clockwise);
+                                }
+                        	}
                         }
                     }
                     time_until_input = TURN_ANIMATION_TIME;
