@@ -1318,7 +1318,7 @@ void push(Int3 coords, Direction direction)
 }
 
 // assumes stack is able to be pushed, at least a bit. checks if next is NONE, if so stops. TODO(spike): rename to pushAll or similar
-void pushStack(Int3 coords, Direction direction, bool animations_on)
+void pushStack(Int3 coords, Direction direction, bool animations_on, bool limit_stack_size_to_one)
 {
     Int3 current_coords = coords;
     int32 push_size = 0;
@@ -1339,6 +1339,7 @@ void pushStack(Int3 coords, Direction direction, bool animations_on)
             if (animations_on) push(current_stack_coords, direction);
             else pushWithoutAnimation(current_stack_coords, direction);
             current_stack_coords = getNextCoords(current_stack_coords, UP);
+            if (limit_stack_size_to_one && stack_index == 0) break;
         }
         current_coords = getNextCoords(current_coords, oppositeDirection(direction));
     }
@@ -1949,7 +1950,7 @@ void doHeadMovement(Direction direction, bool animations_on)
     Int3 coords_above_player = getNextCoords(next_world_state.player.coords, UP);
     if (!isPushable(getTileType(coords_above_player))) return;
     PushResult push_result = canPushStack(coords_above_player, direction);
-    if (push_result == CAN_PUSH) pushStack(coords_above_player, direction, animations_on);
+    if (push_result == CAN_PUSH) pushStack(coords_above_player, direction, animations_on, false);
 }
 
 void doStandardMovement(Direction input_direction, TileType next_tile, Int3 next_player_coords)
@@ -2250,7 +2251,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             {
                                 if (do_push) 	  
                                 {
-                                    pushStack(next_player_coords, input_direction, true);
+                                    pushStack(next_player_coords, input_direction, true, false);
                                 }
                                 else if (do_roll) roll(next_player_coords, input_direction);
 
@@ -2348,7 +2349,6 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                             if (!pause_turn)
                             {
-
                                 TileType diagonal_tile_type = getTileType(diagonal_tile_coords); 
                                 TileType orthogonal_tile_type = getTileType(orthogonal_tile_coords);
 
@@ -2367,7 +2367,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     case BOX:
                                     case CRYSTAL:
                                     {
-                                        if (canPush(diagonal_tile_coords, diagonal_push_direction))
+                                        PushResult push_result = canPushStack(diagonal_tile_coords, diagonal_push_direction);
+                                        if (push_result == CAN_PUSH)
                                         {
                                             push_diagonal = true;
                                             allow_turn_diagonal = true;
@@ -2387,7 +2388,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     case BOX:
                                     case CRYSTAL:
                                     {
-                                        if (canPush(orthogonal_tile_coords, orthogonal_push_direction))
+                                        PushResult push_result = canPushStack(orthogonal_tile_coords, orthogonal_push_direction);
+                                        if (push_result == CAN_PUSH)
                                         {
                                             push_orthogonal = true;
                                             allow_turn_orthogonal = true;
@@ -2416,8 +2418,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     next_world_state.player.direction = input_direction;
                                     setTileDirection(next_world_state.player.direction, next_world_state.player.coords);
 
-                                    if (push_diagonal)   push(diagonal_tile_coords,   diagonal_push_direction);
-                                    if (push_orthogonal) push(orthogonal_tile_coords, orthogonal_push_direction);
+                                    if (push_diagonal)   pushStack(diagonal_tile_coords,   diagonal_push_direction, true, true);
+                                    if (push_orthogonal) pushStack(orthogonal_tile_coords, orthogonal_push_direction, true, true);
 
                                     createPackRotationAnimation(intCoordsToNorm(next_world_state.player.coords), 
                                                                 intCoordsToNorm(next_world_state.pack.coords), 
