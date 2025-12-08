@@ -1190,7 +1190,7 @@ bool findFallingInAnimations(int32 id)
     return false;
 }
 
-// hard codes 10 frame animation total (forces logical pause = 2f)
+// hard codes first fall = 12 frames total (8 acceleration, 4 at terminal velocity of 1/8 b/f)
 void createFirstFallAnimation(Vec3 start_position, Vec3* position_to_change, int32 entity_id)
 {
     int32 next_free_array[2] = {0};
@@ -1248,9 +1248,6 @@ PushResult canPush(Int3 coords, Direction direction)
     	current_coords = getNextCoords(current_coords, direction);
         current_tile = getTileType(current_coords);
 
-        if (!intCoordsWithinLevelBounds(current_coords)) return FAILED_PUSH;
-        if (current_tile == NONE) return CAN_PUSH;
-
         Int3 coords_ahead = getNextCoords(entity->coords, direction);
         Int3 coords_below = getNextCoords(entity->coords, DOWN);
         Int3 coords_below_and_ahead = getNextCoords(getNextCoords(entity->coords, DOWN), direction);
@@ -1259,12 +1256,29 @@ PushResult canPush(Int3 coords, Direction direction)
         if (isPushable(getTileType(coords_below)) && entityInMotion(getEntityPointer(coords_below))) return PAUSE_PUSH;
         if (isPushable(getTileType(coords_below_and_ahead)) && entityInMotion(getEntityPointer(coords_below_and_ahead))) return PAUSE_PUSH;
 
+        if (!intCoordsWithinLevelBounds(current_coords)) return FAILED_PUSH;
+        if (current_tile == NONE) return CAN_PUSH;
         if (isSource(current_tile)) return FAILED_PUSH;
         if (current_tile == MIRROR) return FAILED_PUSH;
         if (current_tile == GRID) return FAILED_PUSH;
         if (current_tile == WALL) return FAILED_PUSH;
     }
-    return false; // only here if hit the max entity push count
+    return FAILED_PUSH; // only here if hit the max entity push count
+}
+
+// TODO(spike): does this fail some pushes that should succeed lower down?
+PushResult canPushStack(Int3 coords, Direction direction)
+{
+    int32 stack_size = getPushableStackSize(coords);
+    Int3 current_coords = coords;
+    FOR(stack_index, stack_size)
+    {
+		PushResult push_result = canPush(current_coords, direction);
+        if (push_result == PAUSE_PUSH) return PAUSE_PUSH;
+        if(stack_index == 0) if (push_result == FAILED_PUSH) return FAILED_PUSH;
+        current_coords = getNextCoords(current_coords, UP);
+    }
+    return CAN_PUSH;
 }
 
 // TODO(spike): also rename
@@ -1303,21 +1317,7 @@ void push(Int3 coords, Direction direction)
                                  id, PUSH_ANIMATION_TIME, false); 
 }
 
-PushResult canPushStack(Int3 coords, Direction direction)
-{
-    int32 stack_size = getPushableStackSize(coords);
-    Int3 current_coords = coords;
-    FOR(stack_index, stack_size)
-    {
-		PushResult push_result = canPush(current_coords, direction);
-        if (push_result == PAUSE_PUSH) return PAUSE_PUSH;
-        if (push_result == FAILED_PUSH) return FAILED_PUSH;
-        current_coords = getNextCoords(current_coords, UP);
-    }
-    return CAN_PUSH;
-}
-
-// assumes stack is able to be pushed. TODO(spike): rename to pushAll or similar
+// assumes stack is able to be pushed, at least a bit. checks if next is NONE, if so stops. TODO(spike): rename to pushAll or similar
 void pushStack(Int3 coords, Direction direction)
 {
     Int3 current_coords = coords;
@@ -1335,6 +1335,7 @@ void pushStack(Int3 coords, Direction direction)
         Int3 current_stack_coords = current_coords;
         FOR(stack_index, stack_size)
         {
+            if (getTileType(getNextCoords(current_stack_coords, direction)) != NONE) break;
             push(current_stack_coords, direction);
             current_stack_coords = getNextCoords(current_stack_coords, UP);
         }
@@ -1342,7 +1343,7 @@ void pushStack(Int3 coords, Direction direction)
     }
 }
 
-// encoding new dir by prev dir and push dir rather than by final quat. assumes 6-dim dir
+// assumes 6-dim dir
 Direction getNextMirrorState(Direction start_direction, Direction push_direction)
 {
     switch (start_direction)
@@ -2235,8 +2236,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             case PACK:
                             {
                                 //figure out if push, pause, or fail here.
-
-                                PushResult push_check = canPushStack(next_player_coords, input_direction);
+                            	PushResult push_check = canPushStack(next_player_coords, input_direction);
                                 if (push_check == CAN_PUSH) 
                                 {
                                     do_push = true;
@@ -2261,7 +2261,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                             }
                             default:
                             {
-                                move_player = true;
+                                Int3 coords_ahead = next_player_coords;
+                                Int3 coords_below_and_ahead = getNextCoords(next_player_coords, DOWN);
+                                if (isPushable(getTileType(coords_ahead)) && entityInMotion(getEntityPointer(coords_ahead))) move_player = false;
+                                else if (isPushable(getTileType(coords_below_and_ahead)) && entityInMotion(getEntityPointer(coords_below_and_ahead))) move_player = false;
+                                else move_player = true;
                             }
                         }
 						if (move_player)
