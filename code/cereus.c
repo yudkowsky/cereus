@@ -850,6 +850,20 @@ RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance)
     return output;
 }
 
+void editorPlaceOnlyInstanceOfTile(Entity* entity, Int3 coords, TileType tile, int32 id)
+{
+    for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
+    {
+        if (next_world_state.buffer[buffer_index] != tile) continue;
+        next_world_state.buffer[buffer_index] = NONE;
+        next_world_state.buffer[buffer_index + 1] = NORTH;
+    }
+    entity->coords = coords;
+    entity->position_norm = intCoordsToNorm(coords);
+    entity->id = id;
+    setTileType(editor_state.picked_tile, coords);
+}
+
 // ANIMATION HELPER 
 
 Int3 getNextCoords(Int3 coords, Direction direction)
@@ -1265,7 +1279,6 @@ PushResult canPush(Int3 coords, Direction direction)
     return FAILED_PUSH; // only here if hit the max entity push count
 }
 
-// TODO(spike): does this fail some pushes that should succeed lower down?
 PushResult canPushStack(Int3 coords, Direction direction)
 {
     int32 stack_size = getPushableStackSize(coords);
@@ -1280,8 +1293,7 @@ PushResult canPushStack(Int3 coords, Direction direction)
     return CAN_PUSH;
 }
 
-// TODO(spike): also rename
-Push pushWithoutAnimation(Int3 coords, Direction direction)
+Push pushOnceWithoutAnimation(Int3 coords, Direction direction)
 {
 	Push entity_to_push = {0};
 
@@ -1303,10 +1315,9 @@ Push pushWithoutAnimation(Int3 coords, Direction direction)
     return entity_to_push;
 }
 
-// TODO(spike): rename to pushOneTile or similar
-void push(Int3 coords, Direction direction)
+void pushOnce(Int3 coords, Direction direction)
 {
-    Push entity_to_push = pushWithoutAnimation(coords, direction);
+    Push entity_to_push = pushOnceWithoutAnimation(coords, direction);
 
     int32 id = getEntityId(entity_to_push.new_coords);
     createInterpolationAnimation(intCoordsToNorm(entity_to_push.previous_coords),
@@ -1316,8 +1327,8 @@ void push(Int3 coords, Direction direction)
                                  id, PUSH_ANIMATION_TIME, false); 
 }
 
-// assumes stack is able to be pushed, at least a bit. checks if next is NONE, if so stops. TODO(spike): rename to pushAll or similar
-void pushStack(Int3 coords, Direction direction, bool animations_on, bool limit_stack_size_to_one)
+// assumes stack is able to be pushed, at least a bit. checks if next is NONE, if so stops. 
+void pushAll(Int3 coords, Direction direction, bool animations_on, bool limit_stack_size_to_one)
 {
     Int3 current_coords = coords;
     int32 push_size = 0;
@@ -1335,8 +1346,8 @@ void pushStack(Int3 coords, Direction direction, bool animations_on, bool limit_
         FOR(stack_index, stack_size)
         {
             if (getTileType(getNextCoords(current_stack_coords, direction)) != NONE) break;
-            if (animations_on) push(current_stack_coords, direction);
-            else pushWithoutAnimation(current_stack_coords, direction);
+            if (animations_on) pushOnce(current_stack_coords, direction);
+            else pushOnceWithoutAnimation(current_stack_coords, direction);
             current_stack_coords = getNextCoords(current_stack_coords, UP);
             if (limit_stack_size_to_one && stack_index == 0) break;
         }
@@ -1401,7 +1412,6 @@ Direction getNextMirrorState(Direction start_direction, Direction push_direction
     }
 }
 
-// TODO(spike): compact these into one (like with push / pushWithoutAnimation)
 void rollWithoutAnimation(Int3 coords, Direction direction)
 {
     Entity* entity = getEntityPointer(coords);
@@ -1942,7 +1952,7 @@ void doHeadMovement(Direction direction, bool animations_on)
     Int3 coords_above_player = getNextCoords(next_world_state.player.coords, UP);
     if (!isPushable(getTileType(coords_above_player))) return;
     PushResult push_result = canPushStack(coords_above_player, direction);
-    if (push_result == CAN_PUSH) pushStack(coords_above_player, direction, animations_on, false);
+    if (push_result == CAN_PUSH) pushAll(coords_above_player, direction, animations_on, false);
 }
 
 void doStandardMovement(Direction input_direction, TileType next_tile, Int3 next_player_coords)
@@ -2213,7 +2223,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                             }
                             case MIRROR:
                             {
-                                // TODO(spike): compact this logic a bit (and add a pause condition)
                                 PushResult push_check = canPush(next_player_coords, input_direction);
                                 if (push_check == CAN_PUSH)
                                 {
@@ -2244,7 +2253,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             {
                                 if (do_push) 	  
                                 {
-                                    pushStack(next_player_coords, input_direction, true, false);
+                                    pushAll(next_player_coords, input_direction, true, false);
                                 }
                                 else if (do_roll) 
                                 {
@@ -2259,7 +2268,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 // leap of faith logic - TODO(spike): probably outdated
                                 WorldState world_state_savestate = next_world_state;
 
-                                if (do_push) pushWithoutAnimation(next_player_coords, input_direction);
+                                if (do_push) pushOnceWithoutAnimation(next_player_coords, input_direction);
                                 if (do_roll) rollWithoutAnimation(next_player_coords, input_direction);
 
                                 bool animations_on = false;
@@ -2291,7 +2300,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 next_world_state = world_state_savestate;
                                 if (leap_of_faith_worked)
                                 {
-                                    if (do_push) push(next_player_coords, input_direction);
+                                    if (do_push) pushOnce(next_player_coords, input_direction);
                                     if (do_roll) roll(next_player_coords, input_direction);
 
                                     doStandardMovement(input_direction, next_tile, next_player_coords);
@@ -2418,8 +2427,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     next_world_state.player.direction = input_direction;
                                     setTileDirection(next_world_state.player.direction, next_world_state.player.coords);
 
-                                    if (push_diagonal)   pushStack(diagonal_tile_coords,   diagonal_push_direction, true, true);
-                                    if (push_orthogonal) pushStack(orthogonal_tile_coords, orthogonal_push_direction, true, true);
+                                    if (push_diagonal)   pushAll(diagonal_tile_coords,   diagonal_push_direction, true, true);
+                                    if (push_orthogonal) pushAll(orthogonal_tile_coords, orthogonal_push_direction, true, true);
 
                                     createPackRotationAnimation(intCoordsToNorm(next_world_state.player.coords), 
                                                                 intCoordsToNorm(next_world_state.pack.coords), 
@@ -2525,31 +2534,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                     }
                     else if (editor_state.picked_tile == PLAYER) // TODO(spike): collapse these two
                     {
-                        // remove other instances of player
-                        for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
-                        {
-							if (next_world_state.buffer[buffer_index] != PLAYER) continue;
-                            setTileType(NONE, raycast_output.hit_coords);
-                            setTileDirection(NORTH, raycast_output.hit_coords);
-                        }
-						next_world_state.player.coords = raycast_output.place_coords;
-                        next_world_state.player.position_norm = intCoordsToNorm(next_world_state.player.coords);
-                        next_world_state.player.id = 1;
-                        setTileType(editor_state.picked_tile, raycast_output.place_coords);
+                        editorPlaceOnlyInstanceOfTile(&next_world_state.player, raycast_output.place_coords, PLAYER, PLAYER_ID);
                     }
                     else if (editor_state.picked_tile == PACK)
                     {
-                        // remove other instances of pack
-                        for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
-                        {
-							if (next_world_state.buffer[buffer_index] != PACK) continue;
-                            setTileType(NONE, raycast_output.hit_coords);
-                            setTileDirection(NORTH, raycast_output.hit_coords);
-                        }
-						next_world_state.pack.coords = raycast_output.place_coords;
-                        next_world_state.pack.position_norm = intCoordsToNorm(next_world_state.pack.coords);
-                        next_world_state.pack.id = 2;
-                        setTileType(editor_state.picked_tile, raycast_output.place_coords);
+                        editorPlaceOnlyInstanceOfTile(&next_world_state.pack, raycast_output.place_coords, PACK, PACK_ID);
                     }
                     else
                     {
