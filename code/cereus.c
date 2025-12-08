@@ -1318,7 +1318,7 @@ void push(Int3 coords, Direction direction)
 }
 
 // assumes stack is able to be pushed, at least a bit. checks if next is NONE, if so stops. TODO(spike): rename to pushAll or similar
-void pushStack(Int3 coords, Direction direction)
+void pushStack(Int3 coords, Direction direction, bool animations_on)
 {
     Int3 current_coords = coords;
     int32 push_size = 0;
@@ -1336,7 +1336,8 @@ void pushStack(Int3 coords, Direction direction)
         FOR(stack_index, stack_size)
         {
             if (getTileType(getNextCoords(current_stack_coords, direction)) != NONE) break;
-            push(current_stack_coords, direction);
+            if (animations_on) push(current_stack_coords, direction);
+            else pushWithoutAnimation(current_stack_coords, direction);
             current_stack_coords = getNextCoords(current_stack_coords, UP);
         }
         current_coords = getNextCoords(current_coords, oppositeDirection(direction));
@@ -1945,38 +1946,10 @@ void doHeadRotation(bool clockwise)
 
 void doHeadMovement(Direction direction, bool animations_on)
 {
-    int32 stack_size = 0;
     Int3 coords_above_player = getNextCoords(next_world_state.player.coords, UP);
-    Int3 current_stack_coords = coords_above_player;
-    FOR(find_stack_size_index, MAX_PUSHABLE_STACK_SIZE)
-    {
-        TileType next_tile_type = getTileType(current_stack_coords);
-        if (isPushable(next_tile_type))
-        {
-            if (canPush(current_stack_coords, direction)) 
-            {
-                stack_size++;
-            }
-            else 
-            {
-                break;
-            }
-        }
-        else break;
-        current_stack_coords = getNextCoords(current_stack_coords, UP);
-    }
-
-    Int3 stack_entity_coords = coords_above_player; 
-    if (animations_on) FOR(stack_index, stack_size)
-    {
-        push(stack_entity_coords, direction);
-        stack_entity_coords = getNextCoords(stack_entity_coords, UP);
-    }
-    else FOR(stack_index, stack_size)
-    {
-        pushWithoutAnimation(stack_entity_coords, direction);
-        stack_entity_coords = getNextCoords(stack_entity_coords, UP);
-    }
+    if (!isPushable(getTileType(coords_above_player))) return;
+    PushResult push_result = canPushStack(coords_above_player, direction);
+    if (push_result == CAN_PUSH) pushStack(coords_above_player, direction, animations_on);
 }
 
 void doStandardMovement(Direction input_direction, TileType next_tile, Int3 next_player_coords)
@@ -2277,7 +2250,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             {
                                 if (do_push) 	  
                                 {
-                                    pushStack(next_player_coords, input_direction);
+                                    pushStack(next_player_coords, input_direction, true);
                                 }
                                 else if (do_roll) roll(next_player_coords, input_direction);
 
