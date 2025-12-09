@@ -1513,6 +1513,7 @@ void roll(Int3 coords, Direction direction)
 {
     int32 id = getEntityId(coords);
     Entity* entity = getEntityPointer(coords);
+    createTrailingHitbox(coords, ROLL_ANIMATION_TIME / 2);
 	Vec4 quaternion_transform = quaternionNormalize(quaternionMultiply(quaternionFromAxisAngle(rollingAxis(direction), 0.25f*TAU), directionToQuaternion(entity->direction, true)));
     createRollingAnimation(intCoordsToNorm(coords), direction, &entity->position_norm, 
                            directionToQuaternion(entity->direction, true), quaternion_transform, &entity->rotation_quat,
