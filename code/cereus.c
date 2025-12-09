@@ -193,6 +193,7 @@ const int32 TRAILING_HITBOX_TIME = 4;
 const int32 TIME_BEFORE_DIAGONAL_TRAILING_HITBOX = 3;
 const int32 TRAILING_HITBOX_PACK_DIAGONAL_TURN_TIME = 4;
 const int32 TRAILING_HITBOX_PACK_ORTHOGONAL_TURN_TIME = 2;
+const int32 PACK_HITBOX_TURN_FROM_OR_TO_TIME = 8;
 
 const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
@@ -281,9 +282,16 @@ int32 time_until_input = 0;
 EditorState editor_state = {0};
 LaserBuffer laser_buffer[1024] = {0};
 
+TrailingHitbox trailing_hitboxes[64] = {0};
 int32 diagonal_turn_hitbox_timer = 0;
 Int3 diagonal_turn_hitbox_coords = {0};
-TrailingHitbox trailing_hitboxes[64] = {0};
+// patch on diagonal pass through due to pack hitbox being only on the diagonal in the middle of turn
+int32 pack_hitbox_turning_from_timer = 0;
+Int3 pack_hitbox_turning_from_coords = {0};
+Direction pack_hitbox_turning_from_direction = NO_DIRECTION;
+int32 pack_hitbox_turning_to_timer = 0;
+Int3 pack_hitbox_turning_to_coords = {0};
+Direction pack_hitbox_turning_to_direction = NO_DIRECTION;
 
 bool do_player_ghost = false;
 bool do_pack_ghost = false;
@@ -519,7 +527,46 @@ Direction oppositeDirection(Direction direction)
         case EAST:  return WEST;
         case UP:    return DOWN;
         case DOWN:  return UP;
-        default: return 0;
+
+        case NORTH_WEST: return SOUTH_EAST;
+        case SOUTH_WEST: return NORTH_EAST;
+        case SOUTH_EAST: return NORTH_WEST;
+        case NORTH_EAST: return SOUTH_WEST;
+
+        default: return NO_DIRECTION;
+    }
+}
+
+// assumes NWSE
+Direction getMiddleDirection(Direction direction_1, Direction direction_2)
+{
+	switch (direction_1)
+    {
+        case NORTH: switch (direction_2)
+        {
+            case WEST: return NORTH_WEST;
+			case EAST: return NORTH_EAST;
+            default: break;
+        }
+    	case WEST: switch (direction_2)
+        {
+			case NORTH: return NORTH_WEST;
+            case SOUTH: return SOUTH_WEST;
+            default: break;
+        }
+        case SOUTH: switch (direction_2)
+        {
+            case WEST: return SOUTH_WEST;
+			case EAST: return SOUTH_EAST;
+            default: break;
+        }
+    	case EAST: switch (direction_2)
+        {
+			case NORTH: return NORTH_EAST;
+            case SOUTH: return SOUTH_EAST;
+            default: break;
+        }
+        default: return NO_DIRECTION;
     }
 }
 
@@ -1763,13 +1810,9 @@ int32 updateLaserBuffer(void)
 
         for (int laser_index = 0; laser_index < MAX_LASER_TRAVEL_DISTANCE; laser_index++)
         {
-            FOR(trailing_hitbox_index, MAX_TRAILING_HITBOX_COUNT) 
-            {
-                if (int3IsEqual(current_coords, trailing_hitboxes[trailing_hitbox_index].coords) && trailing_hitboxes[trailing_hitbox_index].frames > 0)
-                {
-                    goto laser_instance_stop;
-                }
-            }
+            FOR(trailing_hitbox_index, MAX_TRAILING_HITBOX_COUNT) if (int3IsEqual(current_coords, trailing_hitboxes[trailing_hitbox_index].coords) && trailing_hitboxes[trailing_hitbox_index].frames > 0) goto laser_instance_stop;
+            if ((pack_hitbox_turning_from_timer > 0) && int3IsEqual(current_coords, pack_hitbox_turning_from_coords) && (pack_hitbox_turning_from_direction == current_direction)) goto laser_instance_stop;
+            if ((pack_hitbox_turning_to_timer   > 0) && int3IsEqual(current_coords, pack_hitbox_turning_to_coords)   && (pack_hitbox_turning_to_direction   == current_direction)) goto laser_instance_stop;
 
             LaserColor laser_color = colorToLaserColor(entity->color);
             if (!intCoordsWithinLevelBounds(current_coords)) break;
@@ -2506,9 +2549,19 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 if (allow_turn_orthogonal)
                                 {
                                     // actually turning: rotate player
+                                    // first, handle various trailing / phantom hitboxes
 									createTrailingHitbox(next_world_state.pack.coords, TRAILING_HITBOX_PACK_ORTHOGONAL_TURN_TIME);
                                     diagonal_turn_hitbox_timer = TIME_BEFORE_DIAGONAL_TRAILING_HITBOX;
                                     diagonal_turn_hitbox_coords = diagonal_coords;
+
+                                    Direction to_dir = getMiddleDirection(diagonal_push_direction, orthogonal_push_direction);
+									pack_hitbox_turning_from_timer = TURN_ANIMATION_TIME;
+                                    pack_hitbox_turning_from_coords = next_world_state.pack.coords;
+                                    pack_hitbox_turning_from_direction = oppositeDirection(to_dir);
+                                    pack_hitbox_turning_to_timer = TURN_ANIMATION_TIME;
+									pack_hitbox_turning_to_coords = orthogonal_coords;
+                                    pack_hitbox_turning_to_direction = to_dir;
+
             						next_world_state.pack.previously_moving_sideways = TURN_ANIMATION_TIME + 3;
 
                                     if (isPushable(getTileType(getNextCoords(next_world_state.player.coords, UP)))) doHeadRotation(clockwise);
@@ -2803,20 +2856,19 @@ void gameFrame(double delta_time, TickInput tick_input)
         decrementFallingTimers(player);
 		decrementFallingTimers(pack);
 
-		// handle timer which adds trailing hitbox in the middle of turning pack hitbox once needed
+		// handle turning hitboxes
         if (diagonal_turn_hitbox_timer > 0)
         {
-            if (diagonal_turn_hitbox_timer == 1)
-            {
-                createTrailingHitbox(diagonal_turn_hitbox_coords, TRAILING_HITBOX_PACK_DIAGONAL_TURN_TIME);
-            }
+            if (diagonal_turn_hitbox_timer == 1) createTrailingHitbox(diagonal_turn_hitbox_coords, TRAILING_HITBOX_PACK_DIAGONAL_TURN_TIME);
 			diagonal_turn_hitbox_timer--;
         }
+        if (pack_hitbox_turning_from_timer > 0) pack_hitbox_turning_from_timer--;
+        if (pack_hitbox_turning_to_timer   > 0) pack_hitbox_turning_to_timer--;
 
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
 
-        // decrement trailing hitboxes
+        // decrement trailing hitboxes 
         FOR(i, MAX_TRAILING_HITBOX_COUNT) if (trailing_hitboxes[i].frames > 0) trailing_hitboxes[i].frames--;
 
         // finished updating state
