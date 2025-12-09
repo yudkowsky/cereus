@@ -2251,10 +2251,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                         TileType next_tile = getTileType(next_player_coords);
                         if (!isSource(next_tile)) switch (next_tile)
                         {
-                            case VOID: break;
-                            case GRID: break;
-                            case WALL: break;
-                            case PERM_MIRROR: break;
+                            case VOID:
+                            case GRID:
+                            case WALL:
+                            case PERM_MIRROR:
+                            {
+                                do_failed_animations = true;
+                                break;
+                            }
                             case BOX:
                             case CRYSTAL:
                             case PACK:
