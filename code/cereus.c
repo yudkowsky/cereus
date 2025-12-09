@@ -12,15 +12,16 @@
 
 typedef enum TileType
 {
-    NONE    = 0,
-    VOID    = 1,
-    GRID    = 2,
-    WALL    = 3,
-    BOX     = 4,
-    PLAYER  = 5,
-    MIRROR  = 6,
-    CRYSTAL = 7,
-    PACK    = 8,
+    NONE    	= 0,
+    VOID    	= 1,
+    GRID    	= 2,
+    WALL    	= 3,
+    BOX     	= 4,
+    PLAYER  	= 5,
+    MIRROR  	= 6,
+    CRYSTAL 	= 7,
+    PACK        = 8,
+    PERM_MIRROR = 9,
 
     SOURCE_RED     = 32,
     SOURCE_GREEN   = 33,
@@ -116,6 +117,7 @@ typedef struct WorldState
     Entity mirrors[32];
     Entity sources[32];
     Entity crystals[32];
+    Entity perm_mirrors[32];
 }
 WorldState;
 
@@ -178,7 +180,6 @@ const int32 PUSH_ANIMATION_TIME = 9;
 const int32 ROLL_ANIMATION_TIME = 18;
 const int32 TURN_ANIMATION_TIME = 9;
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
-
 const int32 FAILED_ANIMATION_TIME = 8;
 
 const int32 PACK_TURN_HITBOX_PRIMARY_TIME = 3;
@@ -186,6 +187,8 @@ const int32 PACK_TURN_HITBOX_SECONDARY_TIME = 5;
 
 const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
+
+const int32 LASER_BUFFER_MOVING_TIME_ALLOWED_FOR_PASSTHROUGH = 4; // fall animation time / 2
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
@@ -204,19 +207,21 @@ const Vec4 IDENTITY_QUATERNION  = { 0, 0, 0, 1 };
 
 const int32 PLAYER_ID = 1;
 const int32 PACK_ID   = 2;
-const int32 ID_OFFSET_BOX     = 100 * 1;
-const int32 ID_OFFSET_MIRROR  = 100 * 2;
-const int32 ID_OFFSET_CRYSTAL = 100 * 3;
-const int32 ID_OFFSET_SOURCE  = 100 * 4;
+const int32 ID_OFFSET_BOX     	  = 100 * 1;
+const int32 ID_OFFSET_MIRROR  	  = 100 * 2;
+const int32 ID_OFFSET_CRYSTAL 	  = 100 * 3;
+const int32 ID_OFFSET_SOURCE  	  = 100 * 4;
+const int32 ID_OFFSET_PERM_MIRROR = 100 * 5;
 
-const char* const void_path    = "data/sprites/void.png";
-const char* const grid_path    = "data/sprites/grid.png";
-const char* const wall_path    = "data/sprites/wall.png";
-const char* const box_path     = "data/sprites/box.png";
-const char* const player_path  = "data/sprites/player.png";
-const char* const mirror_path  = "data/sprites/mirror.png";
-const char* const crystal_path = "data/sprites/crystal.png";
-const char* const pack_path    = "data/sprites/pack.png";
+const char* const void_path        = "data/sprites/void.png";
+const char* const grid_path        = "data/sprites/grid.png";
+const char* const wall_path        = "data/sprites/wall.png";
+const char* const box_path         = "data/sprites/box.png";
+const char* const player_path      = "data/sprites/player.png";
+const char* const mirror_path      = "data/sprites/mirror.png";
+const char* const crystal_path     = "data/sprites/crystal.png";
+const char* const pack_path    	   = "data/sprites/pack.png";
+const char* const perm_mirror_path = "data/sprites/perm-mirror.png";
 
 const char* const player_ghost_path = "data/sprites/player-ghost.png";
 const char* const pack_ghost_path   = "data/sprites/pack-ghost.png";
@@ -466,11 +471,12 @@ Entity* getEntityPointer(Int3 coords)
     if (isSource(tile)) entity_group = next_world_state.sources;
     else switch(tile)
     {
-        case BOX:     entity_group = next_world_state.boxes;    break;
-        case MIRROR:  entity_group = next_world_state.mirrors;  break;
-        case CRYSTAL: entity_group = next_world_state.crystals; break;
-        case PLAYER:  return &next_world_state.player;
-        case PACK:	  return &next_world_state.pack;
+        case BOX:     	  entity_group = next_world_state.boxes;    break;
+        case MIRROR:  	  entity_group = next_world_state.mirrors;  break;
+        case CRYSTAL: 	  entity_group = next_world_state.crystals; break;
+        case PERM_MIRROR: entity_group = next_world_state.perm_mirrors; break;
+        case PLAYER: return &next_world_state.player;
+        case PACK:	 return &next_world_state.pack;
         default: return 0;
     }
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
@@ -519,10 +525,11 @@ int32 getEntityCount(Entity *entity_group)
 
 int32 entityIdOffset(Entity *entity)
 {
-    if (entity == next_world_state.boxes)    return ID_OFFSET_BOX;
-    if (entity == next_world_state.mirrors)  return ID_OFFSET_MIRROR;
-    if (entity == next_world_state.crystals) return ID_OFFSET_CRYSTAL;
-    if (entity == next_world_state.sources)  return ID_OFFSET_SOURCE;
+    if (entity == next_world_state.boxes)    	 return ID_OFFSET_BOX;
+    if (entity == next_world_state.mirrors)  	 return ID_OFFSET_MIRROR;
+    if (entity == next_world_state.crystals) 	 return ID_OFFSET_CRYSTAL;
+    if (entity == next_world_state.sources)  	 return ID_OFFSET_SOURCE;
+    if (entity == next_world_state.perm_mirrors) return ID_OFFSET_PERM_MIRROR;
     return 0;
 }
 
@@ -677,15 +684,16 @@ char* getPath(TileType tile)
 {
     switch(tile)
     {
-        case NONE:    return 0;
-        case VOID:    return void_path;
-        case GRID:    return grid_path;
-        case WALL:    return wall_path;
-        case BOX:     return box_path;
-        case PLAYER:  return player_path;
-        case MIRROR:  return mirror_path;
-        case CRYSTAL: return crystal_path;
-        case PACK:    return pack_path;
+        case NONE:        return 0;
+        case VOID:        return void_path;
+        case GRID:        return grid_path;
+        case WALL:        return wall_path;
+        case BOX:         return box_path;
+        case PLAYER:      return player_path;
+        case MIRROR:      return mirror_path;
+        case CRYSTAL:     return crystal_path;
+        case PACK:    	  return pack_path;
+        case PERM_MIRROR: return perm_mirror_path;
 
         case LASER_RED:     return laser_red_path;
         case LASER_GREEN:	return laser_green_path;
@@ -1275,6 +1283,7 @@ PushResult canPush(Int3 coords, Direction direction)
         if (current_tile == MIRROR) return FAILED_PUSH;
         if (current_tile == GRID) return FAILED_PUSH;
         if (current_tile == WALL) return FAILED_PUSH;
+        if (current_tile == PERM_MIRROR) return FAILED_PUSH;
     }
     return FAILED_PUSH; // only here if hit the max entity push count
 }
@@ -1683,6 +1692,12 @@ bool isDiagonal(Direction direction)
     else return true;
 }
 
+bool laserPassthroughAllowed(Entity* entity)
+{
+    if (entity->previously_moving_sideways > LASER_BUFFER_MOVING_TIME_ALLOWED_FOR_PASSTHROUGH || entity->falling_time > LASER_BUFFER_MOVING_TIME_ALLOWED_FOR_PASSTHROUGH) return true;
+    return false;
+}
+
 int32 updateLaserBuffer(void)
 {
     memset(laser_buffer, 0, sizeof(laser_buffer));
@@ -1721,37 +1736,66 @@ int32 updateLaserBuffer(void)
         {
             LaserColor laser_color = colorToLaserColor(entity->color);
             if (!intCoordsWithinLevelBounds(current_coords)) break;
+            // TODO(spike): change these elifs to a switch -- remember to break out of loop using variable
             if (getTileType(current_coords) == PLAYER)
             {
-                if (laser_color.red)   next_world_state.player.hit_by_red   = true;
-                if (laser_color.green) 
+                Entity* player = &next_world_state.player;
+                if (!laserPassthroughAllowed(player))
                 {
-                    switch (current_direction)
+                    if (laser_color.red)   next_world_state.player.hit_by_red   = true;
+                    if (laser_color.green) 
                     {
-                        case NORTH: next_world_state.player.green_hit.north = true; break;
-                        case WEST:  next_world_state.player.green_hit.west  = true; break;
-                        case SOUTH: next_world_state.player.green_hit.south = true; break;
-                        case EAST:  next_world_state.player.green_hit.east  = true; break;
-                        case UP:    next_world_state.player.green_hit.up    = true; break;
-                        case DOWN:  next_world_state.player.green_hit.down  = true; break;
-                        default: break;
+                        switch (current_direction)
+                        {
+                            case NORTH: next_world_state.player.green_hit.north = true; break;
+                            case WEST:  next_world_state.player.green_hit.west  = true; break;
+                            case SOUTH: next_world_state.player.green_hit.south = true; break;
+                            case EAST:  next_world_state.player.green_hit.east  = true; break;
+                            case UP:    next_world_state.player.green_hit.up    = true; break;
+                            case DOWN:  next_world_state.player.green_hit.down  = true; break;
+                            default: break;
+                        }
                     }
+                    if (laser_color.blue)  next_world_state.player.hit_by_blue  = true;
+                    break;
                 }
-                if (laser_color.blue)  next_world_state.player.hit_by_blue  = true;
-                break;
+            }
+            else if (getTileType(current_coords) == PACK)
+            {
+				Entity* pack = &next_world_state.pack;
+                if (!laserPassthroughAllowed(pack)) break;
             }
             else if (getTileType(current_coords) == CRYSTAL)
             {
-                if (!isParallelToXZ(current_direction)) break; // let crystal break beam if not coming at angle flat on the y axis
-                if (laser_color.red) current_direction = getRedDirectionAtCrystal(current_direction); 
-                else if (laser_color.green) current_direction = current_direction;
-                else if (laser_color.blue) current_direction = getBlueDirectionAtCrystal(current_direction); 
+                Entity* crystal = getEntityPointer(current_coords);
+                if (!laserPassthroughAllowed(crystal))
+                {
+                    if (!isParallelToXZ(current_direction)) break; // let crystal break beam if not coming at angle flat on the y axis
+                    if (laser_color.red) current_direction = getRedDirectionAtCrystal(current_direction); 
+                    else if (laser_color.green) current_direction = current_direction;
+                    else if (laser_color.blue) current_direction = getBlueDirectionAtCrystal(current_direction); 
+                }
             }
             else if (getTileType(current_coords) == MIRROR)
             {
-                bool can_reflect = canMirrorReflect(current_direction, getEntityDirection(current_coords));
-                if (can_reflect) current_direction = getNextLaserDirectionMirror(current_direction, getEntityDirection(current_coords));
+                Entity* mirror = getEntityPointer(current_coords);
+                if (!laserPassthroughAllowed(mirror))
+                {
+                    bool can_reflect = canMirrorReflect(current_direction, getEntityDirection(current_coords));
+                    if (can_reflect) current_direction = getNextLaserDirectionMirror(current_direction, getEntityDirection(current_coords));
+                    else break;
+                }
+            }
+            else if (getTileType(current_coords) == PERM_MIRROR)
+            {
+                bool can_reflect = canMirrorReflect(current_direction, getTileDirection(current_coords));
+                if (can_reflect) current_direction = getNextLaserDirectionMirror(current_direction, getTileDirection(current_coords));
                 else break;
+            }
+            else if (getTileType(current_coords) == BOX)
+            {
+                Entity* box = getEntityPointer(current_coords);
+                if (!laserPassthroughAllowed(box)) break;
             }
             else if (getTileType(current_coords) != NONE) break;
 
@@ -1870,7 +1914,7 @@ void doFallingObjects(bool do_animation)
     }
 }
 
-void handleFallingTimers(Entity* entity)
+void decrementFallingTimers(Entity* entity)
 {
     if (entity->previously_moving_sideways > 0) entity->previously_moving_sideways--;
 	if (entity->falling_time > 0) entity->falling_time--;
@@ -2003,25 +2047,28 @@ void gameInitialiseState()
 {
     loadFileToBuffer(level_path);
 
-    memset(next_world_state.boxes,    0, sizeof(next_world_state.boxes)); 
-    memset(next_world_state.mirrors,  0, sizeof(next_world_state.mirrors));
-    memset(next_world_state.crystals, 0, sizeof(next_world_state.crystals));
-    memset(next_world_state.sources,  0, sizeof(next_world_state.sources));
+    memset(next_world_state.boxes,    	  0, sizeof(next_world_state.boxes)); 
+    memset(next_world_state.mirrors,  	  0, sizeof(next_world_state.mirrors));
+    memset(next_world_state.crystals, 	  0, sizeof(next_world_state.crystals));
+    memset(next_world_state.sources,  	  0, sizeof(next_world_state.sources));
+    memset(next_world_state.perm_mirrors, 0, sizeof(next_world_state.perm_mirrors));
 	FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
     {
-        next_world_state.boxes[entity_index].id = -1;
-        next_world_state.mirrors[entity_index].id = -1;
-        next_world_state.crystals[entity_index].id = -1;
-        next_world_state.sources[entity_index].id = -1;
+        next_world_state.boxes[entity_index].id 	   = -1;
+        next_world_state.mirrors[entity_index].id 	   = -1;
+        next_world_state.crystals[entity_index].id 	   = -1;
+        next_world_state.sources[entity_index].id 	   = -1;
+        next_world_state.perm_mirrors[entity_index].id = -1;
     }
     Entity *entity_group = 0;
     for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
     {
         TileType buffer_contents = next_world_state.buffer[buffer_index];
-        if (buffer_contents == BOX)     entity_group = next_world_state.boxes;
-        if (buffer_contents == MIRROR)  entity_group = next_world_state.mirrors;
-        if (buffer_contents == CRYSTAL) entity_group = next_world_state.crystals;
-        if (isSource(buffer_contents))  entity_group = next_world_state.sources;
+        if (buffer_contents == BOX)     	entity_group = next_world_state.boxes;
+        if (buffer_contents == MIRROR)  	entity_group = next_world_state.mirrors;
+        if (buffer_contents == CRYSTAL) 	entity_group = next_world_state.crystals;
+        if (buffer_contents == PERM_MIRROR) entity_group = next_world_state.perm_mirrors;
+        if (isSource(buffer_contents))  	entity_group = next_world_state.sources;
         if (entity_group != 0)
         {
             int32 count = getEntityCount(entity_group);
@@ -2207,6 +2254,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             case VOID: break;
                             case GRID: break;
                             case WALL: break;
+                            case PERM_MIRROR: break;
                             case BOX:
                             case CRYSTAL:
                             case PACK:
@@ -2251,14 +2299,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             TileType tile_below = getTileType(coords_below);
                             if (tile_below != NONE || next_world_state.player.hit_by_red)
                             {
-                                if (do_push) 	  
-                                {
-                                    pushAll(next_player_coords, input_direction, true, false);
-                                }
-                                else if (do_roll) 
-                                {
-                                    roll(next_player_coords, input_direction);
-                                }
+                                if (do_push) pushAll(next_player_coords, input_direction, true, false);
+                                else if (do_roll) roll(next_player_coords, input_direction);
 
                                 doStandardMovement(input_direction, next_tile, next_player_coords);
                                 time_until_input = PUSH_ANIMATION_TIME;
@@ -2268,7 +2310,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 // leap of faith logic - TODO(spike): probably outdated
                                 WorldState world_state_savestate = next_world_state;
 
-                                if (do_push) pushOnceWithoutAnimation(next_player_coords, input_direction);
+                                if (do_push) pushAll(next_player_coords, input_direction, false, false);
                                 if (do_roll) rollWithoutAnimation(next_player_coords, input_direction);
 
                                 bool animations_on = false;
@@ -2532,7 +2574,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         setTileType(editor_state.picked_tile, raycast_output.place_coords); 
                         setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
                     }
-                    else if (editor_state.picked_tile == PLAYER) // TODO(spike): collapse these two
+                    else if (editor_state.picked_tile == PLAYER)
                     {
                         editorPlaceOnlyInstanceOfTile(&next_world_state.player, raycast_output.place_coords, PLAYER, PLAYER_ID);
                     }
@@ -2544,9 +2586,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                     {
                         switch (editor_state.picked_tile)
                         {
-                            case BOX:     entity_group = next_world_state.boxes;    break;
-                            case MIRROR:  entity_group = next_world_state.mirrors;  break;
-                            case CRYSTAL: entity_group = next_world_state.crystals; break;
+                            case BOX:     	  entity_group = next_world_state.boxes;    	break;
+                            case MIRROR:  	  entity_group = next_world_state.mirrors;  	break;
+                            case CRYSTAL: 	  entity_group = next_world_state.crystals; 	break;
+                            case PERM_MIRROR: entity_group = next_world_state.perm_mirrors; break;
                             default: entity_group = 0;
                         }
                         if (entity_group != 0) setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
@@ -2559,11 +2602,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (direction == DOWN) direction = NORTH;
                     else direction++;
                     setTileDirection(direction, raycast_output.hit_coords);
-                    Entity *entity= getEntityPointer(raycast_output.hit_coords);
-                    if (entity!= 0)
+                    Entity *entity = getEntityPointer(raycast_output.hit_coords);
+                    if (entity != 0)
                     {
                         entity->direction = direction;
-						if (getTileType(entity->coords) == MIRROR) entity->rotation_quat = directionToQuaternion(direction, true); // unclear why this is required, something to do with my sprite layout
+						if (getTileType(entity->coords) == MIRROR || getTileType(entity->coords) == PERM_MIRROR) entity->rotation_quat = directionToQuaternion(direction, true); // unclear why this is required, something to do with my sprite layout
 						else entity->rotation_quat = directionToQuaternion(direction, false);
                 	}
                 }
@@ -2574,8 +2617,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 			else if (time_until_input == 0 && tick_input.l_press)
             {
 				editor_state.picked_tile++;
-                //if    (editor_state.picked_tile == PLAYER) editor_state.picked_tile = MIRROR;
-                if 		(editor_state.picked_tile == PACK + 1) editor_state.picked_tile = SOURCE_RED;
+                if 		(editor_state.picked_tile == PERM_MIRROR + 1) editor_state.picked_tile = SOURCE_RED;
                 else if (editor_state.picked_tile == SOURCE_WHITE + 1) editor_state.picked_tile = VOID;
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
@@ -2699,7 +2741,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             animations[animation_index].frames_left--;
         }
 
-        // TODO(spike): check what happens if this is put after laser buffer draw? might help that flashing laser issue? is this still a problem after refactor
         // TODO(spike): maybe these should be per entity, so that boxes and such can also have ephemeral hitboxes when passing into / out of space? but maybe there exists better solution than this
         // decrement ephemeral pack hitboxes if required
 		if (pack_hitbox_timer_primary > 0)   pack_hitbox_timer_primary--;
@@ -2710,14 +2751,10 @@ void gameFrame(double delta_time, TickInput tick_input)
         FOR(falling_object_index, 3)
         {
             Entity* entity_group = falling_entity_groups[falling_object_index];
-            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
-            {
-                handleFallingTimers(&entity_group[entity_index]);
-            }
+            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) decrementFallingTimers(&entity_group[entity_index]);
         }
-
-        handleFallingTimers(player);
-		handleFallingTimers(pack);
+        decrementFallingTimers(player);
+		decrementFallingTimers(pack);
 
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
@@ -2732,14 +2769,8 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
 			// check if inside mirror / crystal, and if so skip
 			bool do_draw = true;
-            for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
-            {
-                if (int3IsEqual(laser_buffer[laser_index].coords, world_state.mirrors[entity_index].coords) || int3IsEqual(laser_buffer[laser_index].coords, world_state.crystals[entity_index].coords))
-                {
-                    do_draw = false;
-                    break;
-                }
-            }
+            TileType laser_in_tile = getTileType(laser_buffer[laser_index].coords);
+            if (laser_in_tile == CRYSTAL || laser_in_tile == MIRROR || laser_in_tile == PERM_MIRROR) do_draw = false;
             if (!do_draw) continue;
 
             bool comparison_found = false;
@@ -2781,14 +2812,15 @@ void gameFrame(double delta_time, TickInput tick_input)
         for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
         {
 			TileType tile = world_state.buffer[tile_index];
-			if (tile == PLAYER || isSource(tile) || isPushable(tile)) continue;
+			if (tile == PLAYER || isSource(tile) || isPushable(tile) || tile == PERM_MIRROR) continue;
 			if (tile != NONE)   drawAsset(getPath(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false));
         }
 
         // draw non-colored entities
-        drawEntityLoop(world_state.boxes,    box_path,     CUBE_3D, DEFAULT_SCALE);
-        drawEntityLoop(world_state.mirrors,  mirror_path,  CUBE_3D, DEFAULT_SCALE);
-        drawEntityLoop(world_state.crystals, crystal_path, CUBE_3D, DEFAULT_SCALE);
+        drawEntityLoop(world_state.boxes,    	 box_path,         CUBE_3D, DEFAULT_SCALE);
+        drawEntityLoop(world_state.mirrors,  	 mirror_path,      CUBE_3D, DEFAULT_SCALE);
+        drawEntityLoop(world_state.crystals, 	 crystal_path,     CUBE_3D, DEFAULT_SCALE);
+        drawEntityLoop(world_state.perm_mirrors, perm_mirror_path, CUBE_3D, DEFAULT_SCALE);
 
         if (world_state.player.id != -1)
         {
@@ -2803,7 +2835,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             else if (             		   hit_by_green && player->hit_by_blue) drawAsset(cyan_player_path,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
             else if (player->hit_by_red                 	  				  ) drawAsset(red_player_path,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
             else if (             		   hit_by_green             		  ) drawAsset(green_player_path,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (                            				   				   player->hit_by_blue) drawAsset(blue_player_path,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (                            		   player->hit_by_blue) drawAsset(blue_player_path,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
             else drawAsset(player_path, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
 
             if (do_player_ghost) drawAsset(player_ghost_path, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, true));
