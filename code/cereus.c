@@ -2823,8 +2823,11 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
 			// check if inside mirror / crystal, and if so skip
 			bool do_draw = true;
-            TileType laser_in_tile = getTileType(laser_buffer[laser_index].coords);
-            if (laser_in_tile == CRYSTAL || laser_in_tile == MIRROR || laser_in_tile == PERM_MIRROR) do_draw = false;
+            Int3 laser_coords = laser_buffer[laser_index].coords;
+            TileType laser_in_tile = getTileType(laser_coords);
+            if (laser_in_tile == CRYSTAL && !laserPassthroughAllowed(getEntityPointer(laser_coords))) do_draw = false;
+            if (laser_in_tile == MIRROR  && !laserPassthroughAllowed(getEntityPointer(laser_coords))) do_draw = false;
+            if (laser_in_tile == PERM_MIRROR) do_draw = false;
             if (!do_draw) continue;
 
             bool comparison_found = false;
