@@ -168,7 +168,7 @@ typedef struct TrailingHitbox
 }
 TrailingHitbox;
 
-const double PHYSICS_INCREMENT = 1.0/10.0;
+const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
 const float TAU = 6.2831853071f;
@@ -190,7 +190,9 @@ const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in firs
 const int32 FAILED_ANIMATION_TIME = 8;
 
 const int32 TRAILING_HITBOX_TIME = 4;
-const int32 TRAILING_HITBOX_PACK_DIAGONAL_TURN_TIME = 6;
+const int32 TIME_BEFORE_DIAGONAL_TRAILING_HITBOX = 3;
+const int32 TRAILING_HITBOX_PACK_DIAGONAL_TURN_TIME = 4;
+const int32 TRAILING_HITBOX_PACK_ORTHOGONAL_TURN_TIME = 2;
 
 const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
@@ -279,6 +281,8 @@ int32 time_until_input = 0;
 EditorState editor_state = {0};
 LaserBuffer laser_buffer[1024] = {0};
 
+int32 diagonal_turn_hitbox_timer = 0;
+Int3 diagonal_turn_hitbox_coords = {0};
 TrailingHitbox trailing_hitboxes[64] = {0};
 
 bool do_player_ghost = false;
@@ -1911,7 +1915,8 @@ bool doFallingEntity(Entity* entity, bool do_animation)
             if (do_animation) 
             {
                 createFirstFallAnimation(intCoordsToNorm(current_start_coords), &entity_in_stack->position_norm, entity_in_stack->id);
-                createTrailingHitbox(current_start_coords, TRAILING_HITBOX_TIME + 4);
+                createTrailingHitbox(current_start_coords, TRAILING_HITBOX_TIME + 5); // TODO(spike): temporary solution: lying about how long in motion here, 
+                                                                                      // but is only used for laser buffer calculation, which has a set rate for all entities for which it can pass through.
             }
             entity_in_stack->falling_time = FALL_ANIMATION_TIME + 4 + 1; // 12 frames here instead of 8 because of acceleration period
         }
@@ -2494,9 +2499,11 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                                 if (allow_turn_orthogonal)
                                 {
-                                    // actually turning rotate player
-									createTrailingHitbox(next_world_state.pack.coords, TRAILING_HITBOX_TIME);
-                                    createTrailingHitbox(diagonal_coords, TRAILING_HITBOX_PACK_DIAGONAL_TURN_TIME);
+                                    // actually turning: rotate player
+									createTrailingHitbox(next_world_state.pack.coords, TRAILING_HITBOX_PACK_ORTHOGONAL_TURN_TIME);
+                                    diagonal_turn_hitbox_timer = TIME_BEFORE_DIAGONAL_TRAILING_HITBOX;
+                                    diagonal_turn_hitbox_coords = diagonal_coords;
+            						next_world_state.pack.previously_moving_sideways = TURN_ANIMATION_TIME + 3;
 
                                     if (isPushable(getTileType(getNextCoords(next_world_state.player.coords, UP)))) doHeadRotation(clockwise);
 
@@ -2789,6 +2796,16 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
         decrementFallingTimers(player);
 		decrementFallingTimers(pack);
+
+		// handle timer which adds trailing hitbox in the middle of turning pack hitbox once needed
+        if (diagonal_turn_hitbox_timer > 0)
+        {
+            if (diagonal_turn_hitbox_timer == 1)
+            {
+                createTrailingHitbox(diagonal_turn_hitbox_coords, TRAILING_HITBOX_PACK_DIAGONAL_TURN_TIME);
+            }
+			diagonal_turn_hitbox_timer--;
+        }
 
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
