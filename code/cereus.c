@@ -1763,7 +1763,13 @@ int32 updateLaserBuffer(void)
 
         for (int laser_index = 0; laser_index < MAX_LASER_TRAVEL_DISTANCE; laser_index++)
         {
-            FOR(trailing_hitbox_index, MAX_TRAILING_HITBOX_COUNT) if (int3IsEqual(current_coords, trailing_hitboxes[trailing_hitbox_index].coords) && trailing_hitboxes[trailing_hitbox_index].frames > 0) goto laser_instance_stop;
+            FOR(trailing_hitbox_index, MAX_TRAILING_HITBOX_COUNT) 
+            {
+                if (int3IsEqual(current_coords, trailing_hitboxes[trailing_hitbox_index].coords) && trailing_hitboxes[trailing_hitbox_index].frames > 0)
+                {
+                    goto laser_instance_stop;
+                }
+            }
 
             LaserColor laser_color = colorToLaserColor(entity->color);
             if (!intCoordsWithinLevelBounds(current_coords)) break;
@@ -1773,7 +1779,7 @@ int32 updateLaserBuffer(void)
                 case PLAYER:
                 {
                     Entity* player = &next_world_state.player;
-                    if (!laserPassthroughAllowed(player))
+                    if (!laserPassthroughAllowed(player) || ((player->previously_moving_sideways > 0) && player->direction == oppositeDirection(current_direction)))
                     {
                         if (laser_color.red)   next_world_state.player.hit_by_red   = true;
                         if (laser_color.green) 
