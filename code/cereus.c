@@ -83,6 +83,8 @@ typedef struct Entity
     int32 previously_moving_sideways;
     int32 falling_time;
 
+    bool will_fall_next_turn;
+
     // for sources/lasers/other colored objects
     Color color;
 
@@ -2382,11 +2384,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                             }
                             default:
                             {
-                                Int3 coords_ahead = next_player_coords;
-                                Int3 coords_below_and_ahead = getNextCoords(next_player_coords, DOWN);
-                                if (isPushable(getTileType(coords_ahead)) && entityInMotion(getEntityPointer(coords_ahead))) move_player = false;
-                                else if (isPushable(getTileType(coords_below_and_ahead)) && entityInMotion(getEntityPointer(coords_below_and_ahead))) move_player = false;
-                                else move_player = true;
+                                if (!player->will_fall_next_turn) 
+                                {
+                                    Int3 coords_ahead = next_player_coords;
+                                    Int3 coords_below_and_ahead = getNextCoords(next_player_coords, DOWN);
+                                    if (isPushable(getTileType(coords_ahead)) && entityInMotion(getEntityPointer(coords_ahead))) move_player = false;
+                                    else if (isPushable(getTileType(coords_below_and_ahead)) && entityInMotion(getEntityPointer(coords_below_and_ahead))) move_player = false;
+                                    else move_player = true;
+                                }
                             }
                         }
 						if (move_player)
@@ -2729,6 +2734,9 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
+        Entity* player = &next_world_state.player;
+        Entity* pack = &next_world_state.pack;
+
         updateLaserBuffer();
 
         // falling logic
@@ -2739,9 +2747,10 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (!next_world_state.pack.pack_detached)
             {
                 // not red and pack attached: player always falls. pack only falls if player falls
-                if (!doFallingEntity(&next_world_state.player, true))
+                if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) player->will_fall_next_turn = true;
+                if (!doFallingEntity(player, true))
                 {
-                    if (doFallingEntity(&next_world_state.pack, true))
+                    if (doFallingEntity(pack, true))
                     {
                         // pack wants to fall but cannot: we already know player can fall, so pack will become unattached
                         next_world_state.pack.pack_detached = true;
@@ -2751,12 +2760,13 @@ void gameFrame(double delta_time, TickInput tick_input)
             else
             {
                 // not red and pack not attached, so pack and player both always fall
-                doFallingEntity(&next_world_state.player, true);
-				doFallingEntity(&next_world_state.pack, true);
+                doFallingEntity(player, true);
+				doFallingEntity(pack, true);
             }
         }
         else
         {
+            player->will_fall_next_turn = false;
             // red, so pack only falls if is detached from player
             if (next_world_state.pack.pack_detached)
             {
@@ -2774,8 +2784,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
 		// render and calculate ghosts
-        Entity* player = &next_world_state.player;
-        Entity* pack = &next_world_state.pack;
         bool facing_green = false;
         switch (player->direction)
         {
@@ -2799,7 +2807,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 current_coords = getNextCoords(current_coords, current_direction);
                 if (!intCoordsWithinLevelBounds(current_coords)) obstructed_tp_location = true;
-                if (getTileType(current_coords) == MIRROR)
+                if (getTileType(current_coords) == MIRROR || getTileType(current_coords) == PERM_MIRROR)
                 {
                     current_direction = getNextLaserDirectionMirror(current_direction, getTileDirection(current_coords));
                     current_coords = getNextCoords(current_coords, current_direction);
