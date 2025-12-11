@@ -1393,7 +1393,7 @@ PushResult canPushStack(Int3 coords, Direction direction)
     return CAN_PUSH;
 }
 
-Push pushOnceWithoutAnimation(Int3 coords, Direction direction)
+Push pushOnceWithoutAnimation(Int3 coords, Direction direction, int32 time)
 {
 	Push entity_to_push = {0};
 
@@ -1403,7 +1403,7 @@ Push pushOnceWithoutAnimation(Int3 coords, Direction direction)
     entity_to_push.entity = entity; 
     entity_to_push.new_coords = getNextCoords(coords, direction);
 
-    entity->previously_moving_sideways = PUSH_ANIMATION_TIME;
+    entity->previously_moving_sideways = time;
 
     setTileType(NONE, entity_to_push.previous_coords);
     setTileDirection(NORTH, entity_to_push.previous_coords);
@@ -1417,7 +1417,7 @@ Push pushOnceWithoutAnimation(Int3 coords, Direction direction)
 
 void pushOnce(Int3 coords, Direction direction, int32 animation_time)
 {
-    Push entity_to_push = pushOnceWithoutAnimation(coords, direction);
+    Push entity_to_push = pushOnceWithoutAnimation(coords, direction, animation_time);
 
     int32 id = getEntityId(entity_to_push.new_coords);
     createInterpolationAnimation(intCoordsToNorm(entity_to_push.previous_coords),
@@ -1448,7 +1448,7 @@ void pushAll(Int3 coords, Direction direction, int32 animation_time, bool animat
         {
             if (getTileType(getNextCoords(current_stack_coords, direction)) != NONE) break;
             if (animations_on) pushOnce(current_stack_coords, direction, animation_time);
-            else pushOnceWithoutAnimation(current_stack_coords, direction);
+            else pushOnceWithoutAnimation(current_stack_coords, direction, animation_time);
             current_stack_coords = getNextCoords(current_stack_coords, UP);
             if (limit_stack_size_to_one && stack_index == 0) break;
         }
@@ -1959,13 +1959,19 @@ void resetStandardVisuals()
 
 // FALLING LOGIC
 
+bool trailingHitboxAtCoords(Int3 coords)
+{
+    FOR(trailing_hitbox_index, MAX_TRAILING_HITBOX_COUNT) if (int3IsEqual(coords, trailing_hitboxes[trailing_hitbox_index].coords) && trailing_hitboxes[trailing_hitbox_index].frames > 0) return true;
+    return false;
+}
+
 // returns true iff object is able to fall as usual, but object collides with something instead.
 bool doFallingEntity(Entity* entity, bool do_animation)
 {
     if (entity->id == -1) return false;
 	Int3 next_coords = getNextCoords(entity->coords, DOWN);
     if (getTileType(next_coords) != NONE) return true;
-    FOR(trailing_hitbox_index, MAX_TRAILING_HITBOX_COUNT) if (int3IsEqual(next_coords, trailing_hitboxes[trailing_hitbox_index].coords) && trailing_hitboxes[trailing_hitbox_index].frames > 0) return true;
+    if (trailingHitboxAtCoords(next_coords)) return true;
 
     int32 stack_size = getPushableStackSize(entity->coords);
     Int3 current_start_coords = entity->coords;
@@ -1981,8 +1987,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
             if (do_animation) 
             {
                 createFirstFallAnimation(intCoordsToNorm(current_start_coords), &entity_in_stack->position_norm, entity_in_stack->id);
-                createTrailingHitbox(current_start_coords, TRAILING_HITBOX_TIME + 5); // TODO(spike): temporary solution: lying about how long in motion here, 
-                                                                                      // but is only used for laser buffer calculation, which has a set rate for all entities for which it can pass through.
+                createTrailingHitbox(current_start_coords, TRAILING_HITBOX_TIME + 5); // it takes 5 extra frames to get to the point where it's cutting off the below laser (and thus not cutting off above, i guess)
             }
             entity_in_stack->falling_time = FALL_ANIMATION_TIME + 4 + 1; // 12 frames here instead of 8 because of acceleration period
         }
@@ -2006,7 +2011,6 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         entity_in_stack->coords = current_end_coords;
         current_end_coords = current_start_coords;
         current_start_coords = getNextCoords(current_start_coords, UP);
-
 	}
     return false;
 }
@@ -2512,8 +2516,9 @@ void gameFrame(double delta_time, TickInput tick_input)
                             Direction orthogonal_push_direction = oppositeDirection(polarity_direction); 
                             
                             bool pause_turn = false;
-                            if (entityInMotion(getEntityPointer(orthogonal_coords))) pause_turn = true;
-                            if (entityInMotion(getEntityPointer(diagonal_coords))) pause_turn = true;
+                            if (trailingHitboxAtCoords(orthogonal_coords)) pause_turn = true;
+                            else if (entityInMotion(getEntityPointer(orthogonal_coords))) pause_turn = true;
+                            else if (entityInMotion(getEntityPointer(diagonal_coords))) pause_turn = true;
 
                             if (!pause_turn)
                             {
@@ -2844,7 +2849,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 				if (player->hit_by_blue) player_hit_by_blue_in_turn = true;
                 if (!player->hit_by_blue && player_hit_by_blue_in_turn && pack_intermediate_states_timer > 0)
                 {
-                    entity_to_fall_after_blue_not_blue_turn_timer = pack_intermediate_states_timer + PUSH_FROM_TURN_ANIMATION_TIME;
+                    entity_to_fall_after_blue_not_blue_turn_timer = pack_intermediate_states_timer + 3; // this number is magic (sorry)
                     entity_to_fall_after_blue_not_blue_turn_coords = getNextCoords(pack_hitbox_turning_to_coords, pack_orthogonal_push_direction);
                     player_hit_by_blue_in_turn = false;
                 }
@@ -2861,13 +2866,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // reattach pack
-        if (next_world_state.pack.pack_detached)
-        {
-            if (getTileType(getNextCoords(next_world_state.player.coords, oppositeDirection(next_world_state.player.direction))) == PACK)
-            {
-                next_world_state.pack.pack_detached = false;
-            }
-        }
+        if (pack->pack_detached && getTileType(getNextCoords(player->coords, oppositeDirection(player->direction))) == PACK) pack->pack_detached = false;
 
 		// render and calculate ghosts
         bool facing_green = false;
