@@ -189,7 +189,7 @@ const int32 PUSH_ANIMATION_TIME = 9;
 const int32 ROLL_ANIMATION_TIME = 18;
 const int32 TURN_ANIMATION_TIME = 9;
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
-const int32 PUSH_FROM_TURN_ANIMATION_TIME = 7;
+const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6; // also somewhat hard coded, based on some function of the turn animation time and the sequencing based on it
 const int32 FAILED_ANIMATION_TIME = 8;
 
 const int32 TRAILING_HITBOX_TIME = 4;
@@ -297,6 +297,9 @@ Direction pack_orthogonal_push_direction = NO_DIRECTION;
 bool do_diagonal_push_on_turn = false;
 bool do_orthogonal_push_on_turn = false;
 bool do_player_and_pack_fall_after_turn = false;
+bool player_hit_by_blue_in_turn = false;
+Int3 entity_to_fall_after_blue_not_blue_turn_coords = {0};
+int32 entity_to_fall_after_blue_not_blue_turn_timer = 0;
 
 // patch on diagonal pass through due to pack hitbox being only on the diagonal in the middle of turn
 int32 pack_hitbox_turning_from_timer = 0;
@@ -2016,6 +2019,7 @@ void doFallingObjects(bool do_animation)
 		Entity* entity_group = object_group_to_fall[to_fall_index];
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
+            if (pack_hitbox_turning_to_timer > 0 && int3IsEqual(pack_hitbox_turning_to_coords, entity_group[entity_index].coords)) continue; // blocks blue-not-blue turn orthogonal case from falling immediately
             doFallingEntity(&entity_group[entity_index], do_animation);
         }
     }
@@ -2760,7 +2764,9 @@ void gameFrame(double delta_time, TickInput tick_input)
                 pack->direction = oppositeDirection(player->direction);
                 setTileType(PACK, pack->coords);
                 setTileDirection(pack->direction, pack->coords);
-
+            }
+            else if (pack_intermediate_states_timer == 4)
+            {
                 if (do_orthogonal_push_on_turn) pushAll(pack_hitbox_turning_to_coords, pack_orthogonal_push_direction, PUSH_FROM_TURN_ANIMATION_TIME, true, true);
             }
             else if (pack_intermediate_states_timer == 1)
@@ -2777,6 +2783,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     doFallingEntity(pack, true);
                     do_player_and_pack_fall_after_turn = false;
                 }
+                player_hit_by_blue_in_turn = false;
             }
             pack_intermediate_states_timer--;
         }
@@ -2784,7 +2791,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         updateLaserBuffer();
 
         // falling logic
-		if (!player->hit_by_blue) doFallingObjects(true);
+		if (!player->hit_by_blue) doFallingObjects(true); // built in guard here against pushable at location of pack_hitbox_turning_to_timer;
 
         if (pack_intermediate_states_timer == 0)
         {
@@ -2831,7 +2838,26 @@ void gameFrame(double delta_time, TickInput tick_input)
                 // in middle of turn, which means was on ground or red, and now no longer on ground AND not red, so must have stopped being red in the middle of the turn.
                 do_player_and_pack_fall_after_turn = true;
             }
-			
+
+            if (isPushable(getTileType(pack_hitbox_turning_to_coords)))
+            {
+				if (player->hit_by_blue) player_hit_by_blue_in_turn = true;
+                if (!player->hit_by_blue && player_hit_by_blue_in_turn && pack_intermediate_states_timer > 0)
+                {
+                    entity_to_fall_after_blue_not_blue_turn_timer = pack_intermediate_states_timer + PUSH_FROM_TURN_ANIMATION_TIME;
+                    entity_to_fall_after_blue_not_blue_turn_coords = getNextCoords(pack_hitbox_turning_to_coords, pack_orthogonal_push_direction);
+                    player_hit_by_blue_in_turn = false;
+                }
+            }
+        }
+
+        if (entity_to_fall_after_blue_not_blue_turn_timer > 0)
+        {
+            if (entity_to_fall_after_blue_not_blue_turn_timer == 1) 
+            {
+                if (isPushable(getTileType(entity_to_fall_after_blue_not_blue_turn_coords))) doFallingEntity(getEntityPointer(entity_to_fall_after_blue_not_blue_turn_coords), true);
+            }
+            entity_to_fall_after_blue_not_blue_turn_timer--;
         }
 
         // reattach pack
