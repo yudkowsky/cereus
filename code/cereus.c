@@ -2363,7 +2363,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         else if (tick_input.s_press) next_player_coords = int3Add(next_world_state.player.coords, AXIS_Z);
                         else if (tick_input.d_press) next_player_coords = int3Add(next_world_state.player.coords, AXIS_X);
                         TileType next_tile = getTileType(next_player_coords);
-                        if (!isSource(next_tile)) switch (next_tile)
+                        if (!player->will_fall_next_turn && !isSource(next_tile)) switch (next_tile)
                         {
                             case VOID:
                             case GRID:
@@ -2403,14 +2403,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                             }
                             default:
                             {
-                                if (!player->will_fall_next_turn) 
-                                {
-                                    Int3 coords_ahead = next_player_coords;
-                                    Int3 coords_below_and_ahead = getNextCoords(next_player_coords, DOWN);
-                                    if (isPushable(getTileType(coords_ahead)) && entityInMotion(getEntityPointer(coords_ahead))) move_player = false;
-                                    else if (isPushable(getTileType(coords_below_and_ahead)) && entityInMotion(getEntityPointer(coords_below_and_ahead))) move_player = false;
-                                    else move_player = true;
-                                }
+                                Int3 coords_ahead = next_player_coords;
+                                Int3 coords_below_and_ahead = getNextCoords(next_player_coords, DOWN);
+                                if (isPushable(getTileType(coords_ahead)) && entityInMotion(getEntityPointer(coords_ahead))) move_player = false;
+                                else if (isPushable(getTileType(coords_below_and_ahead)) && entityInMotion(getEntityPointer(coords_below_and_ahead))) move_player = false;
+                                else move_player = true;
                             }
                         }
 						if (move_player)
