@@ -189,7 +189,7 @@ const int32 PUSH_ANIMATION_TIME = 9;
 const int32 ROLL_ANIMATION_TIME = 18;
 const int32 TURN_ANIMATION_TIME = 9;
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
-const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6;
+const int32 PUSH_FROM_TURN_ANIMATION_TIME = 7;
 const int32 FAILED_ANIMATION_TIME = 8;
 
 const int32 TRAILING_HITBOX_TIME = 4;
@@ -296,6 +296,7 @@ Int3 pack_intermediate_coords = {0};
 Direction pack_orthogonal_push_direction = NO_DIRECTION;
 bool do_diagonal_push_on_turn = false;
 bool do_orthogonal_push_on_turn = false;
+bool do_player_and_pack_fall_after_turn = false;
 
 // patch on diagonal pass through due to pack hitbox being only on the diagonal in the middle of turn
 int32 pack_hitbox_turning_from_timer = 0;
@@ -2747,13 +2748,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // handle pack turning sequence TODO(spike): name all of these numbers better
         if (pack_intermediate_states_timer > 0)
         {
-            if (player->will_fall_next_turn) 
-            {
-                pack_intermediate_states_timer = 0;
-                pack->coords = pack_hitbox_turning_to_coords;
-            }
-
-            else if (pack_intermediate_states_timer == 7)
+            if (pack_intermediate_states_timer == 7)
             {
 				if (do_diagonal_push_on_turn) pushAll(pack_intermediate_coords, oppositeDirection(player->direction), PUSH_FROM_TURN_ANIMATION_TIME, true, true);
             }
@@ -2765,9 +2760,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 pack->direction = oppositeDirection(player->direction);
                 setTileType(PACK, pack->coords);
                 setTileDirection(pack->direction, pack->coords);
-            }
-            else if (pack_intermediate_states_timer == 4)
-            {
+
                 if (do_orthogonal_push_on_turn) pushAll(pack_hitbox_turning_to_coords, pack_orthogonal_push_direction, PUSH_FROM_TURN_ANIMATION_TIME, true, true);
             }
             else if (pack_intermediate_states_timer == 1)
@@ -2777,6 +2770,13 @@ void gameFrame(double delta_time, TickInput tick_input)
 				pack->coords = pack_hitbox_turning_to_coords;
                 setTileType(PACK, pack->coords);
                 setTileDirection(pack->direction, pack->coords);
+
+                if (do_player_and_pack_fall_after_turn)
+                {
+                    doFallingEntity(player, true);
+                    doFallingEntity(pack, true);
+                    do_player_and_pack_fall_after_turn = false;
+                }
             }
             pack_intermediate_states_timer--;
         }
@@ -2784,24 +2784,24 @@ void gameFrame(double delta_time, TickInput tick_input)
         updateLaserBuffer();
 
         // falling logic
-		if (!next_world_state.player.hit_by_blue) doFallingObjects(true);
+		if (!player->hit_by_blue) doFallingObjects(true);
 
-        if (pack_intermediate_states_timer == 0) 
+        if (pack_intermediate_states_timer == 0)
         {
-            if (!next_world_state.player.hit_by_red)
+            if (!player->hit_by_red)
             {
-                if (!next_world_state.pack.pack_detached)
+                if (!pack->pack_detached)
                 {
+                    if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) player->will_fall_next_turn = true; // used for not being able to walk one extra tile after walking out of red beam // TODO(spike): move to single bool in worldstate (same with pack_detached)
+                    else player->will_fall_next_turn = false;
+
                     // not red and pack attached: player always falls. pack only falls if player falls
-                    if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) player->will_fall_next_turn = true;
                     if (!doFallingEntity(player, true))
                     {
+                        if (doFallingEntity(pack, true))
                         {
-                            if (doFallingEntity(pack, true))
-                            {
-                                // pack wants to fall but cannot: we already know player can fall, so pack will become unattached
-                                next_world_state.pack.pack_detached = true;
-                            }
+                            // pack wants to fall but cannot: we already know player can fall, so pack will become unattached
+                            pack->pack_detached = true;
                         }
                     }
                 }
@@ -2816,15 +2816,22 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 player->will_fall_next_turn = false;
                 // red, so pack only falls if is detached from player
-                if (next_world_state.pack.pack_detached)
+                if (pack->pack_detached)
                 {
-                    doFallingEntity(&next_world_state.pack, true);
+                    doFallingEntity(pack, true);
                 }
             }
         }
         else
         {
-			// logic for pack and player falling when pack is in the middle of a turn
+            // in the middle of a turn (where pack is attached)
+
+            if (getTileType(getNextCoords(player->coords, DOWN)) == NONE && !player->hit_by_red)
+            {
+                // in middle of turn, which means was on ground or red, and now no longer on ground AND not red, so must have stopped being red in the middle of the turn.
+                do_player_and_pack_fall_after_turn = true;
+            }
+			
         }
 
         // reattach pack
