@@ -1933,6 +1933,33 @@ void recordStateForUndo()
     undo_buffer_position = (undo_buffer_position + 1) % UNDO_BUFFER_SIZE;
 }
 
+void resetStateForUndo()
+{
+    pack_intermediate_states_timer = 0;
+    pack_intermediate_coords = (Int3){0};
+    pack_orthogonal_push_direction = NO_DIRECTION;
+    do_diagonal_push_on_turn = false;
+    do_orthogonal_push_on_turn = false;
+    do_player_and_pack_fall_after_turn = false;
+    player_hit_by_blue_in_turn = false;
+    entity_to_fall_after_blue_not_blue_turn_coords = (Int3){0};
+    entity_to_fall_after_blue_not_blue_turn_timer = 0;
+
+    pack_hitbox_turning_from_timer = 0;
+    pack_hitbox_turning_from_coords = (Int3){0};
+    pack_hitbox_turning_from_direction = NO_DIRECTION;
+    pack_hitbox_turning_to_timer = 0;
+    pack_hitbox_turning_to_coords = (Int3){0};
+    pack_hitbox_turning_to_direction = NO_DIRECTION;
+
+    do_player_ghost = false;
+    do_pack_ghost = false;
+    player_ghost_coords = (Int3){0};
+    pack_ghost_coords = (Int3){0};
+    player_ghost_direction = NO_DIRECTION;
+    pack_ghost_direction = NO_DIRECTION;
+}
+
 void resetVisuals(Entity* entity)
 {
     entity->position_norm = intCoordsToNorm(entity->coords);
@@ -2156,6 +2183,79 @@ void doStandardMovement(Direction input_direction, TileType next_tile, Int3 next
     recordStateForUndo();
 }
 
+// GHOSTS
+
+void calculateGhosts()
+{
+	Entity* player = &next_world_state.player;
+
+    // render and calculate ghosts
+    bool facing_green = false;
+    switch (player->direction)
+    {
+        case NORTH: if (player->green_hit.south) facing_green = true; break;
+        case WEST:  if (player->green_hit.east)  facing_green = true; break;
+        case SOUTH: if (player->green_hit.north) facing_green = true; break;
+        case EAST:  if (player->green_hit.west)  facing_green = true; break;
+        case UP:    if (player->green_hit.down)  facing_green = true; break;
+        case DOWN:  if (player->green_hit.up)    facing_green = true; break;
+        default: break;
+    }
+    if (facing_green)
+    {
+        bool obstructed_tp_location = false;
+
+        Int3 current_coords = player->coords; 
+        Direction current_direction = player->direction;
+        FOR(seek_index, MAX_LASER_TRAVEL_DISTANCE)
+        {
+            current_coords = getNextCoords(current_coords, current_direction);
+            TileType current_tile = getTileType(current_coords);
+            if (!intCoordsWithinLevelBounds(current_coords)) obstructed_tp_location = true;
+            if (current_tile == MIRROR || current_tile == PERM_MIRROR)
+            {
+                current_direction = getNextLaserDirectionMirror(current_direction, getTileDirection(current_coords));
+                continue;
+            }
+            if (current_tile != NONE) break;
+        }
+        Int3 tp_coords = getNextCoords(current_coords, oppositeDirection(current_direction));
+        if (getTileType(tp_coords) != NONE) obstructed_tp_location = true;
+        else
+        {
+            player_ghost_coords = tp_coords;
+            player_ghost_direction = current_direction;
+        }
+        if (!next_world_state.pack_detached) 
+        {
+            TileType to_be_pack_tile = getTileType(getNextCoords(tp_coords, oppositeDirection(current_direction)));
+            if (to_be_pack_tile != NONE && to_be_pack_tile != PLAYER) obstructed_tp_location = true;
+            else
+            {
+                pack_ghost_coords = getNextCoords(tp_coords, oppositeDirection(current_direction));
+                pack_ghost_direction = current_direction;
+            }
+        }
+
+        if (!obstructed_tp_location)
+        {
+            do_player_ghost = true;
+            if (!next_world_state.pack_detached) do_pack_ghost = true;
+            else do_pack_ghost = false;
+        }
+        else
+        {
+			do_player_ghost = false;
+            do_pack_ghost = false;
+        }
+    }
+    else
+    {
+        do_player_ghost = false;
+        do_pack_ghost = false;
+    }
+}
+
 // GAME
 
 void gameInitialiseState()
@@ -2286,6 +2386,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     undo_buffer_position = next_undo_buffer_position;
                     memset(animations, 0, sizeof(animations));
                     resetStandardVisuals(); // set position_norm and rotation_quat to coords and direction respectively
+                    resetStateForUndo();
                 }
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
@@ -2311,6 +2412,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                 if (input_direction == player->direction)
                 {
+					calculateGhosts();
+
                     if (do_player_ghost)
                     {
                         // seek towards start of laser to get endpoint, and then go to the endpoint
@@ -2341,7 +2444,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 pack->position_norm = intCoordsToNorm(pack_coords);
                                 pack->direction = pack_ghost_direction;
                                 pack->rotation_quat = directionToQuaternion(pack_ghost_direction, true);
-                                setTileType(PLAYER, pack_coords);
+                                setTileType(PACK, pack_coords);
                                 setTileDirection(pack_ghost_direction, pack_coords);
                             }
                             time_until_input = SUCCESSFUL_TP_TIME;
@@ -2866,62 +2969,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (!next_world_state.pack_detached && pack_intermediate_states_timer == 0 && tile_behind_player != PACK) next_world_state.pack_detached = true;
         if (next_world_state.pack_detached && tile_behind_player == PACK) next_world_state.pack_detached = false;
 
-		// render and calculate ghosts
-        bool facing_green = false;
-        switch (player->direction)
-        {
-            case NORTH: if (player->green_hit.south) facing_green = true; break;
-            case WEST:  if (player->green_hit.east)  facing_green = true; break;
-            case SOUTH: if (player->green_hit.north) facing_green = true; break;
-            case EAST:  if (player->green_hit.west)  facing_green = true; break;
-            case UP:    if (player->green_hit.down)  facing_green = true; break;
-            case DOWN:  if (player->green_hit.up)    facing_green = true; break;
-            default: break;
-        }
-        if (facing_green)
-        {
-            // seek towards start of laser to get endpoint, and then go to the endpoint
-            // check if endpoint is valid before teleport (i.e, if pack can go there - if over air, teleport anyway, probably?)
-            bool obstructed_tp_location = false;
-
-            Int3 current_coords = player->coords; 
-            Direction current_direction = player->direction;
-            FOR(seek_index, MAX_LASER_TRAVEL_DISTANCE)
-            {
-                current_coords = getNextCoords(current_coords, current_direction);
-                if (!intCoordsWithinLevelBounds(current_coords)) obstructed_tp_location = true;
-                if (getTileType(current_coords) == MIRROR || getTileType(current_coords) == PERM_MIRROR)
-                {
-                    current_direction = getNextLaserDirectionMirror(current_direction, getTileDirection(current_coords));
-                    current_coords = getNextCoords(current_coords, current_direction);
-                    continue;
-                }
-                if (getTileType(current_coords) != NONE) break;
-            }
-            Int3 tp_coords = getNextCoords(current_coords, oppositeDirection(current_direction));
-            player_ghost_coords = tp_coords;
-            player_ghost_direction = current_direction;
-
-            if (!next_world_state.pack_detached) 
-            {
-                TileType to_be_pack_tile = getTileType(getNextCoords(tp_coords, oppositeDirection(current_direction)));
-                if (to_be_pack_tile != NONE && to_be_pack_tile != PLAYER) obstructed_tp_location = true;
-                pack_ghost_coords = getNextCoords(tp_coords, oppositeDirection(current_direction));
-                pack_ghost_direction = current_direction;
-            }
-
-            if (!obstructed_tp_location)
-            {
-                do_player_ghost = true;
-                do_pack_ghost = true;
-            }
-        }
-        else
-        {
-            do_player_ghost = false;
-            do_pack_ghost = false;
-        }
-
         // do animations
 		for (int animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
         {
@@ -2951,6 +2998,11 @@ void gameFrame(double delta_time, TickInput tick_input)
 		// handle turning hitboxes
         if (pack_hitbox_turning_from_timer > 0) pack_hitbox_turning_from_timer--;
         if (pack_hitbox_turning_to_timer   > 0) pack_hitbox_turning_to_timer--;
+
+        // don't allow inputs if player is falling (this is for meta commands - some redundancy here: pauses already happen if player not allowed to move yet otherwise)
+        if (player->falling_time > 0) time_until_input += 1;
+
+		calculateGhosts();
 
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
@@ -3040,7 +3092,10 @@ void gameFrame(double delta_time, TickInput tick_input)
             else if (                            		   player->hit_by_blue) drawAsset(blue_player_path,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
             else drawAsset(player_path, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
 
-            if (do_player_ghost) drawAsset(player_ghost_path, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, true));
+            if (do_player_ghost) 
+            {
+                drawAsset(player_ghost_path, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, true));
+            }
             if (do_pack_ghost)   drawAsset(pack_ghost_path,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, true));
         }
 		if (world_state.pack.id != -1) drawAsset(pack_path, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat);
