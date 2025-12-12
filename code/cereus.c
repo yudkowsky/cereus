@@ -114,7 +114,7 @@ typedef struct WorldState
     Entity sources[32];
     Entity crystals[32];
     Entity perm_mirrors[32];
-    bool player_will_fall_next_turn;
+    bool player_will_fall_next_turn; // used for not being able to walk one extra tile after walking out of red beam
     bool pack_detached;
 }
 WorldState;
@@ -2798,7 +2798,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 if (!next_world_state.pack_detached)
                 {
-                    if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) next_world_state.player_will_fall_next_turn = true; // used for not being able to walk one extra tile after walking out of red beam // TODO(spike): move to single bool in worldstate (same with pack_detached)
+                    if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) next_world_state.player_will_fall_next_turn = true; 
                     else next_world_state.player_will_fall_next_turn = false;
 
                     // not red and pack attached: player always falls. pack only falls if player falls
@@ -2806,13 +2806,15 @@ void gameFrame(double delta_time, TickInput tick_input)
                     {
                         if (doFallingEntity(pack, true))
                         {
-                            // pack wants to fall but cannot: we already know player can fall, so pack will become unattached
+                            // pack wants to fall but cannot: we already know player can fall, so pack will become unattached // TODO(spike): is this required with the new check below?
                             next_world_state.pack_detached = true;
                         }
                     }
                 }
                 else
                 {
+                    if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) next_world_state.player_will_fall_next_turn = true;
+                    else next_world_state.player_will_fall_next_turn = false;
                     // not red and pack not attached, so pack and player both always fall
                     doFallingEntity(player, true);
                     doFallingEntity(pack, true);
@@ -2843,7 +2845,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 				if (player->hit_by_blue) player_hit_by_blue_in_turn = true;
                 if (!player->hit_by_blue && player_hit_by_blue_in_turn && pack_intermediate_states_timer > 0)
                 {
-                    entity_to_fall_after_blue_not_blue_turn_timer = pack_intermediate_states_timer + 3; // this number is magic (sorry)
+                    entity_to_fall_after_blue_not_blue_turn_timer = pack_intermediate_states_timer + 3; // this number is magic (sorry); it is the frame count that makes the entity fall as soon as possible, i.e., at the same time as the player (if magenta-not-magenta)
                     entity_to_fall_after_blue_not_blue_turn_coords = getNextCoords(pack_hitbox_turning_to_coords, pack_orthogonal_push_direction);
                     player_hit_by_blue_in_turn = false;
                 }
@@ -2859,8 +2861,10 @@ void gameFrame(double delta_time, TickInput tick_input)
             entity_to_fall_after_blue_not_blue_turn_timer--;
         }
 
-        // reattach pack
-        if (next_world_state.pack_detached && getTileType(getNextCoords(player->coords, oppositeDirection(player->direction))) == PACK) next_world_state.pack_detached = false;
+        // detach or reattach pack
+        TileType tile_behind_player = getTileType(getNextCoords(player->coords, oppositeDirection(player->direction)));
+        if (!next_world_state.pack_detached && pack_intermediate_states_timer == 0 && tile_behind_player != PACK) next_world_state.pack_detached = true;
+        if (next_world_state.pack_detached && tile_behind_player == PACK) next_world_state.pack_detached = false;
 
 		// render and calculate ghosts
         bool facing_green = false;
