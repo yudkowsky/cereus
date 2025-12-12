@@ -550,6 +550,23 @@ Direction oppositeDirection(Direction direction)
     }
 }
 
+// TODO(spike): use this in more places
+Direction getNextRotationalDirection(Direction direction, bool clockwise)
+{
+    Direction next_direction = NO_DIRECTION;
+    if (!clockwise)
+    {
+		next_direction = direction - 1;
+        if (next_direction == -1) next_direction = EAST;
+    }
+    else
+    {
+        next_direction = direction + 1;
+        if (next_direction == 4) next_direction = NORTH;
+    }
+    return next_direction;
+}
+
 // assumes NWSE
 Direction getMiddleDirection(Direction direction_1, Direction direction_2)
 {
@@ -982,6 +999,26 @@ Vec3 rollingAxis(Direction direction)
 	return vec3CrossProduct(up, rolling);
 }
 
+bool isPushable(TileType tile)
+{
+    if (tile == BOX || tile == CRYSTAL || tile == MIRROR || tile == PACK) return true;
+    else return false;
+}
+
+int32 getPushableStackSize(Int3 first_entity_coords)
+{
+	Int3 current_stack_coords = first_entity_coords;
+    int32 stack_size = 1;
+    FOR(find_stack_size_index, MAX_PUSHABLE_STACK_SIZE)
+    {
+        current_stack_coords = getNextCoords(current_stack_coords, UP);
+        TileType next_tile_type = getTileType(current_stack_coords);
+        if (!isPushable(next_tile_type)) break;
+        stack_size++;
+    }
+    return stack_size;
+}
+
 // ANIMATIONS
 
 // returns animation_index and queue_time
@@ -1157,17 +1194,19 @@ void createFailedWalkAnimation(Vec3 start_position, Vec3 next_position, Vec3* po
     animations[animation_index].position[0] = start_position;
 }
 
-void doFailedWalkAnimations(Int3 next_player_coords)
+void doFailedWalkAnimations()
 {
-    createFailedWalkAnimation(intCoordsToNorm(next_world_state.player.coords),
-                              intCoordsToNorm(next_player_coords),
-                              &next_world_state.player.position_norm, 1);
-    if (!next_world_state.pack_detached) createFailedWalkAnimation(intCoordsToNorm(next_world_state.pack.coords),
-                      					         intCoordsToNorm(next_world_state.player.coords),
-                              					 &next_world_state.pack.position_norm, 2);
+    int32 stack_size = getPushableStackSize(next_world_state.player.coords); // counts player as member of stack
+    Int3 current_coords = next_world_state.player.coords;
+    FOR(stack_index, stack_size) 
+    {
+        createFailedWalkAnimation(intCoordsToNorm(current_coords), intCoordsToNorm(getNextCoords(current_coords, next_world_state.player.direction)), &getEntityPointer(current_coords)->position_norm, getEntityPointer(current_coords)->id);
+        current_coords = getNextCoords(current_coords, UP);
+    }
+    if (!next_world_state.pack_detached) createFailedWalkAnimation(intCoordsToNorm(next_world_state.pack.coords), intCoordsToNorm(next_world_state.player.coords), &next_world_state.pack.position_norm, PACK_ID);
 }
 
-void createFailedPlayerRotationAnimation(Vec4 start_rotation, Vec4 input_direction_as_quat, Vec4* rotation_to_change, int32 entity_id)
+void createFailedStaticRotationAnimation(Vec4 start_rotation, Vec4 input_direction_as_quat, Vec4* rotation_to_change, int32 entity_id)
 {
     int32 next_free_array[2] = {0};
     int32* next_free_output = findNextFreeInAnimations(next_free_array, entity_id);
@@ -1242,9 +1281,15 @@ void createFailedPackRotationAnimation(Vec3 player_position, Vec3 pack_position,
 
 void doFailedTurnAnimations(Direction input_direction, bool clockwise)
 {
-    createFailedPlayerRotationAnimation(directionToQuaternion(next_world_state.player.direction, true),
-                                        directionToQuaternion(input_direction, true),
-                                        &next_world_state.player.rotation_quat, PLAYER_ID);
+    int32 stack_size = getPushableStackSize(next_world_state.player.coords);
+    Int3 current_coords = next_world_state.player.coords;
+    FOR(stack_index, stack_size)
+    {
+        Entity* current_entity = getEntityPointer(current_coords);
+        Direction next_direction = getNextRotationalDirection(current_entity->direction, clockwise);
+        createFailedStaticRotationAnimation(directionToQuaternion(current_entity->direction, true), directionToQuaternion(next_direction, true), &current_entity->rotation_quat, current_entity->id);
+        current_coords = getNextCoords(current_coords, UP);
+    }
     createFailedPackRotationAnimation(intCoordsToNorm(next_world_state.player.coords), 
                                       intCoordsToNorm(next_world_state.pack.coords), 
                                       oppositeDirection(input_direction), clockwise, 
@@ -1300,26 +1345,6 @@ void createTrailingHitbox(Int3 coords, int32 frames)
     int32 hitbox_index = findNextFreeInTrailingHitboxes();
     trailing_hitboxes[hitbox_index].coords = coords;
     trailing_hitboxes[hitbox_index].frames = frames;
-}
-
-bool isPushable(TileType tile)
-{
-    if (tile == BOX || tile == CRYSTAL || tile == MIRROR || tile == PACK) return true;
-    else return false;
-}
-
-int32 getPushableStackSize(Int3 first_entity_coords)
-{
-	Int3 current_stack_coords = first_entity_coords;
-    int32 stack_size = 1;
-    FOR(find_stack_size_index, MAX_PUSHABLE_STACK_SIZE)
-    {
-        current_stack_coords = getNextCoords(current_stack_coords, UP);
-        TileType next_tile_type = getTileType(current_stack_coords);
-        if (!isPushable(next_tile_type)) break;
-        stack_size++;
-    }
-    return stack_size;
 }
 
 PushResult canPush(Int3 coords, Direction direction)
@@ -2442,14 +2467,14 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                                     doStandardMovement(input_direction, next_tile, next_player_coords);
                                 }
-                                else doFailedWalkAnimations(next_player_coords);
+                                else doFailedWalkAnimations();
                                 time_until_input = PUSH_ANIMATION_TIME;
                             }
                             if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME; 
                         }
 						else if (do_failed_animations) 
                         {
-                            doFailedWalkAnimations(next_player_coords);
+                            doFailedWalkAnimations();
                             time_until_input = FAILED_ANIMATION_TIME;
                         }
                     }
