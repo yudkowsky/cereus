@@ -182,7 +182,6 @@ const float RAYCAST_SEEK_LENGTH = 20.0f;
 const int32 EDITOR_INPUT_TIME_UNTIL_ALLOW = 9;
 const int32 MOVE_ANIMATION_TIME = 9;
 const int32 PUSH_ANIMATION_TIME = 9;
-const int32 ROLL_ANIMATION_TIME = 18;
 const int32 TURN_ANIMATION_TIME = 9;
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
 const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6; // also somewhat hard coded, based on some function of the turn animation time and the sequencing based on it
@@ -306,8 +305,6 @@ Int3 pack_hitbox_turning_to_coords = {0};
 Direction pack_hitbox_turning_to_direction = NO_DIRECTION;
 
 // ghosts from tp
-bool do_player_ghost = false;
-bool do_pack_ghost = false;
 Int3 player_ghost_coords = {0};
 Int3 pack_ghost_coords = {0};
 Direction player_ghost_direction = NO_DIRECTION;
@@ -1368,7 +1365,6 @@ PushResult canPush(Int3 coords, Direction direction)
         if (!intCoordsWithinLevelBounds(current_coords)) return FAILED_PUSH;
         if (current_tile == NONE) return CAN_PUSH;
         if (isSource(current_tile)) return FAILED_PUSH;
-        if (current_tile == MIRROR) return FAILED_PUSH;
         if (current_tile == GRID) return FAILED_PUSH;
         if (current_tile == WALL) return FAILED_PUSH;
         if (current_tile == PERM_MIRROR) return FAILED_PUSH;
@@ -1510,6 +1506,7 @@ Direction getNextMirrorState(Direction start_direction, Direction push_direction
     }
 }
 
+/*
 void rollWithoutAnimation(Int3 coords, Direction direction)
 {
     Entity* entity = getEntityPointer(coords);
@@ -1534,6 +1531,7 @@ void roll(Int3 coords, Direction direction)
 	rollWithoutAnimation(coords, direction);
     entity->previously_moving_sideways = ROLL_ANIMATION_TIME;
 }
+*/
 
 // LASERS
 
@@ -1952,8 +1950,6 @@ void resetStateForUndo()
     pack_hitbox_turning_to_coords = (Int3){0};
     pack_hitbox_turning_to_direction = NO_DIRECTION;
 
-    do_player_ghost = false;
-    do_pack_ghost = false;
     player_ghost_coords = (Int3){0};
     pack_ghost_coords = (Int3){0};
     player_ghost_direction = NO_DIRECTION;
@@ -2139,7 +2135,7 @@ void doHeadMovement(Direction direction, bool animations_on)
     if (push_result == CAN_PUSH) pushAll(coords_above_player, direction, MOVE_ANIMATION_TIME, animations_on, false);
 }
 
-void doStandardMovement(Direction input_direction, TileType next_tile, Int3 next_player_coords)
+void doStandardMovement(Direction input_direction, Int3 next_player_coords)
 {
 	Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
@@ -2147,8 +2143,7 @@ void doStandardMovement(Direction input_direction, TileType next_tile, Int3 next
     doHeadMovement(input_direction, true);
 
     int32 animation_time = 0;
-    if (next_tile == MIRROR) animation_time = ROLL_ANIMATION_TIME;
-    else 					 animation_time = PUSH_ANIMATION_TIME;
+    animation_time = PUSH_ANIMATION_TIME;
 
     player->previously_moving_sideways = PUSH_ANIMATION_TIME + 1;
 
@@ -2397,6 +2392,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                         {
                             if (!int3IsEqual(player_ghost_coords, player->coords))
                             {
+								recordStateForUndo();
+
                                 setTileType(NONE, player->coords);
                                 setTileDirection(NORTH, player->coords);
                                 zeroAnimations(PLAYER_ID);
@@ -2419,7 +2416,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     setTileType(PACK, pack_coords);
                                     setTileDirection(pack_ghost_direction, pack_coords);
                                 }
-								recordStateForUndo();
                             }
                             // tp sends player ontop of themselves - should count as a successful tp, but no point changing state, and don't samve to undo buffer.
                             time_until_input = SUCCESSFUL_TP_TIME;
@@ -2434,8 +2430,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                     {
                         // no ghosts, but still need to check if player is green at all 
                         bool do_push = false;
-                        bool do_roll = false;
-
                         bool move_player = false;
                         bool do_failed_animations = false;
                         if 		(tick_input.w_press) next_player_coords = int3Add(player->coords, int3Negate(AXIS_Z));
@@ -2455,6 +2449,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             }
                             case BOX:
                             case CRYSTAL:
+                            case MIRROR:
                             case PACK:
                             {
                                 //figure out if push, pause, or fail here.
@@ -2465,20 +2460,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     move_player = true;
                                 }
                                 else if (push_check == FAILED_PUSH) do_failed_animations = true;
-                                break;
-                            }
-                            case MIRROR:
-                            {
-                                PushResult push_check = canPush(next_player_coords, input_direction);
-                                if (push_check == CAN_PUSH)
-                                {
-                                    TileType push_tile = getTileType(getNextCoords(next_player_coords, input_direction));
-                                    TileType above_tile = getTileType(getNextCoords(next_player_coords, UP));
-                                    if (push_tile != NONE || above_tile != NONE) break;
-                                    do_roll = true;
-                                    move_player = true;
-                                }
-                                else do_failed_animations = true;
                                 break;
                             }
                             default:
@@ -2498,9 +2479,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             if (tile_below != NONE || player->hit_by_red)
                             {
                                 if (do_push) pushAll(next_player_coords, input_direction, PUSH_ANIMATION_TIME, true, false);
-                                else if (do_roll) roll(next_player_coords, input_direction);
 
-                                doStandardMovement(input_direction, next_tile, next_player_coords);
+                                doStandardMovement(input_direction, next_player_coords);
                                 time_until_input = PUSH_ANIMATION_TIME;
                             }
                             else
@@ -2509,7 +2489,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 WorldState world_state_savestate = next_world_state;
 
                                 if (do_push) pushAll(next_player_coords, input_direction, 0, false, false);
-                                if (do_roll) rollWithoutAnimation(next_player_coords, input_direction);
 
                                 bool animations_on = false;
                                 // TODO(spike): also needs testing
@@ -2541,14 +2520,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 if (leap_of_faith_worked)
                                 {
                                     if (do_push) pushOnce(next_player_coords, input_direction, PUSH_ANIMATION_TIME);
-                                    if (do_roll) roll(next_player_coords, input_direction);
-
-                                    doStandardMovement(input_direction, next_tile, next_player_coords);
+                                    doStandardMovement(input_direction, next_player_coords);
                                 }
                                 else doFailedWalkAnimations();
                                 time_until_input = PUSH_ANIMATION_TIME;
                             }
-                            if (next_tile == MIRROR) time_until_input = ROLL_ANIMATION_TIME; 
                         }
 						else if (do_failed_animations) 
                         {
@@ -2978,15 +2954,12 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (player->falling_time > 0) time_until_input += 1;
 
         // decide which ghosts to render, if ghosts should be rendered
+        bool do_player_ghost = false;
+        bool do_pack_ghost = false;
 		if (calculateGhosts())
         {
             do_player_ghost = true;
             if (!next_world_state.pack_detached) do_pack_ghost = true;
-        }
-		else
-        {
-            do_player_ghost = false;
-            do_pack_ghost = false;
         }
 
         // final redo of laser buffer, after all logic is complete, for drawing
