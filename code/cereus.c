@@ -2185,7 +2185,8 @@ void doStandardMovement(Direction input_direction, TileType next_tile, Int3 next
 
 // GHOSTS
 
-void calculateGhosts()
+// returns true if player is able to try to tp (i.e. player is facing tw green beam). doesn't consider any obstructed tps.
+bool calculateGhosts()
 {
 	Entity* player = &next_world_state.player;
 
@@ -2201,59 +2202,29 @@ void calculateGhosts()
         case DOWN:  if (player->green_hit.up)    facing_green = true; break;
         default: break;
     }
-    if (facing_green)
-    {
-        bool obstructed_tp_location = false;
+    if (!facing_green) return false;
 
-        Int3 current_coords = player->coords; 
-        Direction current_direction = player->direction;
-        FOR(seek_index, MAX_LASER_TRAVEL_DISTANCE)
-        {
-            current_coords = getNextCoords(current_coords, current_direction);
-            TileType current_tile = getTileType(current_coords);
-            if (!intCoordsWithinLevelBounds(current_coords)) obstructed_tp_location = true;
-            if (current_tile == MIRROR || current_tile == PERM_MIRROR)
-            {
-                current_direction = getNextLaserDirectionMirror(current_direction, getTileDirection(current_coords));
-                continue;
-            }
-            if (current_tile != NONE) break;
-        }
-        Int3 tp_coords = getNextCoords(current_coords, oppositeDirection(current_direction));
-        if (getTileType(tp_coords) != NONE) obstructed_tp_location = true;
-        else
-        {
-            player_ghost_coords = tp_coords;
-            player_ghost_direction = current_direction;
-        }
-        if (!next_world_state.pack_detached) 
-        {
-            TileType to_be_pack_tile = getTileType(getNextCoords(tp_coords, oppositeDirection(current_direction)));
-            if (to_be_pack_tile != NONE && to_be_pack_tile != PLAYER) obstructed_tp_location = true;
-            else
-            {
-                pack_ghost_coords = getNextCoords(tp_coords, oppositeDirection(current_direction));
-                pack_ghost_direction = current_direction;
-            }
-        }
-
-        if (!obstructed_tp_location)
-        {
-            do_player_ghost = true;
-            if (!next_world_state.pack_detached) do_pack_ghost = true;
-            else do_pack_ghost = false;
-        }
-        else
-        {
-			do_player_ghost = false;
-            do_pack_ghost = false;
-        }
-    }
-    else
+    Int3 current_coords = player->coords; 
+    Direction current_direction = player->direction;
+    FOR(seek_index, MAX_LASER_TRAVEL_DISTANCE)
     {
-        do_player_ghost = false;
-        do_pack_ghost = false;
+        current_coords = getNextCoords(current_coords, current_direction);
+        TileType current_tile = getTileType(current_coords);
+        if (current_tile == MIRROR || current_tile == PERM_MIRROR)
+        {
+            current_direction = getNextLaserDirectionMirror(current_direction, getTileDirection(current_coords));
+            continue;
+        }
+        if (current_tile != NONE) break;
     }
+    player_ghost_coords = getNextCoords(current_coords, oppositeDirection(current_direction));
+    player_ghost_direction = current_direction;
+    if (!next_world_state.pack_detached) 
+    {
+        pack_ghost_coords = getNextCoords(player_ghost_coords, oppositeDirection(current_direction));
+        pack_ghost_direction = current_direction;
+    }
+    return true;
 }
 
 // GAME
@@ -2412,41 +2383,45 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                 if (input_direction == player->direction)
                 {
-					calculateGhosts();
-
-                    if (do_player_ghost)
+                    if (calculateGhosts())
                     {
                         // seek towards start of laser to get endpoint, and then go to the endpoint
                         // check if endpoint is valid before teleport (i.e, if pack can go there - if over air, teleport anyway, probably?)
 
-						bool obstructed_tp_location = true;
-                        if (do_pack_ghost) obstructed_tp_location = false;
-                        else if (do_player_ghost && next_world_state.pack_detached) obstructed_tp_location = false;
+                        bool allow_tp = false;
+                        TileType player_ghost_tile = getTileType(player_ghost_coords);
+                        TileType pack_ghost_tile = getTileType(pack_ghost_coords);
+                        if ((player_ghost_tile == NONE || player_ghost_tile == PLAYER) && (pack_ghost_tile == NONE || pack_ghost_tile == PLAYER || pack_ghost_tile == PACK)) allow_tp = true;
 
-                        if (!obstructed_tp_location)
+                        if (allow_tp)
                         {
-                            setTileType(NONE, player->coords);
-                            setTileDirection(NORTH, player->coords);
-                            zeroAnimations(PLAYER_ID);
-                            player->coords = player_ghost_coords;
-                            player->position_norm = intCoordsToNorm(player_ghost_coords);
-                            player->direction = player_ghost_direction;
-                            player->rotation_quat = directionToQuaternion(player_ghost_direction, true);
-							setTileType(PLAYER, player_ghost_coords);
-                            setTileDirection(player_ghost_direction, player_ghost_coords);
-                            if (!next_world_state.pack_detached)
+                            if (!int3IsEqual(player_ghost_coords, player->coords))
                             {
-                                Int3 pack_coords = getNextCoords(player_ghost_coords, oppositeDirection(pack_ghost_direction));
-                                setTileType(NONE, pack->coords);
-                                setTileDirection(NORTH, pack->coords);
-                                zeroAnimations(PACK_ID);
-                                pack->coords = pack_coords; 
-                                pack->position_norm = intCoordsToNorm(pack_coords);
-                                pack->direction = pack_ghost_direction;
-                                pack->rotation_quat = directionToQuaternion(pack_ghost_direction, true);
-                                setTileType(PACK, pack_coords);
-                                setTileDirection(pack_ghost_direction, pack_coords);
+                                setTileType(NONE, player->coords);
+                                setTileDirection(NORTH, player->coords);
+                                zeroAnimations(PLAYER_ID);
+                                player->coords = player_ghost_coords;
+                                player->position_norm = intCoordsToNorm(player_ghost_coords);
+                                player->direction = player_ghost_direction;
+                                player->rotation_quat = directionToQuaternion(player_ghost_direction, true);
+                                setTileType(PLAYER, player_ghost_coords);
+                                setTileDirection(player_ghost_direction, player_ghost_coords);
+                                if (!next_world_state.pack_detached)
+                                {
+                                    Int3 pack_coords = getNextCoords(player_ghost_coords, oppositeDirection(pack_ghost_direction));
+                                    setTileType(NONE, pack->coords);
+                                    setTileDirection(NORTH, pack->coords);
+                                    zeroAnimations(PACK_ID);
+                                    pack->coords = pack_coords; 
+                                    pack->position_norm = intCoordsToNorm(pack_coords);
+                                    pack->direction = pack_ghost_direction;
+                                    pack->rotation_quat = directionToQuaternion(pack_ghost_direction, true);
+                                    setTileType(PACK, pack_coords);
+                                    setTileDirection(pack_ghost_direction, pack_coords);
+                                }
+								recordStateForUndo();
                             }
+                            // tp sends player ontop of themselves - should count as a successful tp, but no point changing state, and don't samve to undo buffer.
                             time_until_input = SUCCESSFUL_TP_TIME;
                         }
                         else
@@ -2457,7 +2432,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     }
                     else
                     {
-                        // no green; normal movement attempt
+                        // no ghosts, but still need to check if player is green at all 
                         bool do_push = false;
                         bool do_roll = false;
 
@@ -3002,7 +2977,17 @@ void gameFrame(double delta_time, TickInput tick_input)
         // don't allow inputs if player is falling (this is for meta commands - some redundancy here: pauses already happen if player not allowed to move yet otherwise)
         if (player->falling_time > 0) time_until_input += 1;
 
-		calculateGhosts();
+        // decide which ghosts to render, if ghosts should be rendered
+		if (calculateGhosts())
+        {
+            do_player_ghost = true;
+            if (!next_world_state.pack_detached) do_pack_ghost = true;
+        }
+		else
+        {
+            do_player_ghost = false;
+            do_pack_ghost = false;
+        }
 
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
