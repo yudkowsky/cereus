@@ -285,6 +285,10 @@ LaserBuffer laser_buffer[1024] = {0};
 
 TrailingHitbox trailing_hitboxes[64] = {0};
 
+// player's lingering hitbox when hit should still trigger that color
+int32 player_trailing_hitbox_timer;
+Int3 player_trailing_hitbox_coords;
+
 // handle pack turning sequence
 int32 pack_intermediate_states_timer = 0;
 Int3 pack_intermediate_coords = {0};
@@ -547,7 +551,6 @@ Direction oppositeDirection(Direction direction)
     }
 }
 
-// TODO(spike): use this in more places
 Direction getNextRotationalDirection(Direction direction, bool clockwise)
 {
     Direction next_direction = NO_DIRECTION;
@@ -1080,6 +1083,7 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
     }
 }
 
+/*
 void createRollingAnimation(Vec3 position, Direction direction, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change, int32 entity_id, int32 animation_frames)
 {	
     int32 next_free_array[2] = {0};
@@ -1122,6 +1126,7 @@ void createRollingAnimation(Vec3 position, Direction direction, Vec3* position_t
         animations[animation_index].position[animation_frames-(1+frame_index)] = vec3Add(pivot_point, relative_rotation);
     }
 }
+*/
 
 void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direction pack_direction, bool clockwise, Vec3* position_to_change, Vec4* rotation_to_change, int32 entity_id)
 {
@@ -1140,6 +1145,7 @@ void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direc
     float d_theta_per_frame = (TAU*0.25f)/(float)TURN_ANIMATION_TIME;
     float angle_sign = clockwise ? 1.0f : -1.0f;
     Direction previous_pack_direction = NO_DIRECTION;
+
     if (clockwise) 
     {
         previous_pack_direction = pack_direction - 1;
@@ -1325,7 +1331,7 @@ void createFirstFallAnimation(Vec3 start_position, Vec3* position_to_change, int
     animations[animation_index].position[0] = vec3Add(start_position, vec3Negate(intCoordsToNorm(AXIS_Y)));
 }
 
-// PUSH / ROLL ENTITES
+// PUSH ENTITES
 
 int32 findNextFreeInTrailingHitboxes()
 {
@@ -1804,20 +1810,20 @@ int32 updateLaserBuffer(void)
 
     for (int source_index = 0; source_index < MAX_PSEUDO_SOURCE_COUNT; source_index++)
     {
-        Entity* entity = &sources_as_primary[source_index];
-        if (entity->id == -1) continue;
-        Direction current_direction = entity->direction;
-        Int3 current_coords = getNextCoords(entity->coords, current_direction);
+        Entity* source = &sources_as_primary[source_index];
+        if (source->id == -1) continue;
+        Direction current_direction = source->direction;
+        Int3 current_coords = getNextCoords(source->coords, current_direction);
 
-        switch (entity->color) 
+        switch (source->color) 
         {
-            case MAGENTA: addPrimarySource(&sources_as_primary[total_source_count], entity, &total_source_count, BLUE);  break;
-            case YELLOW:  addPrimarySource(&sources_as_primary[total_source_count], entity, &total_source_count, GREEN); break;
-            case CYAN:    addPrimarySource(&sources_as_primary[total_source_count], entity, &total_source_count, BLUE); break;
+            case MAGENTA: addPrimarySource(&sources_as_primary[total_source_count], source, &total_source_count, BLUE);  break;
+            case YELLOW:  addPrimarySource(&sources_as_primary[total_source_count], source, &total_source_count, GREEN); break;
+            case CYAN:    addPrimarySource(&sources_as_primary[total_source_count], source, &total_source_count, BLUE); break;
             case WHITE:
             {
-                addPrimarySource(&sources_as_primary[total_source_count], entity, &total_source_count, GREEN); 
-                addPrimarySource(&sources_as_primary[total_source_count], entity, &total_source_count, BLUE); // creates a duplicate ID here. still unclear if i even want to use these though
+                addPrimarySource(&sources_as_primary[total_source_count], source, &total_source_count, GREEN); // creates a duplicate ID here. still unclear if i even want to use these though // TODO(spike): have another look at this: something about sources, especially 
+                addPrimarySource(&sources_as_primary[total_source_count], source, &total_source_count, BLUE);   																				// multicolored sources, is buggy
                 break;
             }
             default: break;
@@ -1825,19 +1831,23 @@ int32 updateLaserBuffer(void)
 
         for (int laser_index = 0; laser_index < MAX_LASER_TRAVEL_DISTANCE; laser_index++)
         {
+            TileType tile_hit = getTileType(current_coords);
+            LaserColor laser_color = colorToLaserColor(source->color);
+
+            if (int3IsEqual(current_coords, player_trailing_hitbox_coords) && player_trailing_hitbox_timer > 0) goto player_hit_bypass;
             FOR(trailing_hitbox_index, MAX_TRAILING_HITBOX_COUNT) if (int3IsEqual(current_coords, trailing_hitboxes[trailing_hitbox_index].coords) && trailing_hitboxes[trailing_hitbox_index].frames > 0) goto laser_instance_stop;
             if ((pack_hitbox_turning_from_timer > 0) && int3IsEqual(current_coords, pack_hitbox_turning_from_coords) && (pack_hitbox_turning_from_direction == current_direction)) goto laser_instance_stop;
             if ((pack_hitbox_turning_to_timer   > 0) && int3IsEqual(current_coords, pack_hitbox_turning_to_coords)   && (pack_hitbox_turning_to_direction   == current_direction)) goto laser_instance_stop;
 
-            LaserColor laser_color = colorToLaserColor(entity->color);
             if (!intCoordsWithinLevelBounds(current_coords)) break;
 
-            switch(getTileType(current_coords))
+            switch(tile_hit)
             {
                 case PLAYER:
                 {
                     if (!laserPassthroughAllowed(player) || ((player->previously_moving_sideways > 0) && player->direction == oppositeDirection(current_direction)))
                     {
+player_hit_bypass:
                         if (laser_color.red) player->hit_by_red   = true;
                         if (laser_color.green) 
                         {
@@ -2171,7 +2181,11 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords)
         createTrailingHitbox(pack->coords, TRAILING_HITBOX_TIME);
         pack->coords = player->coords;
     }
-	createTrailingHitbox(player->coords, TRAILING_HITBOX_TIME);
+	
+    player_trailing_hitbox_coords = player->coords;
+    player_trailing_hitbox_timer = TRAILING_HITBOX_TIME;
+
+    //createTrailingHitbox(player->coords, TRAILING_HITBOX_TIME);
     player->coords = next_player_coords;
     setTileType(PLAYER, player->coords);	
 
@@ -2681,7 +2695,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             Vec3 right_camera_basis, forward_camera_basis;
             cameraBasisFromYaw(camera_yaw, &right_camera_basis, &forward_camera_basis);
 
-			// WASD: movement
+			// WASD: camera movement
             // E: toggle editor mode
             // J: set void at current coords
             // L: increment tile at cursor
@@ -2937,7 +2951,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // decrement falling timers
-        Entity* falling_entity_groups[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals }; // TODO(spike): i do this array enough that i should probably just make it global
+        Entity* falling_entity_groups[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
         FOR(falling_object_index, 3)
         {
             Entity* entity_group = falling_entity_groups[falling_object_index];
@@ -2967,6 +2981,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // decrement trailing hitboxes 
         FOR(i, MAX_TRAILING_HITBOX_COUNT) if (trailing_hitboxes[i].frames > 0) trailing_hitboxes[i].frames--;
+        if (player_trailing_hitbox_timer > 0) player_trailing_hitbox_timer--;
 
         // finished updating state
         world_state = next_world_state;
