@@ -1007,7 +1007,7 @@ Vec3 rollingAxis(Direction direction)
 
 bool isPushable(TileType tile)
 {
-    if (tile == BOX || tile == CRYSTAL || tile == MIRROR || tile == PACK || tile == PLAYER) return true;
+    if (tile == BOX || tile == CRYSTAL || tile == MIRROR || tile == PACK) return true;
     else return false;
 }
 
@@ -2025,6 +2025,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         Entity* entity_in_stack = getEntityPointer(current_start_coords);
         if (entity_in_stack->id == -1) return false; // should never happen, shouldn't have id == -1 in the middle of a stack somewhere
         if (entity_in_stack->previously_moving_sideways > 1) return false; 
+        if (entity_in_stack == &next_world_state.pack && !next_world_state.pack_detached) return false;
         if (entity_in_stack == &next_world_state.player && !next_world_state.player.hit_by_red) time_until_input = FALL_ANIMATION_TIME;
 
         if (entity_in_stack->falling_time == 0)
