@@ -182,11 +182,12 @@ const Vec3 DIAGONAL_LASER_SCALE   = { 0.125f, 0.125f, 1.415f };
 const float RAYCAST_SEEK_LENGTH = 20.0f;
 
 const int32 EDITOR_INPUT_TIME_UNTIL_ALLOW = 9;
-const int32 MOVE_ANIMATION_TIME = 9;
+const int32 MOVE_ANIMATION_TIME = 9; // TODO(spike): move and push animation time are always the same
 const int32 PUSH_ANIMATION_TIME = 9;
 const int32 TURN_ANIMATION_TIME = 9;
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
 const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6; // also somewhat hard coded, based on some function of the turn animation time and the sequencing based on it
+const int32 PUSH_MIRROR_ANIMATION_TIME = 16;
 const int32 FAILED_ANIMATION_TIME = 8;
 
 const int32 TRAILING_HITBOX_TIME = 4;
@@ -1313,7 +1314,7 @@ void doFailedTurnAnimations(Direction input_direction, bool clockwise)
 bool entityInMotion(Entity* entity)
 {
     if (entity == 0) return false; // if null pointer return not in motion
-    if (entity->previously_moving_sideways != 0 || entity->falling_time != 0) return true;
+    if (entity->previously_moving_sideways > 1 || entity->falling_time != 0) return true; // > 1 might break things, but makes sense for now; fixes things falling off of your head when walking max speed
     else return false;
 }
 
@@ -1413,7 +1414,7 @@ Push pushOnceWithoutAnimation(Int3 coords, Direction direction, int32 time)
     entity_to_push.entity = entity; 
     entity_to_push.new_coords = getNextCoords(coords, direction);
 
-    entity->previously_moving_sideways = time;
+    entity->previously_moving_sideways = (time == PUSH_MIRROR_ANIMATION_TIME) ? time - 3 : time; // TODO(spike): bad solution but might be fine
 
     setTileType(NONE, entity_to_push.previous_coords);
     setTileDirection(NORTH, entity_to_push.previous_coords);
@@ -1435,7 +1436,8 @@ void pushOnce(Int3 coords, Direction direction, int32 animation_time)
                                  &entity_to_push.entity->position_norm,
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                  id, animation_time); 
-    createTrailingHitbox(coords, TRAILING_HITBOX_TIME);
+    int32 trailing_hitbox_time = (animation_time == PUSH_MIRROR_ANIMATION_TIME ? TRAILING_HITBOX_TIME + 3 : TRAILING_HITBOX_TIME); // TODO(spike): temp solution to mirror times
+    createTrailingHitbox(coords, trailing_hitbox_time);
 }
 
 // assumes at least the lowest layer of the stack is able to be pushed. checks if next is NONE, if so stops. 
@@ -2149,31 +2151,34 @@ void doHeadRotation(bool clockwise)
     }
 }
 
-void doHeadMovement(Direction direction, bool animations_on)
+void doHeadMovement(Direction direction, bool animations_on, int32 animation_time)
 {
     Int3 coords_above_player = getNextCoords(next_world_state.player.coords, UP);
     if (!isPushable(getTileType(coords_above_player))) return;
     PushResult push_result = canPushStack(coords_above_player, direction);
-    if (push_result == CAN_PUSH) pushAll(coords_above_player, direction, MOVE_ANIMATION_TIME, animations_on, false);
+    if (push_result == CAN_PUSH) pushAll(coords_above_player, direction, animation_time, animations_on, false);
 }
 
-void doStandardMovement(Direction input_direction, Int3 next_player_coords)
+void doStandardMovement(Direction input_direction, Int3 next_player_coords, int32 animation_time)
 {
 	Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
 
-    doHeadMovement(input_direction, true);
+    doHeadMovement(input_direction, true, animation_time);
 
-    int32 animation_time = 0;
-    animation_time = PUSH_ANIMATION_TIME;
-
-    player->previously_moving_sideways = PUSH_ANIMATION_TIME + 1;
+    int32 trailing_hitbox_time = (animation_time == PUSH_MIRROR_ANIMATION_TIME) ? TRAILING_HITBOX_TIME + 3 : TRAILING_HITBOX_TIME; // TODO(spike): temp fix for problem of moving for longer period of time when pushing mirror
+    int32 previously_moving_sideways_time = PUSH_ANIMATION_TIME; // TODO(spike): also a temp fix - am lying about amount of time taken to move here, wait and see if this is an issue.
+    player->previously_moving_sideways = previously_moving_sideways_time;
 
     createInterpolationAnimation(intCoordsToNorm(player->coords), 
                                  intCoordsToNorm(next_player_coords), 
                                  &player->position_norm,
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                  PLAYER_ID, animation_time);
+
+    player_trailing_hitbox_coords = player->coords;
+    player_trailing_hitbox_timer = trailing_hitbox_time; 
+
     // move pack also
     if (next_world_state.pack_detached) 
     {
@@ -2181,7 +2186,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords)
     }
     else 
     {
-        pack->previously_moving_sideways = PUSH_ANIMATION_TIME + 1;
+        pack->previously_moving_sideways = previously_moving_sideways_time;
 
         setTileType(NONE, pack->coords);
         setTileType(PACK, player->coords);
@@ -2190,14 +2195,11 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords)
                                      &pack->position_norm,
                                      IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                      PACK_ID, animation_time);
-        createTrailingHitbox(pack->coords, TRAILING_HITBOX_TIME);
+
+        createTrailingHitbox(pack->coords, trailing_hitbox_time);
         pack->coords = player->coords;
     }
-	
-    player_trailing_hitbox_coords = player->coords;
-    player_trailing_hitbox_timer = TRAILING_HITBOX_TIME;
 
-    //createTrailingHitbox(player->coords, TRAILING_HITBOX_TIME);
     player->coords = next_player_coords;
     setTileType(PLAYER, player->coords);	
 
@@ -2458,6 +2460,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         bool do_push = false;
                         bool move_player = false;
                         bool do_failed_animations = false;
+                        int32 animation_time = 0;
                         if 		(tick_input.w_press) next_player_coords = int3Add(player->coords, int3Negate(AXIS_Z));
                         else if (tick_input.a_press) next_player_coords = int3Add(player->coords, int3Negate(AXIS_X));
                         else if (tick_input.s_press) next_player_coords = int3Add(player->coords, AXIS_Z);
@@ -2476,7 +2479,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                             }
                             case BOX:
                             case CRYSTAL:
-                            case MIRROR:
                             case PACK:
                             {
                                 //figure out if push, pause, or fail here.
@@ -2485,6 +2487,25 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 {
                                     do_push = true;
                                     move_player = true;
+                                    animation_time = PUSH_ANIMATION_TIME;
+                                }
+                                else if (push_check == FAILED_PUSH) do_failed_animations = true;
+                                break;
+                            }
+                            case MIRROR: // currently allowing blocks on top of the mirror but not behind the mirror when pushing
+                            {
+                                PushResult push_check = canPush(next_player_coords, input_direction);
+                                if (push_check == CAN_PUSH) 
+                                {
+                                    TileType after_push_tile = getTileType(getNextCoords(next_player_coords, input_direction));
+                               		if (after_push_tile != NONE) 
+                                    {
+                                        do_failed_animations = true;
+                                        break; 
+                                    }
+                                    do_push = true;
+                                    move_player = true;
+                                    animation_time = PUSH_MIRROR_ANIMATION_TIME;
                                 }
                                 else if (push_check == FAILED_PUSH) do_failed_animations = true;
                                 break;
@@ -2495,7 +2516,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 Int3 coords_below_and_ahead = getNextCoords(next_player_coords, DOWN);
                                 if (isPushable(getTileType(coords_ahead)) && entityInMotion(getEntityPointer(coords_ahead))) move_player = false;
                                 else if (isPushable(getTileType(coords_below_and_ahead)) && entityInMotion(getEntityPointer(coords_below_and_ahead))) move_player = false;
-                                else move_player = true;
+                                else
+                                {
+                                    move_player = true;
+                                    animation_time = MOVE_ANIMATION_TIME;
+                                }
                             }
                         }
 						if (move_player)
@@ -2505,10 +2530,9 @@ void gameFrame(double delta_time, TickInput tick_input)
                             TileType tile_below = getTileType(coords_below);
                             if (tile_below != NONE || player->hit_by_red)
                             {
-                                if (do_push) pushAll(next_player_coords, input_direction, PUSH_ANIMATION_TIME, true, false);
-
-                                doStandardMovement(input_direction, next_player_coords);
-                                time_until_input = PUSH_ANIMATION_TIME;
+                                if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
+                                doStandardMovement(input_direction, next_player_coords, animation_time);
+                                time_until_input = animation_time;
                             }
                             else
                             {
@@ -2525,7 +2549,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     if (next_world_state.pack_detached) doFallingEntity(pack, animations_on);
                                 }
 
-                                doHeadMovement(input_direction, animations_on);
+                                doHeadMovement(input_direction, animations_on, 1);
 
                                 setTileType(NONE, player->coords);
                                 player->coords = next_player_coords;
@@ -2546,8 +2570,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 next_world_state = world_state_savestate;
                                 if (leap_of_faith_worked)
                                 {
-                                    if (do_push) pushOnce(next_player_coords, input_direction, PUSH_ANIMATION_TIME);
-                                    doStandardMovement(input_direction, next_player_coords);
+                                    if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
+                                    doStandardMovement(input_direction, next_player_coords, animation_time);
                                 }
                                 else doFailedWalkAnimations();
                                 time_until_input = PUSH_ANIMATION_TIME;
@@ -3007,8 +3031,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (getTileType(getNextCoords(entity->coords, DOWN)) == VOID && !presentInAnimations(entity->id)) entity->id = -1;
             }
         }
-        if (getTileType(getNextCoords(player->coords, DOWN)) == VOID && !presentInAnimations(PLAYER_ID)) player->id = -1;
-        if (getTileType(getNextCoords(pack->coords, DOWN)) == VOID   && !presentInAnimations(PACK_ID))   pack->id = -1;
+        if ((getTileType(getNextCoords(player->coords, DOWN)) == VOID || getTileType(getNextCoords(player->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PLAYER_ID)) player->id = -1;
+        if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID   || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID  ) && !presentInAnimations(PACK_ID))   pack->id = -1;
 
         // finished updating state
         world_state = next_world_state;
