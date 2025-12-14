@@ -83,27 +83,6 @@ LRESULT CALLBACK windowMessageProcessor(
             return 0;
         }
 
-        /*
-        case WM_LBUTTONDOWN:
-            tick_input.left_mouse_press = true;
-            break;
-        case WM_LBUTTONUP:
-            tick_input.left_mouse_press = false;
-            break;
-        case WM_RBUTTONDOWN:
-            tick_input.right_mouse_press = true;
-            break;
-        case WM_RBUTTONUP:
-            tick_input.right_mouse_press = false;
-            break;
-        case WM_MBUTTONDOWN:
-            tick_input.middle_mouse_press = true;
-            break;
-        case WM_MBUTTONUP:
-            tick_input.middle_mouse_press = false;
-            break;
-		*/
-
         case WM_KEYDOWN:
             switch (wParam)
             {
@@ -145,6 +124,16 @@ LRESULT CALLBACK windowMessageProcessor(
                     break;
                 case VK_SHIFT:
                     tick_input.shift_press = true;
+                    break;
+                // temp mouse button shortcuts
+                case 'F':
+                    tick_input.left_mouse_press = true;
+                    break;
+                case 'G':
+                    tick_input.middle_mouse_press = true;
+                    break;
+                case 'H':
+                    tick_input.right_mouse_press = true;
                     break;
             }
             break;
@@ -189,6 +178,16 @@ LRESULT CALLBACK windowMessageProcessor(
                     break;
                 case VK_SHIFT:
                     tick_input.shift_press = false;
+                    break;
+                // temp mouse button shortcuts
+                case 'F':
+					tick_input.left_mouse_press = false;
+                    break;
+                case 'G':
+                    tick_input.middle_mouse_press = false;
+                    break;
+                case 'H':
+                    tick_input.right_mouse_press = false;
                     break;
             }
             break;

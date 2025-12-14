@@ -22,6 +22,7 @@ typedef enum TileType
     CRYSTAL 	= 7,
     PACK        = 8,
     PERM_MIRROR = 9,
+    NOT_VOID    = 10,
 
     SOURCE_RED     = 32,
     SOURCE_GREEN   = 33,
@@ -123,6 +124,7 @@ typedef struct EditorState
 {
     bool editor_mode;
     TileType picked_tile;
+    Direction picked_direction;
 }
 EditorState;
 
@@ -234,6 +236,7 @@ const char* const mirror_path      = "data/sprites/mirror.png";
 const char* const crystal_path     = "data/sprites/crystal.png";
 const char* const pack_path    	   = "data/sprites/pack.png";
 const char* const perm_mirror_path = "data/sprites/perm-mirror.png";
+const char* const not_void_path    = "data/sprites/not-void.png";
 
 const char* const player_ghost_path = "data/sprites/player-ghost.png";
 const char* const pack_ghost_path   = "data/sprites/pack-ghost.png";
@@ -782,6 +785,7 @@ char* getPath(TileType tile)
         case CRYSTAL:     return crystal_path;
         case PACK:    	  return pack_path;
         case PERM_MIRROR: return perm_mirror_path;
+        case NOT_VOID:    return not_void_path;
 
         case LASER_RED:     return laser_red_path;
         case LASER_GREEN:	return laser_green_path;
@@ -958,6 +962,7 @@ void editorPlaceOnlyInstanceOfTile(Entity* entity, Int3 coords, TileType tile, i
     entity->position_norm = intCoordsToNorm(coords);
     entity->id = id;
     setTileType(editor_state.picked_tile, coords);
+    setTileDirection(NORTH, coords);
 }
 
 // ANIMATION HELPER 
@@ -1001,7 +1006,7 @@ Vec3 rollingAxis(Direction direction)
 
 bool isPushable(TileType tile)
 {
-    if (tile == BOX || tile == CRYSTAL || tile == MIRROR || tile == PACK) return true;
+    if (tile == BOX || tile == CRYSTAL || tile == MIRROR || tile == PACK || tile == PLAYER) return true;
     else return false;
 }
 
@@ -1041,6 +1046,12 @@ int32* findNextFreeInAnimations(int32* next_free_array, int32 entity_id)
     next_free_array[0] = animation_index;
     next_free_array[1] = queue_time;
     return next_free_array;
+}
+
+bool presentInAnimations(int32 entity_id)
+{
+    FOR(find_anim_index, MAX_ANIMATION_COUNT) if (animations[find_anim_index].id == entity_id && animations[find_anim_index].frames_left != 0) return true;
+    return false;
 }
 
 void zeroAnimations(int32 id)
@@ -2001,7 +2012,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
 {
     if (entity->id == -1) return false;
 	Int3 next_coords = getNextCoords(entity->coords, DOWN);
-    if (getTileType(next_coords) != NONE) return true;
+    if (!(isPushable(getTileType(next_coords)) && getEntityPointer(next_coords)->id == -1) && getTileType(next_coords) != NONE) return true; // TODO(spike): add entity.id == -1 as NONE in getTileType
     if (trailingHitboxAtCoords(next_coords)) return true;
 
     int32 stack_size = getPushableStackSize(entity->coords);
@@ -2012,13 +2023,14 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         Entity* entity_in_stack = getEntityPointer(current_start_coords);
         if (entity_in_stack->id == -1) return false; // should never happen, shouldn't have id == -1 in the middle of a stack somewhere
         if (entity_in_stack->previously_moving_sideways > 1) return false; 
+        if (entity_in_stack == &next_world_state.player && !next_world_state.player.hit_by_red) time_until_input = FALL_ANIMATION_TIME;
 
         if (entity_in_stack->falling_time == 0)
         {
             if (do_animation) 
             {
                 createFirstFallAnimation(intCoordsToNorm(current_start_coords), &entity_in_stack->position_norm, entity_in_stack->id);
-                createTrailingHitbox(current_start_coords, TRAILING_HITBOX_TIME + 5); // it takes 5 extra frames to get to the point where it's cutting off the below laser (and thus not cutting off above, i guess)
+                createTrailingHitbox(current_start_coords, TRAILING_HITBOX_TIME + 4); // it takes 4 extra frames to get to the point where it's cutting off the below laser (and thus not cutting off above, i guess)
             }
             entity_in_stack->falling_time = FALL_ANIMATION_TIME + 4 + 1; // 12 frames here instead of 8 because of acceleration period
         }
@@ -2457,6 +2469,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             case GRID:
                             case WALL:
                             case PERM_MIRROR:
+                            case NOT_VOID:
                             {
                                 do_failed_animations = true;
                                 break;
@@ -2766,15 +2779,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                     {
                         setTileType(editor_state.picked_tile, raycast_output.place_coords); 
                         setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
+                        setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
                     }
-                    else if (editor_state.picked_tile == PLAYER)
-                    {
-                        editorPlaceOnlyInstanceOfTile(player, raycast_output.place_coords, PLAYER, PLAYER_ID);
-                    }
-                    else if (editor_state.picked_tile == PACK)
-                    {
-                        editorPlaceOnlyInstanceOfTile(pack, raycast_output.place_coords, PACK, PACK_ID);
-                    }
+                    else if (editor_state.picked_tile == PLAYER) editorPlaceOnlyInstanceOfTile(player, raycast_output.place_coords, PLAYER, PLAYER_ID);
+                    else if (editor_state.picked_tile == PACK) editorPlaceOnlyInstanceOfTile(pack, raycast_output.place_coords, PACK, PACK_ID);
                     else
                     {
                         switch (editor_state.picked_tile)
@@ -2787,6 +2795,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                         }
                         if (entity_group != 0) setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
                         setTileType(editor_state.picked_tile, raycast_output.place_coords); 
+
+                        if (editor_state.picked_tile != VOID && editor_state.picked_tile != NOT_VOID && editor_state.picked_tile != GRID) 
+                        {
+                            setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
+                        }
+                        else (setTileDirection(NORTH, raycast_output.place_coords));
                     }
                 }
                 else if (tick_input.r_press && raycast_output.hit)
@@ -2810,7 +2824,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 			else if (time_until_input == 0 && tick_input.l_press)
             {
 				editor_state.picked_tile++;
-                if 		(editor_state.picked_tile == PERM_MIRROR + 1) editor_state.picked_tile = SOURCE_RED;
+                if 		(editor_state.picked_tile == NOT_VOID + 1) editor_state.picked_tile = SOURCE_RED;
                 else if (editor_state.picked_tile == SOURCE_WHITE + 1) editor_state.picked_tile = VOID;
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
@@ -2982,6 +2996,19 @@ void gameFrame(double delta_time, TickInput tick_input)
         // decrement trailing hitboxes 
         FOR(i, MAX_TRAILING_HITBOX_COUNT) if (trailing_hitboxes[i].frames > 0) trailing_hitboxes[i].frames--;
         if (player_trailing_hitbox_timer > 0) player_trailing_hitbox_timer--;
+
+		// delete if above void
+        Entity* entity_group[3] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals};
+        FOR(entity_group_index, 3)
+        {
+            FOR(entity_instance_index, MAX_ENTITY_INSTANCE_COUNT)
+            {
+                Entity* entity = &entity_group[entity_group_index][entity_instance_index];
+                if (getTileType(getNextCoords(entity->coords, DOWN)) == VOID && !presentInAnimations(entity->id)) entity->id = -1;
+            }
+        }
+        if (getTileType(getNextCoords(player->coords, DOWN)) == VOID && !presentInAnimations(PLAYER_ID)) player->id = -1;
+        if (getTileType(getNextCoords(pack->coords, DOWN)) == VOID   && !presentInAnimations(PACK_ID))   pack->id = -1;
 
         // finished updating state
         world_state = next_world_state;
