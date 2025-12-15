@@ -299,7 +299,7 @@ const char start_level_path_buffer[256] = "w:/cereus/data/levels/";
 char level_path_buffer[256] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
-char levels_in_order[32][32] = { "pack-intro", "red-intro-v2", "blue-intro-1", "blue-intro-2", "balance-v2", "mirror-intro", "hax-1", "hax-2", "bureaucracy-v2", "basic" };
+char levels_in_order[32][32] = { "pack-intro", "red-intro-v2", "blue-intro-1", "blue-intro-2", "mirror-intro", "balance-1-v3", "hax-1", "hax-2", "green-intro", "bureaucracy-1", "bureaucracy-2-v3", "balance-2", "basic" };
 
 Camera camera = {0};
 float camera_yaw = 0.0f;
@@ -1385,6 +1385,7 @@ PushResult canPush(Int3 coords, Direction direction)
         if (!intCoordsWithinLevelBounds(current_coords)) return FAILED_PUSH;
         if (current_tile == NONE) return CAN_PUSH;
         if (isSource(current_tile)) return FAILED_PUSH;
+        if (current_tile == MIRROR) return FAILED_PUSH;
         if (current_tile == GRID) return FAILED_PUSH;
         if (current_tile == WALL) return FAILED_PUSH;
         if (current_tile == PERM_MIRROR) return FAILED_PUSH;
