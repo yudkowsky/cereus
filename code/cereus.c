@@ -3044,7 +3044,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID   || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID  ) && !presentInAnimations(PACK_ID))   pack->id = -1;
 
         // win block logic
-        if (getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK)
+        if (getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID))
         {
             recordStateForUndo();
             memset(animations, 0, sizeof(animations));
