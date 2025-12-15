@@ -23,6 +23,7 @@ typedef enum TileType
     PACK        = 8,
     PERM_MIRROR = 9,
     NOT_VOID    = 10,
+    WIN_BLOCK   = 11,
 
     SOURCE_RED     = 32,
     SOURCE_GREEN   = 33,
@@ -117,6 +118,36 @@ typedef struct WorldState
     Entity perm_mirrors[32];
     bool player_will_fall_next_turn; // used for not being able to walk one extra tile after walking out of red beam
     bool pack_detached;
+    char level_path[256];
+
+    // player's lingering hitbox when hit should still trigger that color
+    int32 player_trailing_hitbox_timer;
+    Int3 player_trailing_hitbox_coords;
+
+    // handle pack turning sequence
+    int32 pack_intermediate_states_timer;
+    Int3 pack_intermediate_coords;
+    Direction pack_orthogonal_push_direction;
+    bool do_diagonal_push_on_turn ;
+    bool do_orthogonal_push_on_turn;
+    bool do_player_and_pack_fall_after_turn;
+    bool player_hit_by_blue_in_turn;
+    Int3 entity_to_fall_after_blue_not_blue_turn_coords;
+    int32 entity_to_fall_after_blue_not_blue_turn_timer;
+
+    // patch on diagonal pass through due to pack hitbox being only on the diagonal in the middle of turn
+    int32 pack_hitbox_turning_from_timer;
+    Int3 pack_hitbox_turning_from_coords;
+    Direction pack_hitbox_turning_from_direction;
+    int32 pack_hitbox_turning_to_timer;
+    Int3 pack_hitbox_turning_to_coords;
+    Direction pack_hitbox_turning_to_direction;
+
+    // ghosts from tp
+    Int3 player_ghost_coords;
+    Int3 pack_ghost_coords;
+    Direction player_ghost_direction;
+    Direction pack_ghost_direction;
 }
 WorldState;
 
@@ -191,10 +222,6 @@ const int32 PUSH_MIRROR_ANIMATION_TIME = 16;
 const int32 FAILED_ANIMATION_TIME = 8;
 
 const int32 TRAILING_HITBOX_TIME = 4;
-/*
-const int32 TIME_BEFORE_DIAGONAL_TRAILING_HITBOX = 3;
-const int32 PACK_HITBOX_TURN_FROM_OR_TO_TIME = 8;
-*/
 const int32 FIRST_TRAILING_PACK_TURN_HITBOX_TIME = 2;
 const int32 TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN = 2;
 const int32 PACK_TIME_IN_INTERMEDIATE_STATE = 4;
@@ -238,6 +265,7 @@ const char* const crystal_path     = "data/sprites/crystal.png";
 const char* const pack_path    	   = "data/sprites/pack.png";
 const char* const perm_mirror_path = "data/sprites/perm-mirror.png";
 const char* const not_void_path    = "data/sprites/not-void.png";
+const char* const win_block_path   = "data/sprites/win-block.png";
 
 const char* const player_ghost_path = "data/sprites/player-ghost.png";
 const char* const pack_ghost_path   = "data/sprites/pack-ghost.png";
@@ -266,10 +294,12 @@ const char* const source_yellow_path  = "data/sprites/source-yellow.png";
 const char* const source_cyan_path    = "data/sprites/source-cyan.png";
 const char* const source_white_path   = "data/sprites/source-white.png";
 
-char* level_path = "w:/cereus/data/levels/testing.txt"; // absolute path required to modify original file. used by default if no command line input
-char* system_command_line = "testing";
+const char backup_level_path[256] = "w:/cereus/data/levels/red-intro-v2.txt";
+const char start_level_path_buffer[256] = "w:/cereus/data/levels/";
 char level_path_buffer[256] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
+
+char levels_in_order[32][32] = { "pack-intro", "red-intro-v2", "blue-intro-1", "blue-intro-2", "balance-v2", "mirror-intro", "hax-1", "hax-2", "bureaucracy-v2", "basic" };
 
 Camera camera = {0};
 float camera_yaw = 0.0f;
@@ -288,35 +318,6 @@ EditorState editor_state = {0};
 LaserBuffer laser_buffer[1024] = {0};
 
 TrailingHitbox trailing_hitboxes[64] = {0};
-
-// player's lingering hitbox when hit should still trigger that color
-int32 player_trailing_hitbox_timer;
-Int3 player_trailing_hitbox_coords;
-
-// handle pack turning sequence
-int32 pack_intermediate_states_timer = 0;
-Int3 pack_intermediate_coords = {0};
-Direction pack_orthogonal_push_direction = NO_DIRECTION;
-bool do_diagonal_push_on_turn = false;
-bool do_orthogonal_push_on_turn = false;
-bool do_player_and_pack_fall_after_turn = false;
-bool player_hit_by_blue_in_turn = false;
-Int3 entity_to_fall_after_blue_not_blue_turn_coords = {0};
-int32 entity_to_fall_after_blue_not_blue_turn_timer = 0;
-
-// patch on diagonal pass through due to pack hitbox being only on the diagonal in the middle of turn
-int32 pack_hitbox_turning_from_timer = 0;
-Int3 pack_hitbox_turning_from_coords = {0};
-Direction pack_hitbox_turning_from_direction = NO_DIRECTION;
-int32 pack_hitbox_turning_to_timer = 0;
-Int3 pack_hitbox_turning_to_coords = {0};
-Direction pack_hitbox_turning_to_direction = NO_DIRECTION;
-
-// ghosts from tp
-Int3 player_ghost_coords = {0};
-Int3 pack_ghost_coords = {0};
-Direction player_ghost_direction = NO_DIRECTION;
-Direction pack_ghost_direction = NO_DIRECTION;
 
 // CAMERA STUFF
 
@@ -787,6 +788,7 @@ char* getPath(TileType tile)
         case PACK:    	  return pack_path;
         case PERM_MIRROR: return perm_mirror_path;
         case NOT_VOID:    return not_void_path;
+        case WIN_BLOCK:   return win_block_path;
 
         case LASER_RED:     return laser_red_path;
         case LASER_GREEN:	return laser_green_path;
@@ -1847,10 +1849,10 @@ int32 updateLaserBuffer(void)
             TileType tile_hit = getTileType(current_coords);
             LaserColor laser_color = colorToLaserColor(source->color);
 
-            if (int3IsEqual(current_coords, player_trailing_hitbox_coords) && player_trailing_hitbox_timer > 0) goto player_hit_bypass;
+            if (int3IsEqual(current_coords, next_world_state.player_trailing_hitbox_coords) && next_world_state.player_trailing_hitbox_timer > 0) goto player_hit_bypass;
             FOR(trailing_hitbox_index, MAX_TRAILING_HITBOX_COUNT) if (int3IsEqual(current_coords, trailing_hitboxes[trailing_hitbox_index].coords) && trailing_hitboxes[trailing_hitbox_index].frames > 0) goto laser_instance_stop;
-            if ((pack_hitbox_turning_from_timer > 0) && int3IsEqual(current_coords, pack_hitbox_turning_from_coords) && (pack_hitbox_turning_from_direction == current_direction)) goto laser_instance_stop;
-            if ((pack_hitbox_turning_to_timer   > 0) && int3IsEqual(current_coords, pack_hitbox_turning_to_coords)   && (pack_hitbox_turning_to_direction   == current_direction)) goto laser_instance_stop;
+            if ((next_world_state.pack_hitbox_turning_from_timer > 0) && int3IsEqual(current_coords, next_world_state.pack_hitbox_turning_from_coords) && (next_world_state.pack_hitbox_turning_from_direction == current_direction)) goto laser_instance_stop;
+            if ((next_world_state.pack_hitbox_turning_to_timer   > 0) && int3IsEqual(current_coords, next_world_state.pack_hitbox_turning_to_coords)   && (next_world_state.pack_hitbox_turning_to_direction   == current_direction)) goto laser_instance_stop;
 
             if (!intCoordsWithinLevelBounds(current_coords)) break;
 
@@ -1954,6 +1956,7 @@ void recordStateForUndo()
     undo_buffer_position = (undo_buffer_position + 1) % UNDO_BUFFER_SIZE;
 }
 
+/*
 void resetStateForUndo()
 {
     pack_intermediate_states_timer = 0;
@@ -1978,6 +1981,7 @@ void resetStateForUndo()
     player_ghost_direction = NO_DIRECTION;
     pack_ghost_direction = NO_DIRECTION;
 }
+*/
 
 void resetVisuals(Entity* entity)
 {
@@ -2069,7 +2073,7 @@ void doFallingObjects(bool do_animation)
 		Entity* entity_group = object_group_to_fall[to_fall_index];
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            if (pack_hitbox_turning_to_timer > 0 && int3IsEqual(pack_hitbox_turning_to_coords, entity_group[entity_index].coords)) continue; // blocks blue-not-blue turn orthogonal case from falling immediately
+            if (next_world_state.pack_hitbox_turning_to_timer > 0 && int3IsEqual(next_world_state.pack_hitbox_turning_to_coords, entity_group[entity_index].coords)) continue; // blocks blue-not-blue turn orthogonal case from falling immediately
             doFallingEntity(&entity_group[entity_index], do_animation);
         }
     }
@@ -2177,8 +2181,8 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                  PLAYER_ID, animation_time);
 
-    player_trailing_hitbox_coords = player->coords;
-    player_trailing_hitbox_timer = trailing_hitbox_time; 
+    next_world_state.player_trailing_hitbox_coords = player->coords;
+    next_world_state.player_trailing_hitbox_timer = trailing_hitbox_time; 
 
     // move pack also
     if (next_world_state.pack_detached) 
@@ -2241,12 +2245,12 @@ bool calculateGhosts()
         }
         if (current_tile != NONE) break;
     }
-    player_ghost_coords = getNextCoords(current_coords, oppositeDirection(current_direction));
-    player_ghost_direction = current_direction;
+    next_world_state.player_ghost_coords = getNextCoords(current_coords, oppositeDirection(current_direction));
+    next_world_state.player_ghost_direction = current_direction;
     if (!next_world_state.pack_detached) 
     {
-        pack_ghost_coords = getNextCoords(player_ghost_coords, oppositeDirection(current_direction));
-        pack_ghost_direction = current_direction;
+        next_world_state.pack_ghost_coords = getNextCoords(next_world_state.player_ghost_coords, oppositeDirection(current_direction));
+        next_world_state.pack_ghost_direction = current_direction;
     }
     return true;
 }
@@ -2258,7 +2262,12 @@ void gameInitialiseState()
 	Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
 
-    loadFileToBuffer(level_path);
+    char level_path[256];
+    strcpy(level_path, next_world_state.level_path);
+    memset(&next_world_state, 0, sizeof(WorldState));
+    strcpy(next_world_state.level_path, level_path);
+
+    loadFileToBuffer(next_world_state.level_path);
 
     memset(next_world_state.boxes,    	  0, sizeof(next_world_state.boxes)); 
     memset(next_world_state.mirrors,  	  0, sizeof(next_world_state.mirrors));
@@ -2320,16 +2329,16 @@ void gameInitialiseState()
     world_state = next_world_state;
 }
 
-void gameInitialise(char* command_line) 
+void gameInitialise(char* level_name) 
 {	
-    system_command_line = command_line;
-    if (command_line != 0) 
+    if (level_name != 0) 
     {
-        strcat(level_path_buffer, command_line);
-        strcat(level_path_buffer, ".txt");
-        level_path = level_path_buffer;
+        snprintf(next_world_state.level_path, sizeof(next_world_state.level_path), "%s%s.txt", start_level_path_buffer, level_name);
     }
-
+    else
+    {
+        strcpy(next_world_state.level_path, backup_level_path);
+    }
     gameInitialiseState();
 }
 
@@ -2381,7 +2390,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     undo_buffer_position = next_undo_buffer_position;
                     memset(animations, 0, sizeof(animations));
                     resetStandardVisuals(); // set position_norm and rotation_quat to coords and direction respectively
-                    resetStateForUndo();
+                    //resetStateForUndo();
                 }
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
@@ -2389,6 +2398,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 // restart
                 recordStateForUndo();
+                memset(trailing_hitboxes, 0, sizeof(trailing_hitboxes));
                 memset(animations, 0, sizeof(animations));
                 Camera temp_camera = camera;
                 gameInitialiseState();
@@ -2413,37 +2423,37 @@ void gameFrame(double delta_time, TickInput tick_input)
                         // check if endpoint is valid before teleport (i.e, if pack can go there - if over air, teleport anyway, probably?)
 
                         bool allow_tp = false;
-                        TileType player_ghost_tile = getTileType(player_ghost_coords);
-                        TileType pack_ghost_tile = getTileType(pack_ghost_coords);
+                        TileType player_ghost_tile = getTileType(next_world_state.player_ghost_coords);
+                        TileType pack_ghost_tile = getTileType(next_world_state.pack_ghost_coords);
                         if ((player_ghost_tile == NONE || player_ghost_tile == PLAYER) && (pack_ghost_tile == NONE || pack_ghost_tile == PLAYER || pack_ghost_tile == PACK)) allow_tp = true;
 
                         if (allow_tp)
                         {
-                            if (!int3IsEqual(player_ghost_coords, player->coords))
+                            if (!int3IsEqual(next_world_state.player_ghost_coords, player->coords))
                             {
 								recordStateForUndo();
 
                                 setTileType(NONE, player->coords);
                                 setTileDirection(NORTH, player->coords);
                                 zeroAnimations(PLAYER_ID);
-                                player->coords = player_ghost_coords;
-                                player->position_norm = intCoordsToNorm(player_ghost_coords);
-                                player->direction = player_ghost_direction;
-                                player->rotation_quat = directionToQuaternion(player_ghost_direction, true);
-                                setTileType(PLAYER, player_ghost_coords);
-                                setTileDirection(player_ghost_direction, player_ghost_coords);
+                                player->coords = next_world_state.player_ghost_coords;
+                                player->position_norm = intCoordsToNorm(next_world_state.player_ghost_coords);
+                                player->direction = next_world_state.player_ghost_direction;
+                                player->rotation_quat = directionToQuaternion(next_world_state.player_ghost_direction, true);
+                                setTileType(PLAYER, next_world_state.player_ghost_coords);
+                                setTileDirection(next_world_state.player_ghost_direction, next_world_state.player_ghost_coords);
                                 if (!next_world_state.pack_detached)
                                 {
-                                    Int3 pack_coords = getNextCoords(player_ghost_coords, oppositeDirection(pack_ghost_direction));
+                                    Int3 pack_coords = getNextCoords(next_world_state.player_ghost_coords, oppositeDirection(next_world_state.pack_ghost_direction));
                                     setTileType(NONE, pack->coords);
                                     setTileDirection(NORTH, pack->coords);
                                     zeroAnimations(PACK_ID);
                                     pack->coords = pack_coords; 
                                     pack->position_norm = intCoordsToNorm(pack_coords);
-                                    pack->direction = pack_ghost_direction;
-                                    pack->rotation_quat = directionToQuaternion(pack_ghost_direction, true);
+                                    pack->direction = next_world_state.pack_ghost_direction;
+                                    pack->rotation_quat = directionToQuaternion(next_world_state.pack_ghost_direction, true);
                                     setTileType(PACK, pack_coords);
-                                    setTileDirection(pack_ghost_direction, pack_coords);
+                                    setTileDirection(next_world_state.pack_ghost_direction, pack_coords);
                                 }
                             }
                             // tp sends player ontop of themselves - should count as a successful tp, but no point changing state, and don't samve to undo buffer.
@@ -2474,6 +2484,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             case WALL:
                             case PERM_MIRROR:
                             case NOT_VOID:
+                            case WIN_BLOCK:
                             {
                                 do_failed_animations = true;
                                 break;
@@ -2684,12 +2695,12 @@ void gameFrame(double delta_time, TickInput tick_input)
 									createTrailingHitbox(pack->coords, FIRST_TRAILING_PACK_TURN_HITBOX_TIME);
 
                                     Direction to_dir = getMiddleDirection(diagonal_push_direction, orthogonal_push_direction);
-									pack_hitbox_turning_from_timer = TURN_ANIMATION_TIME;
-                                    pack_hitbox_turning_from_coords = pack->coords;
-                                    pack_hitbox_turning_from_direction = oppositeDirection(to_dir);
-                                    pack_hitbox_turning_to_timer = TURN_ANIMATION_TIME + TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN;
-                                    pack_hitbox_turning_to_coords = orthogonal_coords;
-                                    pack_hitbox_turning_to_direction = to_dir;
+									next_world_state.pack_hitbox_turning_from_timer = TURN_ANIMATION_TIME;
+                                    next_world_state.pack_hitbox_turning_from_coords = pack->coords;
+                                    next_world_state.pack_hitbox_turning_from_direction = oppositeDirection(to_dir);
+                                    next_world_state.pack_hitbox_turning_to_timer = TURN_ANIMATION_TIME + TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN;
+                                    next_world_state.pack_hitbox_turning_to_coords = orthogonal_coords;
+                                    next_world_state.pack_hitbox_turning_to_direction = to_dir;
 
                                     if (isPushable(getTileType(getNextCoords(player->coords, UP)))) doHeadRotation(clockwise);
 
@@ -2707,12 +2718,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                                 oppositeDirection(input_direction), clockwise, 
                                                                 &pack->position_norm, &pack->rotation_quat, PACK_ID);
 
-                                    if (push_diagonal)   do_diagonal_push_on_turn = true;
-                                    if (push_orthogonal) do_orthogonal_push_on_turn = true;
+                                    if (push_diagonal)   next_world_state.do_diagonal_push_on_turn = true;
+                                    if (push_orthogonal) next_world_state.do_orthogonal_push_on_turn = true;
 
-                                    pack_intermediate_states_timer = TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN + PACK_TIME_IN_INTERMEDIATE_STATE + 1; // + 1 because we stop when timer hits 1 (and then reset to 0)
-                                    pack_intermediate_coords = diagonal_coords;
-                                    pack_orthogonal_push_direction = orthogonal_push_direction;
+                                    next_world_state.pack_intermediate_states_timer = TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN + PACK_TIME_IN_INTERMEDIATE_STATE + 1; // + 1 because we stop when timer hits 1 (and then reset to 0)
+                                    next_world_state.pack_intermediate_coords = diagonal_coords;
+                                    next_world_state.pack_orthogonal_push_direction = orthogonal_push_direction;
 
                                     recordStateForUndo();
                                 }
@@ -2849,49 +2860,49 @@ void gameFrame(double delta_time, TickInput tick_input)
 			else if (time_until_input == 0 && tick_input.l_press)
             {
 				editor_state.picked_tile++;
-                if 		(editor_state.picked_tile == NOT_VOID + 1) editor_state.picked_tile = SOURCE_RED;
+                if 		(editor_state.picked_tile == WIN_BLOCK + 1) editor_state.picked_tile = SOURCE_RED;
                 else if (editor_state.picked_tile == SOURCE_WHITE + 1) editor_state.picked_tile = VOID;
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
         }
 
         // handle pack turning sequence TODO(spike): name all of these numbers better
-        if (pack_intermediate_states_timer > 0)
+        if (next_world_state.pack_intermediate_states_timer > 0)
         {
-            if (pack_intermediate_states_timer == 7)
+            if (next_world_state.pack_intermediate_states_timer == 7)
             {
-				if (do_diagonal_push_on_turn) pushAll(pack_intermediate_coords, oppositeDirection(player->direction), PUSH_FROM_TURN_ANIMATION_TIME, true, true);
+				if (next_world_state.do_diagonal_push_on_turn) pushAll(next_world_state.pack_intermediate_coords, oppositeDirection(player->direction), PUSH_FROM_TURN_ANIMATION_TIME, true, true);
             }
-            else if (pack_intermediate_states_timer == 7 - TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN)
+            else if (next_world_state.pack_intermediate_states_timer == 7 - TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN)
             {
                 setTileType(NONE, pack->coords);
                 setTileDirection(NORTH, pack->coords);
-                pack->coords = pack_intermediate_coords;
+                pack->coords = next_world_state.pack_intermediate_coords;
                 pack->direction = oppositeDirection(player->direction);
                 setTileType(PACK, pack->coords);
                 setTileDirection(pack->direction, pack->coords);
             }
-            else if (pack_intermediate_states_timer == 4)
+            else if (next_world_state.pack_intermediate_states_timer == 4)
             {
-                if (do_orthogonal_push_on_turn) pushAll(pack_hitbox_turning_to_coords, pack_orthogonal_push_direction, PUSH_FROM_TURN_ANIMATION_TIME, true, true);
+                if (next_world_state.do_orthogonal_push_on_turn) pushAll(next_world_state.pack_hitbox_turning_to_coords, next_world_state.pack_orthogonal_push_direction, PUSH_FROM_TURN_ANIMATION_TIME, true, true);
             }
-            else if (pack_intermediate_states_timer == 1)
+            else if (next_world_state.pack_intermediate_states_timer == 1)
             { 
                 setTileType(NONE, pack->coords);
                 setTileDirection(NORTH, pack->coords);
-				pack->coords = pack_hitbox_turning_to_coords;
+				pack->coords = next_world_state.pack_hitbox_turning_to_coords;
                 setTileType(PACK, pack->coords);
                 setTileDirection(pack->direction, pack->coords);
 
-                if (do_player_and_pack_fall_after_turn)
+                if (next_world_state.do_player_and_pack_fall_after_turn)
                 {
                     doFallingEntity(player, true);
                     doFallingEntity(pack, true);
-                    do_player_and_pack_fall_after_turn = false;
+                    next_world_state.do_player_and_pack_fall_after_turn = false;
                 }
-                player_hit_by_blue_in_turn = false;
+                next_world_state.player_hit_by_blue_in_turn = false;
             }
-            pack_intermediate_states_timer--;
+            next_world_state.pack_intermediate_states_timer--;
         }
 
         updateLaserBuffer();
@@ -2899,7 +2910,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // falling logic
 		if (!player->hit_by_blue) doFallingObjects(true); // built in guard here against pushable at location of pack_hitbox_turning_to_timer;
 
-        if (pack_intermediate_states_timer == 0)
+        if (next_world_state.pack_intermediate_states_timer == 0)
         {
             if (!player->hit_by_red)
             {
@@ -2944,33 +2955,33 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (getTileType(getNextCoords(player->coords, DOWN)) == NONE && !player->hit_by_red)
             {
                 // in middle of turn, which means was on ground or red, and now no longer on ground AND not red, so must have stopped being red in the middle of the turn.
-                do_player_and_pack_fall_after_turn = true;
+                next_world_state.do_player_and_pack_fall_after_turn = true;
             }
 
-            if (isPushable(getTileType(pack_hitbox_turning_to_coords)))
+            if (isPushable(getTileType(next_world_state.pack_hitbox_turning_to_coords)))
             {
-				if (player->hit_by_blue) player_hit_by_blue_in_turn = true;
-                if (!player->hit_by_blue && player_hit_by_blue_in_turn && pack_intermediate_states_timer > 0)
+				if (player->hit_by_blue) next_world_state.player_hit_by_blue_in_turn = true;
+                if (!player->hit_by_blue && next_world_state.player_hit_by_blue_in_turn && next_world_state.pack_intermediate_states_timer > 0)
                 {
-                    entity_to_fall_after_blue_not_blue_turn_timer = pack_intermediate_states_timer + 3; // this number is magic (sorry); it is the frame count that makes the entity fall as soon as possible, i.e., at the same time as the player (if magenta-not-magenta)
-                    entity_to_fall_after_blue_not_blue_turn_coords = getNextCoords(pack_hitbox_turning_to_coords, pack_orthogonal_push_direction);
-                    player_hit_by_blue_in_turn = false;
+                    next_world_state.entity_to_fall_after_blue_not_blue_turn_timer = next_world_state.pack_intermediate_states_timer + 3; // this number is magic (sorry); it is the frame count that makes the entity fall as soon as possible, i.e., at the same time as the player (if magenta-not-magenta)
+                    next_world_state.entity_to_fall_after_blue_not_blue_turn_coords = getNextCoords(next_world_state.pack_hitbox_turning_to_coords, next_world_state.pack_orthogonal_push_direction);
+                    next_world_state.player_hit_by_blue_in_turn = false;
                 }
             }
         }
 
-        if (entity_to_fall_after_blue_not_blue_turn_timer > 0)
+        if (next_world_state.entity_to_fall_after_blue_not_blue_turn_timer > 0)
         {
-            if (entity_to_fall_after_blue_not_blue_turn_timer == 1) 
+            if (next_world_state.entity_to_fall_after_blue_not_blue_turn_timer == 1) 
             {
-                if (isPushable(getTileType(entity_to_fall_after_blue_not_blue_turn_coords))) doFallingEntity(getEntityPointer(entity_to_fall_after_blue_not_blue_turn_coords), true);
+                if (isPushable(getTileType(next_world_state.entity_to_fall_after_blue_not_blue_turn_coords))) doFallingEntity(getEntityPointer(next_world_state.entity_to_fall_after_blue_not_blue_turn_coords), true);
             }
-            entity_to_fall_after_blue_not_blue_turn_timer--;
+            next_world_state.entity_to_fall_after_blue_not_blue_turn_timer--;
         }
 
         // detach or reattach pack
         TileType tile_behind_player = getTileType(getNextCoords(player->coords, oppositeDirection(player->direction)));
-        if (!next_world_state.pack_detached && pack_intermediate_states_timer == 0 && tile_behind_player != PACK) next_world_state.pack_detached = true;
+        if (!next_world_state.pack_detached && next_world_state.pack_intermediate_states_timer == 0 && tile_behind_player != PACK) next_world_state.pack_detached = true;
         if (next_world_state.pack_detached && tile_behind_player == PACK) next_world_state.pack_detached = false;
 
         // do animations
@@ -3000,8 +3011,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 		decrementFallingTimers(pack);
 
 		// handle turning hitboxes
-        if (pack_hitbox_turning_from_timer > 0) pack_hitbox_turning_from_timer--;
-        if (pack_hitbox_turning_to_timer   > 0) pack_hitbox_turning_to_timer--;
+        if (next_world_state.pack_hitbox_turning_from_timer > 0) next_world_state.pack_hitbox_turning_from_timer--;
+        if (next_world_state.pack_hitbox_turning_to_timer   > 0) next_world_state.pack_hitbox_turning_to_timer--;
 
         // don't allow inputs if player is falling (this is for meta commands - some redundancy here: pauses already happen if player not allowed to move yet otherwise)
         if (player->falling_time > 0) time_until_input += 1;
@@ -3015,12 +3026,9 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (!next_world_state.pack_detached) do_pack_ghost = true;
         }
 
-        // final redo of laser buffer, after all logic is complete, for drawing
-		int32 laser_tile_count = updateLaserBuffer();
-
         // decrement trailing hitboxes 
         FOR(i, MAX_TRAILING_HITBOX_COUNT) if (trailing_hitboxes[i].frames > 0) trailing_hitboxes[i].frames--;
-        if (player_trailing_hitbox_timer > 0) player_trailing_hitbox_timer--;
+        if (next_world_state.player_trailing_hitbox_timer > 0) next_world_state.player_trailing_hitbox_timer--;
 
 		// delete if above void
         Entity* entity_group[3] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals};
@@ -3034,6 +3042,37 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
         if ((getTileType(getNextCoords(player->coords, DOWN)) == VOID || getTileType(getNextCoords(player->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PLAYER_ID)) player->id = -1;
         if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID   || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID  ) && !presentInAnimations(PACK_ID))   pack->id = -1;
+
+        // win block logic
+        if (getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK)
+        {
+            recordStateForUndo();
+            memset(animations, 0, sizeof(animations));
+            memset(trailing_hitboxes, 0, sizeof(trailing_hitboxes));
+            Camera temp_camera = camera;
+
+			char current_level_path[256];
+			strncpy(current_level_path, next_world_state.level_path, sizeof(current_level_path));
+            char* next_level = 0;
+            FOR(level_index, 32)
+            {
+				strcpy(level_path_buffer, start_level_path_buffer);
+                strcat(level_path_buffer, levels_in_order[level_index]);
+                strcat(level_path_buffer, ".txt");
+
+                if (strcmp(level_path_buffer, current_level_path) == 0)
+                {
+                    next_level = levels_in_order[level_index + 1];
+                    break;
+                }
+            }
+            if (next_level) gameInitialise(next_level);
+            camera = temp_camera;
+            time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+        }
+
+        // final redo of laser buffer, after all logic is complete, for drawing
+		int32 laser_tile_count = updateLaserBuffer();
 
         // finished updating state
         world_state = next_world_state;
@@ -3119,9 +3158,9 @@ void gameFrame(double delta_time, TickInput tick_input)
 
             if (do_player_ghost) 
             {
-                drawAsset(player_ghost_path, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, true));
+                drawAsset(player_ghost_path, CUBE_3D, intCoordsToNorm(world_state.player_ghost_coords), PLAYER_SCALE, directionToQuaternion(world_state.player_ghost_direction, true));
             }
-            if (do_pack_ghost)   drawAsset(pack_ghost_path,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, true));
+            if (do_pack_ghost)   drawAsset(pack_ghost_path,   CUBE_3D, intCoordsToNorm(world_state.pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(world_state.pack_ghost_direction, true));
         }
 		if (world_state.pack.id != -1) drawAsset(pack_path, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat);
 
@@ -3134,7 +3173,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // write to file
-        if (editor_state.editor_mode && tick_input.i_press) writeBufferToFile(level_path);
+        if (editor_state.editor_mode && tick_input.i_press) writeBufferToFile(world_state.level_path);
 
 		if (time_until_input > 0) time_until_input--;
 
