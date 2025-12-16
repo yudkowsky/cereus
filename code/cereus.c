@@ -299,8 +299,11 @@ const char start_level_path_buffer[256] = "w:/cereus/data/levels/";
 char level_path_buffer[256] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
-char levels_in_order[32][32] = { "pack-intro", "red-intro-v2", "blue-intro-1", "blue-intro-2", "mirror-intro", "balance-1-v3", "hax-1", "hax-2", "green-intro", "bureaucracy-1", "bureaucracy-2-v3", "balance-2", "basic" };
-
+char levels_in_order[32][32] = { "pack-intro", "red-intro-1", "red-intro-2", "blue-intro-1", "blue-intro-2", 
+    							 "mirror-intro", "rafters",
+                                 "becoming-blue", "hax-0", "hax-1", "hax-2", 
+                                 "green-intro", "mirror-bypass", "bureaucracy", 
+                                 "balance", "basic" };
 Camera camera = {0};
 float camera_yaw = 0.0f;
 float camera_pitch = 0.0f;
