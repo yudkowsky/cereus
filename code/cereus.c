@@ -2552,8 +2552,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                             }
                             else
                             {
-                                // leap of faith logic - TODO(spike): probably outdated
+                                // leap of faith logic
                                 WorldState world_state_savestate = next_world_state;
+                                /*
+                                TrailingHitbox trailing_hitboxes_savestate[64] = {0}; 
+                                memcpy(trailing_hitboxes_savestate, trailing_hitboxes, sizeof(trailing_hitboxes));
+                                */
 
                                 if (do_push) pushAll(next_player_coords, input_direction, 0, false, false);
 
@@ -2572,7 +2576,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 setTileType(PLAYER, player->coords);	
 
                                 // TODO(spike): this code probably needs some testing
-                                if (next_world_state.pack_detached)
+                                if (!next_world_state.pack_detached)
                                 {
                                     setTileType(NONE, pack->coords);
                                     pack->coords = getNextCoords(next_player_coords, oppositeDirection(input_direction));
@@ -2589,8 +2593,13 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
                                     doStandardMovement(input_direction, next_player_coords, animation_time);
                                 }
-                                else doFailedWalkAnimations();
+                                else 
+                                {
+                                    doFailedWalkAnimations();
+                                    updateLaserBuffer();
+                                }
                                 time_until_input = PUSH_ANIMATION_TIME;
+
                             }
                         }
 						else if (do_failed_animations) 
