@@ -213,8 +213,7 @@ const Vec3 DIAGONAL_LASER_SCALE   = { 0.125f, 0.125f, 1.415f };
 const float RAYCAST_SEEK_LENGTH = 20.0f;
 
 const int32 EDITOR_INPUT_TIME_UNTIL_ALLOW = 9;
-const int32 MOVE_ANIMATION_TIME = 9; // TODO(spike): move and push animation time are always the same
-const int32 PUSH_ANIMATION_TIME = 9;
+const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9; // TODO(spike): move and push animation time are always the same
 const int32 TURN_ANIMATION_TIME = 9;
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
 const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6; // also somewhat hard coded, based on some function of the turn animation time and the sequencing based on it
@@ -267,6 +266,9 @@ const char* const perm_mirror_path = "data/sprites/perm-mirror.png";
 const char* const not_void_path    = "data/sprites/not-void.png";
 const char* const win_block_path   = "data/sprites/win-block.png";
 
+// test for 2d sprite loading
+const char* const box_path_2d      = "data/sprites/2d-box.png";
+
 const char* const player_ghost_path = "data/sprites/player-ghost.png";
 const char* const pack_ghost_path   = "data/sprites/pack-ghost.png";
 
@@ -301,7 +303,9 @@ Int3 level_dim = {0};
 
 char levels_in_order[32][32] = { "pack-intro", "red-intro-1", "red-intro-2", "blue-intro-1", "blue-intro-2", 
     							 "mirror-intro", "rafters",
-                                 "becoming-blue", "hax-0", "hax-1", "hax-2", 
+                                 "becoming-blue", 
+                                 "hax-0", "hax-1", "hax-2", 
+                                 "research", "broken-bridges",
                                  "green-intro", "mirror-bypass", "bureaucracy", 
                                  "balance", "basic" };
 Camera camera = {0};
@@ -835,6 +839,9 @@ void drawAsset(char* path, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotatio
     {
         case SPRITE_2D:
         {
+            assets_to_load[asset_location].coords[assets_to_load[asset_location].instance_count] = coords;
+            assets_to_load[asset_location].scale[assets_to_load[asset_location].instance_count]  = scale;
+            assets_to_load[asset_location].instance_count++;
             return;
         }
         case CUBE_3D:
@@ -2023,7 +2030,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
     if (entity->id == -1) return false;
 	Int3 next_coords = getNextCoords(entity->coords, DOWN);
     if (!(isPushable(getTileType(next_coords)) && getEntityPointer(next_coords)->id == -1) && getTileType(next_coords) != NONE) return true; // TODO(spike): add entity.id == -1 as NONE in getTileType
-    if (trailingHitboxAtCoords(next_coords)) return true;
+    if (trailingHitboxAtCoords(next_coords) && entity->id != PLAYER_ID) return true;
 
     int32 stack_size = getPushableStackSize(entity->coords);
     Int3 current_start_coords = entity->coords;
@@ -2176,7 +2183,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
     doHeadMovement(input_direction, true, animation_time);
 
     int32 trailing_hitbox_time = (animation_time == PUSH_MIRROR_ANIMATION_TIME) ? TRAILING_HITBOX_TIME + 3 : TRAILING_HITBOX_TIME; // TODO(spike): temp fix for problem of moving for longer period of time when pushing mirror
-    int32 previously_moving_sideways_time = PUSH_ANIMATION_TIME; // TODO(spike): also a temp fix - am lying about amount of time taken to move here, wait and see if this is an issue.
+    int32 previously_moving_sideways_time = MOVE_OR_PUSH_ANIMATION_TIME; // TODO(spike): also a temp fix - am lying about amount of time taken to move here, wait and see if this is an issue.
     player->previously_moving_sideways = previously_moving_sideways_time;
 
     createInterpolationAnimation(intCoordsToNorm(player->coords), 
@@ -2503,7 +2510,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 {
                                     do_push = true;
                                     move_player = true;
-                                    animation_time = PUSH_ANIMATION_TIME;
+                                    animation_time = MOVE_OR_PUSH_ANIMATION_TIME;
                                 }
                                 else if (push_check == FAILED_PUSH) do_failed_animations = true;
                                 break;
@@ -2535,7 +2542,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 else
                                 {
                                     move_player = true;
-                                    animation_time = MOVE_ANIMATION_TIME;
+                                    animation_time = MOVE_OR_PUSH_ANIMATION_TIME;
                                 }
                             }
                         }
@@ -2554,15 +2561,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                             {
                                 // leap of faith logic
                                 WorldState world_state_savestate = next_world_state;
-                                /*
-                                TrailingHitbox trailing_hitboxes_savestate[64] = {0}; 
-                                memcpy(trailing_hitboxes_savestate, trailing_hitboxes, sizeof(trailing_hitboxes));
-                                */
 
                                 if (do_push) pushAll(next_player_coords, input_direction, 0, false, false);
 
                                 bool animations_on = false;
-                                // TODO(spike): also needs testing
+                                // TODO(spike): needs some testing
                                 if (!player->hit_by_blue)
                                 {
                                     doFallingObjects(animations_on);
@@ -2575,7 +2578,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 player->coords = next_player_coords;
                                 setTileType(PLAYER, player->coords);	
 
-                                // TODO(spike): this code probably needs some testing
                                 if (!next_world_state.pack_detached)
                                 {
                                     setTileType(NONE, pack->coords);
@@ -2598,7 +2600,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     doFailedWalkAnimations();
                                     updateLaserBuffer();
                                 }
-                                time_until_input = PUSH_ANIMATION_TIME;
+                                time_until_input = MOVE_OR_PUSH_ANIMATION_TIME;
 
                             }
                         }
@@ -3184,6 +3186,11 @@ void gameFrame(double delta_time, TickInput tick_input)
             char* path = getPath(getTileType(world_state.sources[source_index].coords));
             drawAsset(path, CUBE_3D, world_state.sources[source_index].position_norm, DEFAULT_SCALE, world_state.sources[source_index].rotation_quat);
         }
+
+		// 2D TEST DRAW BEHIND CUBES
+        Vec3 test_scale = { 500.0f, 500.0f, 1.0f };
+        Vec3 test_pos = { 400.0f, 300.0f, 0.0f };
+        drawAsset(box_path_2d, SPRITE_2D, test_pos, test_scale, IDENTITY_QUATERNION);
 
         // write to file
         if (editor_state.editor_mode && tick_input.i_press) writeBufferToFile(world_state.level_path);

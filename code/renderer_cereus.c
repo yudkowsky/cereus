@@ -20,9 +20,17 @@ typedef struct Vertex
 }
 Vertex;
 
+typedef struct Sprite
+{
+    uint32 asset_index;
+    Vec3 coords;
+	Vec3 size;
+}
+Sprite;
+
 typedef struct Cube 
 {
-	uint32 asset_index ; // index into asset_cache
+	uint32 asset_index; // index into asset_cache
     Vec3 coords;
     Vec3 scale;
     Vec4 rotation;
@@ -69,13 +77,14 @@ typedef struct
     VkFence* in_flight_fences; 
     VkFence* images_in_flight; // for each swapchain image, when GPU finishes that submission, the fence signals; we store the fence to check if image is still in flight.
 
-    VkBuffer vertex_buffer_handle;
-    VkDeviceMemory vertex_memory;
-    void* mapped_vertex_pointer;
+    //VkBuffer vertex_buffer_handle;
+    //VkDeviceMemory vertex_memory;
+    //void* mapped_vertex_pointer;
     VkShaderModule vertex_shader_module_handle;
     VkShaderModule fragment_shader_module_handle;
     VkPipelineLayout graphics_pipeline_layout; 
-    VkPipeline graphics_pipeline_handle;
+    VkPipeline cube_pipeline_handle;
+    VkPipeline sprite_pipeline_handle;
 
     VkSampler pixel_art_sampler;
     CachedAsset asset_cache[256];
@@ -89,6 +98,12 @@ typedef struct
     VkImage depth_image;
     VkDeviceMemory depth_image_memory;
     VkImageView depth_image_view;
+
+	VkBuffer sprite_vertex_buffer;
+    VkDeviceMemory sprite_vertex_memory;
+    VkBuffer sprite_index_buffer;
+    VkDeviceMemory sprite_index_memory;
+    uint32 sprite_index_count;
 
     VkBuffer cube_vertex_buffer;
     VkDeviceMemory cube_vertex_memory;
@@ -107,6 +122,14 @@ RendererState renderer_state;
 #define V0 (0.0f)
 #define V1 (0.5f)
 #define V2 (1.0f)
+
+static const Vertex SPRITE_VERTICES[] =
+{
+    { -0.5f, -0.5f, 0.0f,  0.0f, 1.0f,  0,0,1 },
+    {  0.5f, -0.5f, 0.0f,  1.0f, 1.0f,  0,0,1 },
+    {  0.5f,  0.5f, 0.0f,  1.0f, 0.0f,  0,0,1 },
+    { -0.5f,  0.5f, 0.0f,  0.0f, 0.0f,  0,0,1 },
+};
 
 static const Vertex CUBE_VERTICES[] = 
 {
@@ -151,8 +174,17 @@ static const uint32 CUBE_INDICES[36] =
    20,21,22, 20,22,23
 };
 
+static const uint32 SPRITE_INDICES[6] =
+{
+    0, 1, 2,
+    0, 2, 3
+};
+
 Vertex frame_vertex_stash[65536];
 uint32 frame_vertex_count = 0;
+
+Sprite sprite_instances[1024];
+uint32 sprite_instance_count = 0;
 
 Cube cube_instances[1024];
 uint32 cube_instance_count = 0;
@@ -285,6 +317,25 @@ void mat4BuildViewFromQuat(float output_matrix[16], Vec3 coords, Vec4 quaternion
     output_matrix[12]= -(right_x*coords.x + right_y*coords.y + right_z*coords.z);
     output_matrix[13]= -(up_x*coords.x + up_y*coords.y + up_z*coords.z);
     output_matrix[14]= -(forward_x*coords.x + forward_y*coords.y + forward_z*coords.z);
+}
+
+void mat4BuildOrtho(float output_matrix[16], float left, float right, float bottom, float top, float z_near, float z_far)
+{
+    for (int i = 0; i < 16; i++) output_matrix[i] = 0.0f;
+
+    const float rl = right - left;
+    const float tb = top - bottom;
+    const float fn = z_far - z_near;
+
+    output_matrix[0]  =  2.0f / rl;
+    output_matrix[5]  =  2.0f / tb;
+    output_matrix[10] =  1.0f / fn;
+
+    output_matrix[12] = -(right + left) / rl;
+    output_matrix[13] = -(top + bottom) / tb;
+    output_matrix[14] = -z_near         / fn;
+
+    output_matrix[15] = 1.0f;
 }
 
 // right handed, zero to one depth
@@ -551,6 +602,102 @@ int32 getOrLoadAsset(char* path)
         if (strcmp(renderer_state.asset_cache[asset_cache_index].path, path) == 0) return (int32)asset_cache_index;
     }
     return loadAsset(path);
+}
+
+void uploadBufferToLocalDevice(void* source, VkDeviceSize size, VkBufferUsageFlags final_usage, VkBuffer* out_buffer, VkDeviceMemory* out_memory)
+{
+    // create staging buffer
+    VkBuffer staging_buffer = VK_NULL_HANDLE;
+    VkDeviceMemory staging_memory = VK_NULL_HANDLE;
+
+    VkBufferCreateInfo buffer_info = {0};
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size = size;
+    buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    vkCreateBuffer(renderer_state.logical_device_handle, &buffer_info, 0, &staging_buffer);
+
+    VkMemoryRequirements memory_requirements = {0};
+    vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, staging_buffer, &memory_requirements);
+
+    VkMemoryAllocateInfo alloc_info = {0};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = memory_requirements.size;
+    alloc_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    vkAllocateMemory(renderer_state.logical_device_handle, &alloc_info, 0, &staging_memory);
+    vkBindBufferMemory(renderer_state.logical_device_handle, staging_buffer, staging_memory, 0);
+
+    // copy CPU data into staging memory
+    void* mapped = 0;
+    vkMapMemory(renderer_state.logical_device_handle, staging_memory, 0, size, 0, &mapped);
+    memcpy(mapped, source, (size_t)size);
+    vkUnmapMemory(renderer_state.logical_device_handle, staging_memory);
+
+    // create device-local buffer
+    VkBuffer device_buffer = VK_NULL_HANDLE;
+    VkDeviceMemory device_memory = VK_NULL_HANDLE;
+
+    buffer_info = (VkBufferCreateInfo){0};
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size = size;
+    buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | final_usage;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    vkCreateBuffer(renderer_state.logical_device_handle, &buffer_info, 0, &device_buffer);
+
+    vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, device_buffer, &memory_requirements);
+
+    alloc_info = (VkMemoryAllocateInfo){0};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = memory_requirements.size;
+    alloc_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    vkAllocateMemory(renderer_state.logical_device_handle, &alloc_info, 0, &device_memory);
+    vkBindBufferMemory(renderer_state.logical_device_handle, device_buffer, device_memory, 0);
+
+    // record + submit copy command
+    VkCommandBufferAllocateInfo cb_alloc = {0};
+    cb_alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cb_alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cb_alloc.commandPool = renderer_state.graphics_command_pool_handle;
+    cb_alloc.commandBufferCount = 1;
+
+    VkCommandBuffer command_buffer = VK_NULL_HANDLE;
+    vkAllocateCommandBuffers(renderer_state.logical_device_handle, &cb_alloc, &command_buffer);
+
+    VkCommandBufferBeginInfo cb_begin = {0};
+    cb_begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    cb_begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(command_buffer, &cb_begin);
+
+    VkBufferCopy copy_region = {0};
+    copy_region.srcOffset = 0;
+    copy_region.dstOffset = 0;
+    copy_region.size = size;
+
+    vkCmdCopyBuffer(command_buffer, staging_buffer, device_buffer, 1, &copy_region);
+
+    vkEndCommandBuffer(command_buffer);
+
+    VkSubmitInfo submit = {0};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &command_buffer;
+
+    vkQueueSubmit(renderer_state.graphics_queue_handle, 1, &submit, VK_NULL_HANDLE);
+    vkQueueWaitIdle(renderer_state.graphics_queue_handle);
+
+    vkFreeCommandBuffers(renderer_state.logical_device_handle, renderer_state.graphics_command_pool_handle, 1, &command_buffer);
+
+    // cleanup and return
+    vkDestroyBuffer(renderer_state.logical_device_handle, staging_buffer, 0);
+    vkFreeMemory(renderer_state.logical_device_handle, staging_memory, 0);
+
+    *out_buffer = device_buffer;
+    *out_memory = device_memory;
 }
 
 void rendererInitialise(RendererPlatformHandles platform_handles)
@@ -953,6 +1100,11 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     render_pass_creation_info.dependencyCount = 1;
     render_pass_creation_info.pDependencies = &color_output_subpass_dependency; // same story here - just a pointer to our one dependency, rather than an array.
 	
+
+
+
+
+
     vkCreateRenderPass(renderer_state.logical_device_handle, &render_pass_creation_info, 0, &renderer_state.render_pass_handle);
 
 	// a framebuffer is the binding of the render pass' attachment slots to specific image views, with a fixed size (width/height) and layer count. 
@@ -1068,213 +1220,17 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     vkGetDeviceQueue(renderer_state.logical_device_handle, renderer_state.graphics_family_index, 0, &renderer_state.graphics_queue_handle);
     vkGetDeviceQueue(renderer_state.logical_device_handle, renderer_state.present_family_index, 0, &renderer_state.present_queue_handle);
 
-	// create device-local vertex/index buffers for cube
+
+	// STAGE AND UPLOAD VERTEX / INDEX BUFFER FOR SPRITES AND CUBES
+    renderer_state.sprite_index_count = 6;
+	uploadBufferToLocalDevice(SPRITE_VERTICES, sizeof(SPRITE_VERTICES), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &renderer_state.sprite_vertex_buffer, &renderer_state.sprite_vertex_memory);
+	uploadBufferToLocalDevice(SPRITE_INDICES,  sizeof(SPRITE_INDICES),  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,  &renderer_state.sprite_index_buffer,  &renderer_state.sprite_index_memory);
+
 	renderer_state.cube_index_count = 36;
-
-    VkDeviceSize vertices_size = (VkDeviceSize)sizeof(CUBE_VERTICES);
-    VkDeviceSize indices_size  = (VkDeviceSize)sizeof(CUBE_INDICES);
-
-	// stage and upload vertices
-    VkBuffer vertex_staging_buffer;
-    VkDeviceMemory vertex_staging_memory;
-
-    // scope for variable name collision (ig TODO(spike): rename variables involved)
-    VkBufferCreateInfo buffer_creation_info = {0};
-    buffer_creation_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_creation_info.size = vertices_size;
-    buffer_creation_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    buffer_creation_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &vertex_staging_buffer);
-
-    VkMemoryRequirements memory_requirements;
-    vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, vertex_staging_buffer, &memory_requirements);
-
-    VkMemoryAllocateInfo memory_allocation_info = {0};
-    memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    memory_allocation_info.allocationSize = memory_requirements.size;
-    memory_allocation_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &vertex_staging_memory);
-    vkBindBufferMemory(renderer_state.logical_device_handle, vertex_staging_buffer, vertex_staging_memory, 0);
-
-    void* mapped = 0;
-    vkMapMemory(renderer_state.logical_device_handle, vertex_staging_memory, 0, vertices_size, 0, &mapped);
-    memcpy(mapped, CUBE_VERTICES, (size_t)vertices_size);
-    vkUnmapMemory(renderer_state.logical_device_handle, vertex_staging_memory);
-
-    // create gpu-local vertex buffer
-    buffer_creation_info = (VkBufferCreateInfo){0};
-    buffer_creation_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_creation_info.size = vertices_size;
-    buffer_creation_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    buffer_creation_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &renderer_state.cube_vertex_buffer);
-
-    vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, renderer_state.cube_vertex_buffer, &memory_requirements);
-
-    memory_allocation_info = (VkMemoryAllocateInfo){0};
-    memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    memory_allocation_info.allocationSize = memory_requirements.size;
-    memory_allocation_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &renderer_state.cube_vertex_memory);
-    vkBindBufferMemory(renderer_state.logical_device_handle, renderer_state.cube_vertex_buffer, renderer_state.cube_vertex_memory, 0);
-
-    // copy staging to device-local vertex buffer
-    command_buffer_allocation_info = (VkCommandBufferAllocateInfo){0};
-    command_buffer_allocation_info .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    command_buffer_allocation_info .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    command_buffer_allocation_info .commandPool = renderer_state.graphics_command_pool_handle;
-    command_buffer_allocation_info .commandBufferCount = 1;
-
-    VkCommandBuffer command_buffer;
-    vkAllocateCommandBuffers(renderer_state.logical_device_handle, &command_buffer_allocation_info, &command_buffer);
-
-    command_buffer_begin_info = (VkCommandBufferBeginInfo){0};
-    command_buffer_begin_info .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    command_buffer_begin_info .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
-
-    VkBufferCopy buffer_copy = {0};
-    buffer_copy .srcOffset = 0;
-    buffer_copy .dstOffset = 0;
-    buffer_copy .size = vertices_size;
-
-    vkCmdCopyBuffer(command_buffer, vertex_staging_buffer, renderer_state.cube_vertex_buffer, 1, &buffer_copy);
-
-    vkEndCommandBuffer(command_buffer);
-
-    VkSubmitInfo submit_info = {0};
-    submit_info .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info .commandBufferCount = 1;
-    submit_info .pCommandBuffers = &command_buffer;
-
-    vkQueueSubmit(renderer_state.graphics_queue_handle, 1, &submit_info, VK_NULL_HANDLE);
-    vkQueueWaitIdle(renderer_state.graphics_queue_handle);
-
-    vkFreeCommandBuffers(renderer_state.logical_device_handle, renderer_state.graphics_command_pool_handle, 1, &command_buffer);
-
-    // clean up vertex staging resources
-    vkDestroyBuffer(renderer_state.logical_device_handle, vertex_staging_buffer, 0);
-    vkFreeMemory(renderer_state.logical_device_handle, vertex_staging_memory, 0);
-
-	// stage and upload indices
-    VkBuffer index_staging_buffer;
-    VkDeviceMemory index_staging_memory;
-
-    buffer_creation_info = (VkBufferCreateInfo){0};
-    buffer_creation_info .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_creation_info .size = indices_size;
-    buffer_creation_info .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    buffer_creation_info .sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &index_staging_buffer);
-
-    vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, index_staging_buffer, &memory_requirements);
-
-    memory_allocation_info = (VkMemoryAllocateInfo){0};
-    memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    memory_allocation_info.allocationSize = memory_requirements.size;
-    memory_allocation_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &index_staging_memory);
-    vkBindBufferMemory(renderer_state.logical_device_handle, index_staging_buffer, index_staging_memory, 0);
-
-    mapped = 0;
-    vkMapMemory(renderer_state.logical_device_handle, index_staging_memory, 0, indices_size, 0, &mapped);
-    memcpy(mapped, CUBE_INDICES, (size_t)indices_size);
-    vkUnmapMemory(renderer_state.logical_device_handle, index_staging_memory);
-
-    // create gpu-local index buffer
-    buffer_creation_info = (VkBufferCreateInfo){0};
-    buffer_creation_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    buffer_creation_info.size = indices_size;
-    buffer_creation_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-    buffer_creation_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &renderer_state.cube_index_buffer);
-
-    vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, renderer_state.cube_index_buffer, &memory_requirements);
-
-    memory_allocation_info = (VkMemoryAllocateInfo){0};
-    memory_allocation_info .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    memory_allocation_info .allocationSize = memory_requirements.size;
-    memory_allocation_info .memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    vkAllocateMemory(renderer_state.logical_device_handle, &memory_allocation_info, 0, &renderer_state.cube_index_memory);
-    vkBindBufferMemory(renderer_state.logical_device_handle, renderer_state.cube_index_buffer, renderer_state.cube_index_memory, 0);
-
-    // copy staging to device-local index buffer
-    command_buffer_allocation_info = (VkCommandBufferAllocateInfo){0};
-    command_buffer_allocation_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    command_buffer_allocation_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    command_buffer_allocation_info.commandPool = renderer_state.graphics_command_pool_handle;
-    command_buffer_allocation_info.commandBufferCount = 1;
-
-    vkAllocateCommandBuffers(renderer_state.logical_device_handle, &command_buffer_allocation_info, &command_buffer);
-
-    command_buffer_begin_info = (VkCommandBufferBeginInfo){0};
-    command_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    command_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-    vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
-
-    buffer_copy = (VkBufferCopy){0};
-    buffer_copy .srcOffset = 0;
-    buffer_copy .dstOffset = 0;
-    buffer_copy .size = indices_size;
-
-    vkCmdCopyBuffer(command_buffer, index_staging_buffer, renderer_state.cube_index_buffer, 1, &buffer_copy);
-
-    vkEndCommandBuffer(command_buffer);
-
-    submit_info = (VkSubmitInfo){0};
-    submit_info .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info .commandBufferCount = 1;
-    submit_info .pCommandBuffers = &command_buffer;
-
-    vkQueueSubmit(renderer_state.graphics_queue_handle, 1, &submit_info, VK_NULL_HANDLE);
-    vkQueueWaitIdle(renderer_state.graphics_queue_handle);
-
-    vkFreeCommandBuffers(renderer_state.logical_device_handle, renderer_state.graphics_command_pool_handle, 1, &command_buffer);
-
-    // clean up index staging resources
-    vkDestroyBuffer(renderer_state.logical_device_handle, index_staging_buffer, 0);
-    vkFreeMemory(renderer_state.logical_device_handle, index_staging_memory, 0);
+	uploadBufferToLocalDevice(CUBE_VERTICES, sizeof(CUBE_VERTICES), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &renderer_state.cube_vertex_buffer, &renderer_state.cube_vertex_memory);
+	uploadBufferToLocalDevice(CUBE_INDICES,  sizeof(CUBE_INDICES),  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,  &renderer_state.cube_index_buffer,  &renderer_state.cube_index_memory);
 
     renderer_state.images_in_flight = calloc(renderer_state.swapchain_image_count, sizeof(VkFence)); // calloc because we want these to start at VK_NULL_HANDLE, i.e. 0.
-
-	// triangle time (should all be mostly temporary) TODO(spike): re-evaluate this after i've set up a fixed-size memory block for the entire game
-    VkDeviceSize dynamic_vertex_stream_bytes = 65536 * sizeof(Vertex);
-
-    VkBufferCreateInfo vertex_buffer_creation_info = {0};
-    vertex_buffer_creation_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    vertex_buffer_creation_info.size = dynamic_vertex_stream_bytes;
-    vertex_buffer_creation_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    vertex_buffer_creation_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE; // should probably test on excl. vs. concurrent here, depending on what we did before?
-
-    vkCreateBuffer(renderer_state.logical_device_handle, &buffer_creation_info, 0, &renderer_state.vertex_buffer_handle);
-
-    VkMemoryRequirements vertex_memory_requirements = {0};
-    vkGetBufferMemoryRequirements(renderer_state.logical_device_handle, renderer_state.vertex_buffer_handle, &vertex_memory_requirements);
-	uint32 memory_type_index = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-	if (memory_type_index == UINT32_MAX)
-    {
-        return;
-    }
-
-    VkMemoryAllocateInfo vertex_memory_allocation_info = {0};
-	vertex_memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
-    vertex_memory_allocation_info.allocationSize = memory_requirements.size;
-    vertex_memory_allocation_info.memoryTypeIndex = memory_type_index;
-
-    vkAllocateMemory(renderer_state.logical_device_handle, &vertex_memory_allocation_info, 0, &renderer_state.vertex_memory);
-
-    vkBindBufferMemory(renderer_state.logical_device_handle, renderer_state.vertex_buffer_handle, renderer_state.vertex_memory, 0);
-	vkMapMemory(renderer_state.logical_device_handle, renderer_state.vertex_memory, 0, VK_WHOLE_SIZE, 0, &renderer_state.mapped_vertex_pointer);
 
     // a shader is a tiny program the GPU runs many times in a graphics pipeline.
     // vertex shader (VS): runs once per vertex. it reads vertex attributes (pos, color, etc.), transforms pos into clip space (the [-1, 1] box the gpu expects), and passes along any per-vertex data to the next stage.
@@ -1426,6 +1382,8 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     multisample_state_creation_info.alphaToCoverageEnable = VK_FALSE;
     multisample_state_creation_info.alphaToOneEnable = VK_FALSE;
 
+	// shared info for graphics pipeline that is tweaked based on sprite or cube (default right now is cube, but the parts that are particular to cube are defined later anyway)
+
 	VkPipelineColorBlendAttachmentState color_blend_attachment_state = {0}; // controls per-render-target blending, i.e., how the fragment shader's output color is combined with what's already there. for now, just write RGBA
     color_blend_attachment_state.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     color_blend_attachment_state.blendEnable = VK_FALSE;
@@ -1454,6 +1412,8 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
 	depth_stencil_state_creation_info.depthBoundsTestEnable = VK_FALSE;
 	depth_stencil_state_creation_info.stencilTestEnable = VK_FALSE;
+
+	// descriptors + pipeline layout (shared by sprite and cube pipelines)
 
     VkSamplerCreateInfo sampler_creation_info = {0};
     sampler_creation_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO; // TODO(spike): double check all this info at some point
@@ -1516,25 +1476,55 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 
     vkCreatePipelineLayout(renderer_state.logical_device_handle, &graphics_pipeline_layout_creation_info, 0, &renderer_state.graphics_pipeline_layout);
 
-   	VkGraphicsPipelineCreateInfo graphics_pipeline_creation_info = {0}; // struct that points to all those sub-blocks we just defined; it actually builds the pipeline object
-	graphics_pipeline_creation_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-	graphics_pipeline_creation_info.stageCount = 2;
-	graphics_pipeline_creation_info.pStages = shader_stages;
-	graphics_pipeline_creation_info.pVertexInputState = &vertex_input_state_creation_info;
-	graphics_pipeline_creation_info.pInputAssemblyState = &input_assembly_state_creation_info;
-	graphics_pipeline_creation_info.pViewportState = &viewport_state_creation_info;
-	graphics_pipeline_creation_info.pRasterizationState = &rasterization_state_creation_info; // fill mode, cull off
-	graphics_pipeline_creation_info.pMultisampleState = &multisample_state_creation_info; // multisampling disabled (1x MSAA)
-	graphics_pipeline_creation_info.pDepthStencilState = &depth_stencil_state_creation_info;
-	graphics_pipeline_creation_info.pColorBlendState = &color_blend_state_creation_info; // one color attachment; no blending
-	graphics_pipeline_creation_info.pDynamicState = &dynamic_state_creation_info; // declares that viewport / scissor are dynamic
-	graphics_pipeline_creation_info.layout = renderer_state.graphics_pipeline_layout;
-	graphics_pipeline_creation_info.renderPass = renderer_state.render_pass_handle;
-	graphics_pipeline_creation_info.subpass = 0; // first (and only) subpass
-	graphics_pipeline_creation_info.basePipelineHandle = VK_NULL_HANDLE; // not deriving from another pipeline.
-	graphics_pipeline_creation_info.basePipelineIndex = -1;
+    // base graphics pipeline info
 
-	vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &graphics_pipeline_creation_info, 0, &renderer_state.graphics_pipeline_handle);
+   	VkGraphicsPipelineCreateInfo base_graphics_pipeline_creation_info = {0}; // struct that points to all those sub-blocks we just defined; it actually builds the pipeline object
+	base_graphics_pipeline_creation_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	base_graphics_pipeline_creation_info.stageCount = 2;
+	base_graphics_pipeline_creation_info.pStages = shader_stages;
+	base_graphics_pipeline_creation_info.pVertexInputState = &vertex_input_state_creation_info;
+	base_graphics_pipeline_creation_info.pInputAssemblyState = &input_assembly_state_creation_info;
+	base_graphics_pipeline_creation_info.pViewportState = &viewport_state_creation_info;
+	base_graphics_pipeline_creation_info.pRasterizationState = &rasterization_state_creation_info; // fill mode, cull off
+	base_graphics_pipeline_creation_info.pMultisampleState = &multisample_state_creation_info; // multisampling disabled (1x MSAA)
+	base_graphics_pipeline_creation_info.pDepthStencilState = &depth_stencil_state_creation_info;
+	base_graphics_pipeline_creation_info.pColorBlendState = &color_blend_state_creation_info; // one color attachment; no blending
+	base_graphics_pipeline_creation_info.pDynamicState = &dynamic_state_creation_info; // declares that viewport / scissor are dynamic
+	base_graphics_pipeline_creation_info.layout = renderer_state.graphics_pipeline_layout;
+	base_graphics_pipeline_creation_info.renderPass = renderer_state.render_pass_handle;
+	base_graphics_pipeline_creation_info.subpass = 0; // first (and only) subpass
+	base_graphics_pipeline_creation_info.basePipelineHandle = VK_NULL_HANDLE; // not deriving from another pipeline.
+	base_graphics_pipeline_creation_info.basePipelineIndex = -1;
+
+    // sprite pipeline: depth off, blending on
+    {
+        color_blend_attachment_state.blendEnable = VK_TRUE;
+        color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
+        color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
+
+        depth_stencil_state_creation_info.depthTestEnable = VK_FALSE;
+		depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
+        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_ALWAYS;
+
+        VkGraphicsPipelineCreateInfo sprite_ci = base_graphics_pipeline_creation_info;
+        vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &sprite_ci, 0, &renderer_state.sprite_pipeline_handle);
+    }
+
+	// cube pipeline: depth on, blending off
+    {
+        color_blend_attachment_state.blendEnable = VK_FALSE;
+        
+        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
+
+        VkGraphicsPipelineCreateInfo cube_ci = base_graphics_pipeline_creation_info;
+        vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &cube_ci, 0, &renderer_state.cube_pipeline_handle);
+    }
 }
 
 void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
@@ -1546,18 +1536,30 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
     {
         char* path = assets_to_load[asset_index].path;
         if (path == 0) break;
-        if (assets_to_load[asset_index].type != CUBE_3D) continue;
 
         int32 asset_cache_index = getOrLoadAsset(path);
         if (asset_cache_index == -1) continue;
 
-        for (int32 asset_instance_index = 0; asset_instance_index < assets_to_load[asset_index].instance_count; asset_instance_index++)
+        if (assets_to_load[asset_index].type == SPRITE_2D)
         {
-			Cube* cube_instance = &cube_instances[cube_instance_count++];
-            cube_instance->asset_index = (uint32)asset_cache_index;
-            cube_instance->coords      = assets_to_load[asset_index].coords[asset_instance_index];
-            cube_instance->scale       = assets_to_load[asset_index].scale[asset_instance_index];
-            cube_instance->rotation    = assets_to_load[asset_index].rotation[asset_instance_index];
+			for (int32 sprite_instance_index = 0; sprite_instance_index < assets_to_load[asset_index].instance_count; sprite_instance_index++)
+            {
+                Sprite* sprite = &sprite_instances[sprite_instance_count++];
+                sprite->asset_index = (uint32)asset_cache_index;
+                sprite->coords      = assets_to_load[asset_index].coords[sprite_instance_index];
+                sprite->size        = assets_to_load[asset_index].scale[sprite_instance_index];
+            }
+        }
+        else if (assets_to_load[asset_index].type == CUBE_3D)
+        {
+            for (int32 cube_instance_index = 0; cube_instance_index < assets_to_load[asset_index].instance_count; cube_instance_index++)
+            {
+                Cube* cube_instance = &cube_instances[cube_instance_count++];
+                cube_instance->asset_index = (uint32)asset_cache_index;
+                cube_instance->coords      = assets_to_load[asset_index].coords[cube_instance_index];
+                cube_instance->scale       = assets_to_load[asset_index].scale[cube_instance_index];
+                cube_instance->rotation    = assets_to_load[asset_index].rotation[cube_instance_index];
+            }
         }
     }
 }
@@ -1647,15 +1649,54 @@ void rendererDraw(void)
     scissor.offset.x = 0;
     scissor.offset.y = 0;
     scissor.extent = renderer_state.swapchain_extent;
-    vkCmdSetScissor(command_buffer, 0, 1, &scissor); // TODO(spike): look at this more
+    vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
-	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_handle); // selects which baked pipeline the GPU will use for subsequent draw calls on this command buffer
+	// SPRITE PIPELINE
 
-    // bind cube buffer vertex at binding 0 
-    VkDeviceSize vb_offset = 0;
-    vkCmdBindVertexBuffers(command_buffer, 0, 1, &renderer_state.cube_vertex_buffer, &vb_offset);
+	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.sprite_pipeline_handle); 
 
-    // bind the cube index buffer (uint32 indices)
+	VkDeviceSize sprite_vb_offset = 0;
+    vkCmdBindVertexBuffers(command_buffer, 0, 1, &renderer_state.sprite_vertex_buffer, &sprite_vb_offset);
+    vkCmdBindIndexBuffer(command_buffer, renderer_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+    float ortho[16], view2d[16];
+    mat4BuildOrtho(ortho,
+            0.0f, (float)renderer_state.swapchain_extent.width,
+            0.0f, (float)renderer_state.swapchain_extent.height,
+            0.0f, 1.0f);
+    mat4Identity(view2d);
+
+    int32 last_sprite_asset = -1;
+
+	for (uint32 sprite_instance_index = 0; sprite_instance_index < sprite_instance_count; sprite_instance_index++)
+    {
+        Sprite* sprite = &sprite_instances[sprite_instance_index];
+        if ((int32)sprite->asset_index != last_sprite_asset)
+        {
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_layout, 0, 1, &renderer_state.descriptor_sets[sprite->asset_index], 0, 0);
+            last_sprite_asset = (int32)sprite->asset_index;
+        }
+
+        float model_matrix[16];
+        Vec3 pos = { sprite->coords.x, sprite->coords.y, 0.0f };
+        Vec3 scale = { sprite->size.x, sprite->size.y, 1.0f };
+        Vec4 identity_quaternion = { 0, 0, 0, 1}; // TODO(spike): make global
+
+        mat4BuildTRS(model_matrix, pos, identity_quaternion, scale);
+
+        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 						  sizeof(model_matrix), model_matrix);
+        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(model_matrix),     sizeof(view2d), 		view2d);
+        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(model_matrix) * 2, sizeof(ortho), 		ortho);
+
+        vkCmdDrawIndexed(command_buffer, renderer_state.sprite_index_count, 1, 0, 0, 0);
+    }
+
+	// CUBE PIPELINE
+
+	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.cube_pipeline_handle);
+
+    VkDeviceSize cube_vb_offset = 0;
+    vkCmdBindVertexBuffers(command_buffer, 0, 1, &renderer_state.cube_vertex_buffer, &cube_vb_offset);
     vkCmdBindIndexBuffer(command_buffer, renderer_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
     if (renderer_state.asset_cache_count > 0)
@@ -1670,15 +1711,15 @@ void rendererDraw(void)
     mat4BuildPerspective(projection_matrix, 60.0f * (6.2831831f/360.0f), aspect, 0.1f, 100.0f);
 	mat4BuildViewFromQuat(view_matrix, renderer_camera.coords, renderer_camera.rotation);
 
-    int32 last_asset = -1;
+    int32 last_cube_asset = -1;
     for (uint32 cube_instance_index = 0; cube_instance_index < cube_instance_count; cube_instance_index++)
     {
         Cube* cube_instance = &cube_instances[cube_instance_index];
 
-        if ((int32)cube_instance->asset_index != last_asset)
+        if ((int32)cube_instance->asset_index != last_cube_asset)
         {
             vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_layout, 0, 1, &renderer_state.descriptor_sets[cube_instance->asset_index], 0, 0);
-            last_asset = (int32)cube_instance->asset_index;
+            last_cube_asset = (int32)cube_instance->asset_index;
         }
 
         float model_matrix[16], projection_view_matrix[16], mvp_matrix[16];
