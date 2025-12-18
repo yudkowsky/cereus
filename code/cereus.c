@@ -318,7 +318,7 @@ const char* const source_yellow_path_2d  = "data/sprites/2d-source-yellow.png";
 const char* const source_cyan_path_2d    = "data/sprites/2d-source-cyan.png";
 const char* const source_white_path_2d   = "data/sprites/2d-source-white.png";
 
-const char backup_level_path[256] = "w:/cereus/data/levels/red-intro-v2.txt";
+const char backup_level_path[256] = "w:/cereus/data/levels/red-intro-v2.level";
 const char start_level_path_buffer[256] = "w:/cereus/data/levels/";
 char level_path_buffer[256] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
@@ -772,21 +772,33 @@ void setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction direc
 
 // FILE I/O
 
-void loadFileToBuffer(char* path)
+// .level file structure: 
+// first 4 bytes:    -,x,y,z of level dimensions
+// next x*y*z (32768 by default) bytes: actual level buffer
+// next 4*8 bytes: -,x,y,z of camera start pos, fov,yaw,pitch,-
+
+void loadStateToFile(char* path)
 {
     // get level dimensions
     FILE *file = fopen(path, "rb");
-	uint8 byte = 0;
-    fseek(file, 1, SEEK_CUR); // skip the first byte
-	fread(&byte, 1, 1, file);
-    level_dim.x = byte;
-    fread(&byte, 1, 1, file);
-    level_dim.y = byte;
-    fread(&byte, 1, 1, file);
-    level_dim.z = byte;
+
+    fseek(file, 1, SEEK_SET); // skip the first byte
+	fread(&level_dim.x, 1, 1, file);
+    fread(&level_dim.y, 1, 1, file);
+    fread(&level_dim.z, 1, 1, file);
 
     uint8 buffer[32768]; // level_dim.x*level_dim.y*level_dim.z * 2 for color bytes
 	fread(&buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
+
+    fseek(file, 4, SEEK_CUR); 
+	fread(&camera.coords.x, 4, 1, file);
+	fread(&camera.coords.y, 4, 1, file);
+	fread(&camera.coords.z, 4, 1, file);
+	fread(&camera.fov, 4, 1, file);
+	fread(&camera_yaw, 4, 1, file);
+	fread(&camera_pitch, 4, 1, file);
+//  fread(roll);
+
 	fclose(file);
     memcpy(next_world_state.buffer, buffer, level_dim.x*level_dim.y*level_dim.z * 2);
 }
@@ -795,8 +807,25 @@ void writeBufferToFile(char* path)
 {
     FILE *file = fopen(path, "rb+");
 
-    fseek(file, 4, SEEK_CUR);
+    fseek(file, 4, SEEK_SET);
 	fwrite(world_state.buffer, 1, 32768, file);
+
+    fclose(file);
+}
+
+void writeCameraToFile(char* path)
+{
+    FILE *file = fopen(path, "rb+");
+
+    fseek(file, 4 + 32768 + 4, SEEK_SET);
+    fwrite(&camera.coords.x, 4, 1, file);
+	fwrite(&camera.coords.y, 4, 1, file);
+	fwrite(&camera.coords.z, 4, 1, file);
+	fwrite(&camera.fov, 4, 1, file);
+	fwrite(&camera_yaw, 4, 1, file);
+	fwrite(&camera_pitch, 4, 1, file);
+//  fwrite(roll);
+
     fclose(file);
 }
 
@@ -2328,7 +2357,7 @@ void gameInitialiseState()
     memset(&next_world_state, 0, sizeof(WorldState));
     strcpy(next_world_state.level_path, level_path);
 
-    loadFileToBuffer(next_world_state.level_path);
+    loadStateToFile(next_world_state.level_path);
 
     memset(next_world_state.boxes,    	  0, sizeof(next_world_state.boxes)); 
     memset(next_world_state.mirrors,  	  0, sizeof(next_world_state.mirrors));
@@ -2381,10 +2410,12 @@ void gameInitialiseState()
         }
     }
 
+    /*
 	camera.coords = (Vec3){15, 12, 19};
-    camera.fov = 40.0f;
     camera_yaw = 0; // towards -z; north
     camera_pitch = -TAU * 0.18f; // look down-ish
+    */
+	
     Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera_yaw);
     Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera_pitch);
     camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
@@ -2393,14 +2424,8 @@ void gameInitialiseState()
 
 void gameInitialise(char* level_name) 
 {	
-    if (level_name != 0) 
-    {
-        snprintf(next_world_state.level_path, sizeof(next_world_state.level_path), "%s%s.txt", start_level_path_buffer, level_name);
-    }
-    else
-    {
-        strcpy(next_world_state.level_path, backup_level_path);
-    }
+    if (level_name != 0) snprintf(next_world_state.level_path, sizeof(next_world_state.level_path), "%s%s.level", start_level_path_buffer, level_name);
+    else strcpy(next_world_state.level_path, backup_level_path);
     gameInitialiseState();
 }
 
@@ -3114,7 +3139,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             recordStateForUndo();
             memset(animations, 0, sizeof(animations));
             memset(trailing_hitboxes, 0, sizeof(trailing_hitboxes));
-            Camera temp_camera = camera;
 
 			char current_level_path[256];
 			strncpy(current_level_path, next_world_state.level_path, sizeof(current_level_path));
@@ -3123,7 +3147,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
 				strcpy(level_path_buffer, start_level_path_buffer);
                 strcat(level_path_buffer, levels_in_order[level_index]);
-                strcat(level_path_buffer, ".txt");
+                strcat(level_path_buffer, ".level");
 
                 if (strcmp(level_path_buffer, current_level_path) == 0)
                 {
@@ -3132,7 +3156,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 }
             }
             if (next_level) gameInitialise(next_level);
-            camera = temp_camera;
             time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
         }
 
@@ -3257,6 +3280,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // write to file
         if (editor_state.editor_mode && tick_input.i_press) writeBufferToFile(world_state.level_path);
+        if (editor_state.editor_mode && tick_input.c_press) writeCameraToFile(world_state.level_path);
 
 		if (time_until_input > 0) time_until_input--;
 

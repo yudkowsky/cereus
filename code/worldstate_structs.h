@@ -73,6 +73,7 @@ typedef struct TickInput
 	bool j_press;
     bool k_press;
     bool l_press;
+	bool c_press;
 
 	float mouse_dx;
     float mouse_dy;

@@ -87,6 +87,7 @@ LRESULT CALLBACK windowMessageProcessor(
             switch (wParam)
             {
                 case 'A': tick_input.a_press = true; break;
+                case 'C': tick_input.c_press = true; break;
                 case 'D': tick_input.d_press = true; break;
                 case 'E': tick_input.e_press = true; break;
                 case 'F': tick_input.f_press = true; break;
@@ -109,6 +110,7 @@ LRESULT CALLBACK windowMessageProcessor(
             switch (wParam)
             {
                 case 'A': tick_input.a_press = false; break;
+                case 'C': tick_input.c_press = false; break;
                 case 'D': tick_input.d_press = false; break;
                 case 'E': tick_input.e_press = false; break;
                 case 'F': tick_input.f_press = false; break;
