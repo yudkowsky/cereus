@@ -202,6 +202,9 @@ TrailingHitbox;
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
+const int32 SCREEN_WIDTH_PX = 1920; // TODO(spike): get from windows layer
+const int32	SCREEN_HEIGHT_PX = 1080;
+
 const float TAU = 6.2831853071f;
 
 const float SENSITIVITY = 0.005f;
@@ -254,6 +257,7 @@ const int32 ID_OFFSET_CRYSTAL 	  = 100 * 3;
 const int32 ID_OFFSET_SOURCE  	  = 100 * 4;
 const int32 ID_OFFSET_PERM_MIRROR = 100 * 5;
 
+// assets as 3d cubes
 const char* const void_path        = "data/sprites/void.png";
 const char* const grid_path        = "data/sprites/grid.png";
 const char* const wall_path        = "data/sprites/wall.png";
@@ -265,9 +269,6 @@ const char* const pack_path    	   = "data/sprites/pack.png";
 const char* const perm_mirror_path = "data/sprites/perm-mirror.png";
 const char* const not_void_path    = "data/sprites/not-void.png";
 const char* const win_block_path   = "data/sprites/win-block.png";
-
-// test for 2d sprite loading
-const char* const box_path_2d      = "data/sprites/2d-box.png";
 
 const char* const player_ghost_path = "data/sprites/player-ghost.png";
 const char* const pack_ghost_path   = "data/sprites/pack-ghost.png";
@@ -295,6 +296,30 @@ const char* const source_magenta_path = "data/sprites/source-magenta.png";
 const char* const source_yellow_path  = "data/sprites/source-yellow.png";
 const char* const source_cyan_path    = "data/sprites/source-cyan.png";
 const char* const source_white_path   = "data/sprites/source-white.png";
+
+// assets as 2d sprites
+const char* const face_path_2d     = "data/sprites/2d-face.png";
+const char* const crosshair_path   = "data/sprites/crosshair.png";
+
+const char* const void_path_2d        = "data/sprites/2d-void.png";
+const char* const grid_path_2d        = "data/sprites/2d-grid.png";
+const char* const wall_path_2d        = "data/sprites/2d-wall.png";
+const char* const box_path_2d         = "data/sprites/2d-box.png";
+const char* const player_path_2d      = "data/sprites/2d-player.png";
+const char* const mirror_path_2d      = "data/sprites/2d-mirror.png";
+const char* const crystal_path_2d     = "data/sprites/2d-crystal.png";
+const char* const pack_path_2d    	  = "data/sprites/2d-pack.png";
+const char* const perm_mirror_path_2d = "data/sprites/2d-perm-mirror.png";
+const char* const not_void_path_2d    = "data/sprites/2d-not-void.png";
+const char* const win_block_path_2d   = "data/sprites/2d-win-block.png";
+
+const char* const source_red_path_2d     = "data/sprites/2d-source-red.png";
+const char* const source_green_path_2d   = "data/sprites/2d-source-green.png";
+const char* const source_blue_path_2d    = "data/sprites/2d-source-blue.png";
+const char* const source_magenta_path_2d = "data/sprites/2d-source-magenta.png";
+const char* const source_yellow_path_2d  = "data/sprites/2d-source-yellow.png";
+const char* const source_cyan_path_2d    = "data/sprites/2d-source-cyan.png";
+const char* const source_white_path_2d   = "data/sprites/2d-source-white.png";
 
 const char backup_level_path[256] = "w:/cereus/data/levels/red-intro-v2.txt";
 const char start_level_path_buffer[256] = "w:/cereus/data/levels/";
@@ -780,7 +805,35 @@ void writeBufferToFile(char* path)
 
 // DRAW ASSET
 
-char* getPath(TileType tile)
+char* getSpritePath(TileType tile)
+{
+    switch(tile)
+    {
+        case NONE:        return 0;
+        case VOID:        return void_path_2d;
+        case GRID:        return grid_path_2d;
+        case WALL:        return wall_path_2d;
+        case BOX:         return box_path_2d;
+        case PLAYER:      return player_path_2d;
+        case MIRROR:      return mirror_path_2d;
+        case CRYSTAL:     return crystal_path_2d;
+        case PACK:    	  return pack_path_2d;
+        case PERM_MIRROR: return perm_mirror_path_2d;
+        case NOT_VOID:    return not_void_path_2d;
+        case WIN_BLOCK:   return win_block_path_2d;
+
+        case SOURCE_RED:	 return source_red_path_2d;
+        case SOURCE_GREEN:	 return source_green_path_2d;
+        case SOURCE_BLUE:	 return source_blue_path_2d;
+        case SOURCE_MAGENTA: return source_magenta_path_2d;
+        case SOURCE_YELLOW:	 return source_yellow_path_2d;
+        case SOURCE_CYAN:	 return source_cyan_path_2d;
+        case SOURCE_WHITE:	 return source_white_path_2d;
+        default: return 0;
+    }
+}
+
+char* getCubePath(TileType tile)
 {
     switch(tile)
     {
@@ -3092,7 +3145,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // finished updating state
         world_state = next_world_state;
 
-		// DRAW 
+		// DRAW 3D
 
         // draw lasers
         for (int laser_index = 0; laser_index < laser_tile_count; laser_index++)
@@ -3146,7 +3199,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
 			TileType tile = world_state.buffer[tile_index];
 			if (tile == PLAYER || isSource(tile) || isPushable(tile) || tile == PERM_MIRROR) continue;
-			if (tile != NONE)   drawAsset(getPath(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false));
+			if (tile != NONE)   drawAsset(getCubePath(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false));
         }
 
         // draw non-colored entities
@@ -3183,14 +3236,25 @@ void gameFrame(double delta_time, TickInput tick_input)
 		for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)
         {
             if (world_state.sources[source_index].id == -1) continue;
-            char* path = getPath(getTileType(world_state.sources[source_index].coords));
+            char* path = getCubePath(getTileType(world_state.sources[source_index].coords));
             drawAsset(path, CUBE_3D, world_state.sources[source_index].position_norm, DEFAULT_SCALE, world_state.sources[source_index].rotation_quat);
         }
 
-		// 2D TEST DRAW BEHIND CUBES
-        Vec3 test_scale = { 500.0f, 500.0f, 1.0f };
-        Vec3 test_pos = { 400.0f, 300.0f, 0.0f };
-        drawAsset(box_path_2d, SPRITE_2D, test_pos, test_scale, IDENTITY_QUATERNION);
+		// DRAW 2D
+		if (editor_state.editor_mode)
+        {
+            // crosshair
+            Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
+            Vec3 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2, 0.0f };
+        	drawAsset(crosshair_path, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION);
+
+            // picked block
+            Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
+            Vec3 picked_block_coords = { SCREEN_WIDTH_PX - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
+            drawAsset(getSpritePath(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION);
+
+            // camera boundaries
+        }
 
         // write to file
         if (editor_state.editor_mode && tick_input.i_press) writeBufferToFile(world_state.level_path);

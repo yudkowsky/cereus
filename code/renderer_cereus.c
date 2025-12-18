@@ -1099,11 +1099,6 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	render_pass_creation_info.pSubpasses = &color_output_subpass;
     render_pass_creation_info.dependencyCount = 1;
     render_pass_creation_info.pDependencies = &color_output_subpass_dependency; // same story here - just a pointer to our one dependency, rather than an array.
-	
-
-
-
-
 
     vkCreateRenderPass(renderer_state.logical_device_handle, &render_pass_creation_info, 0, &renderer_state.render_pass_handle);
 
@@ -1530,8 +1525,9 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
 {  
 	renderer_camera = game_camera;
-
+    sprite_instance_count = 0;
 	cube_instance_count = 0;
+
     for (int asset_index = 0; asset_index < 1024; asset_index++)
     {
         char* path = assets_to_load[asset_index].path;
@@ -1651,46 +1647,6 @@ void rendererDraw(void)
     scissor.extent = renderer_state.swapchain_extent;
     vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
-	// SPRITE PIPELINE
-
-	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.sprite_pipeline_handle); 
-
-	VkDeviceSize sprite_vb_offset = 0;
-    vkCmdBindVertexBuffers(command_buffer, 0, 1, &renderer_state.sprite_vertex_buffer, &sprite_vb_offset);
-    vkCmdBindIndexBuffer(command_buffer, renderer_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
-
-    float ortho[16], view2d[16];
-    mat4BuildOrtho(ortho,
-            0.0f, (float)renderer_state.swapchain_extent.width,
-            0.0f, (float)renderer_state.swapchain_extent.height,
-            0.0f, 1.0f);
-    mat4Identity(view2d);
-
-    int32 last_sprite_asset = -1;
-
-	for (uint32 sprite_instance_index = 0; sprite_instance_index < sprite_instance_count; sprite_instance_index++)
-    {
-        Sprite* sprite = &sprite_instances[sprite_instance_index];
-        if ((int32)sprite->asset_index != last_sprite_asset)
-        {
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_layout, 0, 1, &renderer_state.descriptor_sets[sprite->asset_index], 0, 0);
-            last_sprite_asset = (int32)sprite->asset_index;
-        }
-
-        float model_matrix[16];
-        Vec3 pos = { sprite->coords.x, sprite->coords.y, 0.0f };
-        Vec3 scale = { sprite->size.x, sprite->size.y, 1.0f };
-        Vec4 identity_quaternion = { 0, 0, 0, 1}; // TODO(spike): make global
-
-        mat4BuildTRS(model_matrix, pos, identity_quaternion, scale);
-
-        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 						  sizeof(model_matrix), model_matrix);
-        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(model_matrix),     sizeof(view2d), 		view2d);
-        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(model_matrix) * 2, sizeof(ortho), 		ortho);
-
-        vkCmdDrawIndexed(command_buffer, renderer_state.sprite_index_count, 1, 0, 0, 0);
-    }
-
 	// CUBE PIPELINE
 
 	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.cube_pipeline_handle);
@@ -1731,10 +1687,48 @@ void rendererDraw(void)
         vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 						  sizeof(model_matrix), 	 model_matrix);
         vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(model_matrix),     sizeof(view_matrix), 		 view_matrix);
         vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(model_matrix) * 2, sizeof(projection_matrix), projection_matrix);
-
-        //vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(mvp_matrix), mvp_matrix);
         
         vkCmdDrawIndexed(command_buffer, renderer_state.cube_index_count, 1, 0, 0, 0);
+    }
+
+	// SPRITE PIPELINE
+
+	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.sprite_pipeline_handle); 
+
+	VkDeviceSize sprite_vb_offset = 0;
+    vkCmdBindVertexBuffers(command_buffer, 0, 1, &renderer_state.sprite_vertex_buffer, &sprite_vb_offset);
+    vkCmdBindIndexBuffer(command_buffer, renderer_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+    float ortho[16], view2d[16];
+    mat4BuildOrtho(ortho,
+            0.0f, (float)renderer_state.swapchain_extent.width,
+            0.0f, (float)renderer_state.swapchain_extent.height,
+            0.0f, 1.0f);
+    mat4Identity(view2d);
+
+    int32 last_sprite_asset = -1;
+
+	for (uint32 sprite_instance_index = 0; sprite_instance_index < sprite_instance_count; sprite_instance_index++)
+    {
+        Sprite* sprite = &sprite_instances[sprite_instance_index];
+        if ((int32)sprite->asset_index != last_sprite_asset)
+        {
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_layout, 0, 1, &renderer_state.descriptor_sets[sprite->asset_index], 0, 0);
+            last_sprite_asset = (int32)sprite->asset_index;
+        }
+
+        float model_matrix[16];
+        Vec3 pos = { sprite->coords.x, sprite->coords.y, 0.0f };
+        Vec3 scale = { sprite->size.x, sprite->size.y, 1.0f };
+        Vec4 identity_quaternion = { 0, 0, 0, 1}; // TODO(spike): make global
+
+        mat4BuildTRS(model_matrix, pos, identity_quaternion, scale);
+
+        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 						  sizeof(model_matrix), model_matrix);
+        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(model_matrix),     sizeof(view2d), 		view2d);
+        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(model_matrix) * 2, sizeof(ortho), 		ortho);
+
+        vkCmdDrawIndexed(command_buffer, renderer_state.sprite_index_count, 1, 0, 0, 0);
     }
 
     vkCmdEndRenderPass(command_buffer);
