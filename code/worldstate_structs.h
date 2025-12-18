@@ -80,5 +80,9 @@ typedef struct TickInput
     bool left_mouse_press;
     bool right_mouse_press;
     bool middle_mouse_press;
+
+    bool f_press;
+    bool g_press;
+    bool h_press;
 }
 TickInput;

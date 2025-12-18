@@ -86,109 +86,45 @@ LRESULT CALLBACK windowMessageProcessor(
         case WM_KEYDOWN:
             switch (wParam)
             {
-                case 'W':
-                    tick_input.w_press = true; 
-                    break;
-                case 'A':
-                    tick_input.a_press = true; 
-                    break;
-                case 'S':
-                    tick_input.s_press = true; 
-                    break;
-                case 'D':
-                    tick_input.d_press = true; 
-                    break;
-                case 'Z':
-                    tick_input.z_press = true;
-                	break;
-                case 'R':
-                    tick_input.r_press = true;
-                	break;
-                case 'E':
-                    tick_input.e_press = true;
-                	break;
-                case 'I':
-                    tick_input.i_press = true;
-                    break;
-                case 'J':
-                    tick_input.j_press = true;
-                	break;
-                case 'K':
-                    tick_input.k_press = true;
-                	break;
-                case 'L':
-                    tick_input.l_press = true;
-                	break;
-                case VK_SPACE:
-                    tick_input.space_press = true;
-                    break;
-                case VK_SHIFT:
-                    tick_input.shift_press = true;
-                    break;
-                // temp mouse button shortcuts
-                case 'F':
-                    tick_input.left_mouse_press = true;
-                    break;
-                case 'G':
-                    tick_input.middle_mouse_press = true;
-                    break;
-                case 'H':
-                    tick_input.right_mouse_press = true;
-                    break;
+                case 'A': tick_input.a_press = true; break;
+                case 'D': tick_input.d_press = true; break;
+                case 'E': tick_input.e_press = true; break;
+                case 'F': tick_input.f_press = true; break;
+                case 'G': tick_input.g_press = true; break;
+                case 'H': tick_input.h_press = true; break;
+                case 'I': tick_input.i_press = true; break;
+                case 'J': tick_input.j_press = true; break;
+                case 'K': tick_input.k_press = true; break;
+                case 'L': tick_input.l_press = true; break;
+                case 'Q': tick_input.q_press = true; break;
+                case 'R': tick_input.r_press = true; break;
+                case 'S': tick_input.s_press = true; break;
+                case 'W': tick_input.w_press = true; break;
+                case 'Z': tick_input.z_press = true; break;
+                case VK_SPACE: tick_input.space_press = true; break;
+                case VK_SHIFT: tick_input.shift_press = true; break;
             }
             break;
         case WM_KEYUP:
             switch (wParam)
             {
-            	case 'W':
-                    tick_input.w_press = false; 
-                    break;
-            	case 'A':
-                    tick_input.a_press = false; 
-                    break;
-                case 'S':
-                    tick_input.s_press = false; 
-                    break;
-                case 'D':
-                    tick_input.d_press = false; 
-                    break;
-                case 'Z':
-                    tick_input.z_press = false;
-                	break;
-                case 'R':
-                    tick_input.r_press = false;
-                	break;
-                case 'E':
-                    tick_input.e_press = false;
-                	break;
-                case 'I':
-                    tick_input.i_press = false;
-                    break;
-                case 'J':
-                    tick_input.j_press = false;
-                	break;
-                case 'K':
-                    tick_input.k_press = false;
-                	break;
-                case 'L':
-                    tick_input.l_press = false;
-                	break;
-                case VK_SPACE:
-                    tick_input.space_press = false;
-                    break;
-                case VK_SHIFT:
-                    tick_input.shift_press = false;
-                    break;
-                // temp mouse button shortcuts
-                case 'F':
-					tick_input.left_mouse_press = false;
-                    break;
-                case 'G':
-                    tick_input.middle_mouse_press = false;
-                    break;
-                case 'H':
-                    tick_input.right_mouse_press = false;
-                    break;
+                case 'A': tick_input.a_press = false; break;
+                case 'D': tick_input.d_press = false; break;
+                case 'E': tick_input.e_press = false; break;
+                case 'F': tick_input.f_press = false; break;
+                case 'G': tick_input.g_press = false; break;
+                case 'H': tick_input.h_press = false; break;
+                case 'I': tick_input.i_press = false; break;
+                case 'J': tick_input.j_press = false; break;
+                case 'K': tick_input.k_press = false; break;
+                case 'L': tick_input.l_press = false; break;
+                case 'Q': tick_input.q_press = false; break;
+                case 'R': tick_input.r_press = false; break;
+                case 'S': tick_input.s_press = false; break;
+                case 'W': tick_input.w_press = false; break;
+                case 'Z': tick_input.z_press = false; break;
+                case VK_SPACE: tick_input.space_press = false; break;
+                case VK_SHIFT: tick_input.shift_press = false; break;
             }
             break;
     }

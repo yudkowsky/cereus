@@ -2855,12 +2855,13 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
 
             // inputs that require raycast
-			else if (time_until_input == 0 && (tick_input.left_mouse_press || tick_input.right_mouse_press || tick_input.middle_mouse_press || tick_input.r_press))
+			else if (time_until_input == 0 && (tick_input.left_mouse_press || tick_input.right_mouse_press || tick_input.middle_mouse_press || tick_input.r_press
+                        					|| tick_input.f_press          || tick_input.h_press           || tick_input.g_press))
             {
                 Vec3 neg_z_basis = {0, 0, -1};
             	RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
 
-                if (tick_input.left_mouse_press && raycast_output.hit) 
+                if ((tick_input.left_mouse_press || tick_input.f_press) && raycast_output.hit) 
                 {
                     Entity *entity= getEntityPointer(raycast_output.hit_coords);
                     if (entity!= 0)
@@ -2872,7 +2873,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     setTileType(NONE, raycast_output.hit_coords);
                     setTileDirection(NORTH, raycast_output.hit_coords);
                 }
-                else if (tick_input.right_mouse_press && raycast_output.hit) 
+                else if ((tick_input.right_mouse_press || tick_input.h_press) && raycast_output.hit) 
                 {
                     Entity *entity_group = 0;
                     if (isSource(editor_state.picked_tile)) 
@@ -2917,7 +2918,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 						else entity->rotation_quat = directionToQuaternion(direction, false);
                 	}
                 }
-                else if (tick_input.middle_mouse_press && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
+                else if ((tick_input.middle_mouse_press || tick_input.g_press) && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
 
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
@@ -3108,7 +3109,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID   || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID  ) && !presentInAnimations(PACK_ID))   pack->id = -1;
 
         // win block logic
-        if (getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID))
+        if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) || (tick_input.q_press && time_until_input == 0))
         {
             recordStateForUndo();
             memset(animations, 0, sizeof(animations));
