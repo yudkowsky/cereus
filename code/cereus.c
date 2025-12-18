@@ -2889,7 +2889,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if ((tick_input.left_mouse_press || tick_input.f_press) && raycast_output.hit) 
                 {
                     Entity *entity= getEntityPointer(raycast_output.hit_coords);
-                    if (entity!= 0)
+                    if (entity != 0)
                     {
                         entity->coords = (Int3){0};
                         entity->position_norm = (Vec3){0};
@@ -3127,7 +3127,13 @@ void gameFrame(double delta_time, TickInput tick_input)
             FOR(entity_instance_index, MAX_ENTITY_INSTANCE_COUNT)
             {
                 Entity* entity = &entity_group[entity_group_index][entity_instance_index];
-                if (getTileType(getNextCoords(entity->coords, DOWN)) == VOID && !presentInAnimations(entity->id)) entity->id = -1;
+                if (entity->id == -1) continue;
+                if (getTileType(getNextCoords(entity->coords, DOWN)) == VOID && !entityInMotion(entity)) // TODO(spike): still some bug when pushing walking onto a place where another 
+                                                                                                         // entity has fallen and disappeared causing player to be able to walk over void for a few frames
+                {
+                    setTileType(NONE, entity->coords);
+                    entity->id = -1;
+                }
             }
         }
         if ((getTileType(getNextCoords(player->coords, DOWN)) == VOID || getTileType(getNextCoords(player->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PLAYER_ID)) player->id = -1;
