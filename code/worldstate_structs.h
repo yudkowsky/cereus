@@ -5,8 +5,8 @@
 typedef enum 
 {
 	SPRITE_2D = 0,
-    MODEL_3D = 1,
-    CUBE_3D = 2
+    CUBE_3D = 1,
+    MODEL_3D = 2
 }
 AssetType;
 
@@ -25,6 +25,7 @@ typedef struct Camera
 {
     Vec3 coords;
     Vec4 rotation;
+    float fov;
 }
 Camera;
 
@@ -60,14 +61,14 @@ typedef struct TickInput
     bool s_press;
     bool d_press;
 
-    bool space_press;
-    bool shift_press;
-
     bool z_press;
     bool r_press;
 
-	bool e_press;
+    bool space_press;
+    bool shift_press;
 
+	bool e_press;
+    bool q_press;
     bool i_press;
 	bool j_press;
     bool k_press;

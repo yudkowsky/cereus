@@ -4,10 +4,6 @@
 #include <math.h> // TODO(spike): also temporary, for sin/cos
 #include <stdio.h> // TODO(spike): "temporary", for fopen 
 
-#define local_persist static
-#define global_variable static
-#define internal static
-
 #define FOR(i, n) for (int i = 0; i < n; i++)
 
 typedef enum TileType
@@ -154,6 +150,7 @@ WorldState;
 typedef struct EditorState
 {
     bool editor_mode;
+    bool do_wide_camera;
     TileType picked_tile;
     Direction picked_direction;
 }
@@ -2385,6 +2382,7 @@ void gameInitialiseState()
     }
 
 	camera.coords = (Vec3){15, 12, 19};
+    camera.fov = 40.0f;
     camera_yaw = 0; // towards -z; north
     camera_pitch = -TAU * 0.18f; // look down-ish
     Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera_yaw);
@@ -2411,7 +2409,6 @@ void gameFrame(double delta_time, TickInput tick_input)
 	if (delta_time > 0.1) delta_time = 0.1;
 	accumulator += delta_time;
 
-    // modifies globals directly
     if (editor_state.editor_mode)
     {
         camera_yaw += tick_input.mouse_dx * SENSITIVITY;
@@ -2809,6 +2806,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
         else
         {
+            // EDITOR MODE
             Vec3 right_camera_basis, forward_camera_basis;
             cameraBasisFromYaw(camera_yaw, &right_camera_basis, &forward_camera_basis);
 
@@ -2851,11 +2849,9 @@ void gameFrame(double delta_time, TickInput tick_input)
 
 			if (time_until_input == 0 && tick_input.j_press)
             {
-                if (normCoordsWithinLevelBounds(camera.coords))
-                {
-					setTileType(VOID, normCoordsToInt(camera.coords));
-                    time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
-                }
+				if (editor_state.do_wide_camera) editor_state.do_wide_camera = false;
+				else editor_state.do_wide_camera = true;
+                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
 
             // inputs that require raycast
@@ -3252,9 +3248,11 @@ void gameFrame(double delta_time, TickInput tick_input)
             Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
             Vec3 picked_block_coords = { SCREEN_WIDTH_PX - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
             drawAsset(getSpritePath(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION);
-
-            // camera boundaries
         }
+
+        // decide which camera to use
+        if (editor_state.editor_mode && editor_state.do_wide_camera) camera.fov = 60.0f;
+        else camera.fov = 30.0f;
 
         // write to file
         if (editor_state.editor_mode && tick_input.i_press) writeBufferToFile(world_state.level_path);
