@@ -56,25 +56,6 @@ Direction;
 
 typedef struct TickInput
 {
-    bool w_press;
-	bool a_press;
-    bool s_press;
-    bool d_press;
-
-    bool z_press;
-    bool r_press;
-
-    bool space_press;
-    bool shift_press;
-
-	bool e_press;
-    bool q_press;
-    bool i_press;
-	bool j_press;
-    bool k_press;
-    bool l_press;
-	bool c_press;
-
 	float mouse_dx;
     float mouse_dy;
 
@@ -82,8 +63,47 @@ typedef struct TickInput
     bool right_mouse_press;
     bool middle_mouse_press;
 
+	bool a_press;
+    bool b_press;
+    bool c_press;
+    bool d_press;
+    bool e_press;
     bool f_press;
     bool g_press;
     bool h_press;
-}
+    bool i_press;
+    bool j_press;
+    bool k_press;
+    bool l_press;
+    bool m_press;
+    bool n_press;
+    bool o_press;
+    bool p_press;
+    bool q_press;
+    bool r_press;
+    bool s_press;
+    bool t_press;
+    bool u_press;
+    bool v_press;
+    bool w_press;
+    bool x_press;
+    bool y_press;
+    bool z_press;
+
+    bool zero_press;
+    bool one_press;
+    bool two_press;
+    bool three_press;
+    bool four_press;
+    bool five_press;
+    bool six_press;
+    bool seven_press;
+    bool eight_press;
+    bool nine_press;
+
+    bool space_press;
+    bool shift_press;
+    bool back_press;
+    bool dash_press;
+}	
 TickInput;

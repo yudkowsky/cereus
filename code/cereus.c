@@ -318,9 +318,9 @@ const char* const source_yellow_path_2d  = "data/sprites/2d-source-yellow.png";
 const char* const source_cyan_path_2d    = "data/sprites/2d-source-cyan.png";
 const char* const source_white_path_2d   = "data/sprites/2d-source-white.png";
 
-const char backup_level_path[256] = "w:/cereus/data/levels/red-intro-v2.level";
-const char start_level_path_buffer[256] = "w:/cereus/data/levels/";
-char level_path_buffer[256] = "w:/cereus/data/levels/";
+const char backup_level_path[256] = "data/levels/red-intro-2.level";
+const char start_level_path_buffer[256] = "data/levels/";
+char level_path_buffer[256] = "data/levels/";
 Int3 level_dim = {0};
 
 char levels_in_order[32][32] = { "pack-intro", "red-intro-1", "red-intro-2", "blue-intro-1", "blue-intro-2", 
