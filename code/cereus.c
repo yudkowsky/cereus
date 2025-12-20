@@ -2159,6 +2159,7 @@ bool calculateGhosts()
 // EDITOR
 
 /*
+contains two modes, place/break or select. is called if either one happens.
 
 WASD, SPACE, SHIFT: camera movement
 
@@ -2185,7 +2186,7 @@ void editorMode(TickInput *tick_input)
     Vec3 right_camera_basis, forward_camera_basis;
     cameraBasisFromYaw(camera_yaw, &right_camera_basis, &forward_camera_basis);
 
-	// movement (happens every frame)
+    // in all editor modes
     if (tick_input->w_press) 
     {
         camera.coords.x += forward_camera_basis.x * MOVE_STEP;
@@ -2209,12 +2210,7 @@ void editorMode(TickInput *tick_input)
     if (tick_input->space_press) camera.coords.y += MOVE_STEP;
     if (tick_input->shift_press) camera.coords.y -= MOVE_STEP;
 
-	if (time_until_input != 0) return; // everything after here happens every 8 tick timer
-    if (tick_input->e_press) 
-    {
-        editor_state.editor_mode = NO_MODE;
-        time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
-    }
+	if (time_until_input != 0) return; 
 
     if (tick_input->j_press)
     {
@@ -2223,85 +2219,95 @@ void editorMode(TickInput *tick_input)
         time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
     }
 
-    // inputs that require raycast
-    else if (tick_input->left_mouse_press || tick_input->right_mouse_press || tick_input->middle_mouse_press || tick_input->r_press || tick_input->f_press || tick_input->h_press || tick_input->g_press)
+    if (editor_state.editor_mode == PLACE_BREAK)
     {
-        Vec3 neg_z_basis = {0, 0, -1};
-        RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
-
-        if (editor_state.editor_mode == PLACE_BREAK)
-
-
-        if ((tick_input->left_mouse_press || tick_input->f_press) && raycast_output.hit) 
+        if (tick_input->left_mouse_press || tick_input->right_mouse_press || tick_input->middle_mouse_press || tick_input->r_press || tick_input->f_press || tick_input->h_press || tick_input->g_press)
         {
-            Entity *entity= getEntityPointer(raycast_output.hit_coords);
-            if (entity != 0)
+            Vec3 neg_z_basis = {0, 0, -1};
+            RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
+
+            if ((tick_input->left_mouse_press || tick_input->f_press) && raycast_output.hit) 
             {
-                entity->coords = (Int3){0};
-                entity->position_norm = (Vec3){0};
-                entity->id = -1;
-            }
-            setTileType(NONE, raycast_output.hit_coords);
-            setTileDirection(NORTH, raycast_output.hit_coords);
-        }
-        else if ((tick_input->right_mouse_press || tick_input->h_press) && raycast_output.hit) 
-        {
-            Entity *entity_group = 0;
-            if (isSource(editor_state.picked_tile)) 
-            {
-                setTileType(editor_state.picked_tile, raycast_output.place_coords); 
-                setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
-                setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
-            }
-            else if (editor_state.picked_tile == PLAYER) editorPlaceOnlyInstanceOfTile(player, raycast_output.place_coords, PLAYER, PLAYER_ID);
-            else if (editor_state.picked_tile == PACK) editorPlaceOnlyInstanceOfTile(pack, raycast_output.place_coords, PACK, PACK_ID);
-            else
-            {
-                switch (editor_state.picked_tile)
+                Entity *entity= getEntityPointer(raycast_output.hit_coords);
+                if (entity != 0)
                 {
-                    case BOX:     	  entity_group = next_world_state.boxes;    	break;
-                    case MIRROR:  	  entity_group = next_world_state.mirrors;  	break;
-                    case CRYSTAL: 	  entity_group = next_world_state.crystals; 	break;
-                    case PERM_MIRROR: entity_group = next_world_state.perm_mirrors; break;
-                    default: entity_group = 0;
+                    entity->coords = (Int3){0};
+                    entity->position_norm = (Vec3){0};
+                    entity->id = -1;
                 }
-                if (entity_group != 0) setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
-                setTileType(editor_state.picked_tile, raycast_output.place_coords); 
-
-                if (editor_state.picked_tile != VOID && editor_state.picked_tile != NOT_VOID && editor_state.picked_tile != GRID) 
+                setTileType(NONE, raycast_output.hit_coords);
+                setTileDirection(NORTH, raycast_output.hit_coords);
+            }
+            else if ((tick_input->right_mouse_press || tick_input->h_press) && raycast_output.hit) 
+            {
+                Entity *entity_group = 0;
+                if (isSource(editor_state.picked_tile)) 
                 {
+                    setTileType(editor_state.picked_tile, raycast_output.place_coords); 
+                    setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
                     setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
                 }
-                else 
+                else if (editor_state.picked_tile == PLAYER) editorPlaceOnlyInstanceOfTile(player, raycast_output.place_coords, PLAYER, PLAYER_ID);
+                else if (editor_state.picked_tile == PACK) editorPlaceOnlyInstanceOfTile(pack, raycast_output.place_coords, PACK, PACK_ID);
+                else
                 {
-                    setTileDirection(NORTH, raycast_output.place_coords);
+                    switch (editor_state.picked_tile)
+                    {
+                        case BOX:     	  entity_group = next_world_state.boxes;    	break;
+                        case MIRROR:  	  entity_group = next_world_state.mirrors;  	break;
+                        case CRYSTAL: 	  entity_group = next_world_state.crystals; 	break;
+                        case PERM_MIRROR: entity_group = next_world_state.perm_mirrors; break;
+                        default: entity_group = 0;
+                    }
+                    if (entity_group != 0) setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
+                    setTileType(editor_state.picked_tile, raycast_output.place_coords); 
+
+                    if (editor_state.picked_tile != VOID && editor_state.picked_tile != NOT_VOID && editor_state.picked_tile != GRID) 
+                    {
+                        setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
+                    }
+                    else 
+                    {
+                        setTileDirection(NORTH, raycast_output.place_coords);
+                    }
                 }
             }
-        }
-        else if (tick_input->r_press && raycast_output.hit)
-        {   
-            Direction direction = getTileDirection(raycast_output.hit_coords);
-            if (direction == DOWN) direction = NORTH;
-            else direction++;
-            setTileDirection(direction, raycast_output.hit_coords);
-            Entity *entity = getEntityPointer(raycast_output.hit_coords);
-            if (entity != 0)
-            {
-                entity->direction = direction;
-                if (getTileType(entity->coords) == MIRROR || getTileType(entity->coords) == PERM_MIRROR) entity->rotation_quat = directionToQuaternion(direction, true); // unclear why this is required, something to do with my sprite layout
-                else entity->rotation_quat = directionToQuaternion(direction, false);
+            else if (tick_input->r_press && raycast_output.hit)
+            {   
+                Direction direction = getTileDirection(raycast_output.hit_coords);
+                if (direction == DOWN) direction = NORTH;
+                else direction++;
+                setTileDirection(direction, raycast_output.hit_coords);
+                Entity *entity = getEntityPointer(raycast_output.hit_coords);
+                if (entity != 0)
+                {
+                    entity->direction = direction;
+                    if (getTileType(entity->coords) == MIRROR || getTileType(entity->coords) == PERM_MIRROR) entity->rotation_quat = directionToQuaternion(direction, true); // unclear why this is required, something to do with my sprite layout
+                    else entity->rotation_quat = directionToQuaternion(direction, false);
+                }
             }
-        }
-        else if ((tick_input->middle_mouse_press || tick_input->g_press) && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
+            else if ((tick_input->middle_mouse_press || tick_input->g_press) && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
 
-        time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+            time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+        }
+        else if (time_until_input == 0 && tick_input->l_press)
+        {
+            editor_state.picked_tile++;
+            if 		(editor_state.picked_tile == WIN_BLOCK + 1) editor_state.picked_tile = SOURCE_RED;
+            else if (editor_state.picked_tile == SOURCE_WHITE + 1) editor_state.picked_tile = VOID;
+            time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+
+        }
     }
-    else if (time_until_input == 0 && tick_input->l_press)
+    else if (editor_state.editor_mode == SELECT)
     {
-        editor_state.picked_tile++;
-        if 		(editor_state.picked_tile == WIN_BLOCK + 1) editor_state.picked_tile = SOURCE_RED;
-        else if (editor_state.picked_tile == SOURCE_WHITE + 1) editor_state.picked_tile = VOID;
-        time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+        if (tick_input->left_mouse_press)
+        {
+            Vec3 neg_z_basis = {0, 0, -1};
+            RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
+
+			
+        }
     }
 }
 
@@ -2415,13 +2421,13 @@ void gameFrame(double delta_time, TickInput tick_input)
         Entity* player = &next_world_state.player;
         Entity* pack = &next_world_state.pack;
 
+        // mode toggle
+        if (tick_input.zero_press) editor_state.editor_mode = NO_MODE;
+        if (tick_input.one_press)  editor_state.editor_mode = PLACE_BREAK;
+        if (tick_input.two_press)  editor_state.editor_mode = SELECT;
+
         if (editor_state.editor_mode == NO_MODE)
         {
-			if (time_until_input == 0 && tick_input.e_press) 
-            {
-                editor_state.editor_mode = PLACE_BREAK;
-                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
-            }
             if (time_until_input == 0 && tick_input.z_press)
             {
                 // undo

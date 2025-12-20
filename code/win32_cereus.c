@@ -111,16 +111,16 @@ LRESULT CALLBACK windowMessageProcessor(
                 case 'Y': tick_input.y_press = true; break;
                 case 'Z': tick_input.z_press = true; break;
 
-                case 'VK_0': tick_input.zero_press  = true; break;
-                case 'VK_1': tick_input.one_press   = true; break;
-                case 'VK_2': tick_input.two_press   = true; break;
-                case 'VK_3': tick_input.three_press = true; break;
-                case 'VK_4': tick_input.four_press  = true; break;
-                case 'VK_5': tick_input.five_press  = true; break;
-                case 'VK_6': tick_input.six_press   = true; break;
-                case 'VK_7': tick_input.seven_press = true; break;
-                case 'VK_8': tick_input.eight_press = true; break;
-                case 'VK_9': tick_input.nine_press  = true; break;
+                case '0': tick_input.zero_press  = true; break;
+                case '1': tick_input.one_press   = true; break;
+                case '2': tick_input.two_press   = true; break;
+                case '3': tick_input.three_press = true; break;
+                case '4': tick_input.four_press  = true; break;
+                case '5': tick_input.five_press  = true; break;
+                case '6': tick_input.six_press   = true; break;
+                case '7': tick_input.seven_press = true; break;
+                case '8': tick_input.eight_press = true; break;
+                case '9': tick_input.nine_press  = true; break;
 
                 case VK_SPACE: 	   tick_input.space_press = true; break;
                 case VK_SHIFT: 	   tick_input.shift_press = true; break;
@@ -156,16 +156,16 @@ LRESULT CALLBACK windowMessageProcessor(
                 case 'Y': tick_input.y_press = false; break;
                 case 'Z': tick_input.z_press = false; break;
 
-                case 'VK_0': tick_input.zero_press  = false; break;
-                case 'VK_1': tick_input.one_press   = false; break;
-                case 'VK_2': tick_input.two_press   = false; break;
-                case 'VK_3': tick_input.three_press = false; break;
-                case 'VK_4': tick_input.four_press  = false; break;
-                case 'VK_5': tick_input.five_press  = false; break;
-                case 'VK_6': tick_input.six_press   = false; break;
-                case 'VK_7': tick_input.seven_press = false; break;
-                case 'VK_8': tick_input.eight_press = false; break;
-                case 'VK_9': tick_input.nine_press  = false; break;
+                case '0': tick_input.zero_press  = false; break;
+                case '1': tick_input.one_press   = false; break;
+                case '2': tick_input.two_press   = false; break;
+                case '3': tick_input.three_press = false; break;
+                case '4': tick_input.four_press  = false; break;
+                case '5': tick_input.five_press  = false; break;
+                case '6': tick_input.six_press   = false; break;
+                case '7': tick_input.seven_press = false; break;
+                case '8': tick_input.eight_press = false; break;
+                case '9': tick_input.nine_press  = false; break;
 
                 case VK_SPACE: 	   tick_input.space_press = false; break;
                 case VK_SHIFT: 	   tick_input.shift_press = false; break;
