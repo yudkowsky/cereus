@@ -2158,6 +2158,25 @@ bool calculateGhosts()
 
 // EDITOR
 
+/*
+
+WASD, SPACE, SHIFT: camera movement
+
+J: FOV toggle (30 <-> 60)
+C: save camera
+I: save world state
+
+1: place/break mode
+LMB: break
+RMB: place
+MMB: select block
+R: rotate block
+
+2: select mode
+LMB: selet block instance
+
+*/
+
 void editorMode(TickInput *tick_input)
 {
 	Entity* player = &next_world_state.player;
@@ -2166,14 +2185,7 @@ void editorMode(TickInput *tick_input)
     Vec3 right_camera_basis, forward_camera_basis;
     cameraBasisFromYaw(camera_yaw, &right_camera_basis, &forward_camera_basis);
 
-    // WASD: camera movement
-    // E: toggle editor mode
-    // J: set void at current coords
-    // L: increment tile at cursor
-    // LMB: destroy tile at cursor
-    // RMB: place tile at cursor
-    // MMB: pick tile at cursor
-
+	// movement (happens every frame)
     if (tick_input->w_press) 
     {
         camera.coords.x += forward_camera_basis.x * MOVE_STEP;
@@ -2197,13 +2209,14 @@ void editorMode(TickInput *tick_input)
     if (tick_input->space_press) camera.coords.y += MOVE_STEP;
     if (tick_input->shift_press) camera.coords.y -= MOVE_STEP;
 
-    if (time_until_input == 0 && tick_input->e_press) 
+	if (time_until_input != 0) return; // everything after here happens every 8 tick timer
+    if (tick_input->e_press) 
     {
-        editor_state.editor_mode = false;
+        editor_state.editor_mode = NO_MODE;
         time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
     }
 
-    if (time_until_input == 0 && tick_input->j_press)
+    if (tick_input->j_press)
     {
         if (editor_state.do_wide_camera) editor_state.do_wide_camera = false;
         else editor_state.do_wide_camera = true;
@@ -2211,11 +2224,13 @@ void editorMode(TickInput *tick_input)
     }
 
     // inputs that require raycast
-    else if (time_until_input == 0 && (tick_input->left_mouse_press || tick_input->right_mouse_press || tick_input->middle_mouse_press || tick_input->r_press
-                                    || tick_input->f_press          || tick_input->h_press           || tick_input->g_press))
+    else if (tick_input->left_mouse_press || tick_input->right_mouse_press || tick_input->middle_mouse_press || tick_input->r_press || tick_input->f_press || tick_input->h_press || tick_input->g_press)
     {
         Vec3 neg_z_basis = {0, 0, -1};
         RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
+
+        if (editor_state.editor_mode == PLACE_BREAK)
+
 
         if ((tick_input->left_mouse_press || tick_input->f_press) && raycast_output.hit) 
         {
@@ -2257,7 +2272,10 @@ void editorMode(TickInput *tick_input)
                 {
                     setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
                 }
-                else (setTileDirection(NORTH, raycast_output.place_coords));
+                else 
+                {
+                    setTileDirection(NORTH, raycast_output.place_coords);
+                }
             }
         }
         else if (tick_input->r_press && raycast_output.hit)
@@ -2376,7 +2394,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 	if (delta_time > 0.1) delta_time = 0.1;
 	accumulator += delta_time;
 
-    if (editor_state.editor_mode)
+    if (editor_state.editor_mode != NO_MODE)
     {
         camera_yaw += tick_input.mouse_dx * SENSITIVITY;
         if (camera_yaw >  0.5f * TAU) camera_yaw -= TAU; 
@@ -2397,11 +2415,11 @@ void gameFrame(double delta_time, TickInput tick_input)
         Entity* player = &next_world_state.player;
         Entity* pack = &next_world_state.pack;
 
-        if (!editor_state.editor_mode)
+        if (editor_state.editor_mode == NO_MODE)
         {
 			if (time_until_input == 0 && tick_input.e_press) 
             {
-                editor_state.editor_mode = true;
+                editor_state.editor_mode = PLACE_BREAK;
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
             if (time_until_input == 0 && tick_input.z_press)
@@ -3070,10 +3088,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             else if (                            		   player->hit_by_blue) drawAsset(blue_player_path,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
             else drawAsset(player_path, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
 
-            if (do_player_ghost) 
-            {
-                drawAsset(player_ghost_path, CUBE_3D, intCoordsToNorm(world_state.player_ghost_coords), PLAYER_SCALE, directionToQuaternion(world_state.player_ghost_direction, true));
-            }
+            if (do_player_ghost) drawAsset(player_ghost_path, CUBE_3D, intCoordsToNorm(world_state.player_ghost_coords), PLAYER_SCALE, directionToQuaternion(world_state.player_ghost_direction, true));
             if (do_pack_ghost)   drawAsset(pack_ghost_path,   CUBE_3D, intCoordsToNorm(world_state.pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(world_state.pack_ghost_direction, true));
         }
 		if (world_state.pack.id != -1) drawAsset(pack_path, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat);
@@ -3087,7 +3102,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
 		// DRAW 2D
-		if (editor_state.editor_mode)
+		if (editor_state.editor_mode != NO_MODE)
         {
             // crosshair
             Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
@@ -3101,14 +3116,11 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // decide which camera to use
-        if (editor_state.editor_mode && editor_state.do_wide_camera) camera.fov = 60.0f;
+        if (editor_state.do_wide_camera) camera.fov = 60.0f;
         else camera.fov = 30.0f;
 
         // write to file
-        if (editor_state.editor_mode && tick_input.i_press) 
-        {
-            writeBufferToFile(world_state.level_path);
-        }
+        if (editor_state.editor_mode && tick_input.i_press) writeBufferToFile(world_state.level_path);
         if (editor_state.editor_mode && tick_input.c_press) writeCameraToFile(world_state.level_path);
 
 		if (time_until_input > 0) time_until_input--;

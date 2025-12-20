@@ -254,9 +254,17 @@ typedef struct WorldState
 }
 WorldState;
 
+typedef enum EditorMode
+{
+	NO_MODE = 0,
+    PLACE_BREAK = 1,
+    SELECT = 2
+}
+EditorMode;
+
 typedef struct EditorState
 {
-    bool editor_mode;
+    EditorMode editor_mode;
     bool do_wide_camera;
     TileType picked_tile;
     Direction picked_direction;
