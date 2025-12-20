@@ -6,199 +6,6 @@
 
 #define FOR(i, n) for (int i = 0; i < n; i++)
 
-typedef enum TileType
-{
-    NONE    	= 0,
-    VOID    	= 1,
-    GRID    	= 2,
-    WALL    	= 3,
-    BOX     	= 4,
-    PLAYER  	= 5,
-    MIRROR  	= 6,
-    CRYSTAL 	= 7,
-    PACK        = 8,
-    PERM_MIRROR = 9,
-    NOT_VOID    = 10,
-    WIN_BLOCK   = 11,
-
-    SOURCE_RED     = 32,
-    SOURCE_GREEN   = 33,
-    SOURCE_BLUE    = 34,
-    SOURCE_MAGENTA = 35,
-    SOURCE_YELLOW  = 36,
-    SOURCE_CYAN    = 37,
-    SOURCE_WHITE   = 38,
-
-    LASER_RED = 40,
-    LASER_GREEN = 41,
-    LASER_BLUE = 42,
-    LASER_MAGENTA = 43,
-    LASER_YELLOW = 44,
-    LASER_CYAN = 45,
-    LASER_WHITE = 46
-}
-TileType;
-
-typedef enum Color
-{
-    NO_COLOR = 0,
-    RED      = 1,
-    GREEN    = 2,
-	BLUE     = 3,
-	MAGENTA  = 4,
-    YELLOW   = 5,
-    CYAN     = 6,
-    WHITE    = 7
-}
-Color;
-
-typedef enum PushResult
-{
-    CAN_PUSH = 0,
-	PAUSE_PUSH = 1,
-    FAILED_PUSH = 2
-}
-PushResult;
-
-typedef struct GreenHit
-{
-    bool north;
-    bool west;
-    bool south;
-    bool east;
-    bool up;
-    bool down;
-}
-GreenHit;
-
-typedef struct Entity
-{
-    Int3 coords;
-    Vec3 position_norm;
-    Direction direction;
-    Vec4 rotation_quat;
-    int32 id;
-    int32 previously_moving_sideways;
-    int32 falling_time;
-
-    // for sources/lasers/other colored objects
-    Color color;
-
-    // for player
-    bool hit_by_red;
-    GreenHit green_hit;
-    bool hit_by_blue;
-}
-Entity;
-
-typedef struct Animation
-{
-    int32 id;
-    int32 frames_left;
-    Vec3* position_to_change;
-    Vec4* rotation_to_change;
-    Vec3 position[32];
-    Vec4 rotation[32];
-}
-Animation;
-
-typedef struct WorldState
-{
-    uint8 buffer[32768]; // 2 bytes info per tile 
-    Entity player;
-    Entity pack;
-    Entity boxes[32];
-    Entity mirrors[32];
-    Entity sources[32];
-    Entity crystals[32];
-    Entity perm_mirrors[32];
-    bool player_will_fall_next_turn; // used for not being able to walk one extra tile after walking out of red beam
-    bool pack_detached;
-    char level_path[256];
-
-    // player's lingering hitbox when hit should still trigger that color
-    int32 player_trailing_hitbox_timer;
-    Int3 player_trailing_hitbox_coords;
-
-    // handle pack turning sequence
-    int32 pack_intermediate_states_timer;
-    Int3 pack_intermediate_coords;
-    Direction pack_orthogonal_push_direction;
-    bool do_diagonal_push_on_turn ;
-    bool do_orthogonal_push_on_turn;
-    bool do_player_and_pack_fall_after_turn;
-    bool player_hit_by_blue_in_turn;
-    Int3 entity_to_fall_after_blue_not_blue_turn_coords;
-    int32 entity_to_fall_after_blue_not_blue_turn_timer;
-
-    // patch on diagonal pass through due to pack hitbox being only on the diagonal in the middle of turn
-    int32 pack_hitbox_turning_from_timer;
-    Int3 pack_hitbox_turning_from_coords;
-    Direction pack_hitbox_turning_from_direction;
-    int32 pack_hitbox_turning_to_timer;
-    Int3 pack_hitbox_turning_to_coords;
-    Direction pack_hitbox_turning_to_direction;
-
-    // ghosts from tp
-    Int3 player_ghost_coords;
-    Int3 pack_ghost_coords;
-    Direction player_ghost_direction;
-    Direction pack_ghost_direction;
-}
-WorldState;
-
-typedef struct EditorState
-{
-    bool editor_mode;
-    bool do_wide_camera;
-    TileType picked_tile;
-    Direction picked_direction;
-}
-EditorState;
-
-typedef struct RaycastHit
-{
-    bool hit;
-    Int3 hit_coords;
-    Int3 place_coords;
-}
-RaycastHit;
- 
-typedef struct Push 
-{
-    Int3 previous_coords;
-    Int3 new_coords;
-    TileType type;
-    Entity* entity;
-}
-Push;
-
-typedef struct LaserColor
-{
-    bool red;
-    bool green;
-    bool blue;
-}
-LaserColor;
-
-typedef struct LaserBuffer
-{
-    Direction direction;
-    LaserColor color;
-    Int3 coords;
-}
-LaserBuffer;
-
-typedef struct TrailingHitbox
-{
-	Int3 coords;
-    int32 frames;
-}
-TrailingHitbox;
-
-const double PHYSICS_INCREMENT = 1.0/60.0;
-double accumulator = 0;
-
 const int32 SCREEN_WIDTH_PX = 1920; // TODO(spike): get from windows layer
 const int32	SCREEN_HEIGHT_PX = 1080;
 
@@ -255,72 +62,75 @@ const int32 ID_OFFSET_SOURCE  	  = 100 * 4;
 const int32 ID_OFFSET_PERM_MIRROR = 100 * 5;
 
 // assets as 3d cubes
-const char* const void_path        = "data/sprites/void.png";
-const char* const grid_path        = "data/sprites/grid.png";
-const char* const wall_path        = "data/sprites/wall.png";
-const char* const box_path         = "data/sprites/box.png";
-const char* const player_path      = "data/sprites/player.png";
-const char* const mirror_path      = "data/sprites/mirror.png";
-const char* const crystal_path     = "data/sprites/crystal.png";
-const char* const pack_path    	   = "data/sprites/pack.png";
-const char* const perm_mirror_path = "data/sprites/perm-mirror.png";
-const char* const not_void_path    = "data/sprites/not-void.png";
-const char* const win_block_path   = "data/sprites/win-block.png";
+const char* const void_path        = "data/sprites/3d-assets/void.png";
+const char* const grid_path        = "data/sprites/3d-assets/grid.png";
+const char* const wall_path        = "data/sprites/3d-assets/wall.png";
+const char* const box_path         = "data/sprites/3d-assets/box.png";
+const char* const player_path      = "data/sprites/3d-assets/player.png";
+const char* const mirror_path      = "data/sprites/3d-assets/mirror.png";
+const char* const crystal_path     = "data/sprites/3d-assets/crystal.png";
+const char* const pack_path    	   = "data/sprites/3d-assets/pack.png";
+const char* const perm_mirror_path = "data/sprites/3d-assets/perm-mirror.png";
+const char* const not_void_path    = "data/sprites/3d-assets/not-void.png";
+const char* const win_block_path   = "data/sprites/3d-assets/win-block.png";
 
-const char* const player_ghost_path = "data/sprites/player-ghost.png";
-const char* const pack_ghost_path   = "data/sprites/pack-ghost.png";
+const char* const player_ghost_path = "data/sprites/3d-assets/player-ghost.png";
+const char* const pack_ghost_path   = "data/sprites/3d-assets/pack-ghost.png";
 
-const char* const red_player_path     = "data/sprites/player-red.png";
-const char* const green_player_path   = "data/sprites/player-green.png";
-const char* const blue_player_path    = "data/sprites/player-blue.png";
-const char* const magenta_player_path = "data/sprites/player-magenta.png";
-const char* const yellow_player_path  = "data/sprites/player-yellow.png";
-const char* const cyan_player_path    = "data/sprites/player-cyan.png";
-const char* const white_player_path   = "data/sprites/player-white.png";
+const char* const red_player_path     = "data/sprites/3d-assets/player-red.png";
+const char* const green_player_path   = "data/sprites/3d-assets/player-green.png";
+const char* const blue_player_path    = "data/sprites/3d-assets/player-blue.png";
+const char* const magenta_player_path = "data/sprites/3d-assets/player-magenta.png";
+const char* const yellow_player_path  = "data/sprites/3d-assets/player-yellow.png";
+const char* const cyan_player_path    = "data/sprites/3d-assets/player-cyan.png";
+const char* const white_player_path   = "data/sprites/3d-assets/player-white.png";
 
-const char* const laser_red_path      = "data/sprites/laser-red.png";
-const char* const laser_green_path    = "data/sprites/laser-green.png";
-const char* const laser_blue_path     = "data/sprites/laser-blue.png";
-const char* const laser_magenta_path  = "data/sprites/laser-magenta.png";
-const char* const laser_yellow_path   = "data/sprites/laser-yellow.png";
-const char* const laser_cyan_path     = "data/sprites/laser-cyan.png";
-const char* const laser_white_path    = "data/sprites/laser-white.png";
+const char* const laser_red_path      = "data/sprites/3d-assets/laser-red.png";
+const char* const laser_green_path    = "data/sprites/3d-assets/laser-green.png";
+const char* const laser_blue_path     = "data/sprites/3d-assets/laser-blue.png";
+const char* const laser_magenta_path  = "data/sprites/3d-assets/laser-magenta.png";
+const char* const laser_yellow_path   = "data/sprites/3d-assets/laser-yellow.png";
+const char* const laser_cyan_path     = "data/sprites/3d-assets/laser-cyan.png";
+const char* const laser_white_path    = "data/sprites/3d-assets/laser-white.png";
 
-const char* const source_red_path     = "data/sprites/source-red.png";
-const char* const source_green_path   = "data/sprites/source-green.png";
-const char* const source_blue_path    = "data/sprites/source-blue.png";
-const char* const source_magenta_path = "data/sprites/source-magenta.png";
-const char* const source_yellow_path  = "data/sprites/source-yellow.png";
-const char* const source_cyan_path    = "data/sprites/source-cyan.png";
-const char* const source_white_path   = "data/sprites/source-white.png";
+const char* const source_red_path     = "data/sprites/3d-assets/source-red.png";
+const char* const source_green_path   = "data/sprites/3d-assets/source-green.png";
+const char* const source_blue_path    = "data/sprites/3d-assets/source-blue.png";
+const char* const source_magenta_path = "data/sprites/3d-assets/source-magenta.png";
+const char* const source_yellow_path  = "data/sprites/3d-assets/source-yellow.png";
+const char* const source_cyan_path    = "data/sprites/3d-assets/source-cyan.png";
+const char* const source_white_path   = "data/sprites/3d-assets/source-white.png";
 
 // assets as 2d sprites
-const char* const face_path_2d     = "data/sprites/2d-face.png";
-const char* const crosshair_path   = "data/sprites/crosshair.png";
+const char* const face_path_2d     = "data/sprites/2d-assets/2d-face.png";
+const char* const crosshair_path   = "data/sprites/2d-assets/crosshair.png";
 
-const char* const void_path_2d        = "data/sprites/2d-void.png";
-const char* const grid_path_2d        = "data/sprites/2d-grid.png";
-const char* const wall_path_2d        = "data/sprites/2d-wall.png";
-const char* const box_path_2d         = "data/sprites/2d-box.png";
-const char* const player_path_2d      = "data/sprites/2d-player.png";
-const char* const mirror_path_2d      = "data/sprites/2d-mirror.png";
-const char* const crystal_path_2d     = "data/sprites/2d-crystal.png";
-const char* const pack_path_2d    	  = "data/sprites/2d-pack.png";
-const char* const perm_mirror_path_2d = "data/sprites/2d-perm-mirror.png";
-const char* const not_void_path_2d    = "data/sprites/2d-not-void.png";
-const char* const win_block_path_2d   = "data/sprites/2d-win-block.png";
+const char* const void_path_2d        = "data/sprites/2d-assets/2d-void.png";
+const char* const grid_path_2d        = "data/sprites/2d-assets/2d-grid.png";
+const char* const wall_path_2d        = "data/sprites/2d-assets/2d-wall.png";
+const char* const box_path_2d         = "data/sprites/2d-assets/2d-box.png";
+const char* const player_path_2d      = "data/sprites/2d-assets/2d-player.png";
+const char* const mirror_path_2d      = "data/sprites/2d-assets/2d-mirror.png";
+const char* const crystal_path_2d     = "data/sprites/2d-assets/2d-crystal.png";
+const char* const pack_path_2d    	  = "data/sprites/2d-assets/2d-pack.png";
+const char* const perm_mirror_path_2d = "data/sprites/2d-assets/2d-perm-mirror.png";
+const char* const not_void_path_2d    = "data/sprites/2d-assets/2d-not-void.png";
+const char* const win_block_path_2d   = "data/sprites/2d-assets/2d-win-block.png";
 
-const char* const source_red_path_2d     = "data/sprites/2d-source-red.png";
-const char* const source_green_path_2d   = "data/sprites/2d-source-green.png";
-const char* const source_blue_path_2d    = "data/sprites/2d-source-blue.png";
-const char* const source_magenta_path_2d = "data/sprites/2d-source-magenta.png";
-const char* const source_yellow_path_2d  = "data/sprites/2d-source-yellow.png";
-const char* const source_cyan_path_2d    = "data/sprites/2d-source-cyan.png";
-const char* const source_white_path_2d   = "data/sprites/2d-source-white.png";
+const char* const source_red_path_2d     = "data/sprites/2d-assets/2d-source-red.png";
+const char* const source_green_path_2d   = "data/sprites/2d-assets/2d-source-green.png";
+const char* const source_blue_path_2d    = "data/sprites/2d-assets/2d-source-blue.png";
+const char* const source_magenta_path_2d = "data/sprites/2d-assets/2d-source-magenta.png";
+const char* const source_yellow_path_2d  = "data/sprites/2d-assets/2d-source-yellow.png";
+const char* const source_cyan_path_2d    = "data/sprites/2d-assets/2d-source-cyan.png";
+const char* const source_white_path_2d   = "data/sprites/2d-assets/2d-source-white.png";
 
-const char backup_level_path[256] = "data/levels/red-intro-2.level";
-const char start_level_path_buffer[256] = "data/levels/";
-char level_path_buffer[256] = "data/levels/";
+const double PHYSICS_INCREMENT = 1.0/60.0;
+double accumulator = 0;
+
+const char backup_level_path[256] = "w:/cereus/data/levels/red-intro-2.level";
+const char start_level_path_buffer[256] = "w:/cereus/data/levels/";
+char level_path_buffer[256] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
 char levels_in_order[32][32] = { "pack-intro", "red-intro-1", "red-intro-2", "blue-intro-1", "blue-intro-2", 
@@ -338,6 +148,7 @@ AssetToLoad assets_to_load[256] = {0};
 
 WorldState world_state = {0};
 WorldState next_world_state = {0};
+
 WorldState undo_buffer[256] = {0};
 int32 undo_buffer_position = 0;
 
@@ -808,7 +619,7 @@ void writeBufferToFile(char* path)
     FILE *file = fopen(path, "rb+");
 
     fseek(file, 4, SEEK_SET);
-	fwrite(world_state.buffer, 1, 32768, file);
+	fwrite(next_world_state.buffer, 1, 32768, file);
 
     fclose(file);
 }
@@ -2345,6 +2156,137 @@ bool calculateGhosts()
     return true;
 }
 
+// EDITOR
+
+void editorMode(TickInput *tick_input)
+{
+	Entity* player = &next_world_state.player;
+    Entity* pack = &next_world_state.pack;
+
+    Vec3 right_camera_basis, forward_camera_basis;
+    cameraBasisFromYaw(camera_yaw, &right_camera_basis, &forward_camera_basis);
+
+    // WASD: camera movement
+    // E: toggle editor mode
+    // J: set void at current coords
+    // L: increment tile at cursor
+    // LMB: destroy tile at cursor
+    // RMB: place tile at cursor
+    // MMB: pick tile at cursor
+
+    if (tick_input->w_press) 
+    {
+        camera.coords.x += forward_camera_basis.x * MOVE_STEP;
+        camera.coords.z += forward_camera_basis.z * MOVE_STEP;
+    }
+    if (tick_input->a_press) 
+    {
+        camera.coords.x -= right_camera_basis.x * MOVE_STEP;
+        camera.coords.z -= right_camera_basis.z * MOVE_STEP;
+    }
+    if (tick_input->s_press) 
+    {
+        camera.coords.x -= forward_camera_basis.x * MOVE_STEP;
+        camera.coords.z -= forward_camera_basis.z * MOVE_STEP;
+    }
+    if (tick_input->d_press) 
+    {
+        camera.coords.x += right_camera_basis.x * MOVE_STEP;
+        camera.coords.z += right_camera_basis.z * MOVE_STEP;
+    }
+    if (tick_input->space_press) camera.coords.y += MOVE_STEP;
+    if (tick_input->shift_press) camera.coords.y -= MOVE_STEP;
+
+    if (time_until_input == 0 && tick_input->e_press) 
+    {
+        editor_state.editor_mode = false;
+        time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+    }
+
+    if (time_until_input == 0 && tick_input->j_press)
+    {
+        if (editor_state.do_wide_camera) editor_state.do_wide_camera = false;
+        else editor_state.do_wide_camera = true;
+        time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+    }
+
+    // inputs that require raycast
+    else if (time_until_input == 0 && (tick_input->left_mouse_press || tick_input->right_mouse_press || tick_input->middle_mouse_press || tick_input->r_press
+                                    || tick_input->f_press          || tick_input->h_press           || tick_input->g_press))
+    {
+        Vec3 neg_z_basis = {0, 0, -1};
+        RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
+
+        if ((tick_input->left_mouse_press || tick_input->f_press) && raycast_output.hit) 
+        {
+            Entity *entity= getEntityPointer(raycast_output.hit_coords);
+            if (entity != 0)
+            {
+                entity->coords = (Int3){0};
+                entity->position_norm = (Vec3){0};
+                entity->id = -1;
+            }
+            setTileType(NONE, raycast_output.hit_coords);
+            setTileDirection(NORTH, raycast_output.hit_coords);
+        }
+        else if ((tick_input->right_mouse_press || tick_input->h_press) && raycast_output.hit) 
+        {
+            Entity *entity_group = 0;
+            if (isSource(editor_state.picked_tile)) 
+            {
+                setTileType(editor_state.picked_tile, raycast_output.place_coords); 
+                setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
+                setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
+            }
+            else if (editor_state.picked_tile == PLAYER) editorPlaceOnlyInstanceOfTile(player, raycast_output.place_coords, PLAYER, PLAYER_ID);
+            else if (editor_state.picked_tile == PACK) editorPlaceOnlyInstanceOfTile(pack, raycast_output.place_coords, PACK, PACK_ID);
+            else
+            {
+                switch (editor_state.picked_tile)
+                {
+                    case BOX:     	  entity_group = next_world_state.boxes;    	break;
+                    case MIRROR:  	  entity_group = next_world_state.mirrors;  	break;
+                    case CRYSTAL: 	  entity_group = next_world_state.crystals; 	break;
+                    case PERM_MIRROR: entity_group = next_world_state.perm_mirrors; break;
+                    default: entity_group = 0;
+                }
+                if (entity_group != 0) setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
+                setTileType(editor_state.picked_tile, raycast_output.place_coords); 
+
+                if (editor_state.picked_tile != VOID && editor_state.picked_tile != NOT_VOID && editor_state.picked_tile != GRID) 
+                {
+                    setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
+                }
+                else (setTileDirection(NORTH, raycast_output.place_coords));
+            }
+        }
+        else if (tick_input->r_press && raycast_output.hit)
+        {   
+            Direction direction = getTileDirection(raycast_output.hit_coords);
+            if (direction == DOWN) direction = NORTH;
+            else direction++;
+            setTileDirection(direction, raycast_output.hit_coords);
+            Entity *entity = getEntityPointer(raycast_output.hit_coords);
+            if (entity != 0)
+            {
+                entity->direction = direction;
+                if (getTileType(entity->coords) == MIRROR || getTileType(entity->coords) == PERM_MIRROR) entity->rotation_quat = directionToQuaternion(direction, true); // unclear why this is required, something to do with my sprite layout
+                else entity->rotation_quat = directionToQuaternion(direction, false);
+            }
+        }
+        else if ((tick_input->middle_mouse_press || tick_input->g_press) && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
+
+        time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+    }
+    else if (time_until_input == 0 && tick_input->l_press)
+    {
+        editor_state.picked_tile++;
+        if 		(editor_state.picked_tile == WIN_BLOCK + 1) editor_state.picked_tile = SOURCE_RED;
+        else if (editor_state.picked_tile == SOURCE_WHITE + 1) editor_state.picked_tile = VOID;
+        time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+    }
+}
+
 // GAME
 
 void gameInitialiseState()
@@ -2831,129 +2773,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
         else
         {
-            // EDITOR MODE
-            Vec3 right_camera_basis, forward_camera_basis;
-            cameraBasisFromYaw(camera_yaw, &right_camera_basis, &forward_camera_basis);
-
-			// WASD: camera movement
-            // E: toggle editor mode
-            // J: set void at current coords
-            // L: increment tile at cursor
-            // LMB: destroy tile at cursor
-            // RMB: place tile at cursor
-            // MMB: pick tile at cursor
-
-            if (tick_input.w_press) 
-            {
-                camera.coords.x += forward_camera_basis.x * MOVE_STEP;
-                camera.coords.z += forward_camera_basis.z * MOVE_STEP;
-            }
-            if (tick_input.a_press) 
-            {
-                camera.coords.x -= right_camera_basis.x * MOVE_STEP;
-                camera.coords.z -= right_camera_basis.z * MOVE_STEP;
-            }
-            if (tick_input.s_press) 
-            {
-                camera.coords.x -= forward_camera_basis.x * MOVE_STEP;
-                camera.coords.z -= forward_camera_basis.z * MOVE_STEP;
-            }
-            if (tick_input.d_press) 
-            {
-                camera.coords.x += right_camera_basis.x * MOVE_STEP;
-                camera.coords.z += right_camera_basis.z * MOVE_STEP;
-            }
-            if (tick_input.space_press) camera.coords.y += MOVE_STEP;
-            if (tick_input.shift_press) camera.coords.y -= MOVE_STEP;
-
-			if (time_until_input == 0 && tick_input.e_press) 
-            {
-                editor_state.editor_mode = false;
-                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
-            }
-
-			if (time_until_input == 0 && tick_input.j_press)
-            {
-				if (editor_state.do_wide_camera) editor_state.do_wide_camera = false;
-				else editor_state.do_wide_camera = true;
-                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
-            }
-
-            // inputs that require raycast
-			else if (time_until_input == 0 && (tick_input.left_mouse_press || tick_input.right_mouse_press || tick_input.middle_mouse_press || tick_input.r_press
-                        					|| tick_input.f_press          || tick_input.h_press           || tick_input.g_press))
-            {
-                Vec3 neg_z_basis = {0, 0, -1};
-            	RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
-
-                if ((tick_input.left_mouse_press || tick_input.f_press) && raycast_output.hit) 
-                {
-                    Entity *entity= getEntityPointer(raycast_output.hit_coords);
-                    if (entity != 0)
-                    {
-                        entity->coords = (Int3){0};
-                        entity->position_norm = (Vec3){0};
-                        entity->id = -1;
-                    }
-                    setTileType(NONE, raycast_output.hit_coords);
-                    setTileDirection(NORTH, raycast_output.hit_coords);
-                }
-                else if ((tick_input.right_mouse_press || tick_input.h_press) && raycast_output.hit) 
-                {
-                    Entity *entity_group = 0;
-                    if (isSource(editor_state.picked_tile)) 
-                    {
-                        setTileType(editor_state.picked_tile, raycast_output.place_coords); 
-                        setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
-                        setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
-                    }
-                    else if (editor_state.picked_tile == PLAYER) editorPlaceOnlyInstanceOfTile(player, raycast_output.place_coords, PLAYER, PLAYER_ID);
-                    else if (editor_state.picked_tile == PACK) editorPlaceOnlyInstanceOfTile(pack, raycast_output.place_coords, PACK, PACK_ID);
-                    else
-                    {
-                        switch (editor_state.picked_tile)
-                        {
-                            case BOX:     	  entity_group = next_world_state.boxes;    	break;
-                            case MIRROR:  	  entity_group = next_world_state.mirrors;  	break;
-                            case CRYSTAL: 	  entity_group = next_world_state.crystals; 	break;
-                            case PERM_MIRROR: entity_group = next_world_state.perm_mirrors; break;
-                            default: entity_group = 0;
-                        }
-                        if (entity_group != 0) setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
-                        setTileType(editor_state.picked_tile, raycast_output.place_coords); 
-
-                        if (editor_state.picked_tile != VOID && editor_state.picked_tile != NOT_VOID && editor_state.picked_tile != GRID) 
-                        {
-                            setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
-                        }
-                        else (setTileDirection(NORTH, raycast_output.place_coords));
-                    }
-                }
-                else if (tick_input.r_press && raycast_output.hit)
-                {   
-                    Direction direction = getTileDirection(raycast_output.hit_coords);
-                    if (direction == DOWN) direction = NORTH;
-                    else direction++;
-                    setTileDirection(direction, raycast_output.hit_coords);
-                    Entity *entity = getEntityPointer(raycast_output.hit_coords);
-                    if (entity != 0)
-                    {
-                        entity->direction = direction;
-						if (getTileType(entity->coords) == MIRROR || getTileType(entity->coords) == PERM_MIRROR) entity->rotation_quat = directionToQuaternion(direction, true); // unclear why this is required, something to do with my sprite layout
-						else entity->rotation_quat = directionToQuaternion(direction, false);
-                	}
-                }
-                else if ((tick_input.middle_mouse_press || tick_input.g_press) && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
-
-                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
-            }
-			else if (time_until_input == 0 && tick_input.l_press)
-            {
-				editor_state.picked_tile++;
-                if 		(editor_state.picked_tile == WIN_BLOCK + 1) editor_state.picked_tile = SOURCE_RED;
-                else if (editor_state.picked_tile == SOURCE_WHITE + 1) editor_state.picked_tile = VOID;
-                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
-            }
+            editorMode(&tick_input);
         }
 
         // handle pack turning sequence TODO(spike): name all of these numbers better
@@ -3285,7 +3105,10 @@ void gameFrame(double delta_time, TickInput tick_input)
         else camera.fov = 30.0f;
 
         // write to file
-        if (editor_state.editor_mode && tick_input.i_press) writeBufferToFile(world_state.level_path);
+        if (editor_state.editor_mode && tick_input.i_press) 
+        {
+            writeBufferToFile(world_state.level_path);
+        }
         if (editor_state.editor_mode && tick_input.c_press) writeCameraToFile(world_state.level_path);
 
 		if (time_until_input > 0) time_until_input--;

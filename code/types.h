@@ -33,6 +33,7 @@ typedef struct Int2
     int32 x, y;
 }
 Int2;
+
 typedef struct Int3
 {
     int32 x, y, z;
