@@ -16,5 +16,8 @@ const vec3 light_direction = vec3(0.3, 1, 0.5);
 
 void main()
 {
-    out_color = texture(input_texture, uv) * max(dot(normalize(normal), normalize(light_direction)), 0.2);
+    vec4 tex = texture(input_texture, uv);
+    float light = max(dot(normalize(normal), normalize(light_direction)), 0.2);
+
+    out_color = vec4(tex.rgb * light, tex.a);
 }

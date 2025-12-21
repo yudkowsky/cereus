@@ -1594,7 +1594,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
         color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
         color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
         color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
 
         depth_stencil_state_creation_info.depthTestEnable = VK_FALSE;
