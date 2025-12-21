@@ -452,7 +452,6 @@ Vec4 spriteUV(SpriteId id, AssetType type, int32 atlas_width, int32 atlas_height
 }
 
 
-// TODO(spike): some stuff here is still called 'texture' instead of asset. change this after actually generalising to 3d models
 int32 loadAsset(char* path)
 {
     int width, height, channels;
@@ -654,7 +653,6 @@ int32 loadAsset(char* path)
     return (int32)(renderer_state.asset_cache_count - 1);
 }
 
-// TODO(spike): should probably be called something else now that we're using atlases
 int32 getOrLoadAsset(char* path)
 {
     // check if already loaded
