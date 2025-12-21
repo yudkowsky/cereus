@@ -4,11 +4,18 @@
 #include <stdio.h>
 #include "win32_renderer_bridge.h"
 #include <vulkan/vulkan.h>
-
-#include "stb_image.h" // TODO(spike): make a png parser, is probably fun. alternatively look at sean's c libraries
+#include "stb_image.h"
 
 const Int2 SCREEN_RESOLUTION = { 1920, 1080 };
-const float PIXEL_SCALE = 6.0f;
+
+// TODO(spike): set these in loadAsset where stb_image gives me width / height. store in CachedAsset.
+const int32 ATLAS_2D_WIDTH = 128;
+const int32 ATLAS_2D_HEIGHT = 128;
+const int32 ATLAS_3D_WIDTH = 480;
+const int32 ATLAS_3D_HEIGHT = 320;
+
+const char* ATLAS_2D_PATH = "w:/cereus/data/sprites/atlas-2d.png";
+const char* ATLAS_3D_PATH = "w:/cereus/data/sprites/atlas-3d.png";
 
 bool first_submit_since_draw = true;
 
@@ -25,6 +32,7 @@ typedef struct Sprite
     uint32 asset_index;
     Vec3 coords;
 	Vec3 size;
+    Vec4 uv;
 }
 Sprite;
 
@@ -34,6 +42,7 @@ typedef struct Cube
     Vec3 coords;
     Vec3 scale;
     Vec4 rotation;
+    Vec4 uv;
 }
 Cube;
 
@@ -46,7 +55,16 @@ typedef struct CachedAsset
 }
 CachedAsset;
 
-typedef struct
+typedef struct PushConstants
+{
+    float model[16];
+    float view[16];
+    float proj[16];
+    Vec4 uv_rect;
+}
+PushConstants;
+
+typedef struct RendererState
 {
     RendererPlatformHandles platform_handles;
     VkInstance vulkan_instance_handle;
@@ -89,6 +107,9 @@ typedef struct
     VkSampler pixel_art_sampler;
     CachedAsset asset_cache[256];
     uint32 asset_cache_count;
+
+    int32 atlas_2d_asset_index;
+    int32 atlas_3d_asset_index;
 
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
@@ -392,6 +413,45 @@ internal bool readEntireFile(char* path, void** out_data, size_t* out_size)
     return true;
 }
 
+int32 spriteIndexInAtlas(SpriteId id)
+{
+    return (id < SPRITE_2D_COUNT) ? (int32)id : ((int32)id - (int32)SPRITE_2D_COUNT);
+}
+
+void atlasCellSize(AssetType type, int32* cell_width, int32* cell_height)
+{
+    if (type == SPRITE_2D)
+    {
+        *cell_width = 16;
+        *cell_height = 16;
+        return;
+    }
+    if (type == CUBE_3D)
+    {
+        *cell_width = 48;
+        *cell_height = 32;
+        return;
+    }
+}
+
+Vec4 spriteUV(SpriteId id, AssetType type, int32 atlas_width, int32 atlas_height)
+{
+    int32 cell_width = 0, cell_height = 0;
+    atlasCellSize(type, &cell_width, &cell_height);
+    int32 per_row = atlas_width / cell_width;
+    int32 index = spriteIndexInAtlas(id);
+    int32 x = (index % per_row) * cell_width;
+    int32 y = (index / per_row) * cell_height;
+
+    float u0 = (float)x / (float)atlas_width;
+    float v0 = (float)y / (float)atlas_height;
+    float u1 = (float)(x + cell_width) / (float)atlas_width;
+    float v1 = (float)(y + cell_height) / (float)atlas_height;
+
+    return (Vec4){u0,v0,u1,v1};
+}
+
+
 // TODO(spike): some stuff here is still called 'texture' instead of asset. change this after actually generalising to 3d models
 int32 loadAsset(char* path)
 {
@@ -594,6 +654,7 @@ int32 loadAsset(char* path)
     return (int32)(renderer_state.asset_cache_count - 1);
 }
 
+// TODO(spike): should probably be called something else now that we're using atlases
 int32 getOrLoadAsset(char* path)
 {
     // check if already loaded
@@ -1460,7 +1521,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     VkPushConstantRange push_constant_range = {0};
     push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     push_constant_range.offset     = 0;
-    push_constant_range.size       = (uint32)(sizeof(float) * 3 * 16);
+    push_constant_range.size       = (uint32)sizeof(PushConstants); 
 
     VkPipelineLayoutCreateInfo graphics_pipeline_layout_creation_info = {0};
     graphics_pipeline_layout_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -1490,6 +1551,9 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	base_graphics_pipeline_creation_info.subpass = 0; // first (and only) subpass
 	base_graphics_pipeline_creation_info.basePipelineHandle = VK_NULL_HANDLE; // not deriving from another pipeline.
 	base_graphics_pipeline_creation_info.basePipelineIndex = -1;
+
+    renderer_state.atlas_2d_asset_index = getOrLoadAsset((char*)ATLAS_2D_PATH);
+    renderer_state.atlas_3d_asset_index = getOrLoadAsset((char*)ATLAS_3D_PATH);
 
     // sprite pipeline: depth off, blending on
     {
@@ -1530,31 +1594,40 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
 
     for (int asset_index = 0; asset_index < 1024; asset_index++)
     {
-        char* path = assets_to_load[asset_index].path;
-        if (path == 0) break;
+		AssetToLoad* batch = &assets_to_load[asset_index];
+        if (batch->instance_count == 0) continue;
 
-        int32 asset_cache_index = getOrLoadAsset(path);
-        if (asset_cache_index == -1) continue;
+        AssetType type = batch->type;
+        SpriteId sprite_id = batch->sprite_id;
+        int32 atlas_asset_index = (type == SPRITE_2D) ? renderer_state.atlas_2d_asset_index :
+            					  (type == CUBE_3D)   ? renderer_state.atlas_3d_asset_index :
+                                  -1;
+        if (atlas_asset_index < 0) continue;
+        int32 atlas_width  = (type == SPRITE_2D) ? ATLAS_2D_WIDTH  : ATLAS_3D_WIDTH;
+        int32 atlas_height = (type == SPRITE_2D) ? ATLAS_2D_HEIGHT : ATLAS_3D_HEIGHT;
+        Vec4 uv_rect = spriteUV(sprite_id, type, atlas_width, atlas_height);
 
         if (assets_to_load[asset_index].type == SPRITE_2D)
         {
 			for (int32 sprite_instance_index = 0; sprite_instance_index < assets_to_load[asset_index].instance_count; sprite_instance_index++)
             {
                 Sprite* sprite = &sprite_instances[sprite_instance_count++];
-                sprite->asset_index = (uint32)asset_cache_index;
-                sprite->coords      = assets_to_load[asset_index].coords[sprite_instance_index];
-                sprite->size        = assets_to_load[asset_index].scale[sprite_instance_index];
+                sprite->asset_index = (uint32)atlas_asset_index;
+                sprite->coords      = batch->coords[sprite_instance_index];
+                sprite->size        = batch->scale[sprite_instance_index];
+                sprite->uv          = uv_rect;
             }
         }
         else if (assets_to_load[asset_index].type == CUBE_3D)
         {
             for (int32 cube_instance_index = 0; cube_instance_index < assets_to_load[asset_index].instance_count; cube_instance_index++)
             {
-                Cube* cube_instance = &cube_instances[cube_instance_count++];
-                cube_instance->asset_index = (uint32)asset_cache_index;
-                cube_instance->coords      = assets_to_load[asset_index].coords[cube_instance_index];
-                cube_instance->scale       = assets_to_load[asset_index].scale[cube_instance_index];
-                cube_instance->rotation    = assets_to_load[asset_index].rotation[cube_instance_index];
+                Cube* cube= &cube_instances[cube_instance_count++];
+                cube->asset_index = (uint32)atlas_asset_index;
+                cube->coords      = batch->coords[cube_instance_index];
+                cube->scale       = batch->scale[cube_instance_index];
+                cube->rotation    = batch->rotation[cube_instance_index];
+                cube->uv          = uv_rect;
             }
         }
     }
@@ -1670,23 +1743,24 @@ void rendererDraw(void)
     int32 last_cube_asset = -1;
     for (uint32 cube_instance_index = 0; cube_instance_index < cube_instance_count; cube_instance_index++)
     {
-        Cube* cube_instance = &cube_instances[cube_instance_index];
+        Cube* cube= &cube_instances[cube_instance_index];
 
-        if ((int32)cube_instance->asset_index != last_cube_asset)
+        if ((int32)cube->asset_index != last_cube_asset)
         {
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_layout, 0, 1, &renderer_state.descriptor_sets[cube_instance->asset_index], 0, 0);
-            last_cube_asset = (int32)cube_instance->asset_index;
+			vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_layout, 0, 1, &renderer_state.descriptor_sets[cube->asset_index], 0, 0);
+            last_cube_asset = (int32)cube->asset_index;
         }
 
-        float model_matrix[16], projection_view_matrix[16], mvp_matrix[16];
-
-        mat4BuildTRS(model_matrix, cube_instance->coords, cube_instance->rotation, cube_instance->scale);
-        mat4Multiply(projection_view_matrix, projection_matrix, view_matrix);
-        mat4Multiply(mvp_matrix, projection_view_matrix, model_matrix);
+        float model_matrix[16];
+        mat4BuildTRS(model_matrix, cube->coords, cube->rotation, cube->scale);
 		
-        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 						  sizeof(model_matrix), 	 model_matrix);
-        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(model_matrix),     sizeof(view_matrix), 		 view_matrix);
-        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(model_matrix) * 2, sizeof(projection_matrix), projection_matrix);
+        PushConstants push_constants = {0};
+        memcpy(push_constants.model, model_matrix, 		sizeof(push_constants.model));
+        memcpy(push_constants.view,  view_matrix, 		sizeof(push_constants.view));
+        memcpy(push_constants.proj,  projection_matrix, sizeof(push_constants.proj));
+        push_constants.uv_rect = cube->uv;
+
+        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push_constants);
         
         vkCmdDrawIndexed(command_buffer, renderer_state.cube_index_count, 1, 0, 0, 0);
     }
@@ -1711,6 +1785,7 @@ void rendererDraw(void)
 	for (uint32 sprite_instance_index = 0; sprite_instance_index < sprite_instance_count; sprite_instance_index++)
     {
         Sprite* sprite = &sprite_instances[sprite_instance_index];
+
         if ((int32)sprite->asset_index != last_sprite_asset)
         {
             vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_layout, 0, 1, &renderer_state.descriptor_sets[sprite->asset_index], 0, 0);
@@ -1718,15 +1793,16 @@ void rendererDraw(void)
         }
 
         float model_matrix[16];
-        Vec3 pos = { sprite->coords.x, sprite->coords.y, 0.0f };
-        Vec3 scale = { sprite->size.x, sprite->size.y, 1.0f };
         Vec4 identity_quaternion = { 0, 0, 0, 1}; // TODO(spike): make global
+        mat4BuildTRS(model_matrix, sprite->coords, identity_quaternion, sprite->size);
 
-        mat4BuildTRS(model_matrix, pos, identity_quaternion, scale);
+        PushConstants push_constants = {0};
+        memcpy(push_constants.model, model_matrix, sizeof(push_constants.model));
+        memcpy(push_constants.view,  view2d, 	   sizeof(push_constants.view));
+        memcpy(push_constants.proj,  ortho, 	   sizeof(push_constants.proj));
+        push_constants.uv_rect = sprite->uv;
 
-        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, 						  sizeof(model_matrix), model_matrix);
-        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(model_matrix),     sizeof(view2d), 		view2d);
-        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(model_matrix) * 2, sizeof(ortho), 		ortho);
+        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push_constants);
 
         vkCmdDrawIndexed(command_buffer, renderer_state.sprite_index_count, 1, 0, 0, 0);
     }

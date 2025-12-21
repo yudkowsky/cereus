@@ -144,7 +144,7 @@ Camera camera = {0};
 float camera_yaw = 0.0f;
 float camera_pitch = 0.0f;
 
-AssetToLoad assets_to_load[256] = {0};
+AssetToLoad assets_to_load[1024] = {0};
 
 WorldState world_state = {0};
 WorldState next_world_state = {0};
@@ -642,119 +642,115 @@ void writeCameraToFile(char* path)
 
 // DRAW ASSET
 
-char* getSpritePath(TileType tile)
+AssetType assetAtlas(SpriteId id)
+{
+    return (id < SPRITE_2D_COUNT) ? SPRITE_2D : CUBE_3D;
+}
+
+SpriteId getSprite2DId(TileType tile)
 {
     switch(tile)
     {
-        case NONE:        return 0;
-        case VOID:        return void_path_2d;
-        case GRID:        return grid_path_2d;
-        case WALL:        return wall_path_2d;
-        case BOX:         return box_path_2d;
-        case PLAYER:      return player_path_2d;
-        case MIRROR:      return mirror_path_2d;
-        case CRYSTAL:     return crystal_path_2d;
-        case PACK:    	  return pack_path_2d;
-        case PERM_MIRROR: return perm_mirror_path_2d;
-        case NOT_VOID:    return not_void_path_2d;
-        case WIN_BLOCK:   return win_block_path_2d;
+        case NONE:        return NO_ID;
+        case VOID:        return SPRITE_2D_VOID;
+        case GRID:        return SPRITE_2D_GRID;
+        case WALL:        return SPRITE_2D_WALL;
+        case BOX:         return SPRITE_2D_BOX;
+        case PLAYER:      return SPRITE_2D_PLAYER;
+        case MIRROR:      return SPRITE_2D_MIRROR;
+        case CRYSTAL:     return SPRITE_2D_CRYSTAL;
+        case PACK:    	  return SPRITE_2D_PACK;
+        case PERM_MIRROR: return SPRITE_2D_PERM_MIRROR;
+        case NOT_VOID:    return SPRITE_2D_NOT_VOID;
+        case WIN_BLOCK:   return SPRITE_2D_WIN_BLOCK;
 
-        case SOURCE_RED:	 return source_red_path_2d;
-        case SOURCE_GREEN:	 return source_green_path_2d;
-        case SOURCE_BLUE:	 return source_blue_path_2d;
-        case SOURCE_MAGENTA: return source_magenta_path_2d;
-        case SOURCE_YELLOW:	 return source_yellow_path_2d;
-        case SOURCE_CYAN:	 return source_cyan_path_2d;
-        case SOURCE_WHITE:	 return source_white_path_2d;
+        case SOURCE_RED:	 return SPRITE_2D_SOURCE_RED;
+        case SOURCE_GREEN:	 return SPRITE_2D_SOURCE_GREEN;
+        case SOURCE_BLUE:	 return SPRITE_2D_SOURCE_BLUE;
+        case SOURCE_MAGENTA: return SPRITE_2D_SOURCE_MAGENTA;
+        case SOURCE_YELLOW:	 return SPRITE_2D_SOURCE_YELLOW;
+        case SOURCE_CYAN:	 return SPRITE_2D_SOURCE_CYAN;
+        case SOURCE_WHITE:	 return SPRITE_2D_SOURCE_WHITE;
         default: return 0;
     }
 }
 
-char* getCubePath(TileType tile)
+SpriteId getCube3DId(TileType tile)
 {
     switch(tile)
     {
-        case NONE:        return 0;
-        case VOID:        return void_path;
-        case GRID:        return grid_path;
-        case WALL:        return wall_path;
-        case BOX:         return box_path;
-        case PLAYER:      return player_path;
-        case MIRROR:      return mirror_path;
-        case CRYSTAL:     return crystal_path;
-        case PACK:    	  return pack_path;
-        case PERM_MIRROR: return perm_mirror_path;
-        case NOT_VOID:    return not_void_path;
-        case WIN_BLOCK:   return win_block_path;
+        case NONE:        return NO_ID;
+        case VOID:        return CUBE_3D_VOID;
+        case GRID:        return CUBE_3D_GRID;
+        case WALL:        return CUBE_3D_WALL;
+        case BOX:         return CUBE_3D_BOX;
+        case PLAYER:      return CUBE_3D_PLAYER;
+        case MIRROR:      return CUBE_3D_MIRROR;
+        case CRYSTAL:     return CUBE_3D_CRYSTAL;
+        case PACK:    	  return CUBE_3D_PACK;
+        case PERM_MIRROR: return CUBE_3D_PERM_MIRROR;
+        case NOT_VOID:    return CUBE_3D_NOT_VOID;
+        case WIN_BLOCK:   return CUBE_3D_WIN_BLOCK;
 
-        case LASER_RED:     return laser_red_path;
-        case LASER_GREEN:	return laser_green_path;
-        case LASER_BLUE:	return laser_blue_path;
-        case LASER_MAGENTA:	return laser_magenta_path;
-        case LASER_YELLOW:	return laser_yellow_path;
-        case LASER_CYAN:	return laser_cyan_path;
-        case LASER_WHITE:	return laser_white_path;
+        case LASER_RED:     return CUBE_3D_LASER_RED;
+        case LASER_GREEN:	return CUBE_3D_LASER_GREEN;
+        case LASER_BLUE:	return CUBE_3D_LASER_BLUE;
+        case LASER_MAGENTA:	return CUBE_3D_LASER_MAGENTA;
+        case LASER_YELLOW:	return CUBE_3D_LASER_YELLOW;
+        case LASER_CYAN:	return CUBE_3D_LASER_CYAN;
+        case LASER_WHITE:	return CUBE_3D_LASER_WHITE;
 
-        case SOURCE_RED:	 return source_red_path;
-        case SOURCE_GREEN:	 return source_green_path;
-        case SOURCE_BLUE:	 return source_blue_path;
-        case SOURCE_MAGENTA: return source_magenta_path;
-        case SOURCE_YELLOW:	 return source_yellow_path;
-        case SOURCE_CYAN:	 return source_cyan_path;
-        case SOURCE_WHITE:	 return source_white_path;
+        case SOURCE_RED:	 return CUBE_3D_SOURCE_RED;
+        case SOURCE_GREEN:	 return CUBE_3D_SOURCE_GREEN;
+        case SOURCE_BLUE:	 return CUBE_3D_SOURCE_BLUE;
+        case SOURCE_MAGENTA: return CUBE_3D_SOURCE_MAGENTA;
+        case SOURCE_YELLOW:	 return CUBE_3D_SOURCE_YELLOW;
+        case SOURCE_CYAN:	 return CUBE_3D_SOURCE_CYAN;
+        case SOURCE_WHITE:	 return CUBE_3D_SOURCE_WHITE;
         default: return 0;
     }
 }
 
 // assuming one path -> one asset type.
-void drawAsset(char* path, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation)
+void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation)
 {
 	int32 asset_location = -1;
+    // TODO(spike): add arrayCount function instead of just looping to 256
     for (int32 asset_index = 0; asset_index < 256; asset_index++)
     {
-        if (assets_to_load[asset_index].path == path) 
+        if (assets_to_load[asset_index].instance_count == 0)
         {
-            asset_location = asset_index;
-            break;
+            if (asset_location == -1) asset_location = asset_index;
+            continue;
         }
-        if (assets_to_load[asset_index].path == 0)
+        if (assets_to_load[asset_index].sprite_id == id && assets_to_load[asset_index].type == type)
         {
-            asset_location = asset_index;
-            assets_to_load[asset_location].path = path;
-            assets_to_load[asset_location].type = type;
+			asset_location = asset_index;
             break;
         }
     }
-    switch (type)
+    AssetToLoad* a = &assets_to_load[asset_location];
+
+    if (a->instance_count == 0)
     {
-        case SPRITE_2D:
-        {
-            assets_to_load[asset_location].coords[assets_to_load[asset_location].instance_count] = coords;
-            assets_to_load[asset_location].scale[assets_to_load[asset_location].instance_count]  = scale;
-            assets_to_load[asset_location].instance_count++;
-            return;
-        }
-        case CUBE_3D:
-        {
-            assets_to_load[asset_location].coords[assets_to_load[asset_location].instance_count]   = coords;
-            assets_to_load[asset_location].scale[assets_to_load[asset_location].instance_count]    = scale;
-            assets_to_load[asset_location].rotation[assets_to_load[asset_location].instance_count] = rotation;
-            assets_to_load[asset_location].instance_count++;
-            return;
-        }
-        case MODEL_3D:
-        {
-            return;
-        }
+        a->type = type;
+        a->sprite_id = id;
     }
+    int32 index = a->instance_count;
+    a->coords[index] = coords;
+    a->scale[index] = scale;
+    a->rotation[index] = rotation;
+    a->instance_count++;
 }
 
-void drawEntityLoop(Entity* entity_group, char* path, AssetType type, Vec3 scale)
+// TODO(spike): maybe just get rid this and be more sure about setting tile to NONE when id is -1; sentinel value is just there for the entity array, not for rendering really!
+// 				then can do the draw in the big loop where i also do walls, voids, etc.
+void drawEntityLoop(Entity* entity_group, SpriteId id, AssetType type, Vec3 scale)
 {
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
     {
         if (entity_group[entity_index].id == -1) continue;
-        drawAsset(path, type, entity_group[entity_index].position_norm, scale, entity_group[entity_index].rotation_quat);
+        drawAsset(id, type, entity_group[entity_index].position_norm, scale, entity_group[entity_index].rotation_quat);
     }
 }
 
@@ -2305,8 +2301,6 @@ void editorMode(TickInput *tick_input)
         {
             Vec3 neg_z_basis = {0, 0, -1};
             RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
-
-			
         }
     }
 }
@@ -3053,13 +3047,13 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (is_diagonal) laser_scale = DIAGONAL_LASER_SCALE;
             else 			 laser_scale = ORTHOGONAL_LASER_SCALE;
 
-            if      (color.red && color.green && color.blue) drawAsset(laser_white_path,   CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
-            else if (color.red && color.green              ) drawAsset(laser_yellow_path,  CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
-            else if (color.red &&                color.blue) drawAsset(laser_magenta_path, CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
-            else if (             color.green && color.blue) drawAsset(laser_cyan_path,    CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
-            else if (color.red                             ) drawAsset(laser_red_path,     CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
-            else if (             color.green              ) drawAsset(laser_green_path,   CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
-            else if (                            color.blue) drawAsset(laser_blue_path,    CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            if      (color.red && color.green && color.blue) drawAsset(CUBE_3D_LASER_WHITE,   CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (color.red && color.green              ) drawAsset(CUBE_3D_LASER_YELLOW,  CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (color.red &&                color.blue) drawAsset(CUBE_3D_LASER_MAGENTA, CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (             color.green && color.blue) drawAsset(CUBE_3D_LASER_CYAN,    CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (color.red                             ) drawAsset(CUBE_3D_LASER_RED,     CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (             color.green              ) drawAsset(CUBE_3D_LASER_GREEN,   CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
+            else if (                            color.blue) drawAsset(CUBE_3D_LASER_BLUE,    CUBE_3D, intCoordsToNorm(laser_buffer[laser_index].coords), laser_scale, directionToQuaternion(laser_buffer[laser_index].direction, false));
         }
         // clear laser buffer 
         memset(laser_buffer, 0, sizeof(laser_buffer));
@@ -3069,14 +3063,14 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
 			TileType tile = world_state.buffer[tile_index];
 			if (tile == PLAYER || isSource(tile) || isPushable(tile) || tile == PERM_MIRROR) continue;
-			if (tile != NONE)   drawAsset(getCubePath(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false));
+			if (tile != NONE)   drawAsset(getCube3DId(tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false));
         }
 
         // draw non-colored entities
-        drawEntityLoop(world_state.boxes,    	 box_path,         CUBE_3D, DEFAULT_SCALE);
-        drawEntityLoop(world_state.mirrors,  	 mirror_path,      CUBE_3D, DEFAULT_SCALE);
-        drawEntityLoop(world_state.crystals, 	 crystal_path,     CUBE_3D, DEFAULT_SCALE);
-        drawEntityLoop(world_state.perm_mirrors, perm_mirror_path, CUBE_3D, DEFAULT_SCALE);
+        drawEntityLoop(world_state.boxes,    	 CUBE_3D_BOX,         CUBE_3D, DEFAULT_SCALE);
+        drawEntityLoop(world_state.mirrors,  	 CUBE_3D_MIRROR,      CUBE_3D, DEFAULT_SCALE);
+        drawEntityLoop(world_state.crystals, 	 CUBE_3D_CRYSTAL,     CUBE_3D, DEFAULT_SCALE);
+        drawEntityLoop(world_state.perm_mirrors, CUBE_3D_PERM_MIRROR, CUBE_3D, DEFAULT_SCALE);
 
         if (world_state.player.id != -1)
         {
@@ -3085,26 +3079,26 @@ void gameFrame(double delta_time, TickInput tick_input)
             // TODO(spike): this is terrible (fix with shaders)
     		bool hit_by_green = false;
             if (player->green_hit.north || player->green_hit.west || player->green_hit.south || player->green_hit.east || player->green_hit.up || player->green_hit.down) hit_by_green = true;
-            if      (player->hit_by_red && hit_by_green && player->hit_by_blue) drawAsset(white_player_path,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (player->hit_by_red && hit_by_green             		  ) drawAsset(yellow_player_path,  CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (player->hit_by_red &&      	       player->hit_by_blue) drawAsset(magenta_player_path, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (             		   hit_by_green && player->hit_by_blue) drawAsset(cyan_player_path,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (player->hit_by_red                 	  				  ) drawAsset(red_player_path,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (             		   hit_by_green             		  ) drawAsset(green_player_path,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (                            		   player->hit_by_blue) drawAsset(blue_player_path,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else drawAsset(player_path, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            if      (player->hit_by_red && hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_WHITE,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (player->hit_by_red && hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_YELLOW,  CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (player->hit_by_red &&      	       player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (             		   hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_CYAN,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (player->hit_by_red                 	  				  ) drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (             		   hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_GREEN,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else if (                            		   player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
+            else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
 
-            if (do_player_ghost) drawAsset(player_ghost_path, CUBE_3D, intCoordsToNorm(world_state.player_ghost_coords), PLAYER_SCALE, directionToQuaternion(world_state.player_ghost_direction, true));
-            if (do_pack_ghost)   drawAsset(pack_ghost_path,   CUBE_3D, intCoordsToNorm(world_state.pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(world_state.pack_ghost_direction, true));
+            if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(world_state.player_ghost_coords), PLAYER_SCALE, directionToQuaternion(world_state.player_ghost_direction, true));
+            if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(world_state.pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(world_state.pack_ghost_direction, true));
         }
-		if (world_state.pack.id != -1) drawAsset(pack_path, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat);
+		if (world_state.pack.id != -1) drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat);
 
 		// draw sources 
 		for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)
         {
             if (world_state.sources[source_index].id == -1) continue;
-            char* path = getCubePath(getTileType(world_state.sources[source_index].coords));
-            drawAsset(path, CUBE_3D, world_state.sources[source_index].position_norm, DEFAULT_SCALE, world_state.sources[source_index].rotation_quat);
+            int32 id = getCube3DId(getTileType(world_state.sources[source_index].coords));
+            drawAsset(id, CUBE_3D, world_state.sources[source_index].position_norm, DEFAULT_SCALE, world_state.sources[source_index].rotation_quat);
         }
 
 		// DRAW 2D
@@ -3113,12 +3107,12 @@ void gameFrame(double delta_time, TickInput tick_input)
             // crosshair
             Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
             Vec3 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2, 0.0f };
-        	drawAsset(crosshair_path, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION);
+        	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION);
 
             // picked block
             Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
             Vec3 picked_block_coords = { SCREEN_WIDTH_PX - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
-            drawAsset(getSpritePath(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION);
+            drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION);
         }
 
         // decide which camera to use

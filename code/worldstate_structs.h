@@ -15,9 +15,73 @@ typedef enum
 }
 AssetType;
 
+typedef enum SpriteId 
+{
+    NO_ID = -1,
+    SPRITE_2D_VOID,
+    SPRITE_2D_GRID,
+    SPRITE_2D_WALL,
+    SPRITE_2D_BOX,
+    SPRITE_2D_PLAYER,
+	SPRITE_2D_MIRROR,
+    SPRITE_2D_CRYSTAL,
+    SPRITE_2D_PACK,
+    SPRITE_2D_PERM_MIRROR,
+    SPRITE_2D_NOT_VOID,
+    SPRITE_2D_WIN_BLOCK,
+    SPRITE_2D_SOURCE_RED,
+    SPRITE_2D_SOURCE_GREEN,
+    SPRITE_2D_SOURCE_BLUE,
+    SPRITE_2D_SOURCE_MAGENTA,
+    SPRITE_2D_SOURCE_YELLOW,
+    SPRITE_2D_SOURCE_CYAN,
+    SPRITE_2D_SOURCE_WHITE,
+    SPRITE_2D_CROSSHAIR,
+
+    SPRITE_2D_COUNT,
+
+    CUBE_3D_VOID,
+    CUBE_3D_GRID,
+    CUBE_3D_WALL,
+    CUBE_3D_BOX,
+    CUBE_3D_PLAYER,
+    CUBE_3D_MIRROR,
+    CUBE_3D_CRYSTAL,
+    CUBE_3D_PACK,
+    CUBE_3D_PERM_MIRROR,
+    CUBE_3D_NOT_VOID,
+    CUBE_3D_WIN_BLOCK,
+    CUBE_3D_PLAYER_GHOST,
+    CUBE_3D_PACK_GHOST,
+    CUBE_3D_SOURCE_RED,
+    CUBE_3D_SOURCE_GREEN,
+    CUBE_3D_SOURCE_BLUE,
+    CUBE_3D_SOURCE_MAGENTA,
+    CUBE_3D_SOURCE_YELLOW,
+    CUBE_3D_SOURCE_CYAN,
+    CUBE_3D_SOURCE_WHITE,
+    CUBE_3D_LASER_RED,
+    CUBE_3D_LASER_GREEN,
+    CUBE_3D_LASER_BLUE,
+    CUBE_3D_LASER_MAGENTA,
+    CUBE_3D_LASER_YELLOW,
+    CUBE_3D_LASER_CYAN,
+    CUBE_3D_LASER_WHITE,
+    CUBE_3D_PLAYER_RED,
+    CUBE_3D_PLAYER_GREEN,
+    CUBE_3D_PLAYER_BLUE,
+    CUBE_3D_PLAYER_MAGENTA,
+    CUBE_3D_PLAYER_YELLOW,
+    CUBE_3D_PLAYER_CYAN,
+    CUBE_3D_PLAYER_WHITE,
+
+    ASSET_COUNT
+}
+SpriteId;
+
 typedef struct AssetToLoad 
 {
-    char* path;
+    SpriteId sprite_id;
 	AssetType type;
     Vec3 coords[8192];
 	Vec3 scale[8192];
@@ -113,36 +177,37 @@ typedef struct TickInput
 }	
 TickInput;
 
+// TODO(spike): rename NONE -> NO_TILE
 typedef enum TileType
 {
-    NONE    	= 0,
-    VOID        = 1,
-    GRID    	= 2,
-    WALL    	= 3,
-    BOX     	= 4,
-    PLAYER  	= 5,
-    MIRROR  	= 6,
-    CRYSTAL 	= 7,
-    PACK        = 8,
-    PERM_MIRROR = 9,
-    NOT_VOID    = 10,
-    WIN_BLOCK   = 11,
+    NONE,
+    VOID,
+    GRID,
+    WALL,
+    BOX,
+    PLAYER,
+    MIRROR,
+    CRYSTAL,
+    PACK,
+    PERM_MIRROR,
+    NOT_VOID,
+    WIN_BLOCK,
 
-    SOURCE_RED     = 32,
-    SOURCE_GREEN   = 33,
-    SOURCE_BLUE    = 34,
-    SOURCE_MAGENTA = 35,
-    SOURCE_YELLOW  = 36,
-    SOURCE_CYAN    = 37,
-    SOURCE_WHITE   = 38,
+    SOURCE_RED,
+    SOURCE_GREEN,
+    SOURCE_BLUE,
+    SOURCE_MAGENTA,
+    SOURCE_YELLOW,
+    SOURCE_CYAN,
+    SOURCE_WHITE,
 
-    LASER_RED = 40,
-    LASER_GREEN = 41,
-    LASER_BLUE = 42,
-    LASER_MAGENTA = 43,
-    LASER_YELLOW = 44,
-    LASER_CYAN = 45,
-    LASER_WHITE = 46
+    LASER_RED,
+    LASER_GREEN,
+    LASER_BLUE,
+    LASER_MAGENTA,
+    LASER_YELLOW,
+    LASER_CYAN,
+    LASER_WHITE
 }
 TileType;
 
