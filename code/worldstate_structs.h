@@ -9,9 +9,9 @@
 
 typedef enum 
 {
-	SPRITE_2D = 0,
-    CUBE_3D = 1,
-    MODEL_3D = 2
+	SPRITE_2D,
+    CUBE_3D,
+    MODEL_3D
 }
 AssetType;
 
@@ -37,6 +37,9 @@ typedef enum SpriteId
     SPRITE_2D_SOURCE_CYAN,
     SPRITE_2D_SOURCE_WHITE,
     SPRITE_2D_CROSSHAIR,
+
+    SPRITE_2D_FONT_SPACE,
+    SPRITE_2D_FONT_LAST = SPRITE_2D_FONT_SPACE + 94,
 
     SPRITE_2D_COUNT,
 
@@ -123,6 +126,13 @@ typedef enum
 }
 Direction;
 
+typedef struct TextInput
+{
+    uint32 codepoints[64];
+    int32 count;
+}
+TextInput;
+
 typedef struct TickInput
 {
 	float mouse_dx;
@@ -172,10 +182,22 @@ typedef struct TickInput
 
     bool space_press;
     bool shift_press;
-    bool back_press;
+
     bool dash_press;
+
+    bool backspace_pressed_this_frame;
+    bool enter_pressed_this_frame;
+
+    TextInput text;
 }	
 TickInput;
+
+typedef struct EditBuffer
+{
+    char string[256];
+    int32 length;
+}
+EditBuffer;
 
 // TODO(spike): rename NONE -> NO_TILE
 typedef enum TileType
@@ -333,6 +355,8 @@ typedef struct EditorState
     bool do_wide_camera;
     TileType picked_tile;
     Direction picked_direction;
+
+    EditBuffer edit_buffer;
 }
 EditorState;
 

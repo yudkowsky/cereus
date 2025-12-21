@@ -20,8 +20,8 @@ const Vec3 DIAGONAL_LASER_SCALE   = { 0.125f, 0.125f, 1.415f };
 const float RAYCAST_SEEK_LENGTH = 20.0f;
 
 const int32 EDITOR_INPUT_TIME_UNTIL_ALLOW = 9;
-const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9; // TODO(spike): move and push animation time are always the same
-const int32 TURN_ANIMATION_TIME = 9;
+const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9; // TODO(spike): make this freely editable (want to up this by a few frames to emphasise pushing multiple box mechanics)
+const int32 TURN_ANIMATION_TIME = 9; // somewhat hard coded, tied to PUSH_FROM_TURN...
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
 const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6; // also somewhat hard coded, based on some function of the turn animation time and the sequencing based on it
 const int32 PUSH_MIRROR_ANIMATION_TIME = 16;
@@ -35,7 +35,7 @@ const int32 PACK_TIME_IN_INTERMEDIATE_STATE = 4;
 const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
 
-const int32 LASER_BUFFER_MOVING_TIME_ALLOWED_FOR_PASSTHROUGH = 5; // actually inverted: this is 8 - x frames
+const int32 LASER_BUFFER_MOVING_TIME_ALLOWED_FOR_PASSTHROUGH = 5; // actually inverted: this is 9 - x frames
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
@@ -61,69 +61,10 @@ const int32 ID_OFFSET_CRYSTAL 	  = 100 * 3;
 const int32 ID_OFFSET_SOURCE  	  = 100 * 4;
 const int32 ID_OFFSET_PERM_MIRROR = 100 * 5;
 
-// assets as 3d cubes
-const char* const void_path        = "data/sprites/3d-assets/void.png";
-const char* const grid_path        = "data/sprites/3d-assets/grid.png";
-const char* const wall_path        = "data/sprites/3d-assets/wall.png";
-const char* const box_path         = "data/sprites/3d-assets/box.png";
-const char* const player_path      = "data/sprites/3d-assets/player.png";
-const char* const mirror_path      = "data/sprites/3d-assets/mirror.png";
-const char* const crystal_path     = "data/sprites/3d-assets/crystal.png";
-const char* const pack_path    	   = "data/sprites/3d-assets/pack.png";
-const char* const perm_mirror_path = "data/sprites/3d-assets/perm-mirror.png";
-const char* const not_void_path    = "data/sprites/3d-assets/not-void.png";
-const char* const win_block_path   = "data/sprites/3d-assets/win-block.png";
-
-const char* const player_ghost_path = "data/sprites/3d-assets/player-ghost.png";
-const char* const pack_ghost_path   = "data/sprites/3d-assets/pack-ghost.png";
-
-const char* const red_player_path     = "data/sprites/3d-assets/player-red.png";
-const char* const green_player_path   = "data/sprites/3d-assets/player-green.png";
-const char* const blue_player_path    = "data/sprites/3d-assets/player-blue.png";
-const char* const magenta_player_path = "data/sprites/3d-assets/player-magenta.png";
-const char* const yellow_player_path  = "data/sprites/3d-assets/player-yellow.png";
-const char* const cyan_player_path    = "data/sprites/3d-assets/player-cyan.png";
-const char* const white_player_path   = "data/sprites/3d-assets/player-white.png";
-
-const char* const laser_red_path      = "data/sprites/3d-assets/laser-red.png";
-const char* const laser_green_path    = "data/sprites/3d-assets/laser-green.png";
-const char* const laser_blue_path     = "data/sprites/3d-assets/laser-blue.png";
-const char* const laser_magenta_path  = "data/sprites/3d-assets/laser-magenta.png";
-const char* const laser_yellow_path   = "data/sprites/3d-assets/laser-yellow.png";
-const char* const laser_cyan_path     = "data/sprites/3d-assets/laser-cyan.png";
-const char* const laser_white_path    = "data/sprites/3d-assets/laser-white.png";
-
-const char* const source_red_path     = "data/sprites/3d-assets/source-red.png";
-const char* const source_green_path   = "data/sprites/3d-assets/source-green.png";
-const char* const source_blue_path    = "data/sprites/3d-assets/source-blue.png";
-const char* const source_magenta_path = "data/sprites/3d-assets/source-magenta.png";
-const char* const source_yellow_path  = "data/sprites/3d-assets/source-yellow.png";
-const char* const source_cyan_path    = "data/sprites/3d-assets/source-cyan.png";
-const char* const source_white_path   = "data/sprites/3d-assets/source-white.png";
-
-// assets as 2d sprites
-const char* const face_path_2d     = "data/sprites/2d-assets/2d-face.png";
-const char* const crosshair_path   = "data/sprites/2d-assets/crosshair.png";
-
-const char* const void_path_2d        = "data/sprites/2d-assets/2d-void.png";
-const char* const grid_path_2d        = "data/sprites/2d-assets/2d-grid.png";
-const char* const wall_path_2d        = "data/sprites/2d-assets/2d-wall.png";
-const char* const box_path_2d         = "data/sprites/2d-assets/2d-box.png";
-const char* const player_path_2d      = "data/sprites/2d-assets/2d-player.png";
-const char* const mirror_path_2d      = "data/sprites/2d-assets/2d-mirror.png";
-const char* const crystal_path_2d     = "data/sprites/2d-assets/2d-crystal.png";
-const char* const pack_path_2d    	  = "data/sprites/2d-assets/2d-pack.png";
-const char* const perm_mirror_path_2d = "data/sprites/2d-assets/2d-perm-mirror.png";
-const char* const not_void_path_2d    = "data/sprites/2d-assets/2d-not-void.png";
-const char* const win_block_path_2d   = "data/sprites/2d-assets/2d-win-block.png";
-
-const char* const source_red_path_2d     = "data/sprites/2d-assets/2d-source-red.png";
-const char* const source_green_path_2d   = "data/sprites/2d-assets/2d-source-green.png";
-const char* const source_blue_path_2d    = "data/sprites/2d-assets/2d-source-blue.png";
-const char* const source_magenta_path_2d = "data/sprites/2d-assets/2d-source-magenta.png";
-const char* const source_yellow_path_2d  = "data/sprites/2d-assets/2d-source-yellow.png";
-const char* const source_cyan_path_2d    = "data/sprites/2d-assets/2d-source-cyan.png";
-const char* const source_white_path_2d   = "data/sprites/2d-assets/2d-source-white.png";
+const int32 FONT_FIRST_ASCII = 32;
+const int32 FONT_LAST_ASCII = 126;
+const int32 FONT_CELL_WIDTH_PX = 6;
+const int32 FONT_CELL_HEIGHT_PX = 10;
 
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
@@ -715,7 +656,6 @@ SpriteId getCube3DId(TileType tile)
 void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation)
 {
 	int32 asset_location = -1;
-    // TODO(spike): add arrayCount function instead of just looping to 256
     for (int32 asset_index = 0; asset_index < 256; asset_index++)
     {
         if (assets_to_load[asset_index].instance_count == 0)
@@ -751,6 +691,30 @@ void drawEntityLoop(Entity* entity_group, SpriteId id, AssetType type, Vec3 scal
     {
         if (entity_group[entity_index].id == -1) continue;
         drawAsset(id, type, entity_group[entity_index].position_norm, scale, entity_group[entity_index].rotation_quat);
+    }
+}
+
+void drawText(char* string, float x, float y, float scale)
+{
+	float pen_x = x;
+    float pen_y = y;
+	for (char* pointer = string; *pointer; ++pointer)
+    {
+		char c = *pointer;
+        if (c == '\n')
+        {
+            pen_x = x;
+            pen_y += FONT_CELL_HEIGHT_PX * scale; 
+            continue;
+        }
+        unsigned char uc = (unsigned char)c;
+        if (uc < FONT_FIRST_ASCII || uc > FONT_LAST_ASCII) uc = '?';
+
+        SpriteId id = (SpriteId)(SPRITE_2D_FONT_SPACE + ((unsigned char)c - 32));
+		Vec3 draw_coords = { pen_x, pen_y, 0};
+        Vec3 draw_scale = { scale, scale, 1};
+        drawAsset(id, SPRITE_2D, draw_coords, draw_scale, IDENTITY_QUATERNION);
+		pen_x += FONT_CELL_WIDTH_PX * scale;
     }
 }
 
@@ -2152,6 +2116,44 @@ bool calculateGhosts()
     return true;
 }
 
+// TEXT HELPERS FOR EDIT_BUFFER
+
+void editAppendChar(char c)
+{
+    EditBuffer* buffer = &editor_state.edit_buffer; 
+    if (buffer->length >= 256 - 1) return; // keep space for null terminator
+    buffer->string[buffer->length++] = c;
+}
+
+void editBackspace()
+{
+    EditBuffer* buffer = &editor_state.edit_buffer;
+    if (buffer->length == 0) return;
+    buffer->length--;
+    buffer->string[buffer->length] = 0;
+}
+
+void updateTextInput(TickInput *input)
+{
+    for (int32 chars_typed_index = 0; chars_typed_index < input->text.count; chars_typed_index++)
+    {
+		uint32 codepoint = input->text.codepoints[chars_typed_index];
+        char c = (char)codepoint;
+        editAppendChar(c);
+    }
+    if (input->backspace_pressed_this_frame)
+    {
+        editBackspace();
+    }
+}
+
+int32 glyphSprite(char c)
+{
+    unsigned char uc = (unsigned char)c;
+    if (uc < FONT_FIRST_ASCII || uc > FONT_LAST_ASCII) uc = '?';
+    return (SpriteId)(uc - FONT_FIRST_ASCII);
+}
+
 // EDITOR
 
 /*
@@ -3120,10 +3122,14 @@ void gameFrame(double delta_time, TickInput tick_input)
         else camera.fov = 30.0f;
 
         // write to file
-        if (editor_state.editor_mode && tick_input.i_press) writeBufferToFile(world_state.level_path);
-        if (editor_state.editor_mode && tick_input.c_press) writeCameraToFile(world_state.level_path);
+        if (time_until_input == 0 && editor_state.editor_mode && tick_input.i_press) writeBufferToFile(world_state.level_path);
+        if (time_until_input == 0 && editor_state.editor_mode && tick_input.c_press) writeCameraToFile(world_state.level_path);
 
 		if (time_until_input > 0) time_until_input--;
+
+        updateTextInput(&tick_input);
+        Vec3 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2, 0.0f };
+        drawText(editor_state.edit_buffer.string, center_screen.x, center_screen.y, 20);
 
         rendererSubmitFrame(assets_to_load, camera);
         memset(assets_to_load, 0, sizeof(assets_to_load));

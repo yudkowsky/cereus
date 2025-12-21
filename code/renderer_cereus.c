@@ -11,10 +11,13 @@ const Int2 SCREEN_RESOLUTION = { 1920, 1080 };
 // TODO(spike): set these in loadAsset where stb_image gives me width / height. store in CachedAsset.
 const int32 ATLAS_2D_WIDTH = 128;
 const int32 ATLAS_2D_HEIGHT = 128;
+const int32 ATLAS_FONT_WIDTH = 120;
+const int32 ATLAS_FONT_HEIGHT = 180;
 const int32 ATLAS_3D_WIDTH = 480;
 const int32 ATLAS_3D_HEIGHT = 320;
 
 const char* ATLAS_2D_PATH = "w:/cereus/data/sprites/atlas-2d.png";
+const char* ATLAS_FONT_PATH = "w:/cereus/data/sprites/atlas-font.png";
 const char* ATLAS_3D_PATH = "w:/cereus/data/sprites/atlas-3d.png";
 
 bool first_submit_since_draw = true;
@@ -38,7 +41,7 @@ Sprite;
 
 typedef struct Cube 
 {
-	uint32 asset_index; // index into asset_cache
+	uint32 asset_index;
     Vec3 coords;
     Vec3 scale;
     Vec4 rotation;
@@ -109,6 +112,7 @@ typedef struct RendererState
     uint32 asset_cache_count;
 
     int32 atlas_2d_asset_index;
+	int32 atlas_font_asset_index;
     int32 atlas_3d_asset_index;
 
     VkDescriptorSetLayout descriptor_set_layout;
@@ -373,7 +377,7 @@ void mat4BuildPerspective(float output_matrix[16], float fov_y_radians, float as
 	output_matrix[14] = (z_near * z_far) / (z_near - z_far);
 }
 
-internal uint32 findMemoryType(uint32 type_bits, VkMemoryPropertyFlags property_flags)
+uint32 findMemoryType(uint32 type_bits, VkMemoryPropertyFlags property_flags)
 {
     VkPhysicalDeviceMemoryProperties memory_properties = {0};
     vkGetPhysicalDeviceMemoryProperties(renderer_state.physical_device_handle, &memory_properties);
@@ -386,7 +390,7 @@ internal uint32 findMemoryType(uint32 type_bits, VkMemoryPropertyFlags property_
     return UINT32_MAX;
 }
 
-internal bool readEntireFile(char* path, void** out_data, size_t* out_size)
+bool readEntireFile(char* path, void** out_data, size_t* out_size)
 {
 	FILE* file = fopen(path, "rb"); // read binary
     if (!file) return false;
@@ -413,17 +417,44 @@ internal bool readEntireFile(char* path, void** out_data, size_t* out_size)
     return true;
 }
 
-int32 spriteIndexInAtlas(SpriteId id)
+bool spriteIsFont(SpriteId id)
 {
-    return (id < SPRITE_2D_COUNT) ? (int32)id : ((int32)id - (int32)SPRITE_2D_COUNT);
+    return (id >= SPRITE_2D_FONT_SPACE && id <= SPRITE_2D_FONT_LAST);
 }
 
-void atlasCellSize(AssetType type, int32* cell_width, int32* cell_height)
+int32 spriteIndexInAtlas(SpriteId id, AssetType type)
 {
     if (type == SPRITE_2D)
     {
-        *cell_width = 16;
-        *cell_height = 16;
+        if (spriteIsFont(id))
+        {
+            return (int32)id - (int32)SPRITE_2D_FONT_SPACE;
+        }
+        else
+        {
+            return (int32)id;
+        }
+    }
+    else
+    {
+        return (int32)id - (int32)SPRITE_2D_COUNT;
+    }
+}
+
+void atlasCellSize(SpriteId id, AssetType type, int32* cell_width, int32* cell_height)
+{
+    if (type == SPRITE_2D)
+    {
+        if (spriteIsFont(id))
+        {
+            *cell_width = 6;
+            *cell_height = 10;
+        }
+        else
+        {
+            *cell_width = 16;
+            *cell_height = 16;
+        }
         return;
     }
     if (type == CUBE_3D)
@@ -437,9 +468,11 @@ void atlasCellSize(AssetType type, int32* cell_width, int32* cell_height)
 Vec4 spriteUV(SpriteId id, AssetType type, int32 atlas_width, int32 atlas_height)
 {
     int32 cell_width = 0, cell_height = 0;
-    atlasCellSize(type, &cell_width, &cell_height);
+    atlasCellSize(id, type, &cell_width, &cell_height);
+
     int32 per_row = atlas_width / cell_width;
-    int32 index = spriteIndexInAtlas(id);
+    int32 index = spriteIndexInAtlas(id, type);
+
     int32 x = (index % per_row) * cell_width;
     int32 y = (index / per_row) * cell_height;
 
@@ -1550,8 +1583,9 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	base_graphics_pipeline_creation_info.basePipelineHandle = VK_NULL_HANDLE; // not deriving from another pipeline.
 	base_graphics_pipeline_creation_info.basePipelineIndex = -1;
 
-    renderer_state.atlas_2d_asset_index = getOrLoadAsset((char*)ATLAS_2D_PATH);
-    renderer_state.atlas_3d_asset_index = getOrLoadAsset((char*)ATLAS_3D_PATH);
+    renderer_state.atlas_2d_asset_index   = getOrLoadAsset((char*)ATLAS_2D_PATH);
+    renderer_state.atlas_font_asset_index = getOrLoadAsset((char*)ATLAS_FONT_PATH);
+    renderer_state.atlas_3d_asset_index   = getOrLoadAsset((char*)ATLAS_3D_PATH);
 
     // sprite pipeline: depth off, blending on
     {
@@ -1597,12 +1631,35 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
 
         AssetType type = batch->type;
         SpriteId sprite_id = batch->sprite_id;
-        int32 atlas_asset_index = (type == SPRITE_2D) ? renderer_state.atlas_2d_asset_index :
-            					  (type == CUBE_3D)   ? renderer_state.atlas_3d_asset_index :
-                                  -1;
+
+		int32 atlas_asset_index = -1;
+        int32 atlas_width = 0;
+        int32 atlas_height = 0;
+
+        if (type == SPRITE_2D)
+        {
+            if (spriteIsFont(sprite_id))
+            {
+                atlas_asset_index = renderer_state.atlas_font_asset_index;
+                atlas_width = ATLAS_FONT_WIDTH;
+                atlas_height = ATLAS_FONT_HEIGHT;
+            }
+            else
+            {
+                atlas_asset_index = renderer_state.atlas_2d_asset_index;
+                atlas_width = ATLAS_2D_WIDTH;
+                atlas_height = ATLAS_2D_HEIGHT;
+            }
+        }
+        else if (type == CUBE_3D)
+        {
+            atlas_asset_index = renderer_state.atlas_3d_asset_index;
+            atlas_width = ATLAS_3D_WIDTH;
+            atlas_height = ATLAS_3D_HEIGHT;
+        }
+
         if (atlas_asset_index < 0) continue;
-        int32 atlas_width  = (type == SPRITE_2D) ? ATLAS_2D_WIDTH  : ATLAS_3D_WIDTH;
-        int32 atlas_height = (type == SPRITE_2D) ? ATLAS_2D_HEIGHT : ATLAS_3D_HEIGHT;
+
         Vec4 uv_rect = spriteUV(sprite_id, type, atlas_width, atlas_height);
 
         if (assets_to_load[asset_index].type == SPRITE_2D)

@@ -30,6 +30,14 @@ void centerCursorInWindow(void)
     SetCursorPos(center.x, center.y);
 }
 
+void pushTextChar(TickInput *input, uint32 codepoint)
+{
+    if (input->text.count < (int32)(sizeof(input->text.codepoints) / sizeof(input->text.codepoints[0])))
+    {
+		input->text.codepoints[input->text.count++] = codepoint;
+    }
+}
+
 LRESULT CALLBACK windowMessageProcessor(
     HWND window_handle, 
     UINT message_id,
@@ -38,6 +46,14 @@ LRESULT CALLBACK windowMessageProcessor(
 {
     switch (message_id)
     {
+        case WM_CHAR:
+        {
+            uint32 character = (uint32)wParam;
+            if 		(character == '\b') tick_input.backspace_pressed_this_frame = true;
+            else if (character == '\r') tick_input.enter_pressed_this_frame = true;
+            else if (character >= 32 && character < 128) pushTextChar(&tick_input, character);
+            return 0;
+        }
         case WM_ACTIVATE:
         {
 			if (LOWORD(wParam) == WA_ACTIVE || LOWORD(wParam) == WA_CLICKACTIVE)
@@ -124,7 +140,6 @@ LRESULT CALLBACK windowMessageProcessor(
 
                 case VK_SPACE: 	   tick_input.space_press = true; break;
                 case VK_SHIFT: 	   tick_input.shift_press = true; break;
-                case VK_BACK: 	   tick_input.back_press  = true; break;
                 case VK_OEM_MINUS: tick_input.dash_press  = true; break;
             }
             break;
@@ -169,7 +184,6 @@ LRESULT CALLBACK windowMessageProcessor(
 
                 case VK_SPACE: 	   tick_input.space_press = false; break;
                 case VK_SHIFT: 	   tick_input.shift_press = false; break;
-                case VK_BACK: 	   tick_input.back_press  = false; break;
                 case VK_OEM_MINUS: tick_input.dash_press  = false; break;
             }
             break;
@@ -248,6 +262,7 @@ int CALLBACK WinMain(
                 running = false;
                 break;
             }
+            TranslateMessage(&queued_message);
             DispatchMessage(&queued_message);
         }
 
@@ -270,6 +285,10 @@ int CALLBACK WinMain(
 
         tick_input.mouse_dx = 0;
         tick_input.mouse_dy = 0;
+        tick_input.text.count = 0;
+        tick_input.backspace_pressed_this_frame = false;
+        tick_input.enter_pressed_this_frame = false;
+
 
         centerCursorInWindow();
     }
