@@ -10,6 +10,7 @@ layout(push_constant) uniform PC {
     mat4 model;
     mat4 view;
     mat4 projection;
+    mat4 uv_rect;
 } pc;
 
 const vec3 light_direction = vec3(0.3, 1, 0.5);

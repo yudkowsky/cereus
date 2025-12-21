@@ -65,6 +65,7 @@ const int32 FONT_FIRST_ASCII = 32;
 const int32 FONT_LAST_ASCII = 126;
 const int32 FONT_CELL_WIDTH_PX = 6;
 const int32 FONT_CELL_HEIGHT_PX = 10;
+const float DEFAULT_TEXT_SCALE = 30.0f;
 
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
@@ -581,6 +582,18 @@ void writeCameraToFile(char* path)
     fclose(file);
 }
 
+void getLevelNameFromPath(char* level_path, char* output)
+{
+    char* slash = strrchr(level_path, '/'); // gets last / or .
+    char* dot   = strrchr(level_path, '.');
+    if (slash && dot && dot > slash)
+    {
+        size_t length = dot - slash - 1;
+        strncpy(output, slash + 1, length);
+        output[length] = '\0';
+    }
+}
+
 // DRAW ASSET
 
 AssetType assetAtlas(SpriteId id)
@@ -694,16 +707,17 @@ void drawEntityLoop(Entity* entity_group, SpriteId id, AssetType type, Vec3 scal
     }
 }
 
-void drawText(char* string, float x, float y, float scale)
+void drawText(char* string, Vec2 coords, float scale)
 {
-	float pen_x = x;
-    float pen_y = y;
+	float pen_x = coords.x;
+    float pen_y = coords.y;
+    float aspect = (float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX;
 	for (char* pointer = string; *pointer; ++pointer)
     {
 		char c = *pointer;
         if (c == '\n')
         {
-            pen_x = x;
+            pen_x = coords.x;
             pen_y += FONT_CELL_HEIGHT_PX * scale; 
             continue;
         }
@@ -712,9 +726,9 @@ void drawText(char* string, float x, float y, float scale)
 
         SpriteId id = (SpriteId)(SPRITE_2D_FONT_SPACE + ((unsigned char)c - 32));
 		Vec3 draw_coords = { pen_x, pen_y, 0};
-        Vec3 draw_scale = { scale, scale, 1};
+        Vec3 draw_scale = { scale * aspect, scale, 1};
         drawAsset(id, SPRITE_2D, draw_coords, draw_scale, IDENTITY_QUATERNION);
-		pen_x += FONT_CELL_WIDTH_PX * scale;
+		pen_x += scale * aspect;
     }
 }
 
@@ -3115,6 +3129,12 @@ void gameFrame(double delta_time, TickInput tick_input)
             Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
             Vec3 picked_block_coords = { SCREEN_WIDTH_PX - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
             drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION);
+
+            // level name
+			Vec2 level_path_coords = { 100.0f, (float)(SCREEN_HEIGHT_PX - 100) };
+            char level_name[256];
+            getLevelNameFromPath(world_state.level_path, level_name);
+            drawText(level_name, level_path_coords, DEFAULT_TEXT_SCALE);
         }
 
         // decide which camera to use
@@ -3128,8 +3148,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 		if (time_until_input > 0) time_until_input--;
 
         updateTextInput(&tick_input);
-        Vec3 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2, 0.0f };
-        drawText(editor_state.edit_buffer.string, center_screen.x, center_screen.y, 20);
+        Vec2 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2 };
+        drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE);
 
         rendererSubmitFrame(assets_to_load, camera);
         memset(assets_to_load, 0, sizeof(assets_to_load));
