@@ -2465,6 +2465,7 @@ void editorMode(TickInput *tick_input)
 			if (isEntity(getTileType(raycast_output.hit_coords)))
             {
 				editor_state.selected_id = getEntityId(raycast_output.hit_coords);
+
             }
 			else
             {
@@ -3171,6 +3172,25 @@ void gameFrame(double delta_time, TickInput tick_input)
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
 
+        if (editor_state.editor_mode == SELECT)
+        {
+            if (editor_state.selected_id / 100 == 6)
+            {
+                if (tick_input.enter_pressed_this_frame)
+                {
+                    Entity* wb = getEntityFromId(editor_state.selected_id);
+                    memset(wb->next_level, '0', sizeof(wb->next_level));
+					memcpy(wb->next_level, editor_state.edit_buffer.string, sizeof(wb->next_level) - 1);
+                }
+
+                updateTextInput(&tick_input);
+            }
+            else
+            {
+				memset(&editor_state.edit_buffer, 0, sizeof(editor_state.edit_buffer));
+            }
+        }
+
         // finished updating state
         world_state = next_world_state;
 
@@ -3288,6 +3308,9 @@ void gameFrame(double delta_time, TickInput tick_input)
 		// selected id
         if (editor_state.editor_mode == SELECT)
         {
+            Vec2 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2 };
+            drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE);
+
             Vec2 selected_id_coords = { 30.0f, (float)(SCREEN_HEIGHT_PX - 130) };
             if (editor_state.selected_id != -1)
             {
@@ -3313,11 +3336,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-        // text input test
-        Vec2 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2 };
-        updateTextInput(&tick_input);
-        drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE);
-		
         /*
 		Vec2 win_block_count_coords = { 30.0f, (float)(SCREEN_HEIGHT_PX) - 180 }; // TODO(spike): macro for this sort of view debug info. also function to get coords (would work dynamically)
         char win_block_count_text[256] = {0};
