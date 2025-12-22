@@ -35,7 +35,7 @@ const int32 PACK_TIME_IN_INTERMEDIATE_STATE = 4;
 const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
 
-const int32 LASER_BUFFER_MOVING_TIME_ALLOWED_FOR_PASSTHROUGH = 5; // actually inverted: this is 9 - x frames
+const int32 LASER_BUFFER_MOVING_TIME_ALLOWED_FOR_PASSTHROUGH = 5; // actually inverted: this is time - x frames
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
@@ -640,26 +640,20 @@ void loadFileToState(char* path)
     memcpy(next_world_state.buffer, buffer, level_dim.x*level_dim.y*level_dim.z * 2);
 }
 
-void writeBufferToFile(char* path)
+void writeBufferToFile(FILE* file)
 {
-    FILE* file = fopen(path, "rb+");
-
     fseek(file, 4, SEEK_SET);
 	fwrite(next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
-
-    fclose(file);
 }
 
-void writeCameraToFile(char* path)
+void writeCameraToFile(FILE* file)
 {
-    FILE* file = fopen(path, "rb+");
-
     bool found = false; // unused, because if not found just write to EOF anyway
     int32 seek_to = findChunkOrEOF(file, CAMERA_CHUNK_TAG, &found);
     fseek(file, seek_to, SEEK_SET);
     if (!found)
     {
-        fwrite(&CAMERA_CHUNK_TAG, 4, 1, file);
+        fwrite(CAMERA_CHUNK_TAG, 4, 1, file);
     }
     fwrite(&CAMERA_CHUNK_SIZE, 4, 1, file);
     fwrite(&camera.coords.x, 4, 1, file);
@@ -668,8 +662,20 @@ void writeCameraToFile(char* path)
     fwrite(&camera.fov, 4, 1, file);
     fwrite(&camera_yaw, 4, 1, file);
     fwrite(&camera_pitch, 4, 1, file);
+}
 
-    fclose(file);
+void writeWinBlockToFile(FILE* file, Entity* wb)
+{
+    if (wb->next_level[0] == '\0') return;
+    
+    fwrite(WIN_BLOCK_CHUNK_TAG, 4, 1, file);
+    fwrite(&WIN_BLOCK_CHUNK_SIZE, 4, 1, file);
+    fwrite(&wb->coords.x, 4, 1, file);
+    fwrite(&wb->coords.y, 4, 1, file);
+    fwrite(&wb->coords.z, 4, 1, file);
+    char next_level[64] = {0};
+    memcpy(next_level, wb->next_level, 63);
+    fwrite(next_level, 1, 64, file);
 }
 
 int32 findWinBlockPath(FILE* file, int32 x, int32 y, int32 z)
@@ -744,7 +750,37 @@ void loadWinBlockPaths(FILE* file)
     }
 }
 
+bool saveLevelRewrite(char* path)
+{
+    char temp_path[256] = {0};
+    snprintf(temp_path, sizeof(temp_path), "%s.temp", path);
 
+    FILE* file = fopen(temp_path, "wb");
+    
+    fseek(file, 1, SEEK_SET);
+    fwrite(&level_dim.x, 1, 1, file);
+    fwrite(&level_dim.y, 1, 1, file);
+    fwrite(&level_dim.z, 1, 1, file);
+
+    fwrite(next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
+
+    writeCameraToFile(file);
+    FOR(win_block_index, MAX_ENTITY_INSTANCE_COUNT)
+    {
+        Entity* wb = &next_world_state.win_blocks[win_block_index];
+        if (wb->id == -1) continue;
+        writeWinBlockToFile(file, wb);
+    }
+
+    fclose(file);
+
+    remove(path);
+    if (rename(temp_path, path) != 0)
+    {
+        return false;
+    }
+    return true;
+}
 
 void getLevelNameFromPath(char* level_path, char* output)
 {
@@ -2555,6 +2591,7 @@ void gameInitialiseState()
 
 void gameInitialise(char* level_name) 
 {	
+    // TODO(spike): panic if cannot open constructed level path
     if (level_name != 0) snprintf(next_world_state.level_path, sizeof(next_world_state.level_path), "%s%s.level", start_level_path_buffer, level_name);
     else strcpy(next_world_state.level_path, backup_level_path);
     gameInitialiseState();
@@ -3331,8 +3368,14 @@ void gameFrame(double delta_time, TickInput tick_input)
         else camera.fov = 30.0f;
 
         // write to file
-        if (time_until_input == 0 && editor_state.editor_mode && tick_input.i_press) writeBufferToFile(world_state.level_path);
-        if (time_until_input == 0 && editor_state.editor_mode && tick_input.c_press) writeCameraToFile(world_state.level_path);
+        if (time_until_input == 0 && editor_state.editor_mode == PLACE_BREAK && tick_input.i_press) 
+        {
+            saveLevelRewrite(world_state.level_path);
+            //if (ok) drawText()
+        }
+        FILE* file = fopen(world_state.level_path, "rb+");
+        if (time_until_input == 0 && editor_state.editor_mode == PLACE_BREAK && tick_input.c_press) writeCameraToFile(file);
+        fclose(file);
 
 		if (time_until_input > 0) time_until_input--;
 
