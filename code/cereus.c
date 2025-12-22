@@ -76,7 +76,7 @@ const char WIN_BLOCK_CHUNK_TAG[4] = "WINB";
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
-const char backup_level_path[256] = "w:/cereus/data/levels/red-intro-2.level";
+const char backup_level_path[256] = "w:/cereus/data/levels/basic.level";
 const char start_level_path_buffer[256] = "w:/cereus/data/levels/";
 char level_path_buffer[256] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
@@ -319,6 +319,29 @@ int32 getEntityId(Int3 coords)
 {
 	Entity *entity = getEntityPointer(coords);
     return entity->id;
+}
+
+Entity* getEntityFromId(int32 id)
+{
+    if (id == PLAYER_ID) return &next_world_state.player;
+    else if (id == PACK_ID) return &next_world_state.pack;
+    else 
+    {
+        Entity* entity_group = 0;
+        int32 switch_value =  ((id / 100) * 100);
+        if 		(switch_value == ID_OFFSET_BOX)    		entity_group = next_world_state.boxes; 
+        else if (switch_value == ID_OFFSET_MIRROR) 		entity_group = next_world_state.mirrors;
+        else if (switch_value == ID_OFFSET_CRYSTAL) 	entity_group = next_world_state.crystals;
+        else if (switch_value == ID_OFFSET_SOURCE) 		entity_group = next_world_state.sources;
+        else if (switch_value == ID_OFFSET_PERM_MIRROR) entity_group = next_world_state.perm_mirrors;
+        else if (switch_value == ID_OFFSET_WIN_BLOCK) 	entity_group = next_world_state.win_blocks;
+
+        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+        {
+            if (entity_group[entity_index].id == id) return &entity_group[entity_index];
+        }
+        return 0;
+    }
 }
 
 Direction getEntityDirection(Int3 coords) 
@@ -3271,6 +3294,18 @@ void gameFrame(double delta_time, TickInput tick_input)
                 char selected_id_text[256] = {0};
                 snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d", editor_state.selected_id);
                 drawText(selected_id_text, selected_id_coords, DEFAULT_TEXT_SCALE);
+
+                // next_level display
+                if (editor_state.selected_id / 100 == 6)
+                {
+					Entity* wb = getEntityFromId(editor_state.selected_id);
+                    
+                    Vec2 next_level_text_coords = { 30.0f, (float)(SCREEN_HEIGHT_PX - 180) };
+
+                    char next_level_text[256] = {0};
+                    snprintf(next_level_text, sizeof(next_level_text), "next level: %s", wb->next_level);
+                    drawText(next_level_text, next_level_text_coords, DEFAULT_TEXT_SCALE);
+                }
             }
             else
             {
