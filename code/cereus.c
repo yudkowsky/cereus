@@ -107,6 +107,9 @@ int32 time_until_input = 0;
 EditorState editor_state = {0};
 LaserBuffer laser_buffer[1024] = {0};
 
+const Vec2 DEBUG_TEXT_COORDS_START = { 50.0f, 1080.0f - 80.0f };
+Vec2 debug_text_coords = {0}; 
+
 TrailingHitbox trailing_hitboxes[64] = {0};
 
 // CAMERA STUFF
@@ -930,6 +933,12 @@ void drawText(char* string, Vec2 coords, float scale)
         drawAsset(id, SPRITE_2D, draw_coords, draw_scale, IDENTITY_QUATERNION);
 		pen_x += scale * aspect;
     }
+}
+
+void drawDebugText(char* string)
+{
+	drawText(string, debug_text_coords, DEFAULT_TEXT_SCALE);
+    debug_text_coords.y -= 50.0f;
 }
 
 // RAYCAST ALGORITHM FOR EDITOR PLACE/DESTROY
@@ -2622,6 +2631,8 @@ void gameFrame(double delta_time, TickInput tick_input)
         Entity* player = &next_world_state.player;
         Entity* pack = &next_world_state.pack;
 
+        debug_text_coords = DEBUG_TEXT_COORDS_START;
+
         // mode toggle
         if (editor_state.editor_mode != SELECT_WRITE)
     	{
@@ -3338,10 +3349,9 @@ void gameFrame(double delta_time, TickInput tick_input)
             drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION);
         }
         // level name
-        Vec2 level_path_coords = { 30.0f, (float)(SCREEN_HEIGHT_PX - 80) };
         char level_name[256] = {0};
         getLevelNameFromPath(world_state.level_path, level_name);
-        drawText(level_name, level_path_coords, DEFAULT_TEXT_SCALE);
+		drawDebugText(level_name);
 
 		// selected id
         if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
@@ -3349,28 +3359,25 @@ void gameFrame(double delta_time, TickInput tick_input)
             Vec2 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2 };
             drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE);
 
-            Vec2 selected_id_coords = { 30.0f, (float)(SCREEN_HEIGHT_PX - 130) };
             if (editor_state.selected_id != -1)
             {
                 char selected_id_text[256] = {0};
                 snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d", editor_state.selected_id);
-                drawText(selected_id_text, selected_id_coords, DEFAULT_TEXT_SCALE);
+                drawDebugText(selected_id_text);
 
                 // next_level display
                 if (editor_state.selected_id / 100 == 6)
                 {
 					Entity* wb = getEntityFromId(editor_state.selected_id);
                     
-                    Vec2 next_level_text_coords = { 30.0f, (float)(SCREEN_HEIGHT_PX - 180) };
-
                     char next_level_text[256] = {0};
                     snprintf(next_level_text, sizeof(next_level_text), "next level: %s", wb->next_level);
-                    drawText(next_level_text, next_level_text_coords, DEFAULT_TEXT_SCALE);
+                    drawDebugText(next_level_text);
                 }
             }
             else
             {
-                drawText("no entity selected", selected_id_coords, DEFAULT_TEXT_SCALE);
+                drawDebugText("no entity selected");
             }
         }
 
