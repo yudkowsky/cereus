@@ -3156,17 +3156,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             memset(trailing_hitboxes, 0, sizeof(trailing_hitboxes));
 
             Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
-            strcpy(level_path_buffer, start_level_path_buffer);
-            strcat(level_path_buffer, wb->next_level);
-            strcat(level_path_buffer, ".level");
-
-			FILE* test = fopen(level_path_buffer, "rb+");
-
-            if (test)
-            {
-                fclose(test);
-                gameInitialise(level_path_buffer);
-            }
+            gameInitialise(wb->next_level);
         }
 
         // final redo of laser buffer, after all logic is complete, for drawing
@@ -3335,13 +3325,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 drawText("no entity selected", selected_id_coords, DEFAULT_TEXT_SCALE);
             }
         }
-
-        /*
-		Vec2 win_block_count_coords = { 30.0f, (float)(SCREEN_HEIGHT_PX) - 180 }; // TODO(spike): macro for this sort of view debug info. also function to get coords (would work dynamically)
-        char win_block_count_text[256] = {0};
-        snprintf(win_block_count_text, sizeof(win_block_count_text), "win block count: %d", world_state.win_block_count);
-        drawText(win_block_count_text, win_block_count_coords, DEFAULT_TEXT_SCALE);
-        */
 
         // decide which camera to use
         if (editor_state.do_wide_camera) camera.fov = 60.0f;
