@@ -275,13 +275,16 @@ typedef struct Entity
     int32 previously_moving_sideways;
     int32 falling_time;
 
-    // for sources/lasers/other colored objects
+    // for sources/lasers
     Color color;
 
     // for player
     bool hit_by_red;
     GreenHit green_hit;
     bool hit_by_blue;
+
+    // for win blocks
+    char next_level[64];
 }
 Entity;
 
@@ -306,9 +309,11 @@ typedef struct WorldState
     Entity sources[32];
     Entity crystals[32];
     Entity perm_mirrors[32];
+    Entity win_blocks[32];
     bool player_will_fall_next_turn; // used for not being able to walk one extra tile after walking out of red beam
     bool pack_detached;
     char level_path[256];
+//	int32 win_block_count;
 
     // player's lingering hitbox when hit should still trigger that color
     int32 player_trailing_hitbox_timer;
@@ -355,6 +360,8 @@ typedef struct EditorState
     bool do_wide_camera;
     TileType picked_tile;
     Direction picked_direction;
+
+    int32 selected_id;
 
     EditBuffer edit_buffer;
 }

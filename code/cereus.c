@@ -20,7 +20,7 @@ const Vec3 DIAGONAL_LASER_SCALE   = { 0.125f, 0.125f, 1.415f };
 const float RAYCAST_SEEK_LENGTH = 20.0f;
 
 const int32 EDITOR_INPUT_TIME_UNTIL_ALLOW = 9;
-const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9; // TODO(spike): make this freely editable (want to up this by a few frames to emphasise pushing multiple box mechanics)
+const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9; // TODO(spike): make this freely editable (want to up this by a few frames to emphasise pushing stacked box mechanics)
 const int32 TURN_ANIMATION_TIME = 9; // somewhat hard coded, tied to PUSH_FROM_TURN...
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
 const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6; // also somewhat hard coded, based on some function of the turn animation time and the sequencing based on it
@@ -60,12 +60,18 @@ const int32 ID_OFFSET_MIRROR  	  = 100 * 2;
 const int32 ID_OFFSET_CRYSTAL 	  = 100 * 3;
 const int32 ID_OFFSET_SOURCE  	  = 100 * 4;
 const int32 ID_OFFSET_PERM_MIRROR = 100 * 5;
+const int32 ID_OFFSET_WIN_BLOCK   = 100 * 6;
 
 const int32 FONT_FIRST_ASCII = 32;
 const int32 FONT_LAST_ASCII = 126;
 const int32 FONT_CELL_WIDTH_PX = 6;
 const int32 FONT_CELL_HEIGHT_PX = 10;
 const float DEFAULT_TEXT_SCALE = 30.0f;
+
+const int32 CAMERA_CHUNK_SIZE = 24;
+const char CAMERA_CHUNK_TAG[4] = "CMRA";
+const int32 WIN_BLOCK_CHUNK_SIZE = 76;
+const char WIN_BLOCK_CHUNK_TAG[4] = "WINB";
 
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
@@ -75,6 +81,7 @@ const char start_level_path_buffer[256] = "w:/cereus/data/levels/";
 char level_path_buffer[256] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
+/*
 char levels_in_order[32][32] = { "pack-intro", "red-intro-1", "red-intro-2", "blue-intro-1", "blue-intro-2", 
     							 "mirror-intro", "rafters",
                                  "becoming-blue", 
@@ -82,6 +89,7 @@ char levels_in_order[32][32] = { "pack-intro", "red-intro-1", "red-intro-2", "bl
                                  "research", "broken-bridges",
                                  "green-intro", "mirror-bypass", "bureaucracy", 
                                  "balance", "basic" };
+*/
 Camera camera = {0};
 float camera_yaw = 0.0f;
 float camera_pitch = 0.0f;
@@ -291,10 +299,11 @@ Entity* getEntityPointer(Int3 coords)
     if (isSource(tile)) entity_group = next_world_state.sources;
     else switch(tile)
     {
-        case BOX:     	  entity_group = next_world_state.boxes;    break;
-        case MIRROR:  	  entity_group = next_world_state.mirrors;  break;
-        case CRYSTAL: 	  entity_group = next_world_state.crystals; break;
+        case BOX:     	  entity_group = next_world_state.boxes;    	break;
+        case MIRROR:  	  entity_group = next_world_state.mirrors;  	break;
+        case CRYSTAL: 	  entity_group = next_world_state.crystals; 	break;
         case PERM_MIRROR: entity_group = next_world_state.perm_mirrors; break;
+        case WIN_BLOCK:   entity_group = next_world_state.win_blocks;    break;
         case PLAYER: return &next_world_state.player;
         case PACK:	 return &next_world_state.pack;
         default: return 0;
@@ -405,6 +414,7 @@ int32 entityIdOffset(Entity *entity)
     if (entity == next_world_state.crystals) 	 return ID_OFFSET_CRYSTAL;
     if (entity == next_world_state.sources)  	 return ID_OFFSET_SOURCE;
     if (entity == next_world_state.perm_mirrors) return ID_OFFSET_PERM_MIRROR;
+    if (entity == next_world_state.win_blocks)   return ID_OFFSET_WIN_BLOCK;
     return 0;
 }
 
@@ -527,10 +537,56 @@ void setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction direc
 
 // .level file structure: 
 // first 4 bytes:    -,x,y,z of level dimensions
-// next x*y*z (32768 by default) bytes: actual level buffer
-// next 4*8 bytes: -,x,y,z of camera start pos, fov,yaw,pitch,-
+// next x*y*z * 2 (32768 by default) bytes: actual level buffer
+// then chunking starts: 4 bytes for tag (e.g. CMRA), 4 bytes for int32 size of chunk (e.g 24), and then data for that chunk.
 
-void loadStateToFile(char* path)
+// find the location of specific chunk
+int32 findChunkOrEOF(FILE* file, char tag[4], bool* found)
+{
+    char chunk[4];
+    int32 chunk_size = 0; // used to seek to the next chunk if this one is full
+    int32 tag_pos = 0;
+
+    fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
+
+    while (true) 
+    {
+        tag_pos = ftell(file);
+
+        // check what this chunk says
+        if (fread(chunk, 4, 1, file) != 1) 
+        {
+            // eof without chunk tag -> append to eof
+            clearerr(file);
+            *found = false;
+            return tag_pos;
+        }
+        if (memcmp(chunk, tag, 4) == 0)
+        {
+			// camera chunk found -> overwrite
+            *found = true;
+            return tag_pos + 4;
+        }
+
+        // that chunk wasn't useful; jump ahead by chunk_size after reading it
+        if (fread(&chunk_size, 4, 1, file) != 1)
+        {
+            // truncated (chunk tag found without accompanying int32 - should never happen)
+            return -1; 
+        }
+        fseek(file, chunk_size, SEEK_CUR);
+    }
+}
+
+bool readChunkHeader(FILE* file, char out_tag[4], int32 *out_size)
+{
+    if (fread(out_tag, 4, 1, file) != 1) return false; // EOF
+	if (fread(out_size, 4, 1, file) != 1) return false; // truncated
+    return true;
+}
+
+// doesn't load win block info, only loads buffer + camera
+void loadFileToState(char* path)
 {
     // get level dimensions
     FILE *file = fopen(path, "rb");
@@ -540,47 +596,132 @@ void loadStateToFile(char* path)
     fread(&level_dim.y, 1, 1, file);
     fread(&level_dim.z, 1, 1, file);
 
-    uint8 buffer[32768]; // level_dim.x*level_dim.y*level_dim.z * 2 for color bytes
+    uint8 buffer[32768];
 	fread(&buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
 
-    fseek(file, 4, SEEK_CUR); 
-	fread(&camera.coords.x, 4, 1, file);
-	fread(&camera.coords.y, 4, 1, file);
-	fread(&camera.coords.z, 4, 1, file);
-	fread(&camera.fov, 4, 1, file);
-	fread(&camera_yaw, 4, 1, file);
-	fread(&camera_pitch, 4, 1, file);
-//  fread(roll);
-
+    bool found = false;
+    int32 seek_to = findChunkOrEOF(file, CAMERA_CHUNK_TAG, &found);
+    if (seek_to >= 0 && found == true)
+    {
+        fseek(file, seek_to, SEEK_SET); // go to after chunk marker
+        fseek(file, 4, SEEK_CUR); // ...but still want to skip over chunk size
+        fread(&camera.coords.x, 4, 1, file);
+        fread(&camera.coords.y, 4, 1, file);
+        fread(&camera.coords.z, 4, 1, file);
+        fread(&camera.fov, 4, 1, file);
+        fread(&camera_yaw, 4, 1, file);
+        fread(&camera_pitch, 4, 1, file);
+    }
+	
 	fclose(file);
     memcpy(next_world_state.buffer, buffer, level_dim.x*level_dim.y*level_dim.z * 2);
 }
 
 void writeBufferToFile(char* path)
 {
-    FILE *file = fopen(path, "rb+");
+    FILE* file = fopen(path, "rb+");
 
     fseek(file, 4, SEEK_SET);
-	fwrite(next_world_state.buffer, 1, 32768, file);
+	fwrite(next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
 
     fclose(file);
 }
 
 void writeCameraToFile(char* path)
 {
-    FILE *file = fopen(path, "rb+");
+    FILE* file = fopen(path, "rb+");
 
-    fseek(file, 4 + 32768 + 4, SEEK_SET);
+    bool found = false; // unused, because if not found just write to EOF anyway
+    int32 seek_to = findChunkOrEOF(file, CAMERA_CHUNK_TAG, &found);
+    fseek(file, seek_to, SEEK_SET);
+    if (!found)
+    {
+        fwrite(&CAMERA_CHUNK_TAG, 4, 1, file);
+    }
+    fwrite(&CAMERA_CHUNK_SIZE, 4, 1, file);
     fwrite(&camera.coords.x, 4, 1, file);
-	fwrite(&camera.coords.y, 4, 1, file);
-	fwrite(&camera.coords.z, 4, 1, file);
-	fwrite(&camera.fov, 4, 1, file);
-	fwrite(&camera_yaw, 4, 1, file);
-	fwrite(&camera_pitch, 4, 1, file);
-//  fwrite(roll);
+    fwrite(&camera.coords.y, 4, 1, file);
+    fwrite(&camera.coords.z, 4, 1, file);
+    fwrite(&camera.fov, 4, 1, file);
+    fwrite(&camera_yaw, 4, 1, file);
+    fwrite(&camera_pitch, 4, 1, file);
 
     fclose(file);
 }
+
+int32 findWinBlockPath(FILE* file, int32 x, int32 y, int32 z)
+{
+    fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
+	
+    char tag[4] = {0};
+    int32 size = 0;
+    
+    while (readChunkHeader(file, tag, &size))
+    {
+        int32 pos = ftell(file);
+
+        if (memcmp(tag, WIN_BLOCK_CHUNK_TAG, 4) == 0 && size == (int32)(WIN_BLOCK_CHUNK_SIZE))
+        {
+			int32 comp_x, comp_y, comp_z;
+            char path[64] = {0};
+            if (fread(&comp_x, 4, 1, file) != 1) return -1;
+            if (fread(&comp_y, 4, 1, file) != 1) return -1;
+            if (fread(&comp_z, 4, 1, file) != 1) return -1;
+            if (fread(path, 1, 64, file) != 64) return -1;
+
+            if (comp_x == x && comp_y == y && comp_z == z)
+            {
+                return (int32)(pos + 12);
+            }
+        }
+        fseek(file, pos + size, SEEK_SET);
+    }
+
+    return -1; // nothing found at these coords
+}
+
+void loadWinBlockPaths(FILE* file)
+{
+    fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
+
+    char tag[4] = {0};
+    int32 size = 0;
+
+    while (readChunkHeader(file, tag, &size))
+    {
+        int32 pos = ftell(file);
+
+        if (memcmp(tag, WIN_BLOCK_CHUNK_TAG, 4) == 0 && size == WIN_BLOCK_CHUNK_SIZE)
+        {
+			int32 x, y, z;
+            char path[64];
+			if (fread(&x, 4, 1, file) != 1) return;
+			if (fread(&y, 4, 1, file) != 1) return;
+			if (fread(&z, 4, 1, file) != 1) return;
+			if (fread(&path, 1, 64, file) != 64) return;
+            path[63] = '\0';
+
+            FOR(wb_index, MAX_ENTITY_INSTANCE_COUNT)
+            {
+                Entity* wb = &next_world_state.win_blocks[wb_index];
+                if (wb->coords.x == x && wb->coords.y == y && wb->coords.z == z)
+                {
+                    memcpy(wb->next_level, path, sizeof(wb->next_level));
+                    break;
+                }
+            }
+            // continue from end of chunk
+            fseek(file, pos + size, SEEK_SET);
+        }
+        else
+        {
+            // skip payload of some other chunk
+            fseek(file, pos + size, SEEK_SET);
+        }
+    }
+}
+
+
 
 void getLevelNameFromPath(char* level_path, char* output)
 {
@@ -884,6 +1025,12 @@ Vec3 rollingAxis(Direction direction)
 bool isPushable(TileType tile)
 {
     if (tile == BOX || tile == CRYSTAL || tile == MIRROR || tile == PACK) return true;
+    else return false;
+}
+
+bool isEntity(TileType tile)
+{
+    if (tile == BOX || tile == CRYSTAL || tile == MIRROR || tile == PERM_MIRROR || tile == PACK || tile == PLAYER || tile == WIN_BLOCK || isSource(tile)) return true;
     else return false;
 }
 
@@ -1401,33 +1548,6 @@ Direction getNextMirrorState(Direction start_direction, Direction push_direction
         default: return 0;
     }
 }
-
-/*
-void rollWithoutAnimation(Int3 coords, Direction direction)
-{
-    Entity* entity = getEntityPointer(coords);
-	setTileType(NONE, coords);
-    setTileDirection(NORTH, coords);
-	entity->coords = getNextCoords(coords, direction);
-	Direction new_direction = getNextMirrorState(entity->direction, direction);
-    entity->direction = new_direction;
-    setTileType(MIRROR, entity->coords);
-    setTileDirection(new_direction, entity->coords);
-}
-
-void roll(Int3 coords, Direction direction)
-{
-    int32 id = getEntityId(coords);
-    Entity* entity = getEntityPointer(coords);
-    createTrailingHitbox(coords, ROLL_ANIMATION_TIME / 2);
-	Vec4 quaternion_transform = quaternionNormalize(quaternionMultiply(quaternionFromAxisAngle(rollingAxis(direction), 0.25f*TAU), directionToQuaternion(entity->direction, true)));
-    createRollingAnimation(intCoordsToNorm(coords), direction, &entity->position_norm, 
-                           directionToQuaternion(entity->direction, true), quaternion_transform, &entity->rotation_quat,
-                           id, ROLL_ANIMATION_TIME);
-	rollWithoutAnimation(coords, direction);
-    entity->previously_moving_sideways = ROLL_ANIMATION_TIME;
-}
-*/
 
 // LASERS
 
@@ -2269,6 +2389,7 @@ void editorMode(TickInput *tick_input)
                         case MIRROR:  	  entity_group = next_world_state.mirrors;  	break;
                         case CRYSTAL: 	  entity_group = next_world_state.crystals; 	break;
                         case PERM_MIRROR: entity_group = next_world_state.perm_mirrors; break;
+                        case WIN_BLOCK:   entity_group = next_world_state.win_blocks;   break;
                         default: entity_group = 0;
                     }
                     if (entity_group != 0) setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
@@ -2317,6 +2438,15 @@ void editorMode(TickInput *tick_input)
         {
             Vec3 neg_z_basis = {0, 0, -1};
             RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
+
+			if (isEntity(getTileType(raycast_output.hit_coords)))
+            {
+				editor_state.selected_id = getEntityId(raycast_output.hit_coords);
+            }
+			else
+            {
+				editor_state.selected_id = -1;
+            }
         }
     }
 }
@@ -2333,13 +2463,14 @@ void gameInitialiseState()
     memset(&next_world_state, 0, sizeof(WorldState));
     strcpy(next_world_state.level_path, level_path);
 
-    loadStateToFile(next_world_state.level_path);
+    loadFileToState(next_world_state.level_path);
 
     memset(next_world_state.boxes,    	  0, sizeof(next_world_state.boxes)); 
     memset(next_world_state.mirrors,  	  0, sizeof(next_world_state.mirrors));
     memset(next_world_state.crystals, 	  0, sizeof(next_world_state.crystals));
     memset(next_world_state.sources,  	  0, sizeof(next_world_state.sources));
     memset(next_world_state.perm_mirrors, 0, sizeof(next_world_state.perm_mirrors));
+    memset(next_world_state.win_blocks,   0, sizeof(next_world_state.win_blocks));
 	FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
     {
         next_world_state.boxes[entity_index].id 	   = -1;
@@ -2347,6 +2478,7 @@ void gameInitialiseState()
         next_world_state.crystals[entity_index].id 	   = -1;
         next_world_state.sources[entity_index].id 	   = -1;
         next_world_state.perm_mirrors[entity_index].id = -1;
+        next_world_state.win_blocks[entity_index].id   = -1;
     }
     Entity *entity_group = 0;
     for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
@@ -2356,6 +2488,7 @@ void gameInitialiseState()
         if (buffer_contents == MIRROR)  	entity_group = next_world_state.mirrors;
         if (buffer_contents == CRYSTAL) 	entity_group = next_world_state.crystals;
         if (buffer_contents == PERM_MIRROR) entity_group = next_world_state.perm_mirrors;
+        if (buffer_contents == WIN_BLOCK)   entity_group = next_world_state.win_blocks;
         if (isSource(buffer_contents))  	entity_group = next_world_state.sources;
         if (entity_group != 0)
         {
@@ -2366,7 +2499,7 @@ void gameInitialiseState()
             entity_group[count].rotation_quat = directionToQuaternion(entity_group[count].direction, true);
             entity_group[count].color = getEntityColor(entity_group[count].coords);
             entity_group[count].id = getEntityCount(entity_group) + entityIdOffset(entity_group);
-            entity_group= 0;
+            entity_group = 0;
         }
         else if (next_world_state.buffer[buffer_index] == PLAYER) // special case for player, since there is only one
         {
@@ -2385,13 +2518,11 @@ void gameInitialiseState()
             pack->id = PACK_ID;
         }
     }
+    
+	FILE* file = fopen(level_path, "rb+");
+	loadWinBlockPaths(file);
+    fclose(file);
 
-    /*
-	camera.coords = (Vec3){15, 12, 19};
-    camera_yaw = 0; // towards -z; north
-    camera_pitch = -TAU * 0.18f; // look down-ish
-    */
-	
     Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera_yaw);
     Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera_pitch);
     camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
@@ -3000,23 +3131,18 @@ void gameFrame(double delta_time, TickInput tick_input)
             memset(animations, 0, sizeof(animations));
             memset(trailing_hitboxes, 0, sizeof(trailing_hitboxes));
 
-			char current_level_path[256];
-			strncpy(current_level_path, next_world_state.level_path, sizeof(current_level_path));
-            char* next_level = 0;
-            FOR(level_index, 32)
-            {
-				strcpy(level_path_buffer, start_level_path_buffer);
-                strcat(level_path_buffer, levels_in_order[level_index]);
-                strcat(level_path_buffer, ".level");
+            Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
+            strcpy(level_path_buffer, start_level_path_buffer);
+            strcat(level_path_buffer, wb->next_level);
+            strcat(level_path_buffer, ".level");
 
-                if (strcmp(level_path_buffer, current_level_path) == 0)
-                {
-                    next_level = levels_in_order[level_index + 1];
-                    break;
-                }
+			FILE* test = fopen(level_path_buffer, "rb+");
+
+            if (test)
+            {
+                fclose(test);
+                gameInitialise(level_path_buffer);
             }
-            if (next_level) gameInitialise(next_level);
-            time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
         }
 
         // final redo of laser buffer, after all logic is complete, for drawing
@@ -3129,13 +3255,40 @@ void gameFrame(double delta_time, TickInput tick_input)
             Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
             Vec3 picked_block_coords = { SCREEN_WIDTH_PX - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
             drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION);
-
-            // level name
-			Vec2 level_path_coords = { 100.0f, (float)(SCREEN_HEIGHT_PX - 100) };
-            char level_name[256];
-            getLevelNameFromPath(world_state.level_path, level_name);
-            drawText(level_name, level_path_coords, DEFAULT_TEXT_SCALE);
         }
+        // level name
+        Vec2 level_path_coords = { 30.0f, (float)(SCREEN_HEIGHT_PX - 80) };
+        char level_name[256] = {0};
+        getLevelNameFromPath(world_state.level_path, level_name);
+        drawText(level_name, level_path_coords, DEFAULT_TEXT_SCALE);
+
+		// selected id
+        if (editor_state.editor_mode == SELECT)
+        {
+            Vec2 selected_id_coords = { 30.0f, (float)(SCREEN_HEIGHT_PX - 130) };
+            if (editor_state.selected_id != -1)
+            {
+                char selected_id_text[256] = {0};
+                snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d", editor_state.selected_id);
+                drawText(selected_id_text, selected_id_coords, DEFAULT_TEXT_SCALE);
+            }
+            else
+            {
+                drawText("no entity selected", selected_id_coords, DEFAULT_TEXT_SCALE);
+            }
+        }
+
+        // text input test
+        Vec2 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2 };
+        updateTextInput(&tick_input);
+        drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE);
+		
+        /*
+		Vec2 win_block_count_coords = { 30.0f, (float)(SCREEN_HEIGHT_PX) - 180 }; // TODO(spike): macro for this sort of view debug info. also function to get coords (would work dynamically)
+        char win_block_count_text[256] = {0};
+        snprintf(win_block_count_text, sizeof(win_block_count_text), "win block count: %d", world_state.win_block_count);
+        drawText(win_block_count_text, win_block_count_coords, DEFAULT_TEXT_SCALE);
+        */
 
         // decide which camera to use
         if (editor_state.do_wide_camera) camera.fov = 60.0f;
@@ -3146,10 +3299,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (time_until_input == 0 && editor_state.editor_mode && tick_input.c_press) writeCameraToFile(world_state.level_path);
 
 		if (time_until_input > 0) time_until_input--;
-
-        updateTextInput(&tick_input);
-        Vec2 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2 };
-        drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE);
 
         rendererSubmitFrame(assets_to_load, camera);
         memset(assets_to_load, 0, sizeof(assets_to_load));
