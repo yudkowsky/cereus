@@ -17,7 +17,7 @@ const Vec3 DEFAULT_SCALE = { 1.0f,  1.0f,  1.0f  };
 const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 const Vec3 ORTHOGONAL_LASER_SCALE = { 0.125f, 0.125f, 1.0f   };
 const Vec3 DIAGONAL_LASER_SCALE   = { 0.125f, 0.125f, 1.415f };
-const float RAYCAST_SEEK_LENGTH = 20.0f;
+const float MAX_RAYCAST_SEEK_LENGTH = 50.0f;
 
 const int32 EDITOR_INPUT_TIME_UNTIL_ALLOW = 9;
 const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9; // TODO(spike): make this freely editable (want to up this by a few frames to emphasise pushing stacked box mechanics)
@@ -619,7 +619,7 @@ void loadFileToState(char* path)
     fread(&level_dim.y, 1, 1, file);
     fread(&level_dim.z, 1, 1, file);
 
-    uint8 buffer[32768];
+    uint8 buffer[32768]; // just some max level size - not all of this is necessarily copied.
 	fread(&buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
 
     bool found = false;
@@ -942,9 +942,6 @@ RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance)
     start.y += 0.5;
     start.z += 0.5;
 
-    // TODO(spike): temporary - need to fix so it works from outside bounds
-	if (!intCoordsWithinLevelBounds(current_cube)) return output;
-
     // step direction on each axis
 	int32 step_x = 0, step_y = 0, step_z = 0;
 
@@ -1013,7 +1010,7 @@ RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance)
             t_max_z += t_delta_z;
         }
 
-        if (!intCoordsWithinLevelBounds(current_cube)) break;
+        if (!intCoordsWithinLevelBounds(current_cube)) continue;
 
         TileType tile = getTileType(current_cube);
         if (tile != NONE)
@@ -2377,45 +2374,47 @@ void editorMode(TickInput *tick_input)
     Vec3 right_camera_basis, forward_camera_basis;
     cameraBasisFromYaw(camera_yaw, &right_camera_basis, &forward_camera_basis);
 
-    // in all editor modes
-    if (tick_input->w_press) 
+    if (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT)
     {
-        camera.coords.x += forward_camera_basis.x * MOVE_STEP;
-        camera.coords.z += forward_camera_basis.z * MOVE_STEP;
-    }
-    if (tick_input->a_press) 
-    {
-        camera.coords.x -= right_camera_basis.x * MOVE_STEP;
-        camera.coords.z -= right_camera_basis.z * MOVE_STEP;
-    }
-    if (tick_input->s_press) 
-    {
-        camera.coords.x -= forward_camera_basis.x * MOVE_STEP;
-        camera.coords.z -= forward_camera_basis.z * MOVE_STEP;
-    }
-    if (tick_input->d_press) 
-    {
-        camera.coords.x += right_camera_basis.x * MOVE_STEP;
-        camera.coords.z += right_camera_basis.z * MOVE_STEP;
-    }
-    if (tick_input->space_press) camera.coords.y += MOVE_STEP;
-    if (tick_input->shift_press) camera.coords.y -= MOVE_STEP;
+        if (tick_input->w_press) 
+        {
+            camera.coords.x += forward_camera_basis.x * MOVE_STEP;
+            camera.coords.z += forward_camera_basis.z * MOVE_STEP;
+        }
+        if (tick_input->a_press) 
+        {
+            camera.coords.x -= right_camera_basis.x * MOVE_STEP;
+            camera.coords.z -= right_camera_basis.z * MOVE_STEP;
+        }
+        if (tick_input->s_press) 
+        {
+            camera.coords.x -= forward_camera_basis.x * MOVE_STEP;
+            camera.coords.z -= forward_camera_basis.z * MOVE_STEP;
+        }
+        if (tick_input->d_press) 
+        {
+            camera.coords.x += right_camera_basis.x * MOVE_STEP;
+            camera.coords.z += right_camera_basis.z * MOVE_STEP;
+        }
+        if (tick_input->space_press) camera.coords.y += MOVE_STEP;
+        if (tick_input->shift_press) camera.coords.y -= MOVE_STEP;
 
-	if (time_until_input != 0) return; 
-
-    if (tick_input->j_press)
-    {
-        if (editor_state.do_wide_camera) editor_state.do_wide_camera = false;
-        else editor_state.do_wide_camera = true;
-        time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+        if (tick_input->j_press && time_until_input == 0)
+        {
+            if (editor_state.do_wide_camera) editor_state.do_wide_camera = false;
+            else editor_state.do_wide_camera = true;
+            time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+        }
     }
+
+    if (time_until_input != 0) return; 
 
     if (editor_state.editor_mode == PLACE_BREAK)
     {
         if (tick_input->left_mouse_press || tick_input->right_mouse_press || tick_input->middle_mouse_press || tick_input->r_press || tick_input->f_press || tick_input->h_press || tick_input->g_press)
         {
             Vec3 neg_z_basis = {0, 0, -1};
-            RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
+            RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), MAX_RAYCAST_SEEK_LENGTH);
 
             if ((tick_input->left_mouse_press || tick_input->f_press) && raycast_output.hit) 
             {
@@ -2496,7 +2495,7 @@ void editorMode(TickInput *tick_input)
         if (tick_input->left_mouse_press)
         {
             Vec3 neg_z_basis = {0, 0, -1};
-            RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), RAYCAST_SEEK_LENGTH);
+            RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), MAX_RAYCAST_SEEK_LENGTH);
 
 			if (isEntity(getTileType(raycast_output.hit_coords)))
             {
@@ -2624,9 +2623,12 @@ void gameFrame(double delta_time, TickInput tick_input)
         Entity* pack = &next_world_state.pack;
 
         // mode toggle
-        if (tick_input.zero_press) editor_state.editor_mode = NO_MODE;
-        if (tick_input.one_press)  editor_state.editor_mode = PLACE_BREAK;
-        if (tick_input.two_press)  editor_state.editor_mode = SELECT;
+        if (editor_state.editor_mode != SELECT_WRITE)
+    	{
+            if (tick_input.zero_press) editor_state.editor_mode = NO_MODE;
+            if (tick_input.one_press)  editor_state.editor_mode = PLACE_BREAK;
+            if (tick_input.two_press)  editor_state.editor_mode = SELECT;
+        }
 
         if (editor_state.editor_mode == NO_MODE)
         {
@@ -3199,15 +3201,23 @@ void gameFrame(double delta_time, TickInput tick_input)
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
 
-        if (editor_state.editor_mode == SELECT)
+        if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
         {
             if (editor_state.selected_id / 100 == 6)
             {
+                editor_state.editor_mode = SELECT_WRITE;
                 if (tick_input.enter_pressed_this_frame)
                 {
                     Entity* wb = getEntityFromId(editor_state.selected_id);
                     memset(wb->next_level, '0', sizeof(wb->next_level));
 					memcpy(wb->next_level, editor_state.edit_buffer.string, sizeof(wb->next_level) - 1);
+                    editor_state.editor_mode = SELECT;
+                    editor_state.selected_id = 0;
+                }
+                else if (tick_input.escape_press)
+                {
+                    editor_state.editor_mode = SELECT;
+                    editor_state.selected_id = 0;
                 }
 
                 updateTextInput(&tick_input);
@@ -3318,7 +3328,8 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             // crosshair
             Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
-            Vec3 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2, 0.0f };
+            Vec3 center_screen = { ((float)SCREEN_WIDTH_PX / 2) - 5, ((float)SCREEN_HEIGHT_PX / 2) - 18, 0.0f }; // weird numbers are just adjustment because raycast starts slightly offset 
+                                                                                                        	// i think this is due to windowed mode, but could be issue with raycast.
         	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION);
 
             // picked block
@@ -3333,7 +3344,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         drawText(level_name, level_path_coords, DEFAULT_TEXT_SCALE);
 
 		// selected id
-        if (editor_state.editor_mode == SELECT)
+        if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
         {
             Vec2 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2 };
             drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE);
