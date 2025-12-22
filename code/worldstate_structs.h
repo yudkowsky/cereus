@@ -187,6 +187,7 @@ typedef struct TickInput
 
     bool backspace_pressed_this_frame;
     bool enter_pressed_this_frame;
+    bool escape_press;
 
     TextInput text;
 }	
@@ -350,7 +351,8 @@ typedef enum EditorMode
 {
 	NO_MODE = 0,
     PLACE_BREAK = 1,
-    SELECT = 2
+    SELECT = 2,
+    SELECT_WRITE = 3,
 }
 EditorMode;
 

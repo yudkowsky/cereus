@@ -618,9 +618,13 @@ void loadFileToState(char* path)
     FILE *file = fopen(path, "rb");
 
     fseek(file, 1, SEEK_SET); // skip the first byte
-	fread(&level_dim.x, 1, 1, file);
-    fread(&level_dim.y, 1, 1, file);
-    fread(&level_dim.z, 1, 1, file);
+    uint8 x, y, z;
+	fread(&x, 1, 1, file);
+    fread(&y, 1, 1, file);
+    fread(&z, 1, 1, file);
+    level_dim.x = x;
+    level_dim.y = y;
+    level_dim.z = z;
 
     uint8 buffer[32768]; // just some max level size - not all of this is necessarily copied.
 	fread(&buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
@@ -761,9 +765,13 @@ bool saveLevelRewrite(char* path)
     FILE* file = fopen(temp_path, "wb");
     
     fseek(file, 1, SEEK_SET);
-    fwrite(&level_dim.x, 1, 1, file);
-    fwrite(&level_dim.y, 1, 1, file);
-    fwrite(&level_dim.z, 1, 1, file);
+    uint8 x, y, z;
+    x = (uint8)level_dim.x;
+    y = (uint8)level_dim.y;
+    z = (uint8)level_dim.z;
+    fwrite(&x, 1, 1, file);
+    fwrite(&y, 1, 1, file);
+    fwrite(&z, 1, 1, file);
 
     fwrite(next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
 
@@ -2015,33 +2023,6 @@ void recordStateForUndo()
     undo_buffer[undo_buffer_position] = world_state;
     undo_buffer_position = (undo_buffer_position + 1) % UNDO_BUFFER_SIZE;
 }
-
-/*
-void resetStateForUndo()
-{
-    pack_intermediate_states_timer = 0;
-    pack_intermediate_coords = (Int3){0};
-    pack_orthogonal_push_direction = NO_DIRECTION;
-    do_diagonal_push_on_turn = false;
-    do_orthogonal_push_on_turn = false;
-    do_player_and_pack_fall_after_turn = false;
-    player_hit_by_blue_in_turn = false;
-    entity_to_fall_after_blue_not_blue_turn_coords = (Int3){0};
-    entity_to_fall_after_blue_not_blue_turn_timer = 0;
-
-    pack_hitbox_turning_from_timer = 0;
-    pack_hitbox_turning_from_coords = (Int3){0};
-    pack_hitbox_turning_from_direction = NO_DIRECTION;
-    pack_hitbox_turning_to_timer = 0;
-    pack_hitbox_turning_to_coords = (Int3){0};
-    pack_hitbox_turning_to_direction = NO_DIRECTION;
-
-    player_ghost_coords = (Int3){0};
-    pack_ghost_coords = (Int3){0};
-    player_ghost_direction = NO_DIRECTION;
-    pack_ghost_direction = NO_DIRECTION;
-}
-*/
 
 void resetVisuals(Entity* entity)
 {
