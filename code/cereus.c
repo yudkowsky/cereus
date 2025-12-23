@@ -1502,7 +1502,6 @@ PushResult canPush(Int3 coords, Direction direction)
         if (!intCoordsWithinLevelBounds(current_coords)) return FAILED_PUSH;
         if (current_tile == NONE) return CAN_PUSH;
         if (isSource(current_tile)) return FAILED_PUSH;
-        if (current_tile == MIRROR) return FAILED_PUSH;
         if (current_tile == GRID) return FAILED_PUSH;
         if (current_tile == WALL) return FAILED_PUSH;
         if (current_tile == PERM_MIRROR) return FAILED_PUSH;
@@ -1534,7 +1533,7 @@ Push pushOnceWithoutAnimation(Int3 coords, Direction direction, int32 time)
     entity_to_push.entity = entity; 
     entity_to_push.new_coords = getNextCoords(coords, direction);
 
-    entity->previously_moving_sideways = (time == PUSH_MIRROR_ANIMATION_TIME) ? time - 3 : time; // TODO(spike): bad solution but might be fine
+    entity->previously_moving_sideways = time;
 
     setTileType(NONE, entity_to_push.previous_coords);
     setTileDirection(NORTH, entity_to_push.previous_coords);
@@ -1556,7 +1555,7 @@ void pushOnce(Int3 coords, Direction direction, int32 animation_time)
                                  &entity_to_push.entity->position_norm,
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                  id, animation_time); 
-    int32 trailing_hitbox_time = (animation_time == PUSH_MIRROR_ANIMATION_TIME ? TRAILING_HITBOX_TIME + 3 : TRAILING_HITBOX_TIME); // TODO(spike): temp solution to mirror times
+    int32 trailing_hitbox_time = (animation_time == TRAILING_HITBOX_TIME);
     createTrailingHitbox(coords, trailing_hitbox_time);
 }
 
@@ -2235,7 +2234,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
 
     doHeadMovement(input_direction, true, animation_time);
 
-    int32 trailing_hitbox_time = (animation_time == PUSH_MIRROR_ANIMATION_TIME) ? TRAILING_HITBOX_TIME + 3 : TRAILING_HITBOX_TIME; // TODO(spike): temp fix for problem of moving for longer period of time when pushing mirror
+    int32 trailing_hitbox_time = TRAILING_HITBOX_TIME;
     int32 previously_moving_sideways_time = MOVE_OR_PUSH_ANIMATION_TIME; // TODO(spike): also a temp fix - am lying about amount of time taken to move here, wait and see if this is an issue.
     player->previously_moving_sideways = previously_moving_sideways_time;
 
@@ -2763,6 +2762,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             case BOX:
                             case CRYSTAL:
                             case PACK:
+                            case MIRROR:
                             {
                                 //figure out if push, pause, or fail here.
                             	PushResult push_check = canPushStack(next_player_coords, input_direction);
@@ -2771,24 +2771,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     do_push = true;
                                     move_player = true;
                                     animation_time = MOVE_OR_PUSH_ANIMATION_TIME;
-                                }
-                                else if (push_check == FAILED_PUSH) do_failed_animations = true;
-                                break;
-                            }
-                            case MIRROR: // currently allowing blocks on top of the mirror but not behind the mirror when pushing
-                            {
-                                PushResult push_check = canPush(next_player_coords, input_direction);
-                                if (push_check == CAN_PUSH) 
-                                {
-                                    TileType after_push_tile = getTileType(getNextCoords(next_player_coords, input_direction));
-                               		if (after_push_tile != NONE) 
-                                    {
-                                        do_failed_animations = true;
-                                        break; 
-                                    }
-                                    do_push = true;
-                                    move_player = true;
-                                    animation_time = PUSH_MIRROR_ANIMATION_TIME;
                                 }
                                 else if (push_check == FAILED_PUSH) do_failed_animations = true;
                                 break;
@@ -2930,6 +2912,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     }
                                     case BOX:
                                     case CRYSTAL:
+                                    case MIRROR:
                                     {
                                         PushResult push_result = canPushStack(diagonal_coords, diagonal_push_direction);
                                         if (push_result == CAN_PUSH)
@@ -2951,6 +2934,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     }
                                     case BOX:
                                     case CRYSTAL:
+                                    case MIRROR:
                                     {
                                         PushResult push_result = canPushStack(orthogonal_coords, orthogonal_push_direction);
                                         if (push_result == CAN_PUSH)
