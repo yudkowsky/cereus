@@ -98,6 +98,8 @@ typedef struct Camera
     Vec3 coords;
     Vec4 rotation;
     float fov;
+    float yaw;
+    float pitch;
 }
 Camera;
 

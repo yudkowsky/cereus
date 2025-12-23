@@ -76,7 +76,7 @@ const char WIN_BLOCK_CHUNK_TAG[4] = "WINB";
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
-const char backup_level_path[256] = "w:/cereus/data/levels/basic.level";
+const char backup_level_path[256] = "w:/cereus/data/levels/overworld.level";
 const char start_level_path_buffer[256] = "w:/cereus/data/levels/";
 char level_path_buffer[256] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
@@ -91,8 +91,6 @@ char levels_in_order[32][32] = { "pack-intro", "red-intro-1", "red-intro-2", "bl
                                  "balance", "basic" };
 */
 Camera camera = {0};
-float camera_yaw = 0.0f;
-float camera_pitch = 0.0f;
 
 AssetToLoad assets_to_load[1024] = {0};
 
@@ -626,7 +624,7 @@ void loadFileToState(char* path)
     level_dim.y = y;
     level_dim.z = z;
 
-    uint8 buffer[32768]; // just some max level size - not all of this is necessarily copied.
+    uint8 buffer[65536]; // just some max level size - not all of this is necessarily copied.
 	fread(&buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
 
     bool found = false;
@@ -639,8 +637,8 @@ void loadFileToState(char* path)
         fread(&camera.coords.y, 4, 1, file);
         fread(&camera.coords.z, 4, 1, file);
         fread(&camera.fov, 4, 1, file);
-        fread(&camera_yaw, 4, 1, file);
-        fread(&camera_pitch, 4, 1, file);
+        fread(&camera.yaw, 4, 1, file);
+        fread(&camera.pitch, 4, 1, file);
     }
 	
 	fclose(file);
@@ -653,7 +651,27 @@ void writeBufferToFile(FILE* file)
 	fwrite(next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
 }
 
-void writeCameraToFile(FILE* file)
+Camera getCurrentCameraInFile(FILE* file)
+{
+	Camera out_camera = {0};
+
+    bool found = false;
+    int32 seek_to = findChunkOrEOF(file, CAMERA_CHUNK_TAG, &found);
+    if (seek_to >= 0 && found == true)
+    {
+        fseek(file, seek_to, SEEK_SET); // go to after chunk marker
+        fseek(file, 4, SEEK_CUR); // ...but still want to skip over chunk size
+        fread(&out_camera.coords.x, 4, 1, file);
+        fread(&out_camera.coords.y, 4, 1, file);
+        fread(&out_camera.coords.z, 4, 1, file);
+        fread(&out_camera.fov, 4, 1, file);
+        fread(&out_camera.yaw, 4, 1, file);
+        fread(&out_camera.pitch, 4, 1, file);
+    }
+    return out_camera;
+}
+
+void writeCameraToFile(FILE* file, Camera* in_camera)
 {
     bool found = false; // unused, because if not found just write to EOF anyway
     int32 seek_to = findChunkOrEOF(file, CAMERA_CHUNK_TAG, &found);
@@ -663,12 +681,12 @@ void writeCameraToFile(FILE* file)
         fwrite(CAMERA_CHUNK_TAG, 4, 1, file);
     }
     fwrite(&CAMERA_CHUNK_SIZE, 4, 1, file);
-    fwrite(&camera.coords.x, 4, 1, file);
-    fwrite(&camera.coords.y, 4, 1, file);
-    fwrite(&camera.coords.z, 4, 1, file);
-    fwrite(&camera.fov, 4, 1, file);
-    fwrite(&camera_yaw, 4, 1, file);
-    fwrite(&camera_pitch, 4, 1, file);
+    fwrite(&in_camera->coords.x, 4, 1, file);
+    fwrite(&in_camera->coords.y, 4, 1, file);
+    fwrite(&in_camera->coords.z, 4, 1, file);
+    fwrite(&in_camera->fov, 4, 1, file);
+    fwrite(&in_camera->yaw, 4, 1, file);
+    fwrite(&in_camera->pitch, 4, 1, file);
 }
 
 void writeWinBlockToFile(FILE* file, Entity* wb)
@@ -759,6 +777,10 @@ void loadWinBlockPaths(FILE* file)
 
 bool saveLevelRewrite(char* path)
 {
+    FILE* old_file = fopen(path, "rb+");
+    Camera saved_camera = getCurrentCameraInFile(old_file);
+	fclose(old_file);
+
     char temp_path[256] = {0};
     snprintf(temp_path, sizeof(temp_path), "%s.temp", path);
 
@@ -775,7 +797,8 @@ bool saveLevelRewrite(char* path)
 
     fwrite(next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
 
-    writeCameraToFile(file);
+    writeCameraToFile(file, &saved_camera);
+
     FOR(win_block_index, MAX_ENTITY_INSTANCE_COUNT)
     {
         Entity* wb = &next_world_state.win_blocks[win_block_index];
@@ -2362,7 +2385,7 @@ void editorMode(TickInput *tick_input)
     Entity* pack = &next_world_state.pack;
 
     Vec3 right_camera_basis, forward_camera_basis;
-    cameraBasisFromYaw(camera_yaw, &right_camera_basis, &forward_camera_basis);
+    cameraBasisFromYaw(camera.yaw, &right_camera_basis, &forward_camera_basis);
 
     if (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT)
     {
@@ -2572,8 +2595,8 @@ void gameInitialiseState()
 	loadWinBlockPaths(file);
     fclose(file);
 
-    Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera_yaw);
-    Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera_pitch);
+    Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera.yaw);
+    Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera.pitch);
     camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
     world_state = next_world_state;
 }
@@ -2593,16 +2616,16 @@ void gameFrame(double delta_time, TickInput tick_input)
 
     if (editor_state.editor_mode != NO_MODE)
     {
-        camera_yaw += tick_input.mouse_dx * SENSITIVITY;
-        if (camera_yaw >  0.5f * TAU) camera_yaw -= TAU; 
-        if (camera_yaw < -0.5f * TAU) camera_yaw += TAU; 
-        camera_pitch += tick_input.mouse_dy * SENSITIVITY;
+        camera.yaw += tick_input.mouse_dx * SENSITIVITY;
+        if (camera.yaw >  0.5f * TAU) camera.yaw -= TAU; 
+        if (camera.yaw < -0.5f * TAU) camera.yaw += TAU; 
+        camera.pitch += tick_input.mouse_dy * SENSITIVITY;
         float pitch_limit = 0.25f * TAU;
-        if (camera_pitch >  pitch_limit) camera_pitch =  pitch_limit; 
-        if (camera_pitch < -pitch_limit) camera_pitch = -pitch_limit; 
+        if (camera.pitch >  pitch_limit) camera.pitch =  pitch_limit; 
+        if (camera.pitch < -pitch_limit) camera.pitch = -pitch_limit; 
 
-        Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera_yaw);
-        Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera_pitch);
+        Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera.yaw);
+        Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera.pitch);
         camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
     }
 
@@ -3180,14 +3203,17 @@ void gameFrame(double delta_time, TickInput tick_input)
         if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID   || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID  ) && !presentInAnimations(PACK_ID))   pack->id = -1;
 
         // win block logic
-        if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) || (tick_input.q_press && time_until_input == 0))
+        if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_input == 0))
         {
-            recordStateForUndo();
-            memset(animations, 0, sizeof(animations));
-            memset(trailing_hitboxes, 0, sizeof(trailing_hitboxes));
-
             Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
-            gameInitialise(wb->next_level);
+            if (wb->next_level[0] != 0)
+            {
+                recordStateForUndo();
+                memset(animations, 0, sizeof(animations));
+                memset(trailing_hitboxes, 0, sizeof(trailing_hitboxes));
+
+                gameInitialise(wb->next_level);
+            }
         }
 
         // final redo of laser buffer, after all logic is complete, for drawing
@@ -3362,7 +3388,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-        // decide which camera to use
+        // decide which camera to use TODO(spike): embedd in file, and add ability to change fov in editor
         if (editor_state.do_wide_camera) camera.fov = 60.0f;
         else camera.fov = 30.0f;
 
@@ -3370,10 +3396,9 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (time_until_input == 0 && editor_state.editor_mode == PLACE_BREAK && tick_input.i_press) 
         {
             saveLevelRewrite(world_state.level_path);
-            //if (ok) drawText()
         }
         FILE* file = fopen(world_state.level_path, "rb+");
-        if (time_until_input == 0 && editor_state.editor_mode == PLACE_BREAK && tick_input.c_press) writeCameraToFile(file);
+        if (time_until_input == 0 && editor_state.editor_mode == PLACE_BREAK && tick_input.c_press) writeCameraToFile(file, &camera);
         fclose(file);
 
 		if (time_until_input > 0) time_until_input--;
