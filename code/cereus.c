@@ -809,10 +809,7 @@ bool saveLevelRewrite(char* path)
     fclose(file);
 
     remove(path);
-    if (rename(temp_path, path) != 0)
-    {
-        return false;
-    }
+    if (rename(temp_path, path) != 0) return false;
     return true;
 }
 
@@ -2530,9 +2527,12 @@ void gameInitialiseState()
     Entity* pack = &next_world_state.pack;
 
     char level_path[256];
+
+    bool save_in_ow = next_world_state.in_overworld;
     strcpy(level_path, next_world_state.level_path);
     memset(&next_world_state, 0, sizeof(WorldState));
     strcpy(next_world_state.level_path, level_path);
+    next_world_state.in_overworld = save_in_ow;
 
     loadFileToState(next_world_state.level_path);
 
@@ -2603,7 +2603,12 @@ void gameInitialiseState()
 void gameInitialise(char* level_name) 
 {	
     // TODO(spike): panic if cannot open constructed level path
-    if (level_name != 0) snprintf(next_world_state.level_path, sizeof(next_world_state.level_path), "%s%s.level", start_level_path_buffer, level_name);
+    if (level_name != 0) 
+    {
+        if (strcmp(level_name, "overworld") == 0) next_world_state.in_overworld = true;
+        else next_world_state.in_overworld = false;
+        snprintf(next_world_state.level_path, sizeof(next_world_state.level_path), "%s%s.level", start_level_path_buffer, level_name);
+    }
     else strcpy(next_world_state.level_path, backup_level_path);
     gameInitialiseState();
 }
@@ -2990,7 +2995,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 {
                                     // failed turn animation
                                     doFailedTurnAnimations(input_direction, clockwise);
-                                }
+                               }
                         	}
                         }
                     }
@@ -3189,12 +3194,17 @@ void gameFrame(double delta_time, TickInput tick_input)
         // win block logic
         if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_input == 0))
         {
+            if (next_world_state.in_overworld) saveLevelRewrite(next_world_state.level_path);
+
             Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
             if (wb->next_level[0] != 0)
             {
+                if (strcmp(wb->next_level, "overworld") == 0) next_world_state.in_overworld = true;
                 recordStateForUndo();
                 memset(animations, 0, sizeof(animations));
                 memset(trailing_hitboxes, 0, sizeof(trailing_hitboxes));
+
+                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
 
                 gameInitialise(wb->next_level);
             }
@@ -3371,6 +3381,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                 drawDebugText("no entity selected");
             }
         }
+
+        // temp debug text
+        char in_ow_info[256] = {0};
+        snprintf(in_ow_info, sizeof(in_ow_info), "in overworld: %s", world_state.in_overworld ? "true" : "false");
+		drawDebugText(in_ow_info);
 
         // decide which camera to use TODO(spike): embedd in file, and add ability to change fov in editor
         if (editor_state.do_wide_camera) camera.fov = 60.0f;

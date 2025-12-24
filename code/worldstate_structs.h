@@ -316,7 +316,7 @@ typedef struct WorldState
     bool player_will_fall_next_turn; // used for not being able to walk one extra tile after walking out of red beam
     bool pack_detached;
     char level_path[64];
-//	int32 win_block_count;
+    bool in_overworld;
 
     // player's lingering hitbox when hit should still trigger that color
     int32 player_trailing_hitbox_timer;
