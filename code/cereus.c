@@ -3173,18 +3173,21 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (next_world_state.player_trailing_hitbox_timer > 0) next_world_state.player_trailing_hitbox_timer--;
 
 		// delete if above void
-        Entity* entity_group[3] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals};
-        FOR(entity_group_index, 3)
+        if (!player->hit_by_blue) // TODO(spike): maybe just wrap this into the falling logic?
         {
-            FOR(entity_instance_index, MAX_ENTITY_INSTANCE_COUNT)
+            Entity* entity_group[3] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals};
+            FOR(entity_group_index, 3)
             {
-                Entity* entity = &entity_group[entity_group_index][entity_instance_index];
-                if (entity->id == -1) continue;
-                if (getTileType(getNextCoords(entity->coords, DOWN)) == VOID && !entityInMotion(entity)) // TODO(spike): still some bug when pushing walking onto a place where another 
-                                                                                                         // entity has fallen and disappeared causing player to be able to walk over void for a few frames
+                FOR(entity_instance_index, MAX_ENTITY_INSTANCE_COUNT)
                 {
-                    setTileType(NONE, entity->coords);
-                    entity->id = -1;
+                    Entity* entity = &entity_group[entity_group_index][entity_instance_index];
+                    if (entity->id == -1) continue;
+                    if (getTileType(getNextCoords(entity->coords, DOWN)) == VOID && !entityInMotion(entity)) // TODO(spike): still some bug when pushing walking onto a place where another 
+                                                                                                             // entity has fallen and disappeared causing player to be able to walk over void for a few frames
+                    {
+                        setTileType(NONE, entity->coords);
+                        entity->id = -1;
+                    }
                 }
             }
         }

@@ -208,10 +208,10 @@ static const uint32 SPRITE_INDICES[6] =
 Vertex frame_vertex_stash[65536];
 uint32 frame_vertex_count = 0;
 
-Sprite sprite_instances[1024];
+Sprite sprite_instances[8192];
 uint32 sprite_instance_count = 0;
 
-Cube cube_instances[1024];
+Cube cube_instances[8192];
 uint32 cube_instance_count = 0;
 
 Camera renderer_camera = {0};
