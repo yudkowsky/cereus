@@ -37,6 +37,7 @@ typedef enum SpriteId
     SPRITE_2D_SOURCE_CYAN,
     SPRITE_2D_SOURCE_WHITE,
     SPRITE_2D_CROSSHAIR,
+    SPRITE_2D_LOCKED_BLOCK,
 
     SPRITE_2D_FONT_SPACE,
     SPRITE_2D_FONT_LAST = SPRITE_2D_FONT_SPACE + 94,
@@ -77,6 +78,7 @@ typedef enum SpriteId
     CUBE_3D_PLAYER_YELLOW,
     CUBE_3D_PLAYER_CYAN,
     CUBE_3D_PLAYER_WHITE,
+    CUBE_3D_LOCKED_BLOCK,
 
     ASSET_COUNT
 }
@@ -226,6 +228,8 @@ typedef enum TileType
     SOURCE_CYAN,
     SOURCE_WHITE,
 
+    LOCKED_BLOCK,
+
     LASER_RED,
     LASER_GREEN,
     LASER_BLUE,
@@ -277,6 +281,7 @@ typedef struct Entity
     int32 id;
     int32 previously_moving_sideways;
     int32 falling_time;
+    bool locked;
 
     // for sources/lasers
     Color color;
@@ -288,6 +293,9 @@ typedef struct Entity
 
     // for win blocks
     char next_level[64];
+
+    // for locked blocks
+    char unlocked_by[64];
 }
 Entity;
 
@@ -307,12 +315,14 @@ typedef struct WorldState
     uint8 buffer[32768]; // 2 bytes info per tile 
     Entity player;
     Entity pack;
-    Entity boxes[32];
-    Entity mirrors[32];
-    Entity sources[32];
-    Entity crystals[32];
-    Entity perm_mirrors[32];
-    Entity win_blocks[32];
+    Entity boxes[128];
+    Entity mirrors[128];
+    Entity sources[128];
+    Entity crystals[128];
+    Entity perm_mirrors[128];
+    Entity win_blocks[128];
+    Entity locked_blocks[128];
+
     bool player_will_fall_next_turn; // used for not being able to walk one extra tile after walking out of red beam
     bool pack_detached;
     char level_path[64];
