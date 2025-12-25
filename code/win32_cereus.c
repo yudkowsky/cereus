@@ -283,13 +283,6 @@ int CALLBACK WinMain(
 
         gameFrame(delta_time, tick_input); 
 
-        tick_input.mouse_dx = 0;
-        tick_input.mouse_dy = 0;
-        tick_input.text.count = 0;
-        tick_input.backspace_pressed_this_frame = false;
-        tick_input.enter_pressed_this_frame = false;
-
-
         centerCursorInWindow();
     }
 
