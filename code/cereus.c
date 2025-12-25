@@ -3454,6 +3454,12 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (time_until_input == 0 && editor_state.editor_mode == PLACE_BREAK && tick_input.c_press) writeCameraToFile(file, &camera);
         fclose(file);
 
+        tick_input.mouse_dx = 0;
+        tick_input.mouse_dy = 0;
+        tick_input.text.count = 0;
+        tick_input.backspace_pressed_this_frame = false;
+        tick_input.enter_pressed_this_frame = false;
+
 		if (time_until_input > 0) time_until_input--;
 
         rendererSubmitFrame(assets_to_load, camera);
