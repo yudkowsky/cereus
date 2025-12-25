@@ -368,6 +368,14 @@ typedef enum EditorMode
 }
 EditorMode;
 
+typedef enum WritingField
+{
+    NO_WRITING_FIELD = 0,
+	WRITING_FIELD_NEXT_LEVEL,
+    WRITING_FIELD_UNLOCKED_BY
+}
+WritingField;
+
 typedef struct EditorState
 {
     EditorMode editor_mode;
@@ -376,6 +384,7 @@ typedef struct EditorState
     Direction picked_direction;
 
     int32 selected_id;
+    WritingField writing_field;
 
     EditBuffer edit_buffer;
 }

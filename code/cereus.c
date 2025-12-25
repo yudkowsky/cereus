@@ -6,7 +6,7 @@
 
 #define FOR(i, n) for (int i = 0; i < n; i++)
 
-const int32 SCREEN_WIDTH_PX = 1920; // TODO(spike): get from windows layer
+const int32 SCREEN_WIDTH_PX = 1920; // TODO(spike): get from platform layer
 const int32	SCREEN_HEIGHT_PX = 1080;
 
 const float TAU = 6.2831853071f;
@@ -24,7 +24,6 @@ const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9; // TODO(spike): make this freely ed
 const int32 TURN_ANIMATION_TIME = 9; // somewhat hard coded, tied to PUSH_FROM_TURN...
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
 const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6; // also somewhat hard coded, based on some function of the turn animation time and the sequencing based on it
-const int32 PUSH_MIRROR_ANIMATION_TIME = 16;
 const int32 FAILED_ANIMATION_TIME = 8;
 
 const int32 TRAILING_HITBOX_TIME = 4;
@@ -81,15 +80,6 @@ const char start_level_path_buffer[256] = "w:/cereus/data/levels/";
 char level_path_buffer[256] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
-/*
-char levels_in_order[32][32] = { "pack-intro", "red-intro-1", "red-intro-2", "blue-intro-1", "blue-intro-2", 
-    							 "mirror-intro", "rafters",
-                                 "becoming-blue", 
-                                 "hax-0", "hax-1", "hax-2", 
-                                 "research", "broken-bridges",
-                                 "green-intro", "mirror-bypass", "bureaucracy", 
-                                 "balance", "basic" };
-*/
 Camera camera = {0};
 
 AssetToLoad assets_to_load[1024] = {0};
@@ -564,10 +554,6 @@ void setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction direc
 // first 4 bytes:    -,x,y,z of level dimensions
 // next x*y*z * 2 (32768 by default) bytes: actual level buffer
 // then chunking starts: 4 bytes for tag (e.g. CMRA), 4 bytes for int32 size of chunk (e.g 24), and then data for that chunk.
-
-// .meta file structure:
-// LOCK chunk:
-// LOCK, size, coords, unlocked by path (path 64 bytes)
 
 // find the location of specific chunk
 int32 findChunkOrEOF(FILE* file, char tag[4], bool* found)
@@ -2503,7 +2489,33 @@ void editorMode(TickInput *tick_input)
             time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
         }
     }
-    else if (editor_state.editor_mode == SELECT)
+
+    if (editor_state.editor_mode == SELECT_WRITE)
+    {
+        if (tick_input->enter_pressed_this_frame)
+        {
+            Entity* wb = getEntityFromId(editor_state.selected_id);
+            memset(wb->next_level, '0', sizeof(wb->next_level));
+            memcpy(wb->next_level, editor_state.edit_buffer.string, sizeof(wb->next_level) - 1);
+            editor_state.editor_mode = SELECT;
+            editor_state.selected_id = 0;
+            editor_state.writing_field = NO_WRITING_FIELD;
+        }
+        else if (tick_input->escape_press)
+        {
+            editor_state.editor_mode = SELECT;
+            editor_state.selected_id = 0;
+            editor_state.writing_field = NO_WRITING_FIELD;
+        }
+
+        updateTextInput(tick_input);
+    }
+    else
+    {
+        memset(&editor_state.edit_buffer, 0, sizeof(editor_state.edit_buffer));
+    }
+
+    if (editor_state.editor_mode == SELECT)
     {
         if (tick_input->left_mouse_press)
         {
@@ -2517,6 +2529,20 @@ void editorMode(TickInput *tick_input)
 			else
             {
 				editor_state.selected_id = -1;
+            }
+        }
+
+        if (editor_state.selected_id > 0)
+        {
+            if (tick_input->l_press) 
+            {
+                editor_state.editor_mode = SELECT_WRITE;
+                editor_state.writing_field = WRITING_FIELD_NEXT_LEVEL;
+            }
+            if (tick_input->b_press)
+            {
+                editor_state.editor_mode = SELECT_WRITE;
+                editor_state.writing_field = WRITING_FIELD_UNLOCKED_BY;
             }
         }
     }
@@ -3259,41 +3285,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
 
-        if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
-        {
-            if (tick_input.space_press && time_until_input == 0)
-            {
-				Entity* e = getEntityFromId(editor_state.selected_id);
-            	if (e->locked) e->locked = false;
-            	else 		   e->locked = true;
-                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
-            }
-
-            if (editor_state.selected_id / 100 == 6)
-            {
-                editor_state.editor_mode = SELECT_WRITE;
-                if (tick_input.enter_pressed_this_frame)
-                {
-                    Entity* wb = getEntityFromId(editor_state.selected_id);
-                    memset(wb->next_level, '0', sizeof(wb->next_level));
-					memcpy(wb->next_level, editor_state.edit_buffer.string, sizeof(wb->next_level) - 1);
-                    editor_state.editor_mode = SELECT;
-                    editor_state.selected_id = 0;
-                }
-                else if (tick_input.escape_press)
-                {
-                    editor_state.editor_mode = SELECT;
-                    editor_state.selected_id = 0;
-                }
-
-                updateTextInput(&tick_input);
-            }
-            else
-            {
-				memset(&editor_state.edit_buffer, 0, sizeof(editor_state.edit_buffer));
-            }
-        }
-
         // finished updating state
         world_state = next_world_state;
 
@@ -3417,32 +3408,38 @@ void gameFrame(double delta_time, TickInput tick_input)
             Vec2 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2 };
             drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE);
 
-            if (editor_state.selected_id != -1)
+            if (editor_state.selected_id > 0)
             {
+                Entity* e = getEntityFromId(editor_state.selected_id);
+
                 char selected_id_text[256] = {0};
                 snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d", editor_state.selected_id);
                 drawDebugText(selected_id_text);
 
-                // next_level display
-                if (editor_state.selected_id / 100 == 6)
+                char writing_field_text[256] = {0};
+                char writing_field_state[256] = {0};
+                switch (editor_state.writing_field)
                 {
-					Entity* wb = getEntityFromId(editor_state.selected_id);
-                    
-                    char next_level_text[256] = {0};
-                    snprintf(next_level_text, sizeof(next_level_text), "next level: %s", wb->next_level);
-                    drawDebugText(next_level_text);
+                    case NO_WRITING_FIELD:    		memcpy(writing_field_state, "none", 		sizeof(writing_field_state)); break;
+                    case WRITING_FIELD_NEXT_LEVEL:  memcpy(writing_field_state, "next level", 	sizeof(writing_field_state)); break;
+                    case WRITING_FIELD_UNLOCKED_BY: memcpy(writing_field_state, "unlocked by", 	sizeof(writing_field_state)); break;
                 }
+                snprintf(writing_field_text, sizeof(writing_field_text), "writing_field: %s", writing_field_state); 
+                drawDebugText(writing_field_text);
+
+                // TODO(spike): macro for this declaration + snprintf + drawDebugText
+				char next_level_text[256] = {0};
+                char unlocked_by_text[256] = {0};
+				snprintf(next_level_text, sizeof(next_level_text), "next_level: %s", e->next_level);
+                snprintf(unlocked_by_text, sizeof(unlocked_by_text), "unlocked_by: %s", e->unlocked_by);
+                drawDebugText(next_level_text);
+                drawDebugText(unlocked_by_text);
             }
             else
             {
                 drawDebugText("no entity selected");
             }
         }
-
-        // temp debug text
-        char in_ow_info[256] = {0};
-        snprintf(in_ow_info, sizeof(in_ow_info), "in overworld: %s", world_state.in_overworld ? "true" : "false");
-		drawDebugText(in_ow_info);
 
         // decide which camera to use TODO(spike): embedd in file, and add ability to change fov in editor
         if (editor_state.do_wide_camera) camera.fov = 60.0f;
