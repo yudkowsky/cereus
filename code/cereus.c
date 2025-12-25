@@ -2053,8 +2053,8 @@ void resetVisuals(Entity* entity)
 
 void resetStandardVisuals()
 {
-    Entity* entity_group[3] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals};
-    FOR(entity_group_index, 3)
+    Entity* entity_group[4] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources };
+    FOR(entity_group_index, 4)
     {
         FOR(entity_instance_index, MAX_ENTITY_INSTANCE_COUNT)
         {
@@ -2129,8 +2129,8 @@ bool doFallingEntity(Entity* entity, bool do_animation)
 
 void doFallingObjects(bool do_animation)
 {
- 	Entity* object_group_to_fall[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
-	FOR(to_fall_index, 3)
+ 	Entity* object_group_to_fall[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources };
+	FOR(to_fall_index, 4)
     {
 		Entity* entity_group = object_group_to_fall[to_fall_index];
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -2958,6 +2958,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     case BOX:
                                     case CRYSTAL:
                                     case MIRROR:
+
+                                    case SOURCE_RED:
+                                    case SOURCE_GREEN:
+                                    case SOURCE_BLUE:
+                                    case SOURCE_MAGENTA:
+                                    case SOURCE_YELLOW:
+                                    case SOURCE_CYAN:
+                                    case SOURCE_WHITE:
                                     {
                                         PushResult push_result = canPushStack(orthogonal_coords, orthogonal_push_direction);
                                         if (push_result == CAN_PUSH)
@@ -3161,8 +3169,8 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // decrement falling timers
-        Entity* falling_entity_groups[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals };
-        FOR(falling_object_index, 3)
+        Entity* falling_entity_groups[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources };
+        FOR(falling_object_index, 4)
         {
             Entity* entity_group = falling_entity_groups[falling_object_index];
             FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) decrementFallingTimers(&entity_group[entity_index]);
@@ -3193,8 +3201,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 		// delete objects if above void
         if (!player->hit_by_blue) // TODO(spike): maybe just wrap this into the falling logic?
         {
-            Entity* entity_group[3] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals};
-            FOR(entity_group_index, 3)
+            Entity* entity_group[4] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources };
+            FOR(entity_group_index, 4)
             {
                 FOR(entity_instance_index, MAX_ENTITY_INSTANCE_COUNT)
                 {
