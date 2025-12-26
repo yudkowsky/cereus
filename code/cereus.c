@@ -2431,7 +2431,6 @@ void editorMode(TickInput *tick_input)
             }
             else if ((tick_input->right_mouse_press || tick_input->h_press) && raycast_output.hit) 
             {
-                Entity *entity_group = 0;
                 if (isSource(editor_state.picked_tile)) 
                 {
                     setTileType(editor_state.picked_tile, raycast_output.place_coords); 
@@ -2442,13 +2441,16 @@ void editorMode(TickInput *tick_input)
                 else if (editor_state.picked_tile == PACK) editorPlaceOnlyInstanceOfTile(pack, raycast_output.place_coords, PACK, PACK_ID);
                 else
                 {
+                    Entity* entity_group = 0;
                     switch (editor_state.picked_tile)
                     {
-                        case BOX:     	  entity_group = next_world_state.boxes;    	break;
-                        case MIRROR:  	  entity_group = next_world_state.mirrors;  	break;
-                        case CRYSTAL: 	  entity_group = next_world_state.crystals; 	break;
-                        case PERM_MIRROR: entity_group = next_world_state.perm_mirrors; break;
-                        case WIN_BLOCK:   entity_group = next_world_state.win_blocks;   break;
+                        // TODO(spike): make this switch statement a function, so don't have to keep changing all of them every time there is a new entity added
+                        case BOX:     	   entity_group = next_world_state.boxes;    	  break;
+                        case MIRROR:  	   entity_group = next_world_state.mirrors;  	  break;
+                        case CRYSTAL: 	   entity_group = next_world_state.crystals; 	  break;
+                        case PERM_MIRROR:  entity_group = next_world_state.perm_mirrors;  break;
+                        case WIN_BLOCK:    entity_group = next_world_state.win_blocks;    break;
+                        case LOCKED_BLOCK: entity_group = next_world_state.locked_blocks; break;
                         default: entity_group = 0;
                     }
                     if (entity_group != 0) setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
