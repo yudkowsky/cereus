@@ -207,7 +207,7 @@ EditBuffer;
 // TODO(spike): rename NONE -> NO_TILE
 typedef enum TileType
 {
-    NONE,
+    NONE = 0,
     VOID,
     GRID,
     WALL,
@@ -310,6 +310,14 @@ typedef struct Animation
 }
 Animation;
 
+typedef struct TrailingHitbox
+{
+	Int3 coords;
+    int32 frames;
+    TileType type;
+}
+TrailingHitbox;
+
 typedef struct WorldState
 {
     uint8 buffer[32768]; // 2 bytes info per tile 
@@ -328,9 +336,7 @@ typedef struct WorldState
     char level_path[64];
     bool in_overworld;
 
-    // player's lingering hitbox when hit should still trigger that color
-    int32 player_trailing_hitbox_timer;
-    Int3 player_trailing_hitbox_coords;
+    TrailingHitbox trailing_hitboxes[64];
 
     // handle pack turning sequence
     int32 pack_intermediate_states_timer;
@@ -422,10 +428,3 @@ typedef struct LaserBuffer
     Int3 coords;
 }
 LaserBuffer;
-
-typedef struct TrailingHitbox
-{
-	Int3 coords;
-    int32 frames;
-}
-TrailingHitbox;

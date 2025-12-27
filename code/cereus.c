@@ -98,8 +98,6 @@ LaserBuffer laser_buffer[1024] = {0};
 const Vec2 DEBUG_TEXT_COORDS_START = { 50.0f, 1080.0f - 80.0f };
 Vec2 debug_text_coords = {0}; 
 
-TrailingHitbox trailing_hitboxes[64] = {0};
-
 // CAMERA STUFF
 
 void cameraBasisFromYaw(float yaw, Vec3* right, Vec3* forward)
@@ -1448,17 +1446,28 @@ int32 findNextFreeInTrailingHitboxes()
 {
     FOR(find_hitbox_index, MAX_TRAILING_HITBOX_COUNT)
     {
-        if (trailing_hitboxes[find_hitbox_index].frames != 0) continue;
+        if (next_world_state.trailing_hitboxes[find_hitbox_index].frames != 0) continue;
         return find_hitbox_index;
     }
     return 0;
 }
 
-void createTrailingHitbox(Int3 coords, int32 frames)
+void createTrailingHitbox(Int3 coords, int32 frames, TileType type)
 {
     int32 hitbox_index = findNextFreeInTrailingHitboxes();
-    trailing_hitboxes[hitbox_index].coords = coords;
-    trailing_hitboxes[hitbox_index].frames = frames;
+    next_world_state.trailing_hitboxes[hitbox_index].coords = coords;
+    next_world_state.trailing_hitboxes[hitbox_index].frames = frames;
+    next_world_state.trailing_hitboxes[hitbox_index].type = type;
+}
+
+TileType trailingHitboxAtCoords(Int3 coords)
+{
+    FOR(trailing_hitbox_index, MAX_TRAILING_HITBOX_COUNT) 
+    {
+        TrailingHitbox th = next_world_state.trailing_hitboxes[trailing_hitbox_index];
+        if (int3IsEqual(coords, th.coords) && th.frames > 0) return th.type;
+    }
+    return NONE;
 }
 
 PushResult canPush(Int3 coords, Direction direction)
@@ -1534,13 +1543,14 @@ void pushOnce(Int3 coords, Direction direction, int32 animation_time)
     Push entity_to_push = pushOnceWithoutAnimation(coords, direction, animation_time);
 
     int32 id = getEntityId(entity_to_push.new_coords);
+    TileType trailing_hitbox_type = getTileType(entity_to_push.new_coords);
     createInterpolationAnimation(intCoordsToNorm(entity_to_push.previous_coords),
                                  intCoordsToNorm(entity_to_push.new_coords),
                                  &entity_to_push.entity->position_norm,
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                  id, animation_time); 
     int32 trailing_hitbox_time = animation_time - 3;
-    createTrailingHitbox(coords, trailing_hitbox_time);
+    createTrailingHitbox(coords, trailing_hitbox_time, trailing_hitbox_type);
 }
 
 // assumes at least the lowest layer of the stack is able to be pushed. checks if next is NONE, if so stops. 
@@ -1921,10 +1931,27 @@ int32 updateLaserBuffer(void)
         for (int laser_index = 0; laser_index < MAX_LASER_TRAVEL_DISTANCE; laser_index++)
         {
             TileType tile_hit = getTileType(current_coords);
+            TileType trailing_hitbox_hit = NONE;
             LaserColor laser_color = colorToLaserColor(source->color);
 
-            if (int3IsEqual(current_coords, next_world_state.player_trailing_hitbox_coords) && next_world_state.player_trailing_hitbox_timer > 0) goto player_hit_bypass;
-            FOR(trailing_hitbox_index, MAX_TRAILING_HITBOX_COUNT) if (int3IsEqual(current_coords, trailing_hitboxes[trailing_hitbox_index].coords) && trailing_hitboxes[trailing_hitbox_index].frames > 0) goto laser_instance_stop;
+			trailing_hitbox_hit = trailingHitboxAtCoords(current_coords);
+
+            if (trailing_hitbox_hit)
+            {
+                if (trailing_hitbox_hit == PLAYER)
+                {
+                    goto player_trailing_hitbox_hit_bypass;
+                }
+                else if (trailing_hitbox_hit == MIRROR)
+                {
+
+                }
+                else
+                {
+                    goto laser_instance_stop;
+                }
+            }
+
             if ((next_world_state.pack_hitbox_turning_from_timer > 0) && int3IsEqual(current_coords, next_world_state.pack_hitbox_turning_from_coords) && (next_world_state.pack_hitbox_turning_from_direction == current_direction)) goto laser_instance_stop;
             if ((next_world_state.pack_hitbox_turning_to_timer   > 0) && int3IsEqual(current_coords, next_world_state.pack_hitbox_turning_to_coords)   && (next_world_state.pack_hitbox_turning_to_direction   == current_direction)) goto laser_instance_stop;
             // TODO(spike): add in locked condition, jump to instance stop
@@ -1937,7 +1964,7 @@ int32 updateLaserBuffer(void)
                 {
                     if (!laserPassthroughAllowed(player) || ((player->previously_moving_sideways > 0) && player->direction == oppositeDirection(current_direction)))
                     {
-player_hit_bypass:
+player_trailing_hitbox_hit_bypass:
                         if (laser_color.red) player->hit_by_red   = true;
                         if (laser_color.green) 
                         {
@@ -2055,12 +2082,6 @@ void resetStandardVisuals()
 
 // FALLING LOGIC
 
-bool trailingHitboxAtCoords(Int3 coords)
-{
-    FOR(trailing_hitbox_index, MAX_TRAILING_HITBOX_COUNT) if (int3IsEqual(coords, trailing_hitboxes[trailing_hitbox_index].coords) && trailing_hitboxes[trailing_hitbox_index].frames > 0) return true;
-    return false;
-}
-
 // returns true iff object is able to fall as usual, but object collides with something instead.
 bool doFallingEntity(Entity* entity, bool do_animation)
 {
@@ -2080,12 +2101,13 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         if (entity_in_stack == &next_world_state.pack && !next_world_state.pack_detached) return false;
         if (entity_in_stack == &next_world_state.player && !next_world_state.player.hit_by_red) time_until_input = FALL_ANIMATION_TIME;
 
+        // switch on if this is going to be first fall
         if (entity_in_stack->falling_time == 0)
         {
             if (do_animation) 
             {
                 createFirstFallAnimation(intCoordsToNorm(current_start_coords), &entity_in_stack->position_norm, entity_in_stack->id);
-                createTrailingHitbox(current_start_coords, TRAILING_HITBOX_TIME + 4); // it takes 4 extra frames to get to the point where it's cutting off the below laser (and thus not cutting off above, i guess)
+                createTrailingHitbox(current_start_coords, TRAILING_HITBOX_TIME + 4, getTileType(entity_in_stack->coords)); // it takes 4 extra frames to get to the point where it's cutting off the below laser (and thus not cutting off above, i guess)
             }
             entity_in_stack->falling_time = FALL_ANIMATION_TIME + 4 + 1; // 12 frames here instead of 8 because of acceleration period
         }
@@ -2099,7 +2121,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
                                              &entity_in_stack->position_norm,
                                              IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                              entity_in_stack->id, FALL_ANIMATION_TIME);
-                createTrailingHitbox(current_start_coords, TRAILING_HITBOX_TIME);
+                createTrailingHitbox(current_start_coords, TRAILING_HITBOX_TIME, getTileType(entity_in_stack->coords));
             }
             entity_in_stack->falling_time = FALL_ANIMATION_TIME + 1;
         }
@@ -2229,8 +2251,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                  PLAYER_ID, animation_time);
 
-    next_world_state.player_trailing_hitbox_coords = player->coords;
-    next_world_state.player_trailing_hitbox_timer = trailing_hitbox_time; 
+    createTrailingHitbox(player->coords, trailing_hitbox_time, PLAYER);
 
     // move pack also maybe
     if (next_world_state.pack_detached) 
@@ -2251,7 +2272,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
                                      IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                      PACK_ID, animation_time);
 
-        createTrailingHitbox(pack->coords, trailing_hitbox_time);
+        createTrailingHitbox(pack->coords, trailing_hitbox_time, PACK);
         pack->coords = player->coords;
         setTileDirection(pack->direction, pack->coords);
     }
@@ -2707,7 +2728,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 // restart
                 recordStateForUndo();
-                memset(trailing_hitboxes, 0, sizeof(trailing_hitboxes));
                 memset(animations, 0, sizeof(animations));
                 Camera temp_camera = camera;
                 gameInitialiseState();
@@ -3010,7 +3030,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 {
                                     // actually turning: rotate player
                                     // first, handle various trailing / phantom hitboxes
-									createTrailingHitbox(pack->coords, FIRST_TRAILING_PACK_TURN_HITBOX_TIME);
+									createTrailingHitbox(pack->coords, FIRST_TRAILING_PACK_TURN_HITBOX_TIME, PACK);
 
                                     Direction to_dir = getMiddleDirection(diagonal_push_direction, orthogonal_push_direction);
 									next_world_state.pack_hitbox_turning_from_timer = TURN_ANIMATION_TIME;
@@ -3223,8 +3243,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // decrement trailing hitboxes 
-        FOR(i, MAX_TRAILING_HITBOX_COUNT) if (trailing_hitboxes[i].frames > 0) trailing_hitboxes[i].frames--;
-        if (next_world_state.player_trailing_hitbox_timer > 0) next_world_state.player_trailing_hitbox_timer--;
+        FOR(i, MAX_TRAILING_HITBOX_COUNT) if (next_world_state.trailing_hitboxes[i].frames > 0) next_world_state.trailing_hitboxes[i].frames--;
 
 		// delete objects if above void
         if (!player->hit_by_blue) // TODO(spike): maybe just wrap this into the falling logic?
@@ -3276,7 +3295,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (strcmp(wb->next_level, "overworld") == 0) next_world_state.in_overworld = true;
                 recordStateForUndo();
                 memset(animations, 0, sizeof(animations));
-                memset(trailing_hitboxes, 0, sizeof(trailing_hitboxes));
 
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
 
