@@ -1942,10 +1942,6 @@ int32 updateLaserBuffer(void)
                 {
                     goto player_trailing_hitbox_hit_bypass;
                 }
-                else if (trailing_hitbox_hit == MIRROR)
-                {
-
-                }
                 else
                 {
                     goto laser_instance_stop;
@@ -2515,11 +2511,15 @@ void editorMode(TickInput *tick_input)
 
     if (editor_state.editor_mode == SELECT_WRITE)
     {
+        char (*writing_to_field)[64] = 0;
+        Entity* e = getEntityFromId(editor_state.selected_id);
+        if 		(editor_state.writing_field == WRITING_FIELD_NEXT_LEVEL)  writing_to_field = &e->next_level;
+        else if (editor_state.writing_field == WRITING_FIELD_UNLOCKED_BY) writing_to_field = &e->unlocked_by;
+
         if (tick_input->enter_pressed_this_frame)
         {
-            Entity* wb = getEntityFromId(editor_state.selected_id);
-            memset(wb->next_level, '0', sizeof(wb->next_level));
-            memcpy(wb->next_level, editor_state.edit_buffer.string, sizeof(wb->next_level) - 1);
+            memset(*writing_to_field, '0', sizeof(*writing_to_field));
+            memcpy(*writing_to_field, editor_state.edit_buffer.string, sizeof(*writing_to_field) - 1);
             editor_state.editor_mode = SELECT;
             editor_state.selected_id = 0;
             editor_state.writing_field = NO_WRITING_FIELD;
@@ -2533,7 +2533,7 @@ void editorMode(TickInput *tick_input)
 
         updateTextInput(tick_input);
     }
-    else
+    else // TODO(spike): maybe only need to memset this when exiting select write, or when changing modes
     {
         memset(&editor_state.edit_buffer, 0, sizeof(editor_state.edit_buffer));
     }
@@ -2562,7 +2562,7 @@ void editorMode(TickInput *tick_input)
                 editor_state.editor_mode = SELECT_WRITE;
                 editor_state.writing_field = WRITING_FIELD_NEXT_LEVEL;
             }
-            if (tick_input->b_press)
+            else if (tick_input->b_press)
             {
                 editor_state.editor_mode = SELECT_WRITE;
                 editor_state.writing_field = WRITING_FIELD_UNLOCKED_BY;
