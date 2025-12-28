@@ -43,6 +43,7 @@ const int32 MAX_LASER_TRAVEL_DISTANCE = 48;
 const int32 MAX_PSEUDO_SOURCE_COUNT = 32;
 const int32 MAX_PUSHABLE_STACK_SIZE = 32;
 const int32 MAX_TRAILING_HITBOX_COUNT = 64;
+const int32 MAX_LEVEL_COUNT = 64;
 
 const int32 UNDO_BUFFER_SIZE = 256; // remember to modify undo_buffer
  
@@ -824,6 +825,30 @@ bool saveLevelRewrite(char* path)
     remove(path);
     if (rename(temp_path, path) != 0) return false;
     return true;
+}
+
+int32 findInSolvedLevels(char level_name[64], char (*solved_levels)[64][64])
+{
+    if (level_name == 0) return INT32_MAX; // if NULL string passed, return large number TODO(spike): tomorrow look at this (just try to set a level as solved and see why thing placed doesn't disappear)
+    FOR(solved_level_index, MAX_LEVEL_COUNT) 
+    {
+        if (strcmp(*solved_levels[solved_level_index], level_name) == 0) 
+        {
+            return solved_level_index;
+        }
+    }
+    return -1;
+}
+
+int32 findNextFreeInSolvedLevels(char (*solved_levels)[64][64])
+{
+    FOR(solved_level_index, MAX_LEVEL_COUNT) if ((*solved_levels)[solved_level_index][0] == 0) return solved_level_index;
+    return -1;
+}
+
+void writeSolvedLevelsToFile()
+{
+
 }
 
 // DRAW ASSET
@@ -2590,11 +2615,14 @@ void gameInitialiseState()
 	Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
 
-	// memset worldstate to 0 (with persistant level_name)
-    char persist_level_name[256];
+	// memset worldstate to 0 (with persistant level_name and solved levels)
+    char persist_level_name[256] = {0};
+    char persist_solved_levels[64][64] = {0};
     strcpy(persist_level_name, next_world_state.level_name);
+    memcpy(persist_solved_levels, next_world_state.solved_levels, sizeof(persist_solved_levels));
     memset(&next_world_state, 0, sizeof(WorldState));
     strcpy(next_world_state.level_name, persist_level_name);
+    memcpy(next_world_state.solved_levels, persist_solved_levels, sizeof(persist_solved_levels));
 
     if (strcmp(next_world_state.level_name, "overworld") == 0) next_world_state.in_overworld = true;
     else next_world_state.in_overworld = false;
@@ -2673,7 +2701,7 @@ void gameInitialiseState()
 
 void gameInitialise(char* level_name) 
 {	
-    // TODO(spike): panic if cannot open constructed level path
+    // TODO(spike): panic if cannot open constructed level path (check if can open here before we pass on)
     if (level_name == 0) strcpy(next_world_state.level_name, backup_level_name);
     else strcpy(next_world_state.level_name, level_name);
     gameInitialiseState();
@@ -3313,6 +3341,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                 recordStateForUndo();
                 memset(animations, 0, sizeof(animations));
 
+                if (findInSolvedLevels(next_world_state.level_name, &next_world_state.solved_levels) == -1)
+                {
+                    int32 next_free = findNextFreeInSolvedLevels(&next_world_state.solved_levels);
+                    strcpy(next_world_state.solved_levels[next_free], next_world_state.level_name);
+            	}
+
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
 
                 gameInitialise(wb->next_level);
@@ -3321,6 +3355,36 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // final redo of laser buffer, after all logic is complete, for drawing
 		int32 laser_tile_count = updateLaserBuffer();
+
+		// figure out if entities should be locked / unlocked (should probably try to update this more intelligently later?)
+        if (editor_state.editor_mode == NO_MODE)
+        {
+            Entity* entity_group[2] = {next_world_state.boxes, next_world_state.mirrors, /*next_world_state.crystals, next_world_state.sources*/};
+
+            FOR(group_index, 2)
+            {
+                FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+                {
+                    Entity* e = &entity_group[group_index][entity_index];
+                    if (e->id == -1) continue;
+                    if (findInSolvedLevels(e->unlocked_by, &next_world_state.solved_levels) == -1) e->locked = true; 
+                    else e->locked = false;
+                }
+            }
+            // similar code for locked_blocks
+            FOR(locked_block_index, MAX_ENTITY_INSTANCE_COUNT)
+            {
+                Entity* lb = &next_world_state.locked_blocks[locked_block_index];
+                if (lb->id == -1) continue;
+                if (findInSolvedLevels(lb->unlocked_by, &next_world_state.solved_levels) != -1)
+                {
+					// locked block to be unlocked
+                    lb->id = -1;
+                    setTileType(NONE, lb->coords);
+                    setTileDirection(NORTH, lb->coords);
+                }
+            }
+        }
 
         // finished updating state
         world_state = next_world_state;
@@ -3426,7 +3490,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             // crosshair
             Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
             Vec3 center_screen = { ((float)SCREEN_WIDTH_PX / 2) - 5, ((float)SCREEN_HEIGHT_PX / 2) - 18, 0.0f }; // weird numbers are just adjustment because raycast starts slightly offset 
-                                                                                                        	// i think this is due to windowed mode, but could be issue with raycast.
+                                                                                                        		 // i think this is due to windowed mode, but could be issue with raycast.
         	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION);
 
             // picked block
@@ -3476,7 +3540,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-        // decide which camera to use TODO(spike): embedd in file, and add ability to change fov in editor
+        // decide which camera to use
         if (editor_state.do_wide_camera) camera.fov = 60.0f;
         else camera.fov = 30.0f;
 
@@ -3486,7 +3550,9 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (time_until_input == 0 && editor_state.editor_mode == PLACE_BREAK && tick_input.i_press) 
         {
             saveLevelRewrite(level_path);
+            //writeSolvedLevelsToFile();
         }
+
         FILE* file = fopen(level_path, "rb+");
         if (time_until_input == 0 && editor_state.editor_mode == PLACE_BREAK && tick_input.c_press) writeCameraToFile(file, &camera);
         fclose(file);

@@ -281,7 +281,6 @@ typedef struct Entity
     int32 id;
     int32 previously_moving_sideways;
     int32 falling_time;
-    bool locked;
 
     // for sources/lasers
     Color color;
@@ -293,8 +292,10 @@ typedef struct Entity
 
     // for win blocks
     char next_level[64];
-
-    // for locked blocks
+    
+    // for locked blocks (and other entities that are locked)
+    bool locked; // TODO(spike): later probably don't want to check against unlocked_by for every entity every frame, so want to store this instead 
+    			 // 			 and only check against unlocked_by at points where this can change
     char unlocked_by[64];
 }
 Entity;
@@ -335,6 +336,8 @@ typedef struct WorldState
     bool pack_detached;
     char level_name[64];
     bool in_overworld;
+
+	char solved_levels[64][64];
 
     TrailingHitbox trailing_hitboxes[64];
 
