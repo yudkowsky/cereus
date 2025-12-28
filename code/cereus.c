@@ -73,6 +73,8 @@ const int32 CAMERA_CHUNK_SIZE = 24;
 const char CAMERA_CHUNK_TAG[4] = "CMRA";
 const int32 WIN_BLOCK_CHUNK_SIZE = 76;
 const char WIN_BLOCK_CHUNK_TAG[4] = "WINB";
+const int32 LOCKED_INFO_CHUNK_SIZE = 76;
+const char LOCKED_INFO_CHUNK_TAG[4] = "LKIN";
 
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
@@ -705,8 +707,6 @@ void writeCameraToFile(FILE* file, Camera* in_camera)
 
 void writeWinBlockToFile(FILE* file, Entity* wb)
 {
-    if (wb->next_level[0] == '\0') return;
-    
     fwrite(WIN_BLOCK_CHUNK_TAG, 4, 1, file);
     fwrite(&WIN_BLOCK_CHUNK_SIZE, 4, 1, file);
     fwrite(&wb->coords.x, 4, 1, file);
@@ -748,6 +748,7 @@ int32 findWinBlockPath(FILE* file, int32 x, int32 y, int32 z)
     return -1; // nothing found at these coords
 }
 
+// TODO(spike): these two below functions could be combined for only one sweep through the file
 void loadWinBlockPaths(FILE* file)
 {
     fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
@@ -789,6 +790,63 @@ void loadWinBlockPaths(FILE* file)
     }
 }
 
+void loadLockedInfoPaths(FILE* file)
+{
+    fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
+
+    char tag[4] = {0};
+    int32 size = 0;
+
+    while (readChunkHeader(file, tag, &size))
+    {
+        int32 pos = ftell(file);
+
+        if (memcmp(tag, LOCKED_INFO_CHUNK_TAG, 4) == 0 && size == LOCKED_INFO_CHUNK_SIZE)
+        {
+			int32 x, y, z;
+            char path[64];
+			if (fread(&x, 4, 1, file) != 1) return;
+			if (fread(&y, 4, 1, file) != 1) return;
+			if (fread(&z, 4, 1, file) != 1) return;
+			if (fread(&path, 1, 64, file) != 64) return;
+            path[63] = '\0';
+
+            Entity* entity_group[3] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, /*next_world_state.crystals, next_world_state.sources*/};
+            FOR(group_index, 3)
+            {
+                FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+                {
+                    Entity* e = &entity_group[group_index][entity_index];
+                    if (e->coords.x == x && e->coords.y == y && e->coords.z == z)
+                    {
+                        memcpy(e->unlocked_by, path, sizeof(e->unlocked_by));
+                        break;
+                    }
+                }
+    		}
+            // continue from end of chunk
+            fseek(file, pos + size, SEEK_SET);
+        }
+        else
+        {
+            // skip payload of some other chunk
+            fseek(file, pos + size, SEEK_SET);
+        }
+    }
+}
+
+void writeLockedInfoToFile(FILE* file, Entity* e)
+{
+    fwrite(LOCKED_INFO_CHUNK_TAG, 4, 1, file);
+    fwrite(&LOCKED_INFO_CHUNK_SIZE, 4, 1, file);
+    fwrite(&e->coords.x, 4, 1, file);
+    fwrite(&e->coords.y, 4, 1, file);
+    fwrite(&e->coords.z, 4, 1, file);
+    char unlocked_by[64] = {0};
+    memcpy(unlocked_by, e->unlocked_by, 63);
+    fwrite(unlocked_by, 1, 64, file);
+}
+
 bool saveLevelRewrite(char* path)
 {
     FILE* old_file = fopen(path, "rb+");
@@ -817,7 +875,20 @@ bool saveLevelRewrite(char* path)
     {
         Entity* wb = &next_world_state.win_blocks[win_block_index];
         if (wb->id == -1) continue;
+        if (wb->next_level[0] == '\0') continue;
         writeWinBlockToFile(file, wb);
+    }
+
+    Entity* entity_group[3] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, /*next_world_state.crystals, next_world_state.sources*/};
+    FOR(group_index, 3)
+    {
+        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+        {
+			Entity* e = &entity_group[group_index][entity_index];
+            if (e->id == -1) continue;
+            if (e->unlocked_by[0] == '\0') continue;
+            writeLockedInfoToFile(file, e);
+        }
     }
 
     fclose(file);
@@ -829,10 +900,10 @@ bool saveLevelRewrite(char* path)
 
 int32 findInSolvedLevels(char level_name[64], char (*solved_levels)[64][64])
 {
-    if (level_name == 0) return INT32_MAX; // if NULL string passed, return large number TODO(spike): tomorrow look at this (just try to set a level as solved and see why thing placed doesn't disappear)
+    if (level_name[0] == '\0') return INT32_MAX; // if NULL string passed, return large number
     FOR(solved_level_index, MAX_LEVEL_COUNT) 
     {
-        if (strcmp(*solved_levels[solved_level_index], level_name) == 0) 
+        if (strcmp((*solved_levels)[solved_level_index], level_name) == 0) 
         {
             return solved_level_index;
         }
@@ -2691,6 +2762,7 @@ void gameInitialiseState()
     
 	FILE* file = fopen(level_path, "rb+");
 	loadWinBlockPaths(file);
+    loadLockedInfoPaths(file);
     fclose(file);
 
     Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera.yaw);
@@ -3326,7 +3398,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         // win block logic
         if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_input == 0))
         {
-
             if (next_world_state.in_overworld) 
             {
                 char level_path[64] = {0};
@@ -3376,7 +3447,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 Entity* lb = &next_world_state.locked_blocks[locked_block_index];
                 if (lb->id == -1) continue;
-                if (findInSolvedLevels(lb->unlocked_by, &next_world_state.solved_levels) != -1)
+                int32 find_result = findInSolvedLevels(lb->unlocked_by, &next_world_state.solved_levels);
+                if (find_result != -1 && find_result != INT32_MAX)
                 {
 					// locked block to be unlocked
                     lb->id = -1;
