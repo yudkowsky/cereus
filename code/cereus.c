@@ -54,12 +54,13 @@ const Vec4 IDENTITY_QUATERNION  = { 0, 0, 0, 1 };
 
 const int32 PLAYER_ID = 1;
 const int32 PACK_ID   = 2;
-const int32 ID_OFFSET_BOX     	  = 100 * 1;
-const int32 ID_OFFSET_MIRROR  	  = 100 * 2;
-const int32 ID_OFFSET_CRYSTAL 	  = 100 * 3;
-const int32 ID_OFFSET_SOURCE  	  = 100 * 4;
-const int32 ID_OFFSET_PERM_MIRROR = 100 * 5;
-const int32 ID_OFFSET_WIN_BLOCK   = 100 * 6;
+const int32 ID_OFFSET_BOX     	   = 100 * 1;
+const int32 ID_OFFSET_MIRROR  	   = 100 * 2;
+const int32 ID_OFFSET_CRYSTAL 	   = 100 * 3;
+const int32 ID_OFFSET_SOURCE  	   = 100 * 4;
+const int32 ID_OFFSET_PERM_MIRROR  = 100 * 5;
+const int32 ID_OFFSET_WIN_BLOCK    = 100 * 6;
+const int32 ID_OFFSET_LOCKED_BLOCK = 100 * 7;
 
 const int32 FONT_FIRST_ASCII = 32;
 const int32 FONT_LAST_ASCII = 126;
@@ -75,9 +76,8 @@ const char WIN_BLOCK_CHUNK_TAG[4] = "WINB";
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
-const char backup_level_path[256] = "w:/cereus/data/levels/overworld.level";
-const char start_level_path_buffer[256] = "w:/cereus/data/levels/";
-char level_path_buffer[256] = "w:/cereus/data/levels/";
+const char backup_level_name[64] = "overworld";
+const char start_level_path_buffer[64] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
 Camera camera = {0};
@@ -319,12 +319,13 @@ Entity* getEntityFromId(int32 id)
     {
         Entity* entity_group = 0;
         int32 switch_value =  ((id / 100) * 100);
-        if 		(switch_value == ID_OFFSET_BOX)    		entity_group = next_world_state.boxes; 
-        else if (switch_value == ID_OFFSET_MIRROR) 		entity_group = next_world_state.mirrors;
-        else if (switch_value == ID_OFFSET_CRYSTAL) 	entity_group = next_world_state.crystals;
-        else if (switch_value == ID_OFFSET_SOURCE) 		entity_group = next_world_state.sources;
-        else if (switch_value == ID_OFFSET_PERM_MIRROR) entity_group = next_world_state.perm_mirrors;
-        else if (switch_value == ID_OFFSET_WIN_BLOCK) 	entity_group = next_world_state.win_blocks;
+        if 		(switch_value == ID_OFFSET_BOX)    		 entity_group = next_world_state.boxes; 
+        else if (switch_value == ID_OFFSET_MIRROR) 		 entity_group = next_world_state.mirrors;
+        else if (switch_value == ID_OFFSET_CRYSTAL) 	 entity_group = next_world_state.crystals;
+        else if (switch_value == ID_OFFSET_SOURCE) 		 entity_group = next_world_state.sources;
+        else if (switch_value == ID_OFFSET_PERM_MIRROR)  entity_group = next_world_state.perm_mirrors;
+        else if (switch_value == ID_OFFSET_WIN_BLOCK) 	 entity_group = next_world_state.win_blocks;
+        else if (switch_value == ID_OFFSET_LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
 
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
@@ -422,12 +423,13 @@ int32 getEntityCount(Entity *entity_group)
 
 int32 entityIdOffset(Entity *entity)
 {
-    if (entity == next_world_state.boxes)    	 return ID_OFFSET_BOX;
-    if (entity == next_world_state.mirrors)  	 return ID_OFFSET_MIRROR;
-    if (entity == next_world_state.crystals) 	 return ID_OFFSET_CRYSTAL;
-    if (entity == next_world_state.sources)  	 return ID_OFFSET_SOURCE;
-    if (entity == next_world_state.perm_mirrors) return ID_OFFSET_PERM_MIRROR;
-    if (entity == next_world_state.win_blocks)   return ID_OFFSET_WIN_BLOCK;
+    if 		(entity == next_world_state.boxes)    	   return ID_OFFSET_BOX;
+    else if (entity == next_world_state.mirrors)  	   return ID_OFFSET_MIRROR;
+    else if (entity == next_world_state.crystals) 	   return ID_OFFSET_CRYSTAL;
+    else if (entity == next_world_state.sources)  	   return ID_OFFSET_SOURCE;
+    else if (entity == next_world_state.perm_mirrors)  return ID_OFFSET_PERM_MIRROR;
+    else if (entity == next_world_state.win_blocks)    return ID_OFFSET_WIN_BLOCK;
+    else if (entity == next_world_state.locked_blocks) return ID_OFFSET_LOCKED_BLOCK;
     return 0;
 }
 
@@ -552,6 +554,28 @@ void setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction direc
 // first 4 bytes:    -,x,y,z of level dimensions
 // next x*y*z * 2 (32768 by default) bytes: actual level buffer
 // then chunking starts: 4 bytes for tag (e.g. CMRA), 4 bytes for int32 size of chunk (e.g 24), and then data for that chunk.
+
+// solved-levels.meta structure:
+// SLVL, 4 bytes for int32 size of chunk (so far always 64), and then the name of that level.
+
+void buildLevelPathFromName(char level_name[64], char (*level_path)[64])
+{
+    snprintf(*level_path, sizeof(*level_path), "%s%s.level", start_level_path_buffer, level_name);
+}
+
+/*
+void getLevelNameFromPath(char* level_path, char* output)
+{
+    char* slash = strrchr(level_path, '/'); // gets last / or .
+    char* dot   = strrchr(level_path, '.');
+    if (slash && dot && dot > slash)
+    {
+        size_t length = dot - slash - 1;
+        strncpy(output, slash + 1, length);
+        output[length] = '\0';
+    }
+}
+*/
 
 // find the location of specific chunk
 int32 findChunkOrEOF(FILE* file, char tag[4], bool* found)
@@ -800,18 +824,6 @@ bool saveLevelRewrite(char* path)
     remove(path);
     if (rename(temp_path, path) != 0) return false;
     return true;
-}
-
-void getLevelNameFromPath(char* level_path, char* output)
-{
-    char* slash = strrchr(level_path, '/'); // gets last / or .
-    char* dot   = strrchr(level_path, '.');
-    if (slash && dot && dot > slash)
-    {
-        size_t length = dot - slash - 1;
-        strncpy(output, slash + 1, length);
-        output[length] = '\0';
-    }
 }
 
 // DRAW ASSET
@@ -2578,15 +2590,19 @@ void gameInitialiseState()
 	Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
 
-    char level_path[256];
-
-    bool save_in_ow = next_world_state.in_overworld;
-    strcpy(level_path, next_world_state.level_path);
+	// memset worldstate to 0 (with persistant level_name)
+    char persist_level_name[256];
+    strcpy(persist_level_name, next_world_state.level_name);
     memset(&next_world_state, 0, sizeof(WorldState));
-    strcpy(next_world_state.level_path, level_path);
-    next_world_state.in_overworld = save_in_ow;
+    strcpy(next_world_state.level_name, persist_level_name);
 
-    loadFileToState(next_world_state.level_path);
+    if (strcmp(next_world_state.level_name, "overworld") == 0) next_world_state.in_overworld = true;
+    else next_world_state.in_overworld = false;
+
+    // build level_path from level_name
+	char level_path[64] = {0};
+    buildLevelPathFromName(next_world_state.level_name, &level_path);
+    loadFileToState(level_path);
 
     memset(next_world_state.boxes,    	   0, sizeof(next_world_state.boxes)); 
     memset(next_world_state.mirrors,  	   0, sizeof(next_world_state.mirrors));
@@ -2609,13 +2625,13 @@ void gameInitialiseState()
     for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
     {
         TileType buffer_contents = next_world_state.buffer[buffer_index];
-        if (buffer_contents == BOX)     	 entity_group = next_world_state.boxes;
-        if (buffer_contents == MIRROR)  	 entity_group = next_world_state.mirrors;
-        if (buffer_contents == CRYSTAL) 	 entity_group = next_world_state.crystals;
-        if (buffer_contents == PERM_MIRROR)  entity_group = next_world_state.perm_mirrors;
-        if (buffer_contents == WIN_BLOCK)    entity_group = next_world_state.win_blocks;
-        if (buffer_contents == LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
-        if (isSource(buffer_contents))  	 entity_group = next_world_state.sources;
+        if 	    (buffer_contents == BOX)     	  entity_group = next_world_state.boxes;
+        else if (buffer_contents == MIRROR)  	  entity_group = next_world_state.mirrors;
+        else if (buffer_contents == CRYSTAL) 	  entity_group = next_world_state.crystals;
+        else if (buffer_contents == PERM_MIRROR)  entity_group = next_world_state.perm_mirrors;
+        else if (buffer_contents == WIN_BLOCK)    entity_group = next_world_state.win_blocks;
+        else if (buffer_contents == LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
+        else if (isSource(buffer_contents))  	  entity_group = next_world_state.sources;
         if (entity_group != 0)
         {
             int32 count = getEntityCount(entity_group);
@@ -2658,13 +2674,8 @@ void gameInitialiseState()
 void gameInitialise(char* level_name) 
 {	
     // TODO(spike): panic if cannot open constructed level path
-    if (level_name != 0) 
-    {
-        if (strcmp(level_name, "overworld") == 0) next_world_state.in_overworld = true;
-        else next_world_state.in_overworld = false;
-        snprintf(next_world_state.level_path, sizeof(next_world_state.level_path), "%s%s.level", start_level_path_buffer, level_name);
-    }
-    else strcpy(next_world_state.level_path, backup_level_path);
+    if (level_name == 0) strcpy(next_world_state.level_name, backup_level_name);
+    else strcpy(next_world_state.level_name, level_name);
     gameInitialiseState();
 }
 
@@ -3287,7 +3298,13 @@ void gameFrame(double delta_time, TickInput tick_input)
         // win block logic
         if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_input == 0))
         {
-            if (next_world_state.in_overworld) saveLevelRewrite(next_world_state.level_path);
+
+            if (next_world_state.in_overworld) 
+            {
+                char level_path[64] = {0};
+                buildLevelPathFromName(next_world_state.level_name, &level_path);
+                saveLevelRewrite(level_path);
+            }
 
             Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
             if (wb->next_level[0] != 0)
@@ -3418,9 +3435,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION);
         }
         // level name
-        char level_name[256] = {0};
-        getLevelNameFromPath(world_state.level_path, level_name);
-		drawDebugText(level_name);
+		drawDebugText(next_world_state.level_name);
 
 		// selected id
         if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
@@ -3466,11 +3481,13 @@ void gameFrame(double delta_time, TickInput tick_input)
         else camera.fov = 30.0f;
 
         // write to file
+        char level_path[64];
+        buildLevelPathFromName(world_state.level_name, &level_path);
         if (time_until_input == 0 && editor_state.editor_mode == PLACE_BREAK && tick_input.i_press) 
         {
-            saveLevelRewrite(world_state.level_path);
+            saveLevelRewrite(level_path);
         }
-        FILE* file = fopen(world_state.level_path, "rb+");
+        FILE* file = fopen(level_path, "rb+");
         if (time_until_input == 0 && editor_state.editor_mode == PLACE_BREAK && tick_input.c_press) writeCameraToFile(file, &camera);
         fclose(file);
 

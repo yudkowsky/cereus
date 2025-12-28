@@ -333,7 +333,7 @@ typedef struct WorldState
 
     bool player_will_fall_next_turn; // used for not being able to walk one extra tile after walking out of red beam
     bool pack_detached;
-    char level_path[64];
+    char level_name[64];
     bool in_overworld;
 
     TrailingHitbox trailing_hitboxes[64];
