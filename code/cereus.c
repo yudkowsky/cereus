@@ -79,7 +79,7 @@ const char LOCKED_INFO_CHUNK_TAG[4] = "LKIN";
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
-const char backup_level_name[64] = "overworld";
+const char backup_level_name[64] = "blue-mirror-i";
 const char start_level_path_buffer[64] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
@@ -1560,22 +1560,27 @@ int32 findNextFreeInTrailingHitboxes()
     return 0;
 }
 
-void createTrailingHitbox(Int3 coords, int32 frames, TileType type)
+void createTrailingHitbox(Int3 coords, Direction direction, int32 frames, TileType type)
 {
     int32 hitbox_index = findNextFreeInTrailingHitboxes();
     next_world_state.trailing_hitboxes[hitbox_index].coords = coords;
+    next_world_state.trailing_hitboxes[hitbox_index].direction = direction;
     next_world_state.trailing_hitboxes[hitbox_index].frames = frames;
     next_world_state.trailing_hitboxes[hitbox_index].type = type;
 }
 
-TileType trailingHitboxAtCoords(Int3 coords)
+bool trailingHitboxAtCoords(Int3 coords, TrailingHitbox* trailing_hitbox)
 {
     FOR(trailing_hitbox_index, MAX_TRAILING_HITBOX_COUNT) 
     {
         TrailingHitbox th = next_world_state.trailing_hitboxes[trailing_hitbox_index];
-        if (int3IsEqual(coords, th.coords) && th.frames > 0) return th.type;
+        if (int3IsEqual(coords, th.coords) && th.frames > 0) 
+        {
+			*trailing_hitbox = th;
+            return true;
+        }
     }
-    return NONE;
+    return false;
 }
 
 PushResult canPush(Int3 coords, Direction direction)
@@ -1658,7 +1663,7 @@ void pushOnce(Int3 coords, Direction direction, int32 animation_time)
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                  id, animation_time); 
     int32 trailing_hitbox_time = animation_time - 3;
-    createTrailingHitbox(coords, trailing_hitbox_time, trailing_hitbox_type);
+    createTrailingHitbox(coords, direction, trailing_hitbox_time, trailing_hitbox_type);
 }
 
 // assumes at least the lowest layer of the stack is able to be pushed. checks if next is NONE, if so stops. 
@@ -2036,19 +2041,26 @@ int32 updateLaserBuffer(void)
             default: break;
         }
 
+        Direction trailing_hitbox_hit_travel_direction = NO_DIRECTION; // declaring this here is kind of sloppy, see if can reorganise this code a bit
         for (int laser_index = 0; laser_index < MAX_LASER_TRAVEL_DISTANCE; laser_index++)
         {
             TileType tile_hit = getTileType(current_coords);
-            TileType trailing_hitbox_hit = NONE;
             LaserColor laser_color = colorToLaserColor(source->color);
 
-			trailing_hitbox_hit = trailingHitboxAtCoords(current_coords);
+            TrailingHitbox trailing_hitbox_hit = {0};
+			trailingHitboxAtCoords(current_coords, &trailing_hitbox_hit);
 
-            if (trailing_hitbox_hit)
+            if (trailing_hitbox_hit.type)
             {
-                if (trailing_hitbox_hit == PLAYER)
+                if (trailing_hitbox_hit.type == PLAYER)
                 {
                     goto player_trailing_hitbox_hit_bypass;
+                }
+                else if (trailing_hitbox_hit.type == MIRROR)
+                {
+                    trailing_hitbox_hit_travel_direction = trailing_hitbox_hit.direction;
+                    goto mirror_trailing_hitbox_hit_bypass;
+                    // TODO(spike): also add in time to pass here when changing laser 'offset' depending on how far mirror has been pushed
                 }
                 else
                 {
@@ -2069,7 +2081,7 @@ int32 updateLaserBuffer(void)
                     if (!laserPassthroughAllowed(player) || ((player->previously_moving_sideways > 0) && player->direction == oppositeDirection(current_direction)))
                     {
 player_trailing_hitbox_hit_bypass:
-                        if (laser_color.red) player->hit_by_red   = true;
+                        if (laser_color.red) player->hit_by_red = true;
                         if (laser_color.green) 
                         {
                             switch (current_direction)
@@ -2107,11 +2119,21 @@ player_trailing_hitbox_hit_bypass:
                 }
                 case MIRROR:
                 {
-                    Entity* mirror = getEntityPointer(current_coords);
+mirror_trailing_hitbox_hit_bypass:
+                    Entity* mirror = 0;
+                    if (trailing_hitbox_hit_travel_direction == NO_DIRECTION)
+                    {
+                        mirror = getEntityPointer(current_coords);
+                    }
+                    else
+                    {
+                        mirror = getEntityPointer(getNextCoords(current_coords, trailing_hitbox_hit_travel_direction));
+                    }
+
                     if (!laserPassthroughAllowed(mirror))
                     {
-                        bool can_reflect = canMirrorReflect(current_direction, getEntityDirection(current_coords));
-                        if (can_reflect) current_direction = getNextLaserDirectionMirror(current_direction, getEntityDirection(current_coords));
+                        bool can_reflect = canMirrorReflect(current_direction, mirror->direction);
+                        if (can_reflect) current_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
                         else goto laser_instance_stop;
                     }
 					break;
@@ -2192,7 +2214,8 @@ bool doFallingEntity(Entity* entity, bool do_animation)
     if (entity->id == -1) return false;
 	Int3 next_coords = getNextCoords(entity->coords, DOWN);
     if (!(isPushable(getTileType(next_coords)) && getEntityPointer(next_coords)->id == -1) && getTileType(next_coords) != NONE) return true; // TODO(spike): add entity.id == -1 as NONE in getTileType
-    if (trailingHitboxAtCoords(next_coords) && entity->id != PLAYER_ID) return true;
+    TrailingHitbox _;
+    if (trailingHitboxAtCoords(next_coords, &_) && entity->id != PLAYER_ID) return true;
 
     int32 stack_size = getPushableStackSize(entity->coords);
     Int3 current_start_coords = entity->coords;
@@ -2211,7 +2234,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
             if (do_animation) 
             {
                 createFirstFallAnimation(intCoordsToNorm(current_start_coords), &entity_in_stack->position_norm, entity_in_stack->id);
-                createTrailingHitbox(current_start_coords, TRAILING_HITBOX_TIME + 4, getTileType(entity_in_stack->coords)); // it takes 4 extra frames to get to the point where it's cutting off the below laser (and thus not cutting off above, i guess)
+                createTrailingHitbox(current_start_coords, DOWN, TRAILING_HITBOX_TIME + 4, getTileType(entity_in_stack->coords)); // it takes 4 extra frames to get to the point where it's cutting off the below laser (and thus not cutting off above, i guess)
             }
             entity_in_stack->falling_time = FALL_ANIMATION_TIME + 4 + 1; // 12 frames here instead of 8 because of acceleration period
         }
@@ -2225,7 +2248,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
                                              &entity_in_stack->position_norm,
                                              IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                              entity_in_stack->id, FALL_ANIMATION_TIME);
-                createTrailingHitbox(current_start_coords, TRAILING_HITBOX_TIME, getTileType(entity_in_stack->coords));
+                createTrailingHitbox(current_start_coords, DOWN, TRAILING_HITBOX_TIME, getTileType(entity_in_stack->coords));
             }
             entity_in_stack->falling_time = FALL_ANIMATION_TIME + 1;
         }
@@ -2355,7 +2378,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                  PLAYER_ID, animation_time);
 
-    createTrailingHitbox(player->coords, trailing_hitbox_time, PLAYER);
+    createTrailingHitbox(player->coords, input_direction, trailing_hitbox_time, PLAYER);
 
     // move pack also maybe
     if (next_world_state.pack_detached) 
@@ -2376,7 +2399,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
                                      IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                      PACK_ID, animation_time);
 
-        createTrailingHitbox(pack->coords, trailing_hitbox_time, PACK);
+        createTrailingHitbox(pack->coords, input_direction, trailing_hitbox_time, PACK);
         pack->coords = player->coords;
         setTileDirection(pack->direction, pack->coords);
     }
@@ -3063,7 +3086,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             Direction orthogonal_push_direction = oppositeDirection(polarity_direction); 
                             
                             bool pause_turn = false;
-                            if (trailingHitboxAtCoords(diagonal_coords)) pause_turn = true;
+                            TrailingHitbox _;
+                            if (trailingHitboxAtCoords(diagonal_coords, &_)) pause_turn = true;
                             else if (entityInMotion(getEntityPointer(orthogonal_coords))) pause_turn = true;
                             else if (entityInMotion(getEntityPointer(diagonal_coords))) pause_turn = true;
 
@@ -3141,7 +3165,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 {
                                     // actually turning: rotate player
                                     // first, handle various trailing / phantom hitboxes
-									createTrailingHitbox(pack->coords, FIRST_TRAILING_PACK_TURN_HITBOX_TIME, PACK);
+									createTrailingHitbox(pack->coords, input_direction, FIRST_TRAILING_PACK_TURN_HITBOX_TIME, PACK);
 
                                     Direction to_dir = getMiddleDirection(diagonal_push_direction, orthogonal_push_direction);
 									next_world_state.pack_hitbox_turning_from_timer = TURN_ANIMATION_TIME;

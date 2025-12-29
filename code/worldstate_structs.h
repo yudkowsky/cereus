@@ -314,6 +314,7 @@ Animation;
 typedef struct TrailingHitbox
 {
 	Int3 coords;
+    Direction direction;
     int32 frames;
     TileType type;
 }
