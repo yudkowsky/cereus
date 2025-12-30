@@ -1662,7 +1662,8 @@ void pushOnce(Int3 coords, Direction direction, int32 animation_time)
                                  &entity_to_push.entity->position_norm,
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                  id, animation_time); 
-    int32 trailing_hitbox_time = animation_time - 3;
+    //int32 trailing_hitbox_time = animation_time - 3;
+    int32 trailing_hitbox_time = 4;
     createTrailingHitbox(coords, direction, trailing_hitbox_time, trailing_hitbox_type);
 }
 
@@ -2000,8 +2001,8 @@ bool isDiagonal(Direction direction)
 
 bool laserPassthroughAllowed(Entity* entity)
 {
-    if (entity->previously_moving_sideways > LASER_BUFFER_MOVING_TIME_ALLOWED_FOR_PASSTHROUGH || entity->falling_time > LASER_BUFFER_MOVING_TIME_ALLOWED_FOR_PASSTHROUGH) return true;
-    return false;
+   	if (entity->previously_moving_sideways > LASER_BUFFER_MOVING_TIME_ALLOWED_FOR_PASSTHROUGH || entity->falling_time > LASER_BUFFER_MOVING_TIME_ALLOWED_FOR_PASSTHROUGH) return true;
+   	return false;
 }
 
 int32 updateLaserBuffer(void)
@@ -2041,25 +2042,31 @@ int32 updateLaserBuffer(void)
             default: break;
         }
 
-        Direction trailing_hitbox_hit_travel_direction = NO_DIRECTION; // declaring this here is kind of sloppy, see if can reorganise this code a bit
         for (int laser_index = 0; laser_index < MAX_LASER_TRAVEL_DISTANCE; laser_index++)
         {
-            TileType tile_hit = getTileType(current_coords);
+            if ((next_world_state.pack_hitbox_turning_from_timer > 0) && int3IsEqual(current_coords, next_world_state.pack_hitbox_turning_from_coords) && (next_world_state.pack_hitbox_turning_from_direction == current_direction)) goto laser_instance_stop;
+            if ((next_world_state.pack_hitbox_turning_to_timer   > 0) && int3IsEqual(current_coords, next_world_state.pack_hitbox_turning_to_coords)   && (next_world_state.pack_hitbox_turning_to_direction   == current_direction)) goto laser_instance_stop;
+            // TODO(spike): add in locked condition, jump to instance stop
+
+            TrailingHitbox th = {0};
+            bool has_th = trailingHitboxAtCoords(current_coords, &th);
+            TileType tile_for_collision = getTileType(current_coords);
+
             LaserColor laser_color = colorToLaserColor(source->color);
 
-            TrailingHitbox trailing_hitbox_hit = {0};
-			trailingHitboxAtCoords(current_coords, &trailing_hitbox_hit);
-
-            if (trailing_hitbox_hit.type)
+            if (has_th)
             {
-                if (trailing_hitbox_hit.type == PLAYER)
+                if (th.type == PLAYER)
                 {
                     goto player_trailing_hitbox_hit_bypass;
                 }
-                else if (trailing_hitbox_hit.type == MIRROR)
+                else if (th.type == MIRROR)
                 {
-                    trailing_hitbox_hit_travel_direction = trailing_hitbox_hit.direction;
-                    goto mirror_trailing_hitbox_hit_bypass;
+                    tile_for_collision = MIRROR;
+                    Int3 mirror_entity_coords = getNextCoords(current_coords, th.direction);
+
+                    if (!intCoordsWithinLevelBounds(mirror_entity_coords)) goto laser_instance_stop;
+
                     // TODO(spike): also add in time to pass here when changing laser 'offset' depending on how far mirror has been pushed
                 }
                 else
@@ -2068,13 +2075,9 @@ int32 updateLaserBuffer(void)
                 }
             }
 
-            if ((next_world_state.pack_hitbox_turning_from_timer > 0) && int3IsEqual(current_coords, next_world_state.pack_hitbox_turning_from_coords) && (next_world_state.pack_hitbox_turning_from_direction == current_direction)) goto laser_instance_stop;
-            if ((next_world_state.pack_hitbox_turning_to_timer   > 0) && int3IsEqual(current_coords, next_world_state.pack_hitbox_turning_to_coords)   && (next_world_state.pack_hitbox_turning_to_direction   == current_direction)) goto laser_instance_stop;
-            // TODO(spike): add in locked condition, jump to instance stop
-
             if (!intCoordsWithinLevelBounds(current_coords)) break;
 
-            switch(tile_hit)
+            switch(tile_for_collision)
             {
                 case PLAYER:
                 {
@@ -2119,18 +2122,12 @@ player_trailing_hitbox_hit_bypass:
                 }
                 case MIRROR:
                 {
-mirror_trailing_hitbox_hit_bypass:
-                    Entity* mirror = 0;
-                    if (trailing_hitbox_hit_travel_direction == NO_DIRECTION)
-                    {
-                        mirror = getEntityPointer(current_coords);
-                    }
-                    else
-                    {
-                        mirror = getEntityPointer(getNextCoords(current_coords, trailing_hitbox_hit_travel_direction));
-                    }
+                    Int3 mirror_coords = current_coords;
+                    if (has_th && th.type == MIRROR) mirror_coords = getNextCoords(current_coords, th.direction);
 
-                    if (!laserPassthroughAllowed(mirror))
+                    Entity* mirror = getEntityPointer(mirror_coords);
+
+                    if (!laserPassthroughAllowed(mirror) || th.type == MIRROR)
                     {
                         bool can_reflect = canMirrorReflect(current_direction, mirror->direction);
                         if (can_reflect) current_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
@@ -2992,7 +2989,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             TileType tile_below = getTileType(coords_below);
                             if (tile_below != NONE || player->hit_by_red)
                             {
-                                if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
+                                    if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
                                 doStandardMovement(input_direction, next_player_coords, animation_time);
                                 time_until_input = animation_time;
                             }
