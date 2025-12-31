@@ -279,8 +279,11 @@ typedef struct Entity
     Direction direction;
     Vec4 rotation_quat;
     int32 id;
-    int32 previously_moving_sideways;
-    int32 falling_time;
+
+    bool moving;
+    Direction moving_direction;
+
+    bool do_first_fall;
 
     // for sources/lasers
     Color color;
@@ -294,8 +297,7 @@ typedef struct Entity
     char next_level[64];
     
     // for locked blocks (and other entities that are locked)
-    bool locked; // TODO(spike): later probably don't want to check against unlocked_by for every entity every frame, so want to store this instead 
-    			 // 			 and only check against unlocked_by at points where this can change
+    bool locked;
     char unlocked_by[64];
 }
 Entity;
@@ -425,10 +427,12 @@ typedef struct LaserColor
 }
 LaserColor;
 
+// fill with 0 width
 typedef struct LaserBuffer
 {
+    Vec3 start_coords;
+    Vec3 end_coords;
     Direction direction;
-    LaserColor color;
-    Int3 coords;
+    Color color;
 }
 LaserBuffer;
