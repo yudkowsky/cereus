@@ -79,7 +79,7 @@ const char LOCKED_INFO_CHUNK_TAG[4] = "LKIN";
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
-const char backup_level_name[64] = "blue-mirror-i";
+const char debug_level_name[64] = "blue-mirror-i";
 const char start_level_path_buffer[64] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
@@ -2044,8 +2044,6 @@ int32 updateLaserBuffer(void)
 
         for (int laser_index = 0; laser_index < MAX_LASER_TRAVEL_DISTANCE; laser_index++)
         {
-            if ((next_world_state.pack_hitbox_turning_from_timer > 0) && int3IsEqual(current_coords, next_world_state.pack_hitbox_turning_from_coords) && (next_world_state.pack_hitbox_turning_from_direction == current_direction)) goto laser_instance_stop;
-            if ((next_world_state.pack_hitbox_turning_to_timer   > 0) && int3IsEqual(current_coords, next_world_state.pack_hitbox_turning_to_coords)   && (next_world_state.pack_hitbox_turning_to_direction   == current_direction)) goto laser_instance_stop;
             // TODO(spike): add in locked condition, jump to instance stop
 
             TrailingHitbox th = {0};
@@ -2794,7 +2792,7 @@ void gameInitialiseState()
 void gameInitialise(char* level_name) 
 {	
     // TODO(spike): panic if cannot open constructed level path (check if can open here before we pass on)
-    if (level_name == 0) strcpy(next_world_state.level_name, backup_level_name);
+    if (level_name == 0) strcpy(next_world_state.level_name, debug_level_name);
     else strcpy(next_world_state.level_name, level_name);
     gameInitialiseState();
 }
@@ -3220,6 +3218,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (next_world_state.pack_intermediate_states_timer == 7)
             {
 				if (next_world_state.do_diagonal_push_on_turn) pushAll(next_world_state.pack_intermediate_coords, oppositeDirection(player->direction), PUSH_FROM_TURN_ANIMATION_TIME, true, true);
+                createTrailingHitbox(pack->coords, pack->direction, 4, PACK);
             }
             else if (next_world_state.pack_intermediate_states_timer == 7 - TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN)
             {
@@ -3229,6 +3228,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 pack->direction = oppositeDirection(player->direction);
                 setTileType(PACK, pack->coords);
                 setTileDirection(pack->direction, pack->coords);
+                createTrailingHitbox(next_world_state.pack_intermediate_coords, pack->direction, 4, PACK);
             }
             else if (next_world_state.pack_intermediate_states_timer == 4)
             {
