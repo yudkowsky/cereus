@@ -280,10 +280,11 @@ typedef struct Entity
     Vec4 rotation_quat;
     int32 id;
 
-    bool moving;
+    // these two somewhat redundant but a lot of the time you don't care about the direction something is moving
+    bool in_motion;
     Direction moving_direction;
 
-    bool do_first_fall;
+    bool first_fall_already_done;
 
     // for sources/lasers
     Color color;

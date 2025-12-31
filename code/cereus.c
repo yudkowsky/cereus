@@ -1506,8 +1506,17 @@ void createFirstFallAnimation(Vec3 start_position, Vec3* position_to_change, int
 
 void changeMoving(Entity* e)
 {
-	if (presentInAnimations(e->id)) e->moving = true;
-	else e->moving = false;
+	if (presentInAnimations(e->id)) e->in_motion = true;
+	else 
+    {
+        e->in_motion = false;
+        e->moving_direction = NO_DIRECTION;
+    }
+}
+
+void resetFirstFall(Entity* e)
+{
+    if (!e->in_motion) if (getTileType(getNextCoords(e->coords, DOWN)) != NONE) e->first_fall_already_done = false;
 }
 
 int32 findNextFreeInTrailingHitboxes()
@@ -1555,14 +1564,14 @@ PushResult canPush(Int3 coords, Direction direction)
     	current_coords = getNextCoords(current_coords, direction);
         current_tile = getTileType(current_coords);
 
-		if (entity->moving) return PAUSE_PUSH;
+		if (entity->in_motion) return PAUSE_PUSH;
 
         Int3 coords_ahead = getNextCoords(entity->coords, direction);
-		if (isPushable(getTileType(coords_ahead)) && getEntityPointer(coords_ahead)->moving) return PAUSE_PUSH;
+		if (isPushable(getTileType(coords_ahead)) && getEntityPointer(coords_ahead)->in_motion) return PAUSE_PUSH;
         Int3 coords_below = getNextCoords(entity->coords, DOWN);
-        if (isPushable(getTileType(coords_below)) && getEntityPointer(coords_below)->moving) return PAUSE_PUSH;
+        if (isPushable(getTileType(coords_below)) && getEntityPointer(coords_below)->in_motion) return PAUSE_PUSH;
         Int3 coords_below_and_ahead = getNextCoords(getNextCoords(entity->coords, DOWN), direction);
-        if (isPushable(getTileType(coords_below_and_ahead)) && getEntityPointer(coords_below_and_ahead)->moving) return PAUSE_PUSH;
+        if (isPushable(getTileType(coords_below_and_ahead)) && getEntityPointer(coords_below_and_ahead)->in_motion) return PAUSE_PUSH;
 
         if (!intCoordsWithinLevelBounds(current_coords)) return FAILED_PUSH;
 
@@ -1599,7 +1608,7 @@ Push pushOnceWithoutAnimation(Int3 coords, Direction direction)
     entity_to_push.entity = entity; 
     entity_to_push.new_coords = getNextCoords(coords, direction);
 
-    entity->moving = true;
+    entity->in_motion = true;
     entity->moving_direction = direction;
 
     setTileType(NONE, entity_to_push.previous_coords);
@@ -2089,18 +2098,19 @@ bool doFallingEntity(Entity* entity, bool do_animation)
     {
         Entity* entity_in_stack = getEntityPointer(current_start_coords);
         if (entity_in_stack->id == -1) return false; // should never happen, shouldn't have id == -1 in the middle of a stack somewhere
-        if (entity_in_stack->moving) return false; 
+        if (entity_in_stack->in_motion) return false; 
         if (entity_in_stack == &next_world_state.pack && !next_world_state.pack_detached) return false;
         if (entity_in_stack == &next_world_state.player && !next_world_state.player.hit_by_red) time_until_input = FALL_ANIMATION_TIME;
 
         // switch on if this is going to be first fall
-        if (entity_in_stack->do_first_fall)
+        if (!entity_in_stack->first_fall_already_done)
         {
             if (do_animation) 
             {
                 createFirstFallAnimation(intCoordsToNorm(current_start_coords), &entity_in_stack->position_norm, entity_in_stack->id);
                 createTrailingHitbox(current_start_coords, DOWN, TRAILING_HITBOX_TIME + 4, getTileType(entity_in_stack->coords)); // it takes 4 extra frames to get to the point where it's cutting off the below laser (and thus not cutting off above, i guess)
             }
+            entity_in_stack->first_fall_already_done = true;
         }
         else
         {
@@ -2224,14 +2234,13 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
 
     doHeadMovement(input_direction, true, animation_time);
 
-    int32 trailing_hitbox_time = TRAILING_HITBOX_TIME;
-
     createInterpolationAnimation(intCoordsToNorm(player->coords), 
                                  intCoordsToNorm(next_player_coords), 
                                  &player->position_norm,
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                  PLAYER_ID, animation_time);
 
+    int32 trailing_hitbox_time = TRAILING_HITBOX_TIME;
     createTrailingHitbox(player->coords, input_direction, trailing_hitbox_time, PLAYER);
 
     // move pack also maybe
@@ -2254,11 +2263,17 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
         createTrailingHitbox(pack->coords, input_direction, trailing_hitbox_time, PACK);
         pack->coords = player->coords;
         setTileDirection(pack->direction, pack->coords);
+
+        pack->in_motion = true;
+        pack->moving_direction = input_direction;
     }
 
     player->coords = next_player_coords;
     setTileType(PLAYER, player->coords);	
     setTileDirection(player->direction, player->coords);
+
+    player->in_motion = true;
+    player->moving_direction = input_direction;
 
     recordStateForUndo();
 }
@@ -2720,7 +2735,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 camera = temp_camera;
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
-            if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && (player->moving && player->moving_direction == DOWN) == 0)
+            if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && player->in_motion == 0)
             {
 				// MOVEMENT 
                 Direction input_direction = 0;
@@ -2798,8 +2813,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             {
                                 Int3 coords_ahead = next_player_coords;
                                 Int3 coords_below_and_ahead = getNextCoords(next_player_coords, DOWN);
-                                if (isPushable(getTileType(coords_ahead)) && getEntityPointer(coords_ahead)->moving) move_player = false;
-                                else if (isPushable(getTileType(coords_below_and_ahead)) && getEntityPointer(coords_below_and_ahead)->moving) move_player = false;
+                                if (isPushable(getTileType(coords_ahead)) && getEntityPointer(coords_ahead)->in_motion) move_player = false;
+                                else if (isPushable(getTileType(coords_below_and_ahead)) && getEntityPointer(coords_below_and_ahead)->in_motion) move_player = false;
                                 else
                                 {
                                     move_player = true;
@@ -2844,7 +2859,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             TileType tile_below = getTileType(coords_below);
                             if (tile_below != NONE || player->hit_by_red)
                             {
-                                    if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
+                                if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
                                 doStandardMovement(input_direction, next_player_coords, animation_time);
                                 time_until_input = animation_time;
                             }
@@ -2940,8 +2955,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             bool pause_turn = false;
                             TrailingHitbox _;
                             if (trailingHitboxAtCoords(diagonal_coords, &_)) pause_turn = true;
-                            else if (isEntity(getTileType(orthogonal_coords)) && getEntityPointer(orthogonal_coords)->moving) pause_turn = true;
-                            else if (isEntity(getTileType(diagonal_coords))   && getEntityPointer(diagonal_coords)->moving)   pause_turn = true;
+                            else if (isEntity(getTileType(orthogonal_coords)) && getEntityPointer(orthogonal_coords)->in_motion) pause_turn = true;
+                            else if (isEntity(getTileType(diagonal_coords))   && getEntityPointer(diagonal_coords)->in_motion)   pause_turn = true;
 
                             if (!pause_turn)
                             {
@@ -3205,22 +3220,29 @@ void gameFrame(double delta_time, TickInput tick_input)
             animations[animation_index].frames_left--;
         }
 
-        // decrement falling timers
+        // decrement in_motion / moving_direction and reset first_fall_already_done
         Entity* falling_entity_groups[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources };
         FOR(falling_object_index, 4)
         {
             Entity* entity_group = falling_entity_groups[falling_object_index];
-            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) changeMoving(&entity_group[entity_index]);
+            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) 
+            {
+                changeMoving(&entity_group[entity_index]);
+                resetFirstFall(&entity_group[entity_index]);
+            }
         }
         changeMoving(player);
+        resetFirstFall(player);
 		changeMoving(pack);
+        resetFirstFall(pack);
+
 
 		// handle turning hitboxes
         if (next_world_state.pack_hitbox_turning_from_timer > 0) next_world_state.pack_hitbox_turning_from_timer--;
         if (next_world_state.pack_hitbox_turning_to_timer   > 0) next_world_state.pack_hitbox_turning_to_timer--;
 
         // don't allow inputs if player is moving (this is for meta commands - some redundancy here: pauses already happen if player not allowed to move yet otherwise)
-        if (player->moving> 0) time_until_input += 1;
+        if (player->in_motion) time_until_input = 1;
 
         // decide which ghosts to render, if ghosts should be rendered
         bool do_player_ghost = false;
@@ -3244,7 +3266,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 {
                     Entity* entity = &entity_group[entity_group_index][entity_instance_index];
                     if (entity->id == -1) continue;
-                    if (getTileType(getNextCoords(entity->coords, DOWN)) == VOID && !entity->moving) // TODO(spike): still some bug when pushing walking onto a place where another 
+                    if (getTileType(getNextCoords(entity->coords, DOWN)) == VOID && !entity->in_motion) // TODO(spike): still some bug when pushing walking onto a place where another 
                                                                                                              // entity has fallen and disappeared causing player to be able to walk over void for a few frames
                     {
                         setTileType(NONE, entity->coords);
@@ -3415,6 +3437,23 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
 		// DRAW 2D
+        
+		char player_moving_text[256] = {0};
+        snprintf(player_moving_text, sizeof(player_moving_text), "player moving: %d", player->in_motion);
+		drawDebugText(player_moving_text);
+
+        char player_moving_direction_text[256] = {0};
+        switch (player->moving_direction)
+        {
+            case NO_DIRECTION: snprintf(player_moving_direction_text, sizeof(player_moving_direction_text), "player moving direction: NO_DIRECTION"); break;
+            case NORTH:		   snprintf(player_moving_direction_text, sizeof(player_moving_direction_text), "player moving direction: NORTH"); break;
+            case WEST: 		   snprintf(player_moving_direction_text, sizeof(player_moving_direction_text), "player moving direction: WEST"); break;
+            case SOUTH: 	   snprintf(player_moving_direction_text, sizeof(player_moving_direction_text), "player moving direction: SOUTH"); break;
+            case EAST: 		   snprintf(player_moving_direction_text, sizeof(player_moving_direction_text), "player moving direction: EAST"); break;
+            default: break;
+        }
+        drawDebugText(player_moving_direction_text);
+
 		if (editor_state.editor_mode != NO_MODE)
         {
             // crosshair
