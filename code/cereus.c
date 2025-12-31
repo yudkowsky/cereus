@@ -1566,6 +1566,9 @@ PushResult canPush(Int3 coords, Direction direction)
 
 		if (entity->in_motion) return PAUSE_PUSH;
 
+		// may cause 1f delay when pushing object that will be able to teleport you in the direction you are pushing.
+        if (getTileType(getNextCoords(entity->coords, DOWN)) == NONE && next_world_state.player.hit_by_red == false && next_world_state.player.hit_by_blue == false) return PAUSE_PUSH; 
+
         Int3 coords_ahead = getNextCoords(entity->coords, direction);
 		if (isPushable(getTileType(coords_ahead)) && getEntityPointer(coords_ahead)->in_motion) return PAUSE_PUSH;
         Int3 coords_below = getNextCoords(entity->coords, DOWN);
