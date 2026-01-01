@@ -1993,20 +1993,20 @@ void updateLaserBuffer(void)
             {
                 no_more_turns = true;
 
-                TrailingHitbox _;
                 if (!intCoordsWithinLevelBounds(current_coords))
                 {
                     lb->end_coords = intCoordsToNorm(current_coords);
 					break;
                 }
-                else if (trailingHitboxAtCoords(current_coords, &_))
+
+                TrailingHitbox th;
+                bool th_hit = false;
+                if (trailingHitboxAtCoords(current_coords, &th)) th_hit = true;
+
+                if (getTileType(current_coords) == PLAYER || (th_hit && th.type == PLAYER))
                 {
-                    lb->end_coords = intCoordsToNorm(current_coords);
-                    break;
-                }
-                else if (getTileType(current_coords) == PLAYER)
-                {
-					lb->end_coords = intCoordsToNorm(current_coords);
+					if (player->moving_direction == current_direction || player->moving_direction == oppositeDirection(current_direction)) lb->end_coords = player->position_norm; 
+					else lb->end_coords = intCoordsToNorm(current_coords);
                     LaserColor laser_color = colorToLaserColor(lb->color);
                     if (laser_color.red) player->hit_by_red = true;
                     if (laser_color.green) 
@@ -2025,7 +2025,7 @@ void updateLaserBuffer(void)
                     if (laser_color.blue)  player->hit_by_blue  = true;
                     break;
                 }
-                else if (getTileType(current_coords) == CRYSTAL)
+                else if (getTileType(current_coords) == CRYSTAL || (th_hit && th.type == CRYSTAL))
                 {
 					if 		(lb->color == RED) 	current_direction = getRedDirectionAtCrystal(current_direction);
 					else if (lb->color == BLUE) current_direction = getBlueDirectionAtCrystal(current_direction);
@@ -2033,7 +2033,7 @@ void updateLaserBuffer(void)
                     no_more_turns = false;
                     break;
                 }
-                else if (getTileType(current_coords) == MIRROR)
+                else if (getTileType(current_coords) == MIRROR || (th_hit && th.type == MIRROR))
                 {
                     Entity* mirror = getEntityPointer(current_coords);
 					current_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
@@ -2041,7 +2041,7 @@ void updateLaserBuffer(void)
                     no_more_turns = false;
                     break;
                 }
-                else if (getTileType(current_coords) != NONE)
+                else if (getTileType(current_coords) != NONE || (th_hit))
                 {
                     lb->end_coords = intCoordsToNorm(current_coords);
 					break;
