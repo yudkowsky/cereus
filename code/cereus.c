@@ -1560,13 +1560,13 @@ PushResult canPush(Int3 coords, Direction direction)
 		Entity* entity = getEntityPointer(current_coords);
         if (isEntity(current_tile) && entity->locked) return FAILED_PUSH;
 
-    	current_coords = getNextCoords(current_coords, direction);
-        current_tile = getTileType(current_coords);
-
 		if (entity->in_motion) return PAUSE_PUSH;
 
         // TODO(spike): need to introduce PAUSE_PUSH if entity is going to fall next frame. (this is what below is maybe doing?)
         if (isPushable(getTileType(current_coords)) && getTileType(getNextCoords(current_coords, DOWN)) == NONE && !next_world_state.player.hit_by_blue) return PAUSE_PUSH;
+
+    	current_coords = getNextCoords(current_coords, direction);
+        current_tile = getTileType(current_coords);
 
         Int3 coords_ahead = getNextCoords(entity->coords, direction);
 		if (isPushable(getTileType(coords_ahead)) && getEntityPointer(coords_ahead)->in_motion) return PAUSE_PUSH;
