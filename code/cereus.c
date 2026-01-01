@@ -1565,7 +1565,8 @@ PushResult canPush(Int3 coords, Direction direction)
 
 		if (entity->in_motion) return PAUSE_PUSH;
 
-        // TODO(spike): need to introduce PAUSE_PUSH if entity is going to fall next frame.
+        // TODO(spike): need to introduce PAUSE_PUSH if entity is going to fall next frame. (this is what below is maybe doing?)
+        if (isPushable(getTileType(current_coords)) && getTileType(getNextCoords(current_coords, DOWN)) == NONE && !next_world_state.player.hit_by_blue) return PAUSE_PUSH;
 
         Int3 coords_ahead = getNextCoords(entity->coords, direction);
 		if (isPushable(getTileType(coords_ahead)) && getEntityPointer(coords_ahead)->in_motion) return PAUSE_PUSH;
@@ -1577,7 +1578,6 @@ PushResult canPush(Int3 coords, Direction direction)
         if (!intCoordsWithinLevelBounds(current_coords)) return FAILED_PUSH;
 
         if (current_tile == NONE) return CAN_PUSH;
-//      if (isSource(current_tile)) return FAILED_PUSH;
         if (current_tile == GRID) return FAILED_PUSH;
         if (current_tile == WALL) return FAILED_PUSH;
         if (current_tile == PERM_MIRROR) return FAILED_PUSH;
@@ -1599,7 +1599,7 @@ PushResult canPushStack(Int3 coords, Direction direction)
     return CAN_PUSH;
 }
 
-Push pushOnceWithoutAnimation(Int3 coords, Direction direction)
+Push pushOnceWithoutAnimation(Int3 coords, Direction direction, int32 time)
 {
 	Push entity_to_push = {0};
 
@@ -1609,7 +1609,7 @@ Push pushOnceWithoutAnimation(Int3 coords, Direction direction)
     entity_to_push.entity = entity; 
     entity_to_push.new_coords = getNextCoords(coords, direction);
 
-    entity->in_motion = STANDARD_IN_MOTION_TIME;
+    entity->in_motion = time;
     entity->moving_direction = direction;
 
     setTileType(NONE, entity_to_push.previous_coords);
@@ -1624,7 +1624,7 @@ Push pushOnceWithoutAnimation(Int3 coords, Direction direction)
 
 void pushOnce(Int3 coords, Direction direction, int32 animation_time)
 {
-    Push entity_to_push = pushOnceWithoutAnimation(coords, direction);
+    Push entity_to_push = pushOnceWithoutAnimation(coords, direction, animation_time);
 
     int32 id = getEntityId(entity_to_push.new_coords);
     TileType trailing_hitbox_type = getTileType(entity_to_push.new_coords);
@@ -1658,7 +1658,7 @@ void pushAll(Int3 coords, Direction direction, int32 animation_time, bool animat
         {
             if (getTileType(getNextCoords(current_stack_coords, direction)) != NONE) break;
             if (animations_on) pushOnce(current_stack_coords, direction, animation_time);
-            else pushOnceWithoutAnimation(current_stack_coords, direction);
+            else pushOnceWithoutAnimation(current_stack_coords, direction, animation_time);
             current_stack_coords = getNextCoords(current_stack_coords, UP);
             if (limit_stack_size_to_one && stack_index == 0) break;
         }
@@ -1993,10 +1993,16 @@ void updateLaserBuffer(void)
             {
                 no_more_turns = true;
 
+                TrailingHitbox _;
                 if (!intCoordsWithinLevelBounds(current_coords))
                 {
                     lb->end_coords = intCoordsToNorm(current_coords);
 					break;
+                }
+                else if (trailingHitboxAtCoords(current_coords, &_))
+                {
+                    lb->end_coords = intCoordsToNorm(current_coords);
+                    break;
                 }
                 else if (getTileType(current_coords) == PLAYER)
                 {
@@ -2110,6 +2116,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
                 createTrailingHitbox(current_start_coords, DOWN, TRAILING_HITBOX_TIME + 4, getTileType(entity_in_stack->coords)); // it takes 4 extra frames to get to the point where it's cutting off the below laser (and thus not cutting off above, i guess)
             }
             entity_in_stack->first_fall_already_done = true;
+            entity_in_stack->in_motion = STANDARD_IN_MOTION_TIME + 4;
         }
         else
         {
@@ -2122,6 +2129,8 @@ bool doFallingEntity(Entity* entity, bool do_animation)
                                              entity_in_stack->id, FALL_ANIMATION_TIME);
                 createTrailingHitbox(current_start_coords, DOWN, TRAILING_HITBOX_TIME, getTileType(entity_in_stack->coords));
             }
+            entity_in_stack->first_fall_already_done = false;
+            entity_in_stack->in_motion = STANDARD_IN_MOTION_TIME;
         }
 
         setTileType(getTileType(current_start_coords), current_end_coords); 
@@ -2263,7 +2272,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
         pack->coords = player->coords;
         setTileDirection(pack->direction, pack->coords);
 
-        pack->in_motion = true;
+        //pack->in_motion = STANDARD_IN_MOTION_TIME;
         pack->moving_direction = input_direction;
     }
 
@@ -2271,7 +2280,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
     setTileType(PLAYER, player->coords);	
     setTileDirection(player->direction, player->coords);
 
-    player->in_motion = true;
+    //player->in_motion = STANDARD_IN_MOTION_TIME;
     player->moving_direction = input_direction;
 
     recordStateForUndo();
@@ -3234,7 +3243,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         resetFirstFall(player);
 		changeMoving(pack);
         resetFirstFall(pack);
-
 
 		// handle turning hitboxes
         if (next_world_state.pack_hitbox_turning_from_timer > 0) next_world_state.pack_hitbox_turning_from_timer--;
