@@ -280,8 +280,7 @@ typedef struct Entity
     Vec4 rotation_quat;
     int32 id;
 
-    // these two somewhat redundant but a lot of the time you don't care about the direction something is moving
-    bool in_motion;
+    int32 in_motion;
     Direction moving_direction;
 
     bool first_fall_already_done;

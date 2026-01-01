@@ -24,6 +24,7 @@ const int32 TURN_ANIMATION_TIME = 9; // somewhat hard coded, tied to PUSH_FROM_T
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
 const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6; // also somewhat hard coded, based on some function of the turn animation time and the sequencing based on it
 const int32 FAILED_ANIMATION_TIME = 8;
+const int32 STANDARD_IN_MOTION_TIME = 7;
 
 const int32 TRAILING_HITBOX_TIME = 4;
 const int32 FIRST_TRAILING_PACK_TURN_HITBOX_TIME = 2;
@@ -1260,9 +1261,10 @@ int32* findNextFreeInAnimations(int32* next_free_array, int32 entity_id)
     return next_free_array;
 }
 
-bool presentInAnimations(int32 entity_id)
+int32 presentInAnimations(int32 entity_id)
 {
-    FOR(find_anim_index, MAX_ANIMATION_COUNT) if (animations[find_anim_index].id == entity_id && animations[find_anim_index].frames_left != 0) return true;
+    // not rigorous with more than one animation (but will usually work, for now)
+    FOR(find_anim_index, MAX_ANIMATION_COUNT) if (animations[find_anim_index].id == entity_id && animations[find_anim_index].frames_left != 0) return animations[find_anim_index].frames_left;
     return false;
 }
 
@@ -1506,12 +1508,9 @@ void createFirstFallAnimation(Vec3 start_position, Vec3* position_to_change, int
 
 void changeMoving(Entity* e)
 {
-	if (presentInAnimations(e->id)) e->in_motion = true;
-	else 
-    {
-        e->in_motion = false;
-        e->moving_direction = NO_DIRECTION;
-    }
+	if (presentInAnimations(e->id) && e->in_motion == 0) e->in_motion = presentInAnimations(e->id);
+	else if (e->in_motion > 0) e->in_motion--;
+	else e->moving_direction = NO_DIRECTION;
 }
 
 void resetFirstFall(Entity* e)
@@ -1611,7 +1610,7 @@ Push pushOnceWithoutAnimation(Int3 coords, Direction direction)
     entity_to_push.entity = entity; 
     entity_to_push.new_coords = getNextCoords(coords, direction);
 
-    entity->in_motion = true;
+    entity->in_motion = STANDARD_IN_MOTION_TIME;
     entity->moving_direction = direction;
 
     setTileType(NONE, entity_to_push.previous_coords);
