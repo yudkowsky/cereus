@@ -80,7 +80,7 @@ const char LOCKED_INFO_CHUNK_TAG[4] = "LKIN";
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
-const char debug_level_name[64] = "blue-mirror-i";
+const char debug_level_name[64] = "testing";
 const char start_level_path_buffer[64] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
@@ -100,6 +100,7 @@ EditorState editor_state = {0};
 LaserBuffer laser_buffer[64] = {0};
 
 const Vec2 DEBUG_TEXT_COORDS_START = { 50.0f, 1080.0f - 80.0f };
+const float DEBUG_TEXT_Y_DIFF = 40.0f;
 Vec2 debug_text_coords = {0}; 
 
 // CAMERA STUFF
@@ -441,6 +442,20 @@ int32 entityIdOffset(Entity *entity)
     else if (entity == next_world_state.win_blocks)    return ID_OFFSET_WIN_BLOCK;
     else if (entity == next_world_state.locked_blocks) return ID_OFFSET_LOCKED_BLOCK;
     return 0;
+}
+
+Vec3 directionToVector(Direction direction)
+{
+    switch (direction)
+    {
+        case NORTH: return (Vec3){  0,  0, -1 };
+        case WEST:  return (Vec3){ -1,  0,  0 };
+        case SOUTH: return (Vec3){  0,  0,  1 };
+        case EAST:  return (Vec3){  1,  0,  0 };
+        case UP:    return (Vec3){  0,  1,  0 };
+        case DOWN:  return (Vec3){  0, -1,  0 };
+    	default: return IDENTITY_TRANSLATION;
+    }
 }
 
 // roll_z only works / is used for 6-dim. otherwise we just decide (it doesn't make sense to ask for diagonals)
@@ -1061,7 +1076,7 @@ void drawText(char* string, Vec2 coords, float scale)
 void drawDebugText(char* string)
 {
 	drawText(string, debug_text_coords, DEFAULT_TEXT_SCALE);
-    debug_text_coords.y -= 50.0f;
+    debug_text_coords.y -= DEBUG_TEXT_Y_DIFF;
 }
 
 // RAYCAST ALGORITHM FOR EDITOR PLACE/DESTROY
@@ -1633,8 +1648,7 @@ void pushOnce(Int3 coords, Direction direction, int32 animation_time)
                                  &entity_to_push.entity->position_norm,
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                  id, animation_time); 
-    //int32 trailing_hitbox_time = animation_time - 3;
-    int32 trailing_hitbox_time = 4;
+    int32 trailing_hitbox_time = TRAILING_HITBOX_TIME;
     createTrailingHitbox(coords, direction, trailing_hitbox_time, trailing_hitbox_type);
 }
 
@@ -1876,7 +1890,7 @@ Direction getRedDirectionAtCrystal(Direction input_direction)
         case SOUTH_EAST: return EAST;
         case EAST:       return NORTH_EAST;
         case NORTH_EAST: return NORTH;
-        default: return 0;
+        default: return NO_DIRECTION;
     }
 }
 
@@ -1892,7 +1906,7 @@ Direction getBlueDirectionAtCrystal(Direction input_direction)
         case SOUTH_EAST: return SOUTH;
         case EAST:       return SOUTH_EAST;
         case NORTH_EAST: return EAST;
-        default: return 0;
+        default: return NO_DIRECTION;
     }
 }
 
@@ -1976,7 +1990,8 @@ void updateLaserBuffer(void)
         Entity* source = &next_world_state.sources[source_index]; // TODO(spike): will not work with multicolored sources
         if (source->id == -1) continue;
         Direction current_direction = source->direction;
-        Int3 current_coords = source->coords;
+        Int3 current_tile_coords = source->coords;
+        Vec3 offset = {0};
 
         FOR(laser_turn_index, MAX_LASER_TURNS_ALLOWED)
         {
@@ -1984,38 +1999,50 @@ void updateLaserBuffer(void)
             LaserBuffer* lb = &laser_buffer[laser_buffer_index];
 			bool no_more_turns = true; 
 
-            lb->start_coords = intCoordsToNorm(current_coords);
+            lb->start_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
             lb->direction = current_direction;
             lb->color = source->color;
-            current_coords = getNextCoords(current_coords, current_direction);
+            current_tile_coords = getNextCoords(current_tile_coords, current_direction);
 
             FOR(laser_tile_index, MAX_LASER_TRAVEL_DISTANCE)
             {
                 no_more_turns = true;
 
-                if (!intCoordsWithinLevelBounds(current_coords))
+                if (!intCoordsWithinLevelBounds(current_tile_coords))
                 {
-                    lb->end_coords = intCoordsToNorm(current_coords);
+                    lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
 					break;
+                }
+
+                if ((next_world_state.pack_hitbox_turning_from_timer > 0) 
+                && (int3IsEqual(current_tile_coords, next_world_state.pack_hitbox_turning_from_coords) && (next_world_state.pack_hitbox_turning_from_direction == current_direction)) 
+                || (int3IsEqual(current_tile_coords, next_world_state.pack_hitbox_turning_to_coords)   && (next_world_state.pack_hitbox_turning_to_direction   == current_direction))) 
+                {
+                    Vec3 end_coords = vec3Multiply(vec3Add(intCoordsToNorm(current_tile_coords), intCoordsToNorm(getNextCoords(current_tile_coords, oppositeDirection(current_direction)))), 0.5);
+					lb->end_coords = vec3Add(end_coords, offset); 
+                    break;
                 }
 
                 TrailingHitbox th;
                 bool th_hit = false;
-                if (trailingHitboxAtCoords(current_coords, &th)) th_hit = true;
+                if (trailingHitboxAtCoords(current_tile_coords, &th)) th_hit = true;
 
-                if (getTileType(current_coords) == PLAYER || (th_hit && th.type == PLAYER))
+                if (getTileType(current_tile_coords) == PLAYER || (th_hit && th.type == PLAYER))
                 {
 					if (player->moving_direction == current_direction || player->moving_direction == oppositeDirection(current_direction)) 
                     {
-                        lb->end_coords = player->position_norm; 
+                        lb->end_coords = vec3Add(player->position_norm, offset); 
                     }
 					else if (!th_hit && player->in_motion > STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH && player->moving_direction != NO_DIRECTION) 
                     {
-                        current_coords = getNextCoords(current_coords, current_direction);
+                        current_tile_coords = getNextCoords(current_tile_coords, current_direction);
                         continue;
                     }
+					else 
+                    {
+                        lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                    }
 
-					else lb->end_coords = intCoordsToNorm(current_coords);
                     LaserColor laser_color = colorToLaserColor(lb->color);
                     if (laser_color.red) player->hit_by_red = true;
                     if (laser_color.green) 
@@ -2034,29 +2061,43 @@ void updateLaserBuffer(void)
                     if (laser_color.blue)  player->hit_by_blue  = true;
                     break;
                 }
-                else if (getTileType(current_coords) == CRYSTAL || (th_hit && th.type == CRYSTAL))
+                else if (getTileType(current_tile_coords) == CRYSTAL || (th_hit && th.type == CRYSTAL))
                 {
+                    Entity* crystal = getEntityPointer(current_tile_coords);
+                    if (crystal->in_motion && crystal->moving_direction == oppositeDirection(current_direction))
+                    {
+                        Vec3 to_vector = directionToVector(crystal->moving_direction);
+                        float dir_offset = (float)(MOVE_OR_PUSH_ANIMATION_TIME - crystal->in_motion) / (float)(MOVE_OR_PUSH_ANIMATION_TIME);
+						
+                        offset = vec3Add(vec3Negate(to_vector), vec3Multiply(to_vector, dir_offset));
+
+                        lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                    }
+                    else
+                    {
+                        lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                    }
+
 					if 		(lb->color == RED) 	current_direction = getRedDirectionAtCrystal(current_direction);
 					else if (lb->color == BLUE) current_direction = getBlueDirectionAtCrystal(current_direction);
-                    lb->end_coords = intCoordsToNorm(current_coords);
                     no_more_turns = false;
                     break;
                 }
-                else if (getTileType(current_coords) == MIRROR || (th_hit && th.type == MIRROR))
+                else if (getTileType(current_tile_coords) == MIRROR || (th_hit && th.type == MIRROR))
                 {
-                    Entity* mirror = getEntityPointer(current_coords);
+                    Entity* mirror = getEntityPointer(current_tile_coords);
 					current_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
-                    lb->end_coords = intCoordsToNorm(current_coords);
+                    lb->end_coords = intCoordsToNorm(current_tile_coords);
                     no_more_turns = false;
                     break;
                 }
-                else if (getTileType(current_coords) != NONE || (th_hit))
+                else if (getTileType(current_tile_coords) != NONE || (th_hit))
                 {
-                    lb->end_coords = intCoordsToNorm(current_coords);
+                    lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
 					break;
                 }
 
-                current_coords = getNextCoords(current_coords, current_direction);
+                current_tile_coords = getNextCoords(current_tile_coords, current_direction);
             }
 
             if (no_more_turns) break;
@@ -3471,6 +3512,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
 		// DRAW 2D
         
+        // player in_motion info
 		char player_moving_text[256] = {0};
         snprintf(player_moving_text, sizeof(player_moving_text), "player moving: %d", player->in_motion);
 		drawDebugText(player_moving_text);
@@ -3486,6 +3528,28 @@ void gameFrame(double delta_time, TickInput tick_input)
             default: break;
         }
         drawDebugText(player_moving_direction_text);
+
+		// first crystal in_motion info
+        Entity* c = &next_world_state.crystals[0];
+		char crystal_moving_text[256] = {0};
+        snprintf(crystal_moving_text, sizeof(crystal_moving_text), "crystal moving: %d", c->in_motion);
+		drawDebugText(crystal_moving_text);
+
+        char crystal_moving_direction_text[256] = {0};
+        switch (c->moving_direction)
+        {
+            case NO_DIRECTION: snprintf(crystal_moving_direction_text, sizeof(crystal_moving_direction_text), "crystal moving direction: NO_DIRECTION"); break;
+            case NORTH:		   snprintf(crystal_moving_direction_text, sizeof(crystal_moving_direction_text), "crystal moving direction: NORTH"); break;
+            case WEST: 		   snprintf(crystal_moving_direction_text, sizeof(crystal_moving_direction_text), "crystal moving direction: WEST"); break;
+            case SOUTH: 	   snprintf(crystal_moving_direction_text, sizeof(crystal_moving_direction_text), "crystal moving direction: SOUTH"); break;
+            case EAST: 		   snprintf(crystal_moving_direction_text, sizeof(crystal_moving_direction_text), "crystal moving direction: EAST"); break;
+            default: break;
+        }
+        drawDebugText(crystal_moving_direction_text);
+
+        char crystal_coords_text[256] = {0};
+        snprintf(crystal_coords_text, sizeof(crystal_coords_text), "crystal_coords, %d, %d, %d", c->coords.x, c->coords.y, c->coords.z);
+        drawDebugText(crystal_coords_text);
 
 		if (editor_state.editor_mode != NO_MODE)
         {
