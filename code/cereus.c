@@ -26,7 +26,9 @@ const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6; // also somewhat hard coded, base
 const int32 FAILED_ANIMATION_TIME = 8;
 const int32 STANDARD_IN_MOTION_TIME = 7;
 
-const int32 TRAILING_HITBOX_TIME = 4;
+const int32 STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH = 4;
+
+const int32 TRAILING_HITBOX_TIME = 5;
 const int32 FIRST_TRAILING_PACK_TURN_HITBOX_TIME = 2;
 const int32 TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN = 2;
 const int32 PACK_TIME_IN_INTERMEDIATE_STATE = 4;
@@ -34,9 +36,7 @@ const int32 PACK_TIME_IN_INTERMEDIATE_STATE = 4;
 const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
 
-const int32 LASER_BUFFER_MOVING_TIME_ALLOWED_FOR_PASSTHROUGH = 5; // actually inverted: this is time - x frames
-
-const int32 MAX_ENTITY_INSTANCE_COUNT = 32;
+const int32 MAX_ENTITY_INSTANCE_COUNT = 128;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
 const int32 MAX_ANIMATION_COUNT = 32;
 const int32 MAX_LASER_TRAVEL_DISTANCE = 48;
@@ -2005,7 +2005,16 @@ void updateLaserBuffer(void)
 
                 if (getTileType(current_coords) == PLAYER || (th_hit && th.type == PLAYER))
                 {
-					if (player->moving_direction == current_direction || player->moving_direction == oppositeDirection(current_direction)) lb->end_coords = player->position_norm; 
+					if (player->moving_direction == current_direction || player->moving_direction == oppositeDirection(current_direction)) 
+                    {
+                        lb->end_coords = player->position_norm; 
+                    }
+					else if (!th_hit && player->in_motion > STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH && player->moving_direction != NO_DIRECTION) 
+                    {
+                        current_coords = getNextCoords(current_coords, current_direction);
+                        continue;
+                    }
+
 					else lb->end_coords = intCoordsToNorm(current_coords);
                     LaserColor laser_color = colorToLaserColor(lb->color);
                     if (laser_color.red) player->hit_by_red = true;
@@ -2272,7 +2281,6 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
         pack->coords = player->coords;
         setTileDirection(pack->direction, pack->coords);
 
-        //pack->in_motion = STANDARD_IN_MOTION_TIME;
         pack->moving_direction = input_direction;
     }
 
@@ -2280,7 +2288,6 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
     setTileType(PLAYER, player->coords);	
     setTileDirection(player->direction, player->coords);
 
-    //player->in_motion = STANDARD_IN_MOTION_TIME;
     player->moving_direction = input_direction;
 
     recordStateForUndo();
@@ -2947,6 +2954,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                          1, TURN_ANIMATION_TIME); 
                             player->direction = input_direction;
                             setTileDirection(player->direction, player->coords);
+                            player->moving_direction = NO_DIRECTION;
 
                             recordStateForUndo();
                         }
@@ -3060,6 +3068,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                                     player->direction = input_direction;
                                     setTileDirection(player->direction, player->coords);
+                                    player->moving_direction = NO_DIRECTION;
 
                                     createPackRotationAnimation(intCoordsToNorm(player->coords), 
                                                                 intCoordsToNorm(pack->coords), 
