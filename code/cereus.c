@@ -1277,12 +1277,16 @@ int32* findNextFreeInAnimations(int32* next_free_array, int32 entity_id)
 
 int32 presentInAnimations(int32 entity_id)
 {
-    // not rigorous with more than one animation (but will usually work, for now)
-    FOR(find_anim_index, MAX_ANIMATION_COUNT) if (animations[find_anim_index].id == entity_id && animations[find_anim_index].frames_left != 0) return animations[find_anim_index].frames_left;
-    return false;
+    int32 frames = 0;
+    FOR(find_anim_index, MAX_ANIMATION_COUNT) 
+    {
+        Animation* a = &animations[find_anim_index];
+        if (a->id == entity_id && a->frames_left > frames) frames = a->frames_left; 
+    }
+    return frames;
 }
 
-void zeroAnimations(int32 id)
+void zeroAnimations(int32 id) 
 {
     FOR(animation_index, MAX_ANIMATION_COUNT) if (animations[animation_index].id == id) memset(&animations[animation_index], 0, sizeof(Animation));
 }
@@ -2282,7 +2286,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
                                              entity_in_stack->id, FALL_ANIMATION_TIME);
                 createTrailingHitbox(current_start_coords, DOWN, TRAILING_HITBOX_TIME, getTileType(entity_in_stack->coords));
             }
-            entity_in_stack->first_fall_already_done = false;
+            entity_in_stack->first_fall_already_done = true;
             entity_in_stack->in_motion = STANDARD_IN_MOTION_TIME;
         }
 
