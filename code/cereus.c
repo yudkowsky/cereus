@@ -79,7 +79,7 @@ const char LOCKED_INFO_CHUNK_TAG[4] = "LKIN";
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
-const char debug_level_name[64] = "testing";
+const char debug_level_name[64] = "red-mirror-i";
 const char start_level_path_buffer[64] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
@@ -1992,13 +1992,13 @@ void updateLaserBuffer(void)
         Int3 current_tile_coords = source->coords;
         Vec3 offset = {0};
 
-        bool no_more_turns = true; 
         int32 skip_next_mirror = 0;
 
         FOR(laser_turn_index, MAX_LASER_TURNS_ALLOWED)
         {
             int32 laser_buffer_index = findNextFreeInLaserBuffer();
             LaserBuffer* lb = &laser_buffer[laser_buffer_index];
+            bool no_more_turns = true; 
 
             lb->start_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
             lb->direction = current_direction;
@@ -2027,7 +2027,8 @@ void updateLaserBuffer(void)
 
                 TrailingHitbox th = {0};
                 bool th_hit = false;
-                if (trailingHitboxAtCoords(current_tile_coords, &th)) th_hit = true;
+                if (trailingHitboxAtCoords(current_tile_coords, &th) && th.frames > 0) th_hit = true;
+                else memset(&th, 0, sizeof(TrailingHitbox));
 
                 if (getTileType(current_tile_coords) == PLAYER || (th_hit && th.type == PLAYER))
                 {
@@ -2041,10 +2042,8 @@ void updateLaserBuffer(void)
                     {	
                         if (!skip_check)
                         {
-                            drawDebugText("we're in!!");
                             lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                         }
-
                         LaserColor laser_color = colorToLaserColor(lb->color);
                         if (laser_color.red) player->hit_by_red = true;
                         if (laser_color.green) 
@@ -2148,6 +2147,7 @@ void updateLaserBuffer(void)
                     else
                     {
                         // TODO(spike): need to figure out if pushed by pack or player, and if so change the equivalent of MOVE_OR_PUSH_ANIMATION_TIME that we're checking against
+
                     	// trailing hitbox hit
 						if (mirror->moving_direction == getNextLaserDirectionMirror(current_direction, mirror->direction))
                         {
@@ -2422,6 +2422,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
                                      PACK_ID, animation_time);
 
         createTrailingHitbox(pack->coords, input_direction, trailing_hitbox_time, PACK);
+
         pack->coords = player->coords;
         setTileDirection(pack->direction, pack->coords);
 
@@ -3059,6 +3060,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 {
                                     if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
                                     doStandardMovement(input_direction, next_player_coords, animation_time);
+                                    next_world_state.bypass_player_fall = true; 
                                 }
                                 else 
                                 {
@@ -3286,7 +3288,14 @@ void gameFrame(double delta_time, TickInput tick_input)
             next_world_state.pack_intermediate_states_timer--;
         }
 
-        updateLaserBuffer();
+        if (player->in_motion > 0)
+        {
+            updateLaserBuffer();
+        }
+        else
+        {
+            updateLaserBuffer();
+        }
 
         // falling logic
 		if (!player->hit_by_blue) doFallingObjects(true); // built in guard here against pushable at location of pack_hitbox_turning_to_timer;
@@ -3300,8 +3309,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) next_world_state.player_will_fall_next_turn = true; 
                     else next_world_state.player_will_fall_next_turn = false;
 
-                    // not red and pack attached: player always falls. pack only falls if player falls
-                    if (!doFallingEntity(player, true))
+                    // not red and pack attached: player always falls, if no bypass. pack only falls if player falls
+                    if (!next_world_state.bypass_player_fall && !doFallingEntity(player, true))
                     {
                         if (doFallingEntity(pack, true))
                         {
@@ -3315,7 +3324,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) next_world_state.player_will_fall_next_turn = true;
                     else next_world_state.player_will_fall_next_turn = false;
                     // not red and pack not attached, so pack and player both always fall
-                    doFallingEntity(player, true);
+                    if (!next_world_state.bypass_player_fall) doFallingEntity(player, true);
                     doFallingEntity(pack, true);
                 }
             }
@@ -3415,6 +3424,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // decrement trailing hitboxes 
         FOR(i, MAX_TRAILING_HITBOX_COUNT) if (next_world_state.trailing_hitboxes[i].frames > 0) next_world_state.trailing_hitboxes[i].frames--;
+        if (next_world_state.bypass_player_fall) next_world_state.bypass_player_fall = false;
 
 		// delete objects if above void
         if (!player->hit_by_blue) // TODO(spike): maybe just wrap this into the falling logic?
@@ -3435,6 +3445,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 }
             }
         }
+
         // delete player / pack if above void
         if (!player->hit_by_red)
         {

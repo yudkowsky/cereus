@@ -343,6 +343,7 @@ typedef struct WorldState
 	char solved_levels[64][64];
 
     TrailingHitbox trailing_hitboxes[64];
+    bool bypass_player_fall;
 
     // handle pack turning sequence
     int32 pack_intermediate_states_timer;
