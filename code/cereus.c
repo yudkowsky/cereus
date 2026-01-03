@@ -22,11 +22,10 @@ const int32 EDITOR_INPUT_TIME_UNTIL_ALLOW = 9;
 const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9; // TODO(spike): make this freely editable (want to up this by a few frames to emphasise pushing stacked box mechanics)
 const int32 TURN_ANIMATION_TIME = 9; // somewhat hard coded, tied to PUSH_FROM_TURN...
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
-const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6; // also somewhat hard coded, based on some function of the turn animation time and the sequencing based on it
+const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6;
 const int32 FAILED_ANIMATION_TIME = 8;
 const int32 STANDARD_IN_MOTION_TIME = 7;
-
-const int32 STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH = 4;
+const int32 STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH = 5;
 
 const int32 TRAILING_HITBOX_TIME = 5;
 const int32 FIRST_TRAILING_PACK_TURN_HITBOX_TIME = 2;
@@ -1993,11 +1992,13 @@ void updateLaserBuffer(void)
         Int3 current_tile_coords = source->coords;
         Vec3 offset = {0};
 
+        bool no_more_turns = true; 
+        int32 skip_next_mirror = 0;
+
         FOR(laser_turn_index, MAX_LASER_TURNS_ALLOWED)
         {
             int32 laser_buffer_index = findNextFreeInLaserBuffer();
             LaserBuffer* lb = &laser_buffer[laser_buffer_index];
-			bool no_more_turns = true; 
 
             lb->start_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
             lb->direction = current_direction;
@@ -2016,62 +2017,71 @@ void updateLaserBuffer(void)
 
                 if ((next_world_state.pack_hitbox_turning_from_timer > 0) 
                 && (int3IsEqual(current_tile_coords, next_world_state.pack_hitbox_turning_from_coords) && (next_world_state.pack_hitbox_turning_from_direction == current_direction)) 
-                || (int3IsEqual(current_tile_coords, next_world_state.pack_hitbox_turning_to_coords)   && (next_world_state.pack_hitbox_turning_to_direction   == current_direction))) 
+                || ((next_world_state.pack_hitbox_turning_to_timer > 0) 
+                && int3IsEqual(current_tile_coords, next_world_state.pack_hitbox_turning_to_coords)   && (next_world_state.pack_hitbox_turning_to_direction   == current_direction))) 
                 {
                     Vec3 end_coords = vec3Multiply(vec3Add(intCoordsToNorm(current_tile_coords), intCoordsToNorm(getNextCoords(current_tile_coords, oppositeDirection(current_direction)))), 0.5);
 					lb->end_coords = vec3Add(end_coords, offset); 
                     break;
                 }
 
-                TrailingHitbox th;
+                TrailingHitbox th = {0};
                 bool th_hit = false;
                 if (trailingHitboxAtCoords(current_tile_coords, &th)) th_hit = true;
 
                 if (getTileType(current_tile_coords) == PLAYER || (th_hit && th.type == PLAYER))
                 {
+                    bool skip_check = false;
 					if (player->moving_direction == current_direction || player->moving_direction == oppositeDirection(current_direction)) 
                     {
                         lb->end_coords = vec3Add(player->position_norm, offset); 
+						skip_check = true;
                     }
-					else if (!th_hit && player->in_motion > STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH && player->moving_direction != NO_DIRECTION) 
-                    {
-                        current_tile_coords = getNextCoords(current_tile_coords, current_direction);
-                        continue;
-                    }
-					else 
-                    {
-                        lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
-                    }
-
-                    LaserColor laser_color = colorToLaserColor(lb->color);
-                    if (laser_color.red) player->hit_by_red = true;
-                    if (laser_color.green) 
-                    {
-                        switch (current_direction)
+					if (skip_check || !(player->in_motion >= STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH && player->moving_direction != NO_DIRECTION && th.type != PLAYER))
+                    {	
+                        if (!skip_check)
                         {
-                            case NORTH: player->green_hit.north = true; break;
-                            case WEST:  player->green_hit.west  = true; break;
-                            case SOUTH: player->green_hit.south = true; break;
-                            case EAST:  player->green_hit.east  = true; break;
-                            case UP:    player->green_hit.up    = true; break;
-                            case DOWN:  player->green_hit.down  = true; break;
-                            default: break;
+                            drawDebugText("we're in!!");
+                            lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                         }
+
+                        LaserColor laser_color = colorToLaserColor(lb->color);
+                        if (laser_color.red) player->hit_by_red = true;
+                        if (laser_color.green) 
+                        {
+                            switch (current_direction)
+                            {
+                                case NORTH: player->green_hit.north = true; break;
+                                case WEST:  player->green_hit.west  = true; break;
+                                case SOUTH: player->green_hit.south = true; break;
+                                case EAST:  player->green_hit.east  = true; break;
+                                case UP:    player->green_hit.up    = true; break;
+                                case DOWN:  player->green_hit.down  = true; break;
+                                default: break;
+                            }
+                        }
+                        if (laser_color.blue)  player->hit_by_blue  = true;
+                        break;
                     }
-                    if (laser_color.blue)  player->hit_by_blue  = true;
-                    break;
                 }
-                else if (getTileType(current_tile_coords) == CRYSTAL || (th_hit && th.type == CRYSTAL))
+
+                if (getTileType(current_tile_coords) == CRYSTAL || (th_hit && th.type == CRYSTAL))
                 {
-                    Entity* crystal = getEntityPointer(current_tile_coords);
-                    if (crystal->in_motion && crystal->moving_direction == oppositeDirection(current_direction))
+                    Entity* crystal = {0};
+                    if (th_hit) crystal = getEntityPointer(getNextCoords(current_tile_coords, th.direction));
+                    else crystal = getEntityPointer(current_tile_coords);
+
+                    if (crystal->in_motion && crystal->moving_direction == oppositeDirection(current_direction)) 
                     {
                         Vec3 to_vector = directionToVector(crystal->moving_direction);
                         float dir_offset = (float)(MOVE_OR_PUSH_ANIMATION_TIME - crystal->in_motion) / (float)(MOVE_OR_PUSH_ANIMATION_TIME);
-						
                         offset = vec3Add(vec3Negate(to_vector), vec3Multiply(to_vector, dir_offset));
-
                         lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                    }
+                    else if (!th_hit && !(crystal->in_motion < STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH)) 
+                    {
+                        current_tile_coords = getNextCoords(current_tile_coords, current_direction);
+                        continue;
                     }
                     else
                     {
@@ -2083,18 +2093,111 @@ void updateLaserBuffer(void)
                     no_more_turns = false;
                     break;
                 }
-                else if (getTileType(current_tile_coords) == MIRROR || (th_hit && th.type == MIRROR))
+
+                if ((getTileType(current_tile_coords) == MIRROR || (th_hit && th.type == MIRROR)) && !skip_next_mirror)
                 {
-                    Entity* mirror = getEntityPointer(current_tile_coords);
+                    Entity* mirror = {0};
+                    if (th_hit) mirror = getEntityPointer(getNextCoords(current_tile_coords, th.direction));
+                    else mirror = getEntityPointer(current_tile_coords);
+
+                    if (!th_hit)
+                    {
+                        // hit mirror tile
+                        if (mirror->in_motion && mirror->moving_direction == oppositeDirection(current_direction))
+                        {
+                            Vec3 to_vector = directionToVector(mirror->moving_direction);
+                            float dir_offset = (float)(MOVE_OR_PUSH_ANIMATION_TIME - mirror->in_motion) / (float)(MOVE_OR_PUSH_ANIMATION_TIME);
+                            offset = vec3Add(vec3Negate(to_vector), vec3Multiply(to_vector, dir_offset));
+                            lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                        }
+                        else if (mirror->in_motion && mirror->moving_direction == getNextLaserDirectionMirror(current_direction, mirror->direction))
+                        {
+                            if (mirror->in_motion < STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH)
+                            {
+                                Vec3 to_vector = directionToVector(oppositeDirection(current_direction));
+                                float dir_offset = (float)(MOVE_OR_PUSH_ANIMATION_TIME - mirror->in_motion) / (float)(MOVE_OR_PUSH_ANIMATION_TIME);
+                                offset = vec3Add(vec3Negate(to_vector), vec3Multiply(to_vector, dir_offset));
+                                lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                            }
+                            else
+                            {
+                                current_tile_coords = getNextCoords(current_tile_coords, current_direction);
+                                continue;
+                            }
+                        }
+                        else if (mirror->in_motion && mirror->moving_direction == oppositeDirection(getNextLaserDirectionMirror(current_direction, mirror->direction)))
+                        {
+                            if (mirror->in_motion < STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH)
+                            {
+                                Vec3 to_vector = directionToVector(current_direction);
+                                float dir_offset = (float)(MOVE_OR_PUSH_ANIMATION_TIME - mirror->in_motion) / (float)(MOVE_OR_PUSH_ANIMATION_TIME);
+                                offset = vec3Add(vec3Negate(to_vector), vec3Multiply(to_vector, dir_offset));
+                                lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                            }
+                            else
+                            {
+                                current_tile_coords = getNextCoords(current_tile_coords, current_direction);
+                                continue;
+                            }
+                        }
+                        else
+                        {
+                            lb->end_coords = intCoordsToNorm(current_tile_coords);
+                        }
+                    }
+                    else
+                    {
+                        // TODO(spike): need to figure out if pushed by pack or player, and if so change the equivalent of MOVE_OR_PUSH_ANIMATION_TIME that we're checking against
+                    	// trailing hitbox hit
+						if (mirror->moving_direction == getNextLaserDirectionMirror(current_direction, mirror->direction))
+                        {
+                            Vec3 to_vector = directionToVector(current_direction);
+                            float dir_offset = (float)(mirror->in_motion) / (float)(MOVE_OR_PUSH_ANIMATION_TIME);
+                            offset = vec3Add(vec3Negate(to_vector), vec3Multiply(to_vector, dir_offset));
+                            lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                            skip_next_mirror = 2;
+                        }
+						else if (mirror->moving_direction == oppositeDirection(getNextLaserDirectionMirror(current_direction, mirror->direction)))
+                        {
+                            Vec3 to_vector = directionToVector(oppositeDirection(current_direction));
+                            float dir_offset = (float)(mirror->in_motion) / (float)(MOVE_OR_PUSH_ANIMATION_TIME);
+                            offset = vec3Add(vec3Negate(to_vector), vec3Multiply(to_vector, dir_offset));
+                            lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                            skip_next_mirror = 2;
+                        }
+						else
+                        {
+                            // get here with pack swing from top when laser is pointing straight down onto mirror
+                            lb->end_coords = intCoordsToNorm(current_tile_coords);
+                            break;
+                        }
+                    }
+
 					current_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
-                    lb->end_coords = intCoordsToNorm(current_tile_coords);
                     no_more_turns = false;
                     break;
                 }
-                else if (getTileType(current_tile_coords) != NONE || (th_hit))
+                if (getTileType(current_tile_coords) != NONE || (th_hit))
                 {
-                    lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
-					break;
+                    if (isEntity(getTileType(current_tile_coords)))
+                    {
+                        Entity* e = getEntityPointer(current_tile_coords);
+                        if (e->in_motion < STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH || (!next_world_state.pack_detached && e->id == PACK_ID))
+                        {
+                            lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                            break;
+                        }
+                        else
+                        {
+							current_tile_coords = getNextCoords(current_tile_coords, current_direction);
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                        break;
+                    }
                 }
 
                 current_tile_coords = getNextCoords(current_tile_coords, current_direction);
@@ -2927,7 +3030,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 if (do_push) pushAll(next_player_coords, input_direction, 0, false, false);
 
                                 bool animations_on = false;
-                                // TODO(spike): needs some testing
+
                                 if (!player->hit_by_blue)
                                 {
                                     doFallingObjects(animations_on);
@@ -3299,7 +3402,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (next_world_state.pack_hitbox_turning_to_timer   > 0) next_world_state.pack_hitbox_turning_to_timer--;
 
         // don't allow inputs if player is moving (this is for meta commands - some redundancy here: pauses already happen if player not allowed to move yet otherwise)
-        if (player->in_motion) time_until_input = 1;
+        if (player->in_motion) time_until_input = 1; // TODO(spike): is this needed? it's at least somewhat redundant
 
         // decide which ghosts to render, if ghosts should be rendered
         bool do_player_ghost = false;
