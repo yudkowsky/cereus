@@ -76,6 +76,9 @@ const char WIN_BLOCK_CHUNK_TAG[4] = "WINB";
 const int32 LOCKED_INFO_CHUNK_SIZE = 76;
 const char LOCKED_INFO_CHUNK_TAG[4] = "LKIN";
 
+const int32 OVERWORLD_SCREEN_SIZE_X = 11;
+const int32 OVERWORLD_SCREEN_SIZE_Z = 11;
+
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
@@ -84,6 +87,8 @@ const char start_level_path_buffer[64] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
 Camera camera = {0};
+Camera gameplay_camera = {0};
+Int3 overworld_player_start_coords = {0};
 
 AssetToLoad assets_to_load[1024] = {0};
 
@@ -189,47 +194,87 @@ Vec3 vec3RotateByQuaternion(Vec3 input_vector, Vec4 quaternion)
 
 // MATH HELPER FUNCTIONS
 
-Vec3 intCoordsToNorm(Int3 int_coords) {
-    return (Vec3){ (float)int_coords.x, (float)int_coords.y, (float)int_coords.z }; }
+Vec3 intCoordsToNorm(Int3 int_coords) 
+{
+    return (Vec3){ (float)int_coords.x, (float)int_coords.y, (float)int_coords.z };
+}
 
-Int3 normCoordsToInt(Vec3 norm_coords) {
-	return (Int3){ (int32)floorf(norm_coords.x + 0.5f), (int32)floorf(norm_coords.y + 0.5f), (int32)floorf(norm_coords.z + 0.5f) }; }
+Int3 normCoordsToInt(Vec3 norm_coords) 
+{
+	return (Int3){ (int32)floorf(norm_coords.x + 0.5f), (int32)floorf(norm_coords.y + 0.5f), (int32)floorf(norm_coords.z + 0.5f) }; 
+}
 
-bool intCoordsWithinLevelBounds(Int3 coords) {
-    return (coords.x >= 0 && coords.y >= 0 && coords.z >= 0 && coords.x < level_dim.x && coords.y < level_dim.y && coords.z < level_dim.z); }
+bool intCoordsWithinLevelBounds(Int3 coords) 
+{
+    return (coords.x >= 0 && coords.y >= 0 && coords.z >= 0 && coords.x < level_dim.x && coords.y < level_dim.y && coords.z < level_dim.z); 
+}
 
-bool normCoordsWithinLevelBounds(Vec3 coords) {
-    return (coords.x > 0 && coords.y > 0 && coords.z >= 0 && coords.x < level_dim.x && coords.y < level_dim.y && coords.z < level_dim.z); }
+bool normCoordsWithinLevelBounds(Vec3 coords) 
+{
+    return (coords.x > 0 && coords.y > 0 && coords.z >= 0 && coords.x < level_dim.x && coords.y < level_dim.y && coords.z < level_dim.z); 
+}
 
-bool int3IsEqual(Int3 a, Int3 b) {
-    return (a.x == b.x && a.y == b.y && a.z == b.z); }
+bool int3IsEqual(Int3 a, Int3 b) 
+{
+    return (a.x == b.x && a.y == b.y && a.z == b.z); 
+}
 
-Vec3 vec3Negate(Vec3 coords) {
-    return (Vec3){ -coords.x, -coords.y, -coords.z }; }
+Vec3 vec3Negate(Vec3 coords) 
+{
+    return (Vec3){ -coords.x, -coords.y, -coords.z }; 
+}
 
-Int3 int3Negate(Int3 coords) {
-    return (Int3){ -coords.x, -coords.y, -coords.z }; }
+Int3 int3Negate(Int3 coords) 
+{
+    return (Int3){ -coords.x, -coords.y, -coords.z }; 
+}
 
-bool vec3IsZero(Vec3 position) {
-   	return (position.x == 0 && position.y == 0 && position.z == 0); }
+bool vec3IsZero(Vec3 position) 
+{
+   	return (position.x == 0 && position.y == 0 && position.z == 0); 
+}
 
 Vec3 vec3Add(Vec3 a, Vec3 b) {
 	return (Vec3){ a.x+b.x, a.y+b.y, a.z+b.z }; }
 
-Int3 int3Add(Int3 a, Int3 b) {	
-	return (Int3){ a.x+b.x, a.y+b.y, a.z+b.z }; }
+Int3 int3Add(Int3 a, Int3 b)
+{
+	return (Int3){ a.x+b.x, a.y+b.y, a.z+b.z }; 
+}
 
-Vec3 vec3Subtract(Vec3 a, Vec3 b) {
-    return (Vec3){ a.x-b.x, a.y-b.y, a.z-b.z }; }
+Vec3 vec3Subtract(Vec3 a, Vec3 b) 
+{
+    return (Vec3){ a.x-b.x, a.y-b.y, a.z-b.z }; 
+}
 
-Vec3 vec3Multiply(Vec3 v, float s){
-    return (Vec3){ v.x * s, v.y * s, v.z * s}; }
+Vec3 vec3Multiply(Vec3 v, float s)
+{
+    return (Vec3){ v.x * s, v.y * s, v.z * s}; 
+}
 
-Vec3 vec3Abs(Vec3 a) {
-    return (Vec3){ (float)fabs(a.x), (float)fabs(a.y), (float)fabs(a.z) }; }
+Vec3 vec3Abs(Vec3 a) 
+{
+    return (Vec3){ (float)fabs(a.x), (float)fabs(a.y), (float)fabs(a.z) }; 
+}
 
-Vec3 vec3ScalarMultiply(Vec3 position, float scalar) {
-    return (Vec3){ position.x*scalar, position.y*scalar, position.z*scalar }; }
+Vec3 vec3ScalarMultiply(Vec3 position, float scalar) 
+{
+    return (Vec3){ position.x*scalar, position.y*scalar, position.z*scalar }; 
+}
+
+/*
+int32 roundFloatToInt(float f)
+{
+    float d = fmod(f, 1);
+    if (d >= 0.5f) return (int32)f + 1;
+    else return (int32)f;
+}
+
+Int3 roundToInt3(Vec3 coords)
+{
+    return (Int3){ roundFloatToInt(coords.x), roundFloatToInt(coords.y), roundFloatToInt(coords.z) };
+}
+*/
 
 // BUFFER / STATE INTERFACING
 
@@ -2813,11 +2858,14 @@ void gameInitialiseState()
             pack->id = PACK_ID;
         }
     }
-    
+
 	FILE* file = fopen(level_path, "rb+");
 	loadWinBlockPaths(file);
     loadLockedInfoPaths(file);
+    camera = getCurrentCameraInFile(file);
     fclose(file);
+
+    if (next_world_state.in_overworld && int3IsEqual(normCoordsToInt(IDENTITY_TRANSLATION), overworld_player_start_coords)) overworld_player_start_coords = player->coords;
 
     Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera.yaw);
     Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera.pitch);
@@ -3530,6 +3578,24 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
+		// adjust overworld camera based on position
+		gameplay_camera = camera;
+
+        if (next_world_state.in_overworld)
+        {
+            int32 screen_offset_x = 0;
+            int32 dx = player->coords.x - overworld_player_start_coords.x;
+            if 		(dx > 0) screen_offset_x = (dx + 4) / OVERWORLD_SCREEN_SIZE_X;
+            else if (dx < 0) screen_offset_x = (dx - 4) / OVERWORLD_SCREEN_SIZE_X;
+			gameplay_camera.coords.x += screen_offset_x * OVERWORLD_SCREEN_SIZE_X;
+
+            int32 screen_offset_z = 0;
+            int32 dz = player->coords.z - overworld_player_start_coords.z;
+            if 		(dz > 0) screen_offset_z = (dz) / OVERWORLD_SCREEN_SIZE_Z;
+            else if (dz < 0) screen_offset_z = (dz) / OVERWORLD_SCREEN_SIZE_Z;
+			gameplay_camera.coords.z += screen_offset_z * OVERWORLD_SCREEN_SIZE_Z;
+        }
+
         // final redo of laser buffer, after all logic is complete, for drawing
 		updateLaserBuffer();
 
@@ -3631,6 +3697,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 		// DRAW 2D
         
         // player in_motion info
+        /*
 		char player_moving_text[256] = {0};
         snprintf(player_moving_text, sizeof(player_moving_text), "player moving: %d", player->in_motion);
 		drawDebugText(player_moving_text);
@@ -3668,6 +3735,13 @@ void gameFrame(double delta_time, TickInput tick_input)
         char crystal_coords_text[256] = {0};
         snprintf(crystal_coords_text, sizeof(crystal_coords_text), "crystal_coords, %d, %d, %d", c->coords.x, c->coords.y, c->coords.z);
         drawDebugText(crystal_coords_text);
+        */
+
+        /*
+		char player_relative_text[256] = {0};
+        snprintf(player_relative_text, sizeof(player_relative_text), "player relative coords: %d, %d", camera_relative_player_coords.x, camera_relative_player_coords.z);
+        drawDebugText(player_relative_text);
+        */
 
 		if (editor_state.editor_mode != NO_MODE)
         {
@@ -3734,7 +3808,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (time_until_input == 0 && editor_state.editor_mode == PLACE_BREAK && tick_input.i_press) 
         {
             saveLevelRewrite(level_path);
-            //writeSolvedLevelsToFile();
+            // TODO(spike): writeSolvedLevelsToFile();
         }
 
         FILE* file = fopen(level_path, "rb+");
@@ -3749,7 +3823,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
 		if (time_until_input > 0) time_until_input--;
 
-        rendererSubmitFrame(assets_to_load, camera);
+        rendererSubmitFrame(assets_to_load, gameplay_camera);
         memset(assets_to_load, 0, sizeof(assets_to_load));
 
         accumulator -= PHYSICS_INCREMENT;
