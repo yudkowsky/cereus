@@ -76,8 +76,8 @@ const char WIN_BLOCK_CHUNK_TAG[4] = "WINB";
 const int32 LOCKED_INFO_CHUNK_SIZE = 76;
 const char LOCKED_INFO_CHUNK_TAG[4] = "LKIN";
 
-const int32 OVERWORLD_SCREEN_SIZE_X = 11;
-const int32 OVERWORLD_SCREEN_SIZE_Z = 11;
+const int32 OVERWORLD_SCREEN_SIZE_X = 15;
+const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
@@ -3578,6 +3578,9 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
+        // final redo of laser buffer, after all logic is complete, for drawing
+		updateLaserBuffer();
+
 		// adjust overworld camera based on position
 		gameplay_camera = camera;
 
@@ -3585,19 +3588,16 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             int32 screen_offset_x = 0;
             int32 dx = player->coords.x - overworld_player_start_coords.x;
-            if 		(dx > 0) screen_offset_x = (dx + 4) / OVERWORLD_SCREEN_SIZE_X;
-            else if (dx < 0) screen_offset_x = (dx - 4) / OVERWORLD_SCREEN_SIZE_X;
+            if 		(dx > 0) screen_offset_x = (dx + (int32)(OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
+            else if (dx < 0) screen_offset_x = (dx - (int32)(OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
 			gameplay_camera.coords.x += screen_offset_x * OVERWORLD_SCREEN_SIZE_X;
 
             int32 screen_offset_z = 0;
             int32 dz = player->coords.z - overworld_player_start_coords.z;
-            if 		(dz > 0) screen_offset_z = (dz) / OVERWORLD_SCREEN_SIZE_Z;
-            else if (dz < 0) screen_offset_z = (dz) / OVERWORLD_SCREEN_SIZE_Z;
+            if 		(dz > 0) screen_offset_z = (dz + 5) / OVERWORLD_SCREEN_SIZE_Z;
+            else if (dz < 0) screen_offset_z = (dz - 5) / OVERWORLD_SCREEN_SIZE_Z;
 			gameplay_camera.coords.z += screen_offset_z * OVERWORLD_SCREEN_SIZE_Z;
         }
-
-        // final redo of laser buffer, after all logic is complete, for drawing
-		updateLaserBuffer();
 
         // finished updating state
         world_state = next_world_state;
@@ -3759,6 +3759,8 @@ void gameFrame(double delta_time, TickInput tick_input)
         // level name
 		drawDebugText(next_world_state.level_name);
 
+        drawAsset(0, OUTLINE_3D, intCoordsToNorm(player->coords), DEFAULT_SCALE, IDENTITY_QUATERNION);
+
 		// selected id
         if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
         {
@@ -3800,7 +3802,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // decide which camera to use
         if (editor_state.do_wide_camera) camera.fov = 60.0f;
-        else camera.fov = 30.0f;
+        else camera.fov = 25.0f;
 
         // write to file
         char level_path[64];

@@ -11,6 +11,7 @@ typedef enum
 {
 	SPRITE_2D,
     CUBE_3D,
+    OUTLINE_3D,
     MODEL_3D
 }
 AssetType;

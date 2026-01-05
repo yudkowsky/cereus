@@ -98,14 +98,16 @@ typedef struct RendererState
     VkFence* in_flight_fences; 
     VkFence* images_in_flight; // for each swapchain image, when GPU finishes that submission, the fence signals; we store the fence to check if image is still in flight.
 
-    //VkBuffer vertex_buffer_handle;
-    //VkDeviceMemory vertex_memory;
-    //void* mapped_vertex_pointer;
     VkShaderModule vertex_shader_module_handle;
     VkShaderModule fragment_shader_module_handle;
-    VkPipelineLayout graphics_pipeline_layout; 
+    VkShaderModule outline_fragment_shader_module_handle;
+
+    VkPipelineLayout graphics_pipeline_layout; // TODO(spike): rename
     VkPipeline cube_pipeline_handle;
     VkPipeline sprite_pipeline_handle;
+
+	VkPipelineLayout outline_pipeline_layout;
+    VkPipeline outline_pipeline_handle;
 
     VkSampler pixel_art_sampler;
     CachedAsset asset_cache[256];
@@ -213,6 +215,9 @@ uint32 sprite_instance_count = 0;
 
 Cube cube_instances[8192];
 uint32 cube_instance_count = 0;
+
+Cube outline_instances[1024];
+uint32 outline_instance_count = 0;
 
 Camera renderer_camera = {0};
 
@@ -992,7 +997,9 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     // we will need to pass the device extensions we want the logical device to use
     const char* device_extensions[] = { "VK_KHR_swapchain" };
 
-    VkPhysicalDeviceFeatures device_features = {0}; // struct where we enable core VkPhysicalDeviceFeatures - don't need for now
+    VkPhysicalDeviceFeatures device_features = {0};
+    device_features.fillModeNonSolid = VK_TRUE;
+    device_features.wideLines = VK_TRUE;
 
     VkDeviceCreateInfo device_info = {0}; // struct that bundles everthing the driver needs to create the logical device
     device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -1319,21 +1326,13 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 
     renderer_state.images_in_flight = calloc(renderer_state.swapchain_image_count, sizeof(VkFence)); // calloc because we want these to start at VK_NULL_HANDLE, i.e. 0.
 
-    // a shader is a tiny program the GPU runs many times in a graphics pipeline.
-    // vertex shader (VS): runs once per vertex. it reads vertex attributes (pos, color, etc.), transforms pos into clip space (the [-1, 1] box the gpu expects), and passes along any per-vertex data to the next stage.
-    // resterizer (fixed-function): takes vertices and turns them into fragments (pixel candidates)
-    // fragment shader (FS): runs once per fragment. it decides the final color, and can do texturing, lighting, etc.
-
-	// for now this is a black box. but i am interested in this and want to revisit it later.
-
-    // setting up vertex shader module
+    // SETTING UP VERTEX SHADER MODULE
 
     void* vert_bytes = 0; // a pointer that will hold the vertex shader's SPIR-V bytes loaded from disk. 
     size_t vert_size = 0; // holds byte count of vertex shader
     if (!readEntireFile("data/shaders/spirv/tri.vert.spv", &vert_bytes, &vert_size))
     {
 		return;
-        // TODO(spike): various frees here
     }
 
     VkShaderModuleCreateInfo vertex_shader_module_creation_info = {0};
@@ -1341,22 +1340,20 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     vertex_shader_module_creation_info.codeSize = vert_size;
     vertex_shader_module_creation_info.pCode = (const uint32*)vert_bytes;
 
-	// seting up fragment shader module
-
     VkResult vertex_shader_module_creation_result = vkCreateShaderModule(renderer_state.logical_device_handle, &vertex_shader_module_creation_info, 0, &renderer_state.vertex_shader_module_handle);
     if (vertex_shader_module_creation_result != VK_SUCCESS)
     {
         return;
-        // TODO(spike): various frees here
     }
     free(vert_bytes);
+
+	// SETTING UP FRAGMENT SHADER MODULE
 
     void* frag_bytes = 0;
     size_t frag_size = 0;
     if (!readEntireFile("data/shaders/spirv/tri.frag.spv", &frag_bytes, &frag_size))
     {
         return;
-        // TODO(spike): various frees here
     }
 
     VkShaderModuleCreateInfo fragment_shader_module_creation_info = {0};
@@ -1368,11 +1365,30 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     if (fragment_shader_module_creation_result != VK_SUCCESS)
     {
         return;
-        // TODO(spike): various frees here
     }
     free(frag_bytes);
 
-    // define the pipeline shader stages that plug shader modules into the (currently empty) graphics pipeline
+    // SETTING UP OUTLINE SHADER MODULE
+
+    void* outline_frag_bytes = 0;
+    size_t outline_frag_size = 0;
+    if (!readEntireFile("data/shaders/spirv/outline.frag.spv", &outline_frag_bytes, &outline_frag_size))
+    {
+        return;
+    }
+
+    VkShaderModuleCreateInfo outline_frag_shader_module_ci = {0};
+    outline_frag_shader_module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    outline_frag_shader_module_ci.codeSize = outline_frag_size;
+    outline_frag_shader_module_ci.pCode = (const uint32*)outline_frag_bytes;
+
+	VkResult outline_frag_result = vkCreateShaderModule(renderer_state.logical_device_handle, &outline_frag_shader_module_ci, 0, &renderer_state.outline_fragment_shader_module_handle);
+	if (outline_frag_result != VK_SUCCESS)
+    {
+        return;
+    }
+	free(outline_frag_bytes);
+
     // vertex shader stage
 
     VkPipelineShaderStageCreateInfo vertex_shader_stage_create_info = {0};
@@ -1389,8 +1405,17 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     fragment_shader_stage_create_info.module = renderer_state.fragment_shader_module_handle;
     fragment_shader_stage_create_info.pName = "main";
 
-    VkPipelineShaderStageCreateInfo shader_stages[2] = { vertex_shader_stage_create_info, fragment_shader_stage_create_info }; // bundle both stages for pipeline creation
-	
+    // outline fragment shader stage
+
+    VkPipelineShaderStageCreateInfo outline_frag_shader_stage_ci = {0};
+	outline_frag_shader_stage_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	outline_frag_shader_stage_ci.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	outline_frag_shader_stage_ci.module = renderer_state.outline_fragment_shader_module_handle;
+	outline_frag_shader_stage_ci.pName = "main";
+
+    VkPipelineShaderStageCreateInfo shader_stages[2] = { vertex_shader_stage_create_info, fragment_shader_stage_create_info };
+    VkPipelineShaderStageCreateInfo outline_stages[2] = { vertex_shader_stage_create_info, outline_frag_shader_stage_ci };
+
     VkVertexInputBindingDescription vertex_binding = {0};
     vertex_binding.binding   = 0;
     vertex_binding.stride    = sizeof(Vertex);
@@ -1549,19 +1574,41 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 
     vkCreateDescriptorPool(renderer_state.logical_device_handle, &descriptor_pool_creation_info, 0, &renderer_state.descriptor_pool);
 
-    VkPushConstantRange push_constant_range = {0};
-    push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    push_constant_range.offset     = 0;
-    push_constant_range.size       = (uint32)sizeof(PushConstants); 
+	// CREATE TRIANGLE GRAPHICES PIPELINE LAYOUT
 
-    VkPipelineLayoutCreateInfo graphics_pipeline_layout_creation_info = {0};
-    graphics_pipeline_layout_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    graphics_pipeline_layout_creation_info.setLayoutCount = 1;
-    graphics_pipeline_layout_creation_info.pSetLayouts = &renderer_state.descriptor_set_layout; 
-    graphics_pipeline_layout_creation_info.pushConstantRangeCount = 1;
-    graphics_pipeline_layout_creation_info.pPushConstantRanges = &push_constant_range;
+    {
+        VkPushConstantRange push_constant_range = {0};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        push_constant_range.offset     = 0;
+        push_constant_range.size       = (uint32)sizeof(PushConstants); 
 
-    vkCreatePipelineLayout(renderer_state.logical_device_handle, &graphics_pipeline_layout_creation_info, 0, &renderer_state.graphics_pipeline_layout);
+        VkPipelineLayoutCreateInfo graphics_pipeline_layout_creation_info = {0};
+        graphics_pipeline_layout_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        graphics_pipeline_layout_creation_info.setLayoutCount = 1;
+        graphics_pipeline_layout_creation_info.pSetLayouts = &renderer_state.descriptor_set_layout; 
+        graphics_pipeline_layout_creation_info.pushConstantRangeCount = 1;
+        graphics_pipeline_layout_creation_info.pPushConstantRanges = &push_constant_range;
+
+        vkCreatePipelineLayout(renderer_state.logical_device_handle, &graphics_pipeline_layout_creation_info, 0, &renderer_state.graphics_pipeline_layout);
+    }
+
+    // CREATE OUTLINE PIPELINE LAYOUT
+
+    {
+        VkPushConstantRange push_constant_range = {0};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        push_constant_range.offset     = 0;
+        push_constant_range.size       = (uint32)sizeof(PushConstants);
+		
+        VkPipelineLayoutCreateInfo outline_pipeline_layout_ci = {0};
+        outline_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        outline_pipeline_layout_ci.setLayoutCount = 0;
+        outline_pipeline_layout_ci.pSetLayouts = 0;
+        outline_pipeline_layout_ci.pushConstantRangeCount = 1;
+        outline_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
+
+        vkCreatePipelineLayout(renderer_state.logical_device_handle, &outline_pipeline_layout_ci, 0, &renderer_state.outline_pipeline_layout);
+    }
 
     // base graphics pipeline info
 
@@ -1616,13 +1663,41 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
         VkGraphicsPipelineCreateInfo cube_ci = base_graphics_pipeline_creation_info;
         vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &cube_ci, 0, &renderer_state.cube_pipeline_handle);
     }
+
+    // outline pipeline
+    {
+		VkGraphicsPipelineCreateInfo outline_ci = base_graphics_pipeline_creation_info;
+        outline_ci.pStages = outline_stages;
+		
+        // use outline pipeline layout (no descriptors)
+        outline_ci.layout = renderer_state.outline_pipeline_layout;
+
+		rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_LINE;
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
+        rasterization_state_creation_info.lineWidth = 1.0f;
+
+        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
+        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+        color_blend_attachment_state.blendEnable = VK_FALSE;
+
+        vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &outline_ci, 0, &renderer_state.outline_pipeline_handle);
+
+        // TODO(spike): is this needed?
+        rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_FILL;
+        depth_stencil_state_creation_info.depthWriteEnable  = VK_TRUE;
+        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
+    }
 }
 
 void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
 {  
 	renderer_camera = game_camera;
+
     sprite_instance_count = 0;
 	cube_instance_count = 0;
+    outline_instance_count = 0;
 
     for (int asset_index = 0; asset_index < 1024; asset_index++)
     {
@@ -1656,6 +1731,21 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
             atlas_asset_index = renderer_state.atlas_3d_asset_index;
             atlas_width = ATLAS_3D_WIDTH;
             atlas_height = ATLAS_3D_HEIGHT;
+        }
+        else if (type == OUTLINE_3D) 
+        {
+            // for loop in here because we continue past the atlas logic
+            for (int32 outline_instance_index = 0; outline_instance_index < batch->instance_count; outline_instance_index++)
+            {
+                // for now, all outlines are cubes, so just model onto a cube.
+                Cube* cube = &outline_instances[outline_instance_count++];
+                cube->coords      = batch->coords[outline_instance_index];
+				cube->scale       = batch->scale[outline_instance_index];
+                cube->rotation    = batch->rotation[outline_instance_index];
+                cube->uv 	   	  = (Vec4){ 0, 0, 1, 1 }; // unused by shader
+                cube->asset_index = 0; // unused by shader
+            }
+            continue;
         }
 
         if (atlas_asset_index < 0) continue;
@@ -1798,7 +1888,7 @@ void rendererDraw(void)
     int32 last_cube_asset = -1;
     for (uint32 cube_instance_index = 0; cube_instance_index < cube_instance_count; cube_instance_index++)
     {
-        Cube* cube= &cube_instances[cube_instance_index];
+        Cube* cube = &cube_instances[cube_instance_index];
 
         if ((int32)cube->asset_index != last_cube_asset)
         {
@@ -1809,14 +1899,40 @@ void rendererDraw(void)
         float model_matrix[16];
         mat4BuildTRS(model_matrix, cube->coords, cube->rotation, cube->scale);
 		
-        PushConstants push_constants = {0};
-        memcpy(push_constants.model, model_matrix, 		sizeof(push_constants.model));
-        memcpy(push_constants.view,  view_matrix, 		sizeof(push_constants.view));
-        memcpy(push_constants.proj,  projection_matrix, sizeof(push_constants.proj));
-        push_constants.uv_rect = cube->uv;
+        PushConstants pc = {0};
+        memcpy(pc.model, model_matrix, 		sizeof(pc.model));
+        memcpy(pc.view,  view_matrix, 		sizeof(pc.view));
+        memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
+        pc.uv_rect = cube->uv;
 
-        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push_constants);
+        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
         
+        vkCmdDrawIndexed(command_buffer, renderer_state.cube_index_count, 1, 0, 0, 0);
+    }
+
+    // (CUBE) OUTLINE PIPELINE
+
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.outline_pipeline_handle);
+    
+    VkDeviceSize outline_vb_offset = 0;
+    vkCmdBindVertexBuffers(command_buffer, 0, 1, &renderer_state.cube_vertex_buffer, &outline_vb_offset);
+    vkCmdBindIndexBuffer(command_buffer, renderer_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+    // same camera
+    for (uint32 outline_instance_index = 0; outline_instance_index < outline_instance_count; outline_instance_index++)
+    {
+        Cube* cube = &outline_instances[outline_instance_index];
+        float model_matrix[16];
+        mat4BuildTRS(model_matrix, cube->coords, cube->rotation, cube->scale);
+
+        PushConstants pc = {0};
+        memcpy(pc.model, model_matrix,      sizeof(pc.model));
+        memcpy(pc.view,  view_matrix,       sizeof(pc.view));
+        memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
+        pc.uv_rect = (Vec4){0,0,1,1};
+
+        vkCmdPushConstants(command_buffer, renderer_state.outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+
         vkCmdDrawIndexed(command_buffer, renderer_state.cube_index_count, 1, 0, 0, 0);
     }
 
