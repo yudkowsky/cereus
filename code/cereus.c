@@ -2088,7 +2088,7 @@ void updateLaserBuffer(void)
                         lb->end_coords = vec3Add(player->position_norm, offset); 
 						skip_check = true;
                     }
-					if (skip_check || !(player->in_motion >= STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH && player->moving_direction != NO_DIRECTION && th.type != PLAYER))
+                    if (skip_check || ((player->in_motion >= STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH || player->in_motion == 0) && (th_hit == false || th.type == PLAYER)))
                     {	
                         if (!skip_check)
                         {
@@ -2231,16 +2231,24 @@ void updateLaserBuffer(void)
                 {
                     if (isEntity(getTileType(current_tile_coords)))
                     {
-                        Entity* e = getEntityPointer(current_tile_coords);
-                        if (e->in_motion < STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH || (!next_world_state.pack_detached && e->id == PACK_ID))
+                        if (!th_hit) 
                         {
-                            lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
-                            break;
+                            Entity* e = getEntityPointer(current_tile_coords);
+                            if (e->in_motion < STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH)
+                            {
+                                lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                                break;
+                            }
+                            else
+                            {
+                                current_tile_coords = getNextCoords(current_tile_coords, current_direction);
+                                continue;
+                            }
                         }
                         else
                         {
-							current_tile_coords = getNextCoords(current_tile_coords, current_direction);
-                            continue;
+                            lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                            break;
                         }
                     }
                     else
@@ -2945,9 +2953,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 // restart
                 recordStateForUndo();
                 memset(animations, 0, sizeof(animations));
-                Camera temp_camera = camera;
                 gameInitialiseState();
-                camera = temp_camera;
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
             if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && player->in_motion == 0)
