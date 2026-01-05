@@ -1465,7 +1465,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	viewport_state_creation_info.pViewports = &dummy_viewport;
     viewport_state_creation_info.pScissors = &dummy_scissor;
 
-    VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR }; // we will set each frame before drawing
+    VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS };
 
     VkPipelineDynamicStateCreateInfo dynamic_state_creation_info = {0};
     dynamic_state_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
@@ -1479,7 +1479,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_FILL; // fill triangles (not lines / points)
     rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE; // turn off back/face culling: skip rasterizing triangles facing a certain way
     rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; // define which winding would be "front"; doesn't matter while cull is off
-    rasterization_state_creation_info.depthBiasEnable = VK_FALSE; // no depth bias: adds a small offset to a fragment's depth before the depth test. helps with z-fighting with multiple layers, and some other stuff
+    rasterization_state_creation_info.depthBiasEnable = VK_TRUE; 
     rasterization_state_creation_info.depthBiasConstantFactor = 0.0f;
     rasterization_state_creation_info.depthBiasClamp = 0.0f;
     rasterization_state_creation_info.depthBiasSlopeFactor = 0.0f;
@@ -1878,8 +1878,6 @@ void rendererDraw(void)
         vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.graphics_pipeline_layout, 0, 1, &renderer_state.descriptor_sets[0], 0, 0);
     }
 
-	// cube logics
-
     float aspect = (float)renderer_state.swapchain_extent.width / (float)renderer_state.swapchain_extent.height;
 	float projection_matrix[16], view_matrix[16];
     mat4BuildPerspective(projection_matrix, renderer_camera.fov * (6.2831831f/360.0f), aspect, 0.1f, 100.0f);
@@ -1933,7 +1931,11 @@ void rendererDraw(void)
 
         vkCmdPushConstants(command_buffer, renderer_state.outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
 
+		vkCmdSetDepthBias(command_buffer, -0.1f, 0.0f, -0.1f);
+
         vkCmdDrawIndexed(command_buffer, renderer_state.cube_index_count, 1, 0, 0, 0);
+
+		vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
     }
 
 	// SPRITE PIPELINE

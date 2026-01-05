@@ -2755,6 +2755,7 @@ void editorMode(TickInput *tick_input)
 			if (isEntity(getTileType(raycast_output.hit_coords)))
             {
 				editor_state.selected_id = getEntityId(raycast_output.hit_coords);
+                editor_state.selected_coords = raycast_output.hit_coords;
             }
 			else
             {
@@ -3755,11 +3756,14 @@ void gameFrame(double delta_time, TickInput tick_input)
             Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
             Vec3 picked_block_coords = { SCREEN_WIDTH_PX - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
             drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION);
+
+            if (editor_state.selected_id > 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
+            {
+                drawAsset(0, OUTLINE_3D, intCoordsToNorm(editor_state.selected_coords), DEFAULT_SCALE, IDENTITY_QUATERNION);
+            }
         }
         // level name
 		drawDebugText(next_world_state.level_name);
-
-        drawAsset(0, OUTLINE_3D, intCoordsToNorm(player->coords), DEFAULT_SCALE, IDENTITY_QUATERNION);
 
 		// selected id
         if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)

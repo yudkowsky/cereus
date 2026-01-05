@@ -394,6 +394,7 @@ typedef struct EditorState
 {
     EditorMode editor_mode;
     bool do_wide_camera;
+    Int3 selected_coords;
     TileType picked_tile;
     Direction picked_direction;
 
