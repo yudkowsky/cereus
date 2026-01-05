@@ -88,7 +88,8 @@ Int3 level_dim = {0};
 
 Camera camera = {0};
 Int3 camera_screen_offset = {0};
-Int3 overworld_player_start_coords = {0};
+const Int3 camera_center_start = { 7, 0, -2 };
+bool draw_camera_boundary = false;
 
 AssetToLoad assets_to_load[1024] = {0};
 
@@ -2866,7 +2867,8 @@ void gameInitialiseState()
     camera = getCurrentCameraInFile(file);
     fclose(file);
 
-    if (next_world_state.in_overworld && int3IsEqual(normCoordsToInt(IDENTITY_TRANSLATION), overworld_player_start_coords)) overworld_player_start_coords = player->coords;
+    camera_screen_offset.x = (int32)(camera.coords.x / OVERWORLD_SCREEN_SIZE_X);
+    camera_screen_offset.z = (int32)(camera.coords.z / OVERWORLD_SCREEN_SIZE_Z);
 
     Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera.yaw);
     Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera.pitch);
@@ -3583,27 +3585,28 @@ void gameFrame(double delta_time, TickInput tick_input)
 		updateLaserBuffer();
 
 		// adjust overworld camera based on position
-
         if (next_world_state.in_overworld)
         {
             int32 screen_offset_x = 0;
-            int32 dx = player->coords.x - overworld_player_start_coords.x;
+            int32 dx = player->coords.x - camera_center_start.x;
             if 		(dx > 0) screen_offset_x = (dx + (int32)(OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
             else if (dx < 0) screen_offset_x = (dx - (int32)(OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
             if (screen_offset_x != camera_screen_offset.x) 
             {
+                int32 delta = screen_offset_x - camera_screen_offset.x;
                 camera_screen_offset.x = screen_offset_x; 
-                camera.coords.x += camera_screen_offset.x * OVERWORLD_SCREEN_SIZE_X;
+                camera.coords.x += delta * OVERWORLD_SCREEN_SIZE_X;
             }
 
             int32 screen_offset_z = 0;
-            int32 dz = player->coords.z - overworld_player_start_coords.z;
-            if 		(dz > 0) screen_offset_z = (dz + 5) / OVERWORLD_SCREEN_SIZE_Z;
-            else if (dz < 0) screen_offset_z = (dz - 5) / OVERWORLD_SCREEN_SIZE_Z;
+            int32 dz = player->coords.z - camera_center_start.z;
+            if 		(dz > 0) screen_offset_z = (dz + (int32)(OVERWORLD_SCREEN_SIZE_Z / 2)) / OVERWORLD_SCREEN_SIZE_Z;
+            else if (dz < 0) screen_offset_z = (dz - (int32)(OVERWORLD_SCREEN_SIZE_Z / 2)) / OVERWORLD_SCREEN_SIZE_Z;
             if (screen_offset_z != camera_screen_offset.z) 
             {
+                int32 delta = screen_offset_z - camera_screen_offset.z;
                 camera_screen_offset.z = screen_offset_z; 
-                camera.coords.z += camera_screen_offset.z * OVERWORLD_SCREEN_SIZE_Z;
+                camera.coords.z += delta * OVERWORLD_SCREEN_SIZE_Z;
             }
         }
 
@@ -3705,51 +3708,14 @@ void gameFrame(double delta_time, TickInput tick_input)
 		// DRAW 2D
         
         // player in_motion info
-        /*
 		char player_moving_text[256] = {0};
         snprintf(player_moving_text, sizeof(player_moving_text), "player moving: %d", player->in_motion);
 		drawDebugText(player_moving_text);
 
-        char player_moving_direction_text[256] = {0};
-        switch (player->moving_direction)
-        {
-            case NO_DIRECTION: snprintf(player_moving_direction_text, sizeof(player_moving_direction_text), "player moving direction: NO_DIRECTION"); break;
-            case NORTH:		   snprintf(player_moving_direction_text, sizeof(player_moving_direction_text), "player moving direction: NORTH"); break;
-            case WEST: 		   snprintf(player_moving_direction_text, sizeof(player_moving_direction_text), "player moving direction: WEST"); break;
-            case SOUTH: 	   snprintf(player_moving_direction_text, sizeof(player_moving_direction_text), "player moving direction: SOUTH"); break;
-            case EAST: 		   snprintf(player_moving_direction_text, sizeof(player_moving_direction_text), "player moving direction: EAST"); break;
-            default: break;
-        }
-        drawDebugText(player_moving_direction_text);
-
-		// first crystal in_motion info
-        Entity* c = &next_world_state.crystals[0];
-		char crystal_moving_text[256] = {0};
-        snprintf(crystal_moving_text, sizeof(crystal_moving_text), "crystal moving: %d", c->in_motion);
-		drawDebugText(crystal_moving_text);
-
-        char crystal_moving_direction_text[256] = {0};
-        switch (c->moving_direction)
-        {
-            case NO_DIRECTION: snprintf(crystal_moving_direction_text, sizeof(crystal_moving_direction_text), "crystal moving direction: NO_DIRECTION"); break;
-            case NORTH:		   snprintf(crystal_moving_direction_text, sizeof(crystal_moving_direction_text), "crystal moving direction: NORTH"); break;
-            case WEST: 		   snprintf(crystal_moving_direction_text, sizeof(crystal_moving_direction_text), "crystal moving direction: WEST"); break;
-            case SOUTH: 	   snprintf(crystal_moving_direction_text, sizeof(crystal_moving_direction_text), "crystal moving direction: SOUTH"); break;
-            case EAST: 		   snprintf(crystal_moving_direction_text, sizeof(crystal_moving_direction_text), "crystal moving direction: EAST"); break;
-            default: break;
-        }
-        drawDebugText(crystal_moving_direction_text);
-
-        char crystal_coords_text[256] = {0};
-        snprintf(crystal_coords_text, sizeof(crystal_coords_text), "crystal_coords, %d, %d, %d", c->coords.x, c->coords.y, c->coords.z);
-        drawDebugText(crystal_coords_text);
-        */
-
-        /*
-		char player_relative_text[256] = {0};
-        snprintf(player_relative_text, sizeof(player_relative_text), "player relative coords: %d, %d", camera_relative_player_coords.x, camera_relative_player_coords.z);
-        drawDebugText(player_relative_text);
-        */
+        // camera pos info
+        char camera_text[256] = {0};
+        snprintf(camera_text, sizeof(camera_text), "camera pos: %f, %f, %f", camera.coords.x, camera.coords.y, camera.coords.z);
+        drawDebugText(camera_text);
 
 		if (editor_state.editor_mode != NO_MODE)
         {
@@ -3811,7 +3777,14 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
+        /*
         // draw camera boundary lines
+        if (draw_camera_boundary)
+        {
+			Vec3 test_box_scale = { (float)OVERWORLD_SCREEN_SIZE_X, 1, (float)OVERWORLD_SCREEN_SIZE_Z };
+			drawAsset(0, OUTLINE_3D, intCoordsToNorm(camera_center_start), test_box_scale, IDENTITY_QUATERNION);
+        }
+        */
 
         // decide which camera to use
         if (editor_state.do_wide_camera) camera.fov = 60.0f;
@@ -3826,12 +3799,14 @@ void gameFrame(double delta_time, TickInput tick_input)
             // TODO(spike): writeSolvedLevelsToFile();
         }
 
-        FILE* file = fopen(level_path, "rb+");
-        if (time_until_input == 0 && editor_state.editor_mode == PLACE_BREAK && tick_input.c_press) writeCameraToFile(file, &camera);
-        fclose(file);
+        if (time_until_input == 0 && editor_state.editor_mode == PLACE_BREAK && tick_input.c_press) 
+        {
+            FILE* file = fopen(level_path, "rb+");
+            writeCameraToFile(file, &camera);
+            fclose(file);
+        }
 
         tick_input.mouse_dx = 0;
-        tick_input.mouse_dy = 0;
         tick_input.text.count = 0;
         tick_input.backspace_pressed_this_frame = false;
         tick_input.enter_pressed_this_frame = false;
