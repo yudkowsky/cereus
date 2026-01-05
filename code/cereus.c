@@ -3778,7 +3778,13 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // draw camera boundary lines
-        if (true /*draw_camera_boundary*/ && next_world_state.in_overworld)
+        if (time_until_input == 0 && tick_input.t_press) 
+        {
+            draw_camera_boundary = (draw_camera_boundary) ? false : true;
+			time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+        }
+
+        if (draw_camera_boundary && next_world_state.in_overworld)
         {
         	int32 x_draw_offset = 0;
             int32 z_draw_offset = 0;
