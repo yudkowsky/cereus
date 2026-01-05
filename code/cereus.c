@@ -3777,14 +3777,29 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-        /*
         // draw camera boundary lines
-        if (draw_camera_boundary)
+        if (true /*draw_camera_boundary*/ && next_world_state.in_overworld)
         {
-			Vec3 test_box_scale = { (float)OVERWORLD_SCREEN_SIZE_X, 1, (float)OVERWORLD_SCREEN_SIZE_Z };
-			drawAsset(0, OUTLINE_3D, intCoordsToNorm(camera_center_start), test_box_scale, IDENTITY_QUATERNION);
+        	int32 x_draw_offset = 0;
+            int32 z_draw_offset = 0;
+
+            Vec3 x_wall_scale = { (float)OVERWORLD_SCREEN_SIZE_X, 5, 0.01f };
+            Vec3 z_wall_scale = { 0.01f, 5, (float)OVERWORLD_SCREEN_SIZE_Z };
+
+            FOR(z_index, 5)
+            {
+				FOR(x_index, 5)
+                {
+                    Vec3 x_draw_coords = (Vec3){ (float)(x_draw_offset + camera_center_start.x), 3, (float)(z_draw_offset + camera_center_start.z) + ((float)OVERWORLD_SCREEN_SIZE_Z / 2) }; 
+                    Vec3 z_draw_coords = (Vec3){ (float)(x_draw_offset + camera_center_start.x) - ((float)OVERWORLD_SCREEN_SIZE_X / 2), 3, (float)(z_draw_offset + camera_center_start.z) }; 
+                    drawAsset(0, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION);
+                    drawAsset(0, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION);
+					x_draw_offset += OVERWORLD_SCREEN_SIZE_X;
+                }
+                x_draw_offset = 0;
+                z_draw_offset += OVERWORLD_SCREEN_SIZE_Z;
+            }
         }
-        */
 
         // decide which camera to use
         if (editor_state.do_wide_camera) camera.fov = 60.0f;

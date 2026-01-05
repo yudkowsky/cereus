@@ -252,7 +252,7 @@ int CALLBACK WinMain(
 
     gameInitialise(file_path); 
 
-    int32 fps_timer = 0;
+    int32 mspt_timer = 0;
     while (running)
     {
 		while (PeekMessageW(&queued_message, 0, 0, 0, PM_REMOVE))
@@ -271,14 +271,13 @@ int CALLBACK WinMain(
         double delta_time = (current_tick.QuadPart - last_tick.QuadPart) * seconds_per_tick;
         last_tick = current_tick;
 
-        double fps = 1.0 / delta_time;
         wchar_t title_buffer[256];
-        if (fps_timer == 0)
+        if (mspt_timer == 0)
         {
-        	swprintf(title_buffer, 256, L"FPS: %.1f", fps);
-            fps_timer = 20;
+        	swprintf(title_buffer, 256, L"mspt: %.1f", delta_time*1000);
+            mspt_timer = 20;
         }
-        else (fps_timer--);
+        else (mspt_timer --);
 		SetWindowTextW(window_handle, title_buffer);
 
         gameFrame(delta_time, tick_input); 
