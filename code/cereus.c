@@ -87,7 +87,7 @@ const char start_level_path_buffer[64] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
 Camera camera = {0};
-Camera gameplay_camera = {0};
+Int3 camera_screen_offset = {0};
 Int3 overworld_player_start_coords = {0};
 
 AssetToLoad assets_to_load[1024] = {0};
@@ -3583,7 +3583,6 @@ void gameFrame(double delta_time, TickInput tick_input)
 		updateLaserBuffer();
 
 		// adjust overworld camera based on position
-		gameplay_camera = camera;
 
         if (next_world_state.in_overworld)
         {
@@ -3591,13 +3590,21 @@ void gameFrame(double delta_time, TickInput tick_input)
             int32 dx = player->coords.x - overworld_player_start_coords.x;
             if 		(dx > 0) screen_offset_x = (dx + (int32)(OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
             else if (dx < 0) screen_offset_x = (dx - (int32)(OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
-			gameplay_camera.coords.x += screen_offset_x * OVERWORLD_SCREEN_SIZE_X;
+            if (screen_offset_x != camera_screen_offset.x) 
+            {
+                camera_screen_offset.x = screen_offset_x; 
+                camera.coords.x += camera_screen_offset.x * OVERWORLD_SCREEN_SIZE_X;
+            }
 
             int32 screen_offset_z = 0;
             int32 dz = player->coords.z - overworld_player_start_coords.z;
             if 		(dz > 0) screen_offset_z = (dz + 5) / OVERWORLD_SCREEN_SIZE_Z;
             else if (dz < 0) screen_offset_z = (dz - 5) / OVERWORLD_SCREEN_SIZE_Z;
-			gameplay_camera.coords.z += screen_offset_z * OVERWORLD_SCREEN_SIZE_Z;
+            if (screen_offset_z != camera_screen_offset.z) 
+            {
+                camera_screen_offset.z = screen_offset_z; 
+                camera.coords.z += camera_screen_offset.z * OVERWORLD_SCREEN_SIZE_Z;
+            }
         }
 
         // finished updating state
@@ -3765,7 +3772,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // level name
 		drawDebugText(next_world_state.level_name);
 
-		// selected id
+		// draw selected id info
         if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
         {
             Vec2 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2 };
@@ -3804,6 +3811,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
+        // draw camera boundary lines
+
         // decide which camera to use
         if (editor_state.do_wide_camera) camera.fov = 60.0f;
         else camera.fov = 25.0f;
@@ -3829,7 +3838,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
 		if (time_until_input > 0) time_until_input--;
 
-        rendererSubmitFrame(assets_to_load, gameplay_camera);
+        rendererSubmitFrame(assets_to_load, camera);
         memset(assets_to_load, 0, sizeof(assets_to_load));
 
         accumulator -= PHYSICS_INCREMENT;
