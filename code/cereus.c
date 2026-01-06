@@ -1297,6 +1297,41 @@ int32 getPushableStackSize(Int3 first_entity_coords)
     return stack_size;
 }
 
+// TRAILING HITBOXES
+
+int32 findNextFreeInTrailingHitboxes()
+{
+    FOR(find_hitbox_index, MAX_TRAILING_HITBOX_COUNT)
+    {
+        if (next_world_state.trailing_hitboxes[find_hitbox_index].frames != 0) continue;
+        return find_hitbox_index;
+    }
+    return 0;
+}
+
+void createTrailingHitbox(Int3 coords, Direction direction, int32 frames, TileType type)
+{
+    int32 hitbox_index = findNextFreeInTrailingHitboxes();
+    next_world_state.trailing_hitboxes[hitbox_index].coords = coords;
+    next_world_state.trailing_hitboxes[hitbox_index].direction = direction;
+    next_world_state.trailing_hitboxes[hitbox_index].frames = frames;
+    next_world_state.trailing_hitboxes[hitbox_index].type = type;
+}
+
+bool trailingHitboxAtCoords(Int3 coords, TrailingHitbox* trailing_hitbox)
+{
+    FOR(trailing_hitbox_index, MAX_TRAILING_HITBOX_COUNT) 
+    {
+        TrailingHitbox th = next_world_state.trailing_hitboxes[trailing_hitbox_index];
+        if (int3IsEqual(coords, th.coords) && th.frames > 0) 
+        {
+			*trailing_hitbox = th;
+            return true;
+        }
+    }
+    return false;
+}
+
 // ANIMATIONS
 
 // returns animation_index and queue_time
@@ -1451,6 +1486,8 @@ void doFailedWalkAnimations()
         current_coords = getNextCoords(current_coords, UP);
     }
     if (!next_world_state.pack_detached) createFailedWalkAnimation(intCoordsToNorm(next_world_state.pack.coords), intCoordsToNorm(next_world_state.player.coords), &next_world_state.pack.position_norm, PACK_ID);
+
+    next_world_state.player.moving_direction = NO_DIRECTION;
 }
 
 void createFailedStaticRotationAnimation(Vec4 start_rotation, Vec4 input_direction_as_quat, Vec4* rotation_to_change, int32 entity_id)
@@ -1572,7 +1609,7 @@ void createFirstFallAnimation(Vec3 start_position, Vec3* position_to_change, int
 
 void changeMoving(Entity* e)
 {
-	if (presentInAnimations(e->id) && e->in_motion == 0) e->in_motion = presentInAnimations(e->id);
+	if (presentInAnimations(e->id) && e->in_motion == 0 && !(e->moving_direction == NO_DIRECTION)) e->in_motion = presentInAnimations(e->id);
 	else if (e->in_motion > 0) e->in_motion--;
 	else e->moving_direction = NO_DIRECTION;
 }
@@ -1580,39 +1617,6 @@ void changeMoving(Entity* e)
 void resetFirstFall(Entity* e)
 {
     if (!e->in_motion) if (getTileType(getNextCoords(e->coords, DOWN)) != NONE) e->first_fall_already_done = false;
-}
-
-int32 findNextFreeInTrailingHitboxes()
-{
-    FOR(find_hitbox_index, MAX_TRAILING_HITBOX_COUNT)
-    {
-        if (next_world_state.trailing_hitboxes[find_hitbox_index].frames != 0) continue;
-        return find_hitbox_index;
-    }
-    return 0;
-}
-
-void createTrailingHitbox(Int3 coords, Direction direction, int32 frames, TileType type)
-{
-    int32 hitbox_index = findNextFreeInTrailingHitboxes();
-    next_world_state.trailing_hitboxes[hitbox_index].coords = coords;
-    next_world_state.trailing_hitboxes[hitbox_index].direction = direction;
-    next_world_state.trailing_hitboxes[hitbox_index].frames = frames;
-    next_world_state.trailing_hitboxes[hitbox_index].type = type;
-}
-
-bool trailingHitboxAtCoords(Int3 coords, TrailingHitbox* trailing_hitbox)
-{
-    FOR(trailing_hitbox_index, MAX_TRAILING_HITBOX_COUNT) 
-    {
-        TrailingHitbox th = next_world_state.trailing_hitboxes[trailing_hitbox_index];
-        if (int3IsEqual(coords, th.coords) && th.frames > 0) 
-        {
-			*trailing_hitbox = th;
-            return true;
-        }
-    }
-    return false;
 }
 
 PushResult canPush(Int3 coords, Direction direction)
@@ -2088,7 +2092,8 @@ void updateLaserBuffer(void)
                         lb->end_coords = vec3Add(player->position_norm, offset); 
 						skip_check = true;
                     }
-                    if (skip_check || ((player->in_motion >= STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH || player->in_motion == 0) && (th_hit == false || th.type == PLAYER)))
+                    if (skip_check || ((player->in_motion < STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH || player->moving_direction == NO_DIRECTION) && (th_hit == false || th.type == PLAYER)))
+                    //if (skip_check || !(player->in_motion >= STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH && th.type == PLAYER && player->moving_direction != NO_DIRECTION))
                     {	
                         if (!skip_check)
                         {
@@ -2303,7 +2308,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
 {
     if (entity->id == -1) return false;
 	Int3 next_coords = getNextCoords(entity->coords, DOWN);
-    if (!(isPushable(getTileType(next_coords)) && getEntityPointer(next_coords)->id == -1) && getTileType(next_coords) != NONE) return true; // TODO(spike): add entity.id == -1 as NONE in getTileType
+    if (!(isPushable(getTileType(next_coords)) && getEntityPointer(next_coords)->id == -1) && getTileType(next_coords) != NONE) return true;
     TrailingHitbox _;
     if (trailingHitboxAtCoords(next_coords, &_) && entity->id != PLAYER_ID) return true;
 
@@ -2492,6 +2497,9 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
     setTileDirection(player->direction, player->coords);
 
     player->moving_direction = input_direction;
+
+    changeMoving(player);
+	changeMoving(pack);
 
     recordStateForUndo();
 }
@@ -3122,13 +3130,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
                                     doStandardMovement(input_direction, next_player_coords, animation_time);
                                     next_world_state.bypass_player_fall = true; 
+                                    time_until_input = MOVE_OR_PUSH_ANIMATION_TIME;
                                 }
                                 else 
                                 {
                                     doFailedWalkAnimations();
+                                    time_until_input = FAILED_ANIMATION_TIME;
                                     updateLaserBuffer();
                                 }
-                                time_until_input = MOVE_OR_PUSH_ANIMATION_TIME;
 
                             }
                         }
@@ -3717,6 +3726,11 @@ void gameFrame(double delta_time, TickInput tick_input)
 		char player_moving_text[256] = {0};
         snprintf(player_moving_text, sizeof(player_moving_text), "player moving: %d", player->in_motion);
 		drawDebugText(player_moving_text);
+
+        // player in_motion info
+		char player_dir_text[256] = {0};
+        snprintf(player_dir_text, sizeof(player_dir_text), "player moving: %d", player->moving_direction);
+		drawDebugText(player_dir_text);
 
         // camera pos info
         char camera_text[256] = {0};
