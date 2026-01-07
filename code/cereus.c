@@ -45,6 +45,7 @@ const int32 MAX_PSEUDO_SOURCE_COUNT = 32;
 const int32 MAX_PUSHABLE_STACK_SIZE = 32;
 const int32 MAX_TRAILING_HITBOX_COUNT = 64;
 const int32 MAX_LEVEL_COUNT = 64;
+const int32 MAX_RESET_COUNT = 16;
 
 const int32 UNDO_BUFFER_SIZE = 256; // remember to modify undo_buffer
 
@@ -805,6 +806,12 @@ void loadLockedInfoPaths(FILE* file)
     }
 }
 
+int32 findNextFreeInResetBlock(Entity* rb)
+{
+    FOR(to_reset_index, MAX_RESET_COUNT) if (rb->ids_to_reset[to_reset_index] == -1) return to_reset_index;
+    return -1;
+}
+
 void loadResetBlockInfo(FILE* file)
 {
     int32 positions[16] = {0};
@@ -828,8 +835,6 @@ void loadResetBlockInfo(FILE* file)
             if (int3IsEqual(rb_coords, next_world_state.reset_blocks[rb_index_state].coords))
             {
                 Entity* rb = getEntityPointer(rb_coords);
-                rb->count_to_reset = reset_entity_count;
-
 				FOR(reset_entity_index, reset_entity_count)
                 {
                     Int3 reset_entity_coords = {0};
@@ -890,15 +895,22 @@ void writeResetInfoToFile(FILE* file, Entity* rb)
 {
 	fwrite(RESET_INFO_CHUNK_TAG, 4, 1, file);
 
-    int32 size = 4 + (RESET_INFO_SINGLE_ENTRY_SIZE * rb->count_to_reset);
+    int32 count = 0;
+    FOR(to_reset_index, MAX_RESET_COUNT)
+    {
+        if (rb->ids_to_reset[to_reset_index] == -1) continue;
+        else count++;
+    }
+    int32 size = 4 + (RESET_INFO_SINGLE_ENTRY_SIZE * count);
     fwrite(&size, 4, 1, file);
 
     fwrite(&rb->coords.x, 4, 1, file);
     fwrite(&rb->coords.y, 4, 1, file);
     fwrite(&rb->coords.z, 4, 1, file);
 
-    FOR(to_reset_index, rb->count_to_reset)
+    FOR(to_reset_index, MAX_RESET_COUNT)
     {
+        if (rb->ids_to_reset[to_reset_index] == -1) continue;
 		Entity* e = getEntityFromId(rb->ids_to_reset[to_reset_index]);
         fwrite(&e->coords.x, 4, 1, file);
         fwrite(&e->coords.y, 4, 1, file);
@@ -906,8 +918,8 @@ void writeResetInfoToFile(FILE* file, Entity* rb)
     }
 }
 
-// doesn't change the camera
-bool saveLevelRewrite(char* path/*, bool save_new_reset_locations*/)
+// doesn't change the camera or reset blocks
+bool saveLevelRewrite(char* path)
 {
     FILE* old_file = fopen(path, "rb+");
     Camera saved_camera = loadCameraInfo(old_file);
@@ -1287,7 +1299,7 @@ bool isPushable(TileType tile)
 
 bool isEntity(TileType tile)
 {
-    if (tile == BOX || tile == CRYSTAL || tile == MIRROR || tile == PERM_MIRROR || tile == PACK || tile == PLAYER || tile == WIN_BLOCK || tile == LOCKED_BLOCK || isSource(tile)) return true;
+    if (tile == BOX || tile == CRYSTAL || tile == MIRROR || tile == PERM_MIRROR || tile == PACK || tile == PLAYER || tile == WIN_BLOCK || tile == LOCKED_BLOCK || tile == RESET_BLOCK || isSource(tile)) return true;
     else return false;
 }
 
@@ -2805,7 +2817,38 @@ void editorMode(TickInput *tick_input)
             }
         }
 
-        if (editor_state.selected_id > 0)
+        else if (tick_input->right_mouse_press)
+        {
+            Vec3 neg_z_basis = {0, 0, -1};
+            RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), MAX_RAYCAST_SEEK_LENGTH);
+            Entity* rb = getEntityFromId(editor_state.selected_id);
+            if (rb != 0 && getTileType(rb->coords) == RESET_BLOCK)
+            {
+                Entity* new_e = getEntityPointer(raycast_output.hit_coords);
+                if (new_e != 0)
+                {
+                    int32 present_in_rb = -1;
+                    FOR(present_check_index, MAX_RESET_COUNT) if (rb->ids_to_reset[present_check_index] == new_e->id) 
+                    {
+                        present_in_rb = present_check_index;
+                        break;
+                    }
+                    if (present_in_rb == -1)
+                    {
+                        int32 next_free = findNextFreeInResetBlock(rb);
+                        if (next_free != -1) rb->ids_to_reset[next_free] = new_e->id;
+                    }
+                    else
+                    {
+                        rb->ids_to_reset[present_in_rb] = -1;
+                    }
+                    time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+                }
+                // did not click on entity
+            }
+        }
+
+        else if (editor_state.selected_id > 0)
         {
             if (tick_input->l_press) 
             {
@@ -2867,6 +2910,8 @@ void gameInitialiseState()
         next_world_state.locked_blocks[entity_index].id = -1;
         next_world_state.reset_blocks[entity_index].id  = -1;
     }
+    FOR(rb_index, MAX_RESET_COUNT) memset(next_world_state.reset_blocks[rb_index].ids_to_reset, -1, sizeof(next_world_state.reset_blocks[rb_index].ids_to_reset));
+
     Entity *entity_group = 0;
     for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
     {
@@ -3762,6 +3807,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // display level name
 		drawDebugText(next_world_state.level_name);
 
+        /*
         // player in_motion info
 		char player_moving_text[256] = {0};
         snprintf(player_moving_text, sizeof(player_moving_text), "player moving: %d", player->in_motion);
@@ -3776,6 +3822,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         char camera_text[256] = {0};
         snprintf(camera_text, sizeof(camera_text), "camera pos: %f, %f, %f", camera.coords.x, camera.coords.y, camera.coords.z);
         drawDebugText(camera_text);
+        */
 
 		if (editor_state.editor_mode != NO_MODE)
         {
@@ -3822,13 +3869,24 @@ void gameFrame(double delta_time, TickInput tick_input)
                     snprintf(writing_field_text, sizeof(writing_field_text), "writing_field: %s", writing_field_state); 
                     drawDebugText(writing_field_text);
 
-                    // TODO(spike): macro for this declaration + snprintf + drawDebugText
                     char next_level_text[256] = {0};
-                    char unlocked_by_text[256] = {0};
                     snprintf(next_level_text, sizeof(next_level_text), "next_level: %s", e->next_level);
-                    snprintf(unlocked_by_text, sizeof(unlocked_by_text), "unlocked_by: %s", e->unlocked_by);
                     drawDebugText(next_level_text);
+
+                    char unlocked_by_text[256] = {0};
+                    snprintf(unlocked_by_text, sizeof(unlocked_by_text), "unlocked_by: %s", e->unlocked_by);
                     drawDebugText(unlocked_by_text);
+
+                    if (getTileType(e->coords) == RESET_BLOCK)
+                    {
+                        FOR(reset_index, MAX_RESET_COUNT)
+						{
+                            if (e->ids_to_reset[reset_index] == -1) continue;
+							char reset_id_text[256] = {0};
+                            snprintf(reset_id_text, sizeof(reset_id_text), "id of nr. %d reset: %d", reset_index, e->ids_to_reset[reset_index]);
+                            drawDebugText(reset_id_text);
+                        }
+                    }
                 }
                 else
                 {
