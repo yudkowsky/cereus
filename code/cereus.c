@@ -2304,6 +2304,21 @@ void resetStandardVisuals()
     resetVisuals(&next_world_state.pack);
 }
 
+void levelChangePrep(char next_level[64])
+{
+    if (!next_world_state.in_overworld && findInSolvedLevels(next_world_state.level_name, &next_world_state.solved_levels) == -1)
+    {
+        int32 next_free = findNextFreeInSolvedLevels(&next_world_state.solved_levels);
+        strcpy(next_world_state.solved_levels[next_free], next_world_state.level_name);
+    }
+
+    if (strcmp(next_level, "overworld") == 0) next_world_state.in_overworld = true;
+    else next_world_state.in_overworld = false;
+
+    recordStateForUndo();
+    memset(animations, 0, sizeof(animations));
+}
+
 // FALLING LOGIC
 
 // returns true iff object is able to fall as usual, but object collides with something instead.
@@ -2343,10 +2358,10 @@ bool doFallingEntity(Entity* entity, bool do_animation)
             if (do_animation)
             {
                 createInterpolationAnimation(intCoordsToNorm(current_start_coords),
-                        intCoordsToNorm(current_end_coords),
-                        &entity_in_stack->position_norm,
-                        IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                        entity_in_stack->id, FALL_ANIMATION_TIME);
+                                             intCoordsToNorm(current_end_coords),
+                                             &entity_in_stack->position_norm,
+                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                             entity_in_stack->id, FALL_ANIMATION_TIME);
                 createTrailingHitbox(current_start_coords, DOWN, TRAILING_HITBOX_TIME, getTileType(entity_in_stack->coords));
             }
             entity_in_stack->first_fall_already_done = true;
@@ -2425,11 +2440,12 @@ void doHeadRotation(bool clockwise)
 
         int32 id = getEntityId(current_tile_coords);
 
+        // for mirror
         if (!up_or_down) createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
-                directionToQuaternion(current_direction, true), 
-                directionToQuaternion(next_direction, true), 
-                &entity->rotation_quat,
-                id, TURN_ANIMATION_TIME);
+                                                     directionToQuaternion(current_direction, true), 
+                                                     directionToQuaternion(next_direction, true), 
+                                                     &entity->rotation_quat,
+                                                     id, TURN_ANIMATION_TIME);
         else 
         {
             Vec4 start = entity->rotation_quat;
@@ -2959,9 +2975,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                    	memset(&undo_buffer[undo_buffer_position], 0, sizeof(WorldState));
                     undo_buffer_position = next_undo_buffer_position;
                     memset(animations, 0, sizeof(animations));
-                    resetStandardVisuals(); // set position_norm and rotation_quat to coords and direction respectively
-                    
+
                     if (strcmp(next_world_state.level_name, previous_level_name) != 0) gameInitialise(next_world_state.level_name);
+
+                    next_world_state = undo_buffer[next_undo_buffer_position];
+                    resetStandardVisuals();
                 }
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
@@ -2974,6 +2992,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
                 restart_last_turn = true;
             }
+			if (time_until_input == 0 && tick_input.escape_press && !next_world_state.in_overworld)
+            {
+                // leave current level if not in overworld. for now get first win block and go to their next location
+                levelChangePrep("overworld");
+                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+                gameInitialise("overworld");
+            }
+
             if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && player->in_motion == 0)
             {
 				// MOVEMENT 
@@ -3559,18 +3585,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
             if (wb->next_level[0] != 0)
             {
-                if (strcmp(wb->next_level, "overworld") == 0) next_world_state.in_overworld = true;
-                recordStateForUndo();
-                memset(animations, 0, sizeof(animations));
-
-                if (findInSolvedLevels(next_world_state.level_name, &next_world_state.solved_levels) == -1)
-                {
-                    int32 next_free = findNextFreeInSolvedLevels(&next_world_state.solved_levels);
-                    strcpy(next_world_state.solved_levels[next_free], next_world_state.level_name);
-            	}
-
+                levelChangePrep(wb->next_level);
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
-
                 gameInitialise(wb->next_level);
             }
         }
