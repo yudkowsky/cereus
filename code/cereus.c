@@ -99,6 +99,7 @@ WorldState next_world_state = {0};
 
 WorldState undo_buffer[256] = {0};
 int32 undo_buffer_position = 0;
+bool restart_last_turn = false;
 
 Animation animations[32];
 int32 time_until_input = 0;
@@ -2277,6 +2278,8 @@ void recordStateForUndo()
 {
     undo_buffer[undo_buffer_position] = world_state;
     undo_buffer_position = (undo_buffer_position + 1) % UNDO_BUFFER_SIZE;
+
+    restart_last_turn = false; // if player submits something to undo buffer, she must have done something such that we no longer have restarted on last turn.
 }
 
 void resetVisuals(Entity* entity)
@@ -2964,10 +2967,11 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (time_until_input == 0 && tick_input.r_press)
             {
                 // restart
-                recordStateForUndo();
+                if (!restart_last_turn) recordStateForUndo();
                 memset(animations, 0, sizeof(animations));
                 gameInitialiseState();
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+                restart_last_turn = true;
             }
             if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && player->in_motion == 0)
             {
