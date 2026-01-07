@@ -11,8 +11,9 @@ const int32	SCREEN_HEIGHT_PX = 1080;
 
 const float TAU = 6.2831853071f;
 
-const float SENSITIVITY = 0.005f;
-const float MOVE_STEP = 0.075f;
+const float CAMERA_SENSITIVITY = 0.005f;
+const float CAMERA_MOVE_STEP = 0.075f;
+const float CAMERA_FOV = 25.0f;
 const Vec3 DEFAULT_SCALE = { 1.0f,  1.0f,  1.0f  };
 const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 const float LASER_WIDTH = 0.125f;
@@ -46,7 +47,7 @@ const int32 MAX_TRAILING_HITBOX_COUNT = 64;
 const int32 MAX_LEVEL_COUNT = 64;
 
 const int32 UNDO_BUFFER_SIZE = 256; // remember to modify undo_buffer
- 
+
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
 const Int3 AXIS_Z = { 0, 0, 1 };
@@ -120,7 +121,7 @@ void cameraBasisFromYaw(float yaw, Vec3* right, Vec3* forward)
 Vec4 quaternionFromAxisAngle(Vec3 axis, float angle)
 {
     float sine = sinf(angle*0.5f), cosine = cosf(angle*0.5f);
-	return (Vec4){ axis.x*sine, axis.y*sine, axis.z*sine, cosine};
+    return (Vec4){ axis.x*sine, axis.y*sine, axis.z*sine, cosine};
 }
 
 bool quaternionIsZero(Vec4 quaternion)
@@ -161,14 +162,14 @@ Vec4 quaternionNegate(Vec4 quaternion)
 Vec4 quaternionMultiply(Vec4 a, Vec4 b)
 {
     return (Vec4){ a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
-    			   a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
-        		   a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
-        		   a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z};
+        a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
+        a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
+        a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z};
 }
 
 Vec4 quaternionNormalize(Vec4 quaternion)
 {
-	float length_squared = quaternion.x*quaternion.x + quaternion.y*quaternion.y + quaternion.z*quaternion.z + quaternion.w*quaternion.w;
+    float length_squared = quaternion.x*quaternion.x + quaternion.y*quaternion.y + quaternion.z*quaternion.z + quaternion.w*quaternion.w;
     if (length_squared <= 1e-8f) return (Vec4){0, 0, 0, 1}; 
     float inverse_length = 1.0f / sqrtf(length_squared);
     return quaternionScalarMultiply(quaternion, inverse_length);
@@ -176,21 +177,21 @@ Vec4 quaternionNormalize(Vec4 quaternion)
 
 Vec3 vec3CrossProduct(Vec3 a, Vec3 b)
 {
-	return (Vec3){ a.y*b.z - a.z*b.y, a.z*b.x - a.x*b.z, a.x*b.y - a.y*b.x };
+    return (Vec3){ a.y*b.z - a.z*b.y, a.z*b.x - a.x*b.z, a.x*b.y - a.y*b.x };
 }
 
 Vec3 vec3RotateByQuaternion(Vec3 input_vector, Vec4 quaternion)
 {
     Vec3 quaternion_vector_part = (Vec3){ quaternion.x, quaternion.y, quaternion.z };
     float quaternion_scalar_part = quaternion.w;
-	Vec3 q_cross_v = vec3CrossProduct(quaternion_vector_part, input_vector);
-	Vec3 temp_vector = (Vec3){ q_cross_v.x + quaternion_scalar_part * input_vector.x,
-    						   q_cross_v.y + quaternion_scalar_part * input_vector.y,
-    						   q_cross_v.z + quaternion_scalar_part * input_vector.z};
+    Vec3 q_cross_v = vec3CrossProduct(quaternion_vector_part, input_vector);
+    Vec3 temp_vector = (Vec3){ q_cross_v.x + quaternion_scalar_part * input_vector.x,
+        q_cross_v.y + quaternion_scalar_part * input_vector.y,
+        q_cross_v.z + quaternion_scalar_part * input_vector.z};
     Vec3 q_cross_t = vec3CrossProduct(quaternion_vector_part, temp_vector);
     return (Vec3){ input_vector.x + 2.0f * q_cross_t.x,
-    			   input_vector.y + 2.0f * q_cross_t.y,
-    			   input_vector.z + 2.0f * q_cross_t.z};
+        input_vector.y + 2.0f * q_cross_t.y,
+        input_vector.z + 2.0f * q_cross_t.z};
 }
 
 // MATH HELPER FUNCTIONS
@@ -202,7 +203,7 @@ Vec3 intCoordsToNorm(Int3 int_coords)
 
 Int3 normCoordsToInt(Vec3 norm_coords) 
 {
-	return (Int3){ (int32)floorf(norm_coords.x + 0.5f), (int32)floorf(norm_coords.y + 0.5f), (int32)floorf(norm_coords.z + 0.5f) }; 
+    return (Int3){ (int32)floorf(norm_coords.x + 0.5f), (int32)floorf(norm_coords.y + 0.5f), (int32)floorf(norm_coords.z + 0.5f) }; 
 }
 
 bool intCoordsWithinLevelBounds(Int3 coords) 
@@ -232,15 +233,15 @@ Int3 int3Negate(Int3 coords)
 
 bool vec3IsZero(Vec3 position) 
 {
-   	return (position.x == 0 && position.y == 0 && position.z == 0); 
+    return (position.x == 0 && position.y == 0 && position.z == 0); 
 }
 
 Vec3 vec3Add(Vec3 a, Vec3 b) {
-	return (Vec3){ a.x+b.x, a.y+b.y, a.z+b.z }; }
+    return (Vec3){ a.x+b.x, a.y+b.y, a.z+b.z }; }
 
 Int3 int3Add(Int3 a, Int3 b)
 {
-	return (Int3){ a.x+b.x, a.y+b.y, a.z+b.z }; 
+    return (Int3){ a.x+b.x, a.y+b.y, a.z+b.z }; 
 }
 
 Vec3 vec3Subtract(Vec3 a, Vec3 b) 
@@ -264,18 +265,18 @@ Vec3 vec3ScalarMultiply(Vec3 position, float scalar)
 }
 
 /*
-int32 roundFloatToInt(float f)
-{
-    float d = fmod(f, 1);
-    if (d >= 0.5f) return (int32)f + 1;
-    else return (int32)f;
-}
+   int32 roundFloatToInt(float f)
+   {
+   float d = fmod(f, 1);
+   if (d >= 0.5f) return (int32)f + 1;
+   else return (int32)f;
+   }
 
-Int3 roundToInt3(Vec3 coords)
-{
-    return (Int3){ roundFloatToInt(coords.x), roundFloatToInt(coords.y), roundFloatToInt(coords.z) };
-}
-*/
+   Int3 roundToInt3(Vec3 coords)
+   {
+   return (Int3){ roundFloatToInt(coords.x), roundFloatToInt(coords.y), roundFloatToInt(coords.z) };
+   }
+   */
 
 // BUFFER / STATE INTERFACING
 
@@ -290,10 +291,10 @@ int32 coordsToBufferIndexDirection(Int3 coords)
 
 Int3 bufferIndexToCoords(int32 buffer_index)
 {
-	Int3 coords = {0};
+    Int3 coords = {0};
     coords.x = (buffer_index/2) % level_dim.x;
     coords.y = (buffer_index/2) / (level_dim.x * level_dim.z);
-	coords.z = ((buffer_index/2) / level_dim.x) % level_dim.z;
+    coords.z = ((buffer_index/2) / level_dim.x) % level_dim.z;
     return coords;
 }
 
@@ -339,7 +340,7 @@ Color getEntityColor(Int3 coords)
 
 Entity* getEntityPointer(Int3 coords)
 {
-	TileType tile = getTileType(coords);
+    TileType tile = getTileType(coords);
     Entity *entity_group = 0;
     if (isSource(tile)) entity_group = next_world_state.sources;
     else switch(tile)
@@ -363,7 +364,7 @@ Entity* getEntityPointer(Int3 coords)
 
 int32 getEntityId(Int3 coords)
 {
-	Entity *entity = getEntityPointer(coords);
+    Entity *entity = getEntityPointer(coords);
     return entity->id;
 }
 
@@ -393,7 +394,7 @@ Entity* getEntityFromId(int32 id)
 
 Direction getEntityDirection(Int3 coords) 
 {
-	Entity *entity = getEntityPointer(coords);
+    Entity *entity = getEntityPointer(coords);
     return entity->direction;
 }
 
@@ -422,7 +423,7 @@ Direction getNextRotationalDirection(Direction direction, bool clockwise)
     Direction next_direction = NO_DIRECTION;
     if (!clockwise)
     {
-		next_direction = direction - 1;
+        next_direction = direction - 1;
         if (next_direction == -1) next_direction = EAST;
     }
     else
@@ -436,32 +437,32 @@ Direction getNextRotationalDirection(Direction direction, bool clockwise)
 // assumes NWSE
 Direction getMiddleDirection(Direction direction_1, Direction direction_2)
 {
-	switch (direction_1)
+    switch (direction_1)
     {
         case NORTH: switch (direction_2)
-        {
-            case WEST: return NORTH_WEST;
-			case EAST: return NORTH_EAST;
-            default: break;
-        }
-    	case WEST: switch (direction_2)
-        {
-			case NORTH: return NORTH_WEST;
-            case SOUTH: return SOUTH_WEST;
-            default: break;
-        }
+                    {
+                        case WEST: return NORTH_WEST;
+                        case EAST: return NORTH_EAST;
+                        default: break;
+                    }
+        case WEST: switch (direction_2)
+                   {
+                       case NORTH: return NORTH_WEST;
+                       case SOUTH: return SOUTH_WEST;
+                       default: break;
+                   }
         case SOUTH: switch (direction_2)
-        {
-            case WEST: return SOUTH_WEST;
-			case EAST: return SOUTH_EAST;
-            default: break;
-        }
-    	case EAST: switch (direction_2)
-        {
-			case NORTH: return NORTH_EAST;
-            case SOUTH: return SOUTH_EAST;
-            default: break;
-        }
+                    {
+                        case WEST: return SOUTH_WEST;
+                        case EAST: return SOUTH_EAST;
+                        default: break;
+                    }
+        case EAST: switch (direction_2)
+                   {
+                       case NORTH: return NORTH_EAST;
+                       case SOUTH: return SOUTH_EAST;
+                       default: break;
+                   }
         default: return NO_DIRECTION;
     }
 }
@@ -470,8 +471,8 @@ int32 getEntityCount(Entity *entity_group)
 {
     int32 count = 0;
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
-	{
-		if (entity_group[entity_index].id == -1) continue;
+    {
+        if (entity_group[entity_index].id == -1) continue;
         count++;
     }
     return count;
@@ -499,7 +500,7 @@ Vec3 directionToVector(Direction direction)
         case EAST:  return (Vec3){  1,  0,  0 };
         case UP:    return (Vec3){  0,  1,  0 };
         case DOWN:  return (Vec3){  0, -1,  0 };
-    	default: return IDENTITY_TRANSLATION;
+        default: return IDENTITY_TRANSLATION;
     }
 }
 
@@ -530,14 +531,14 @@ Vec4 directionToQuaternion(Direction direction, bool roll_z)
             break;
         case UP:
             roll = 0.25f * TAU;
-			do_roll = true;
+            do_roll = true;
             break;
         case DOWN:
             roll = -0.25f * TAU;
-			do_roll = true;
+            do_roll = true;
             break;
         case NORTH_WEST:
-			yaw = 0.125f * TAU;
+            yaw = 0.125f * TAU;
             do_yaw = true;
             break;
         case NORTH_EAST:
@@ -591,10 +592,10 @@ Vec4 directionToQuaternion(Direction direction, bool roll_z)
         default: return (Vec4){ 0, 0, 0, 0 };
     }
 
-	if (do_yaw && !do_roll) return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), yaw);
+    if (do_yaw && !do_roll) return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), yaw);
     if (!do_yaw && do_roll) return quaternionFromAxisAngle(intCoordsToNorm(roll_z ? AXIS_Z : AXIS_X), roll);
     if (do_yaw && do_roll)
- 	{
+    {
         Vec4 quaternion_yaw  = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), yaw);
         Vec4 quaternion_roll = quaternionFromAxisAngle(intCoordsToNorm(roll_z ? AXIS_Z : AXIS_X), roll);
         return quaternionMultiply(quaternion_roll, quaternion_yaw);
@@ -634,18 +635,18 @@ void buildLevelPathFromName(char level_name[64], char (*level_path)[64])
 }
 
 /*
-void getLevelNameFromPath(char* level_path, char* output)
-{
-    char* slash = strrchr(level_path, '/'); // gets last / or .
-    char* dot   = strrchr(level_path, '.');
-    if (slash && dot && dot > slash)
-    {
-        size_t length = dot - slash - 1;
-        strncpy(output, slash + 1, length);
-        output[length] = '\0';
-    }
-}
-*/
+   void getLevelNameFromPath(char* level_path, char* output)
+   {
+   char* slash = strrchr(level_path, '/'); // gets last / or .
+   char* dot   = strrchr(level_path, '.');
+   if (slash && dot && dot > slash)
+   {
+   size_t length = dot - slash - 1;
+   strncpy(output, slash + 1, length);
+   output[length] = '\0';
+   }
+   }
+   */
 
 // find the location of specific chunk
 int32 findChunkOrEOF(FILE* file, char tag[4], bool* found)
@@ -670,7 +671,7 @@ int32 findChunkOrEOF(FILE* file, char tag[4], bool* found)
         }
         if (memcmp(chunk, tag, 4) == 0)
         {
-			// camera chunk found -> overwrite
+            // camera chunk found -> overwrite
             *found = true;
             return tag_pos + 4;
         }
@@ -688,7 +689,7 @@ int32 findChunkOrEOF(FILE* file, char tag[4], bool* found)
 bool readChunkHeader(FILE* file, char out_tag[4], int32 *out_size)
 {
     if (fread(out_tag, 4, 1, file) != 1) return false; // EOF
-	if (fread(out_size, 4, 1, file) != 1) return false; // truncated
+    if (fread(out_size, 4, 1, file) != 1) return false; // truncated
     return true;
 }
 
@@ -700,7 +701,7 @@ void loadFileToState(char* path)
 
     fseek(file, 1, SEEK_SET); // skip the first byte
     uint8 x, y, z;
-	fread(&x, 1, 1, file);
+    fread(&x, 1, 1, file);
     fread(&y, 1, 1, file);
     fread(&z, 1, 1, file);
     level_dim.x = x;
@@ -708,7 +709,7 @@ void loadFileToState(char* path)
     level_dim.z = z;
 
     uint8 buffer[65536]; // just some max level size - not all of this is necessarily copied.
-	fread(&buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
+    fread(&buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
 
     bool found = false;
     int32 seek_to = findChunkOrEOF(file, CAMERA_CHUNK_TAG, &found);
@@ -723,20 +724,20 @@ void loadFileToState(char* path)
         fread(&camera.yaw, 4, 1, file);
         fread(&camera.pitch, 4, 1, file);
     }
-	
-	fclose(file);
+
+    fclose(file);
     memcpy(next_world_state.buffer, buffer, level_dim.x*level_dim.y*level_dim.z * 2);
 }
 
 void writeBufferToFile(FILE* file)
 {
     fseek(file, 4, SEEK_SET);
-	fwrite(next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
+    fwrite(next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
 }
 
 Camera getCurrentCameraInFile(FILE* file)
 {
-	Camera out_camera = {0};
+    Camera out_camera = {0};
 
     bool found = false;
     int32 seek_to = findChunkOrEOF(file, CAMERA_CHUNK_TAG, &found);
@@ -787,17 +788,17 @@ void writeWinBlockToFile(FILE* file, Entity* wb)
 int32 findWinBlockPath(FILE* file, int32 x, int32 y, int32 z)
 {
     fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
-	
+
     char tag[4] = {0};
     int32 size = 0;
-    
+
     while (readChunkHeader(file, tag, &size))
     {
         int32 pos = ftell(file);
 
         if (memcmp(tag, WIN_BLOCK_CHUNK_TAG, 4) == 0 && size == (int32)(WIN_BLOCK_CHUNK_SIZE))
         {
-			int32 comp_x, comp_y, comp_z;
+            int32 comp_x, comp_y, comp_z;
             char path[64] = {0};
             if (fread(&comp_x, 4, 1, file) != 1) return -1;
             if (fread(&comp_y, 4, 1, file) != 1) return -1;
@@ -829,12 +830,12 @@ void loadWinBlockPaths(FILE* file)
 
         if (memcmp(tag, WIN_BLOCK_CHUNK_TAG, 4) == 0 && size == WIN_BLOCK_CHUNK_SIZE)
         {
-			int32 x, y, z;
+            int32 x, y, z;
             char path[64];
-			if (fread(&x, 4, 1, file) != 1) return;
-			if (fread(&y, 4, 1, file) != 1) return;
-			if (fread(&z, 4, 1, file) != 1) return;
-			if (fread(&path, 1, 64, file) != 64) return;
+            if (fread(&x, 4, 1, file) != 1) return;
+            if (fread(&y, 4, 1, file) != 1) return;
+            if (fread(&z, 4, 1, file) != 1) return;
+            if (fread(&path, 1, 64, file) != 64) return;
             path[63] = '\0';
 
             FOR(wb_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -870,12 +871,12 @@ void loadLockedInfoPaths(FILE* file)
 
         if (memcmp(tag, LOCKED_INFO_CHUNK_TAG, 4) == 0 && size == LOCKED_INFO_CHUNK_SIZE)
         {
-			int32 x, y, z;
+            int32 x, y, z;
             char path[64];
-			if (fread(&x, 4, 1, file) != 1) return;
-			if (fread(&y, 4, 1, file) != 1) return;
-			if (fread(&z, 4, 1, file) != 1) return;
-			if (fread(&path, 1, 64, file) != 64) return;
+            if (fread(&x, 4, 1, file) != 1) return;
+            if (fread(&y, 4, 1, file) != 1) return;
+            if (fread(&z, 4, 1, file) != 1) return;
+            if (fread(&path, 1, 64, file) != 64) return;
             path[63] = '\0';
 
             Entity* entity_group[3] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, /*next_world_state.crystals, next_world_state.sources*/};
@@ -890,7 +891,7 @@ void loadLockedInfoPaths(FILE* file)
                         break;
                     }
                 }
-    		}
+            }
             // continue from end of chunk
             fseek(file, pos + size, SEEK_SET);
         }
@@ -918,13 +919,13 @@ bool saveLevelRewrite(char* path)
 {
     FILE* old_file = fopen(path, "rb+");
     Camera saved_camera = getCurrentCameraInFile(old_file);
-	fclose(old_file);
+    fclose(old_file);
 
     char temp_path[256] = {0};
     snprintf(temp_path, sizeof(temp_path), "%s.temp", path);
 
     FILE* file = fopen(temp_path, "wb");
-    
+
     fseek(file, 1, SEEK_SET);
     uint8 x, y, z;
     x = (uint8)level_dim.x;
@@ -951,7 +952,7 @@ bool saveLevelRewrite(char* path)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-			Entity* e = &entity_group[group_index][entity_index];
+            Entity* e = &entity_group[group_index][entity_index];
             if (e->id == -1) continue;
             if (e->unlocked_by[0] == '\0') continue;
             writeLockedInfoToFile(file, e);
@@ -1065,7 +1066,7 @@ SpriteId getCube3DId(TileType tile)
 // assuming one path -> one asset type.
 void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation)
 {
-	int32 asset_location = -1;
+    int32 asset_location = -1;
     for (int32 asset_index = 0; asset_index < 256; asset_index++)
     {
         if (assets_to_load[asset_index].instance_count == 0)
@@ -1075,7 +1076,7 @@ void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotati
         }
         if (assets_to_load[asset_index].sprite_id == id && assets_to_load[asset_index].type == type)
         {
-			asset_location = asset_index;
+            asset_location = asset_index;
             break;
         }
     }
@@ -1095,12 +1096,12 @@ void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotati
 
 void drawText(char* string, Vec2 coords, float scale)
 {
-	float pen_x = coords.x;
+    float pen_x = coords.x;
     float pen_y = coords.y;
     float aspect = (float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX;
-	for (char* pointer = string; *pointer; ++pointer)
+    for (char* pointer = string; *pointer; ++pointer)
     {
-		char c = *pointer;
+        char c = *pointer;
         if (c == '\n')
         {
             pen_x = coords.x;
@@ -1111,16 +1112,16 @@ void drawText(char* string, Vec2 coords, float scale)
         if (uc < FONT_FIRST_ASCII || uc > FONT_LAST_ASCII) uc = '?';
 
         SpriteId id = (SpriteId)(SPRITE_2D_FONT_SPACE + ((unsigned char)c - 32));
-		Vec3 draw_coords = { pen_x, pen_y, 0};
+        Vec3 draw_coords = { pen_x, pen_y, 0};
         Vec3 draw_scale = { scale * aspect, scale, 1};
         drawAsset(id, SPRITE_2D, draw_coords, draw_scale, IDENTITY_QUATERNION);
-		pen_x += scale * aspect;
+        pen_x += scale * aspect;
     }
 }
 
 void drawDebugText(char* string)
 {
-	drawText(string, debug_text_coords, DEFAULT_TEXT_SCALE);
+    drawText(string, debug_text_coords, DEFAULT_TEXT_SCALE);
     debug_text_coords.y -= DEBUG_TEXT_Y_DIFF;
 }
 
@@ -1128,24 +1129,24 @@ void drawDebugText(char* string)
 
 RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance)
 {
-	RaycastHit output = {0};
+    RaycastHit output = {0};
     Int3 current_cube = normCoordsToInt(start);
     start.x += 0.5;
     start.y += 0.5;
     start.z += 0.5;
 
     // step direction on each axis
-	int32 step_x = 0, step_y = 0, step_z = 0;
+    int32 step_x = 0, step_y = 0, step_z = 0;
 
-	if (direction.x > 0.0f)      step_x = 1;
-	else if (direction.x < 0.0f) step_x = -1;
-	if (direction.y > 0.0f) 	 step_y = 1;
-	else if (direction.y < 0.0f) step_y = -1;
-	if (direction.z > 0.0f) 	 step_z = 1;
-	else if (direction.z < 0.0f) step_z = -1;
+    if (direction.x > 0.0f)      step_x = 1;
+    else if (direction.x < 0.0f) step_x = -1;
+    if (direction.y > 0.0f) 	 step_y = 1;
+    else if (direction.y < 0.0f) step_y = -1;
+    if (direction.z > 0.0f) 	 step_z = 1;
+    else if (direction.z < 0.0f) step_z = -1;
 
     // get coordinates of next grid plane on each axis
-	float next_plane_x = 0.0f, next_plane_y = 0.0f, next_plane_z = 0.0f;
+    float next_plane_x = 0.0f, next_plane_y = 0.0f, next_plane_z = 0.0f;
 
     if (step_x > 0)      next_plane_x = (float)current_cube.x + 1.0f;
     else if (step_x < 0) next_plane_x = (float)current_cube.x;       
@@ -1180,21 +1181,21 @@ RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance)
     // main loop from paper
     while (t <= max_distance) 
     {
-		if (t_max_x <= t_max_y && t_max_x <= t_max_z)
+        if (t_max_x <= t_max_y && t_max_x <= t_max_z)
         {
             previous_cube = current_cube;
             current_cube.x += step_x;
             t = t_max_x;
             t_max_x += t_delta_x;
         }
-		else if (t_max_y <= t_max_z)
+        else if (t_max_y <= t_max_z)
         {
             previous_cube = current_cube;
             current_cube.y += step_y;
             t = t_max_y;
             t_max_y += t_delta_y;
         }
-		else
+        else
         {
             previous_cube = current_cube;
             current_cube.z += step_z;
@@ -1235,7 +1236,7 @@ void editorPlaceOnlyInstanceOfTile(Entity* entity, Int3 coords, TileType tile, i
 
 Int3 getNextCoords(Int3 coords, Direction direction)
 {
-	switch (direction)
+    switch (direction)
     {
         case NORTH: return int3Add(coords, int3Negate(AXIS_Z)); 
         case WEST:  return int3Add(coords, int3Negate(AXIS_X));
@@ -1248,12 +1249,12 @@ Int3 getNextCoords(Int3 coords, Direction direction)
         case NORTH_EAST: return int3Add(coords, int3Add(int3Negate(AXIS_Z), AXIS_X));
         case SOUTH_WEST: return int3Add(coords, int3Add(AXIS_Z, int3Negate(AXIS_X)));
         case SOUTH_EAST: return int3Add(coords, int3Add(AXIS_Z, AXIS_X));
-                               
+
         case UP_NORTH:   return int3Add(coords, int3Add(int3Negate(AXIS_Z), AXIS_Y));
         case UP_SOUTH:   return int3Add(coords, int3Add(AXIS_Z, AXIS_Y));
         case UP_WEST:	 return int3Add(coords, int3Add(int3Negate(AXIS_X), AXIS_Y));
         case UP_EAST:    return int3Add(coords, int3Add(AXIS_X, AXIS_Y));
-                               
+
         case DOWN_NORTH: return int3Add(coords, int3Add(int3Negate(AXIS_Z), int3Negate(AXIS_Y)));
         case DOWN_SOUTH: return int3Add(coords, int3Add(AXIS_Z, int3Negate(AXIS_Y)));
         case DOWN_WEST:  return int3Add(coords, int3Add(int3Negate(AXIS_X), int3Negate(AXIS_Y)));
@@ -1265,9 +1266,9 @@ Int3 getNextCoords(Int3 coords, Direction direction)
 
 Vec3 rollingAxis(Direction direction)
 {
-	Vec3 up = { 0.0f, 1.0f, 0.0f };
+    Vec3 up = { 0.0f, 1.0f, 0.0f };
     Vec3 rolling = intCoordsToNorm(getNextCoords(normCoordsToInt(IDENTITY_TRANSLATION), direction));
-	return vec3CrossProduct(up, rolling);
+    return vec3CrossProduct(up, rolling);
 }
 
 // only checks tile types - doesn't do what canPush does
@@ -1285,7 +1286,7 @@ bool isEntity(TileType tile)
 
 int32 getPushableStackSize(Int3 first_entity_coords)
 {
-	Int3 current_stack_coords = first_entity_coords;
+    Int3 current_stack_coords = first_entity_coords;
     int32 stack_size = 1;
     FOR(find_stack_size_index, MAX_PUSHABLE_STACK_SIZE)
     {
@@ -1325,7 +1326,7 @@ bool trailingHitboxAtCoords(Int3 coords, TrailingHitbox* trailing_hitbox)
         TrailingHitbox th = next_world_state.trailing_hitboxes[trailing_hitbox_index];
         if (int3IsEqual(coords, th.coords) && th.frames > 0) 
         {
-			*trailing_hitbox = th;
+            *trailing_hitbox = th;
             return true;
         }
     }
@@ -1380,10 +1381,10 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
     int32 animation_index = next_free_output[0];
     int32 queue_time = next_free_output[1];
 
-	animations[animation_index].id = entity_id;
+    animations[animation_index].id = entity_id;
     animations[animation_index].frames_left = animation_frames + queue_time; 
 
-	Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(position_b, position_a), (float)(1.0f/animation_frames));
+    Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(position_b, position_a), (float)(1.0f/animation_frames));
 
     if (!vec3IsZero(translation_per_frame))
     {
@@ -1391,7 +1392,7 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
         for (int frame_index = 0; frame_index < animation_frames; frame_index++)
         {
             animations[animation_index].position[animation_frames-(1+frame_index)] 
-            = vec3Add(position_a, vec3ScalarMultiply(translation_per_frame, (float)(1+frame_index)));
+                = vec3Add(position_a, vec3ScalarMultiply(translation_per_frame, (float)(1+frame_index)));
         }
     }
     if (!quaternionIsZero(quaternionSubtract(rotation_b, rotation_a)))
@@ -1401,8 +1402,8 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
         for (int frame_index = 0; frame_index < animation_frames; frame_index++)
         {
             float param = (float)(frame_index + 1) / animation_frames;
-	    	animations[animation_index].rotation[animation_frames-(1+frame_index)] 
-            = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(rotation_a, 1.0f - param), quaternionScalarMultiply(rotation_b, param)));
+            animations[animation_index].rotation[animation_frames-(1+frame_index)] 
+                = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(rotation_a, 1.0f - param), quaternionScalarMultiply(rotation_b, param)));
         }
     }
 }
@@ -1418,7 +1419,7 @@ void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direc
     animations[animation_index].frames_left = TURN_ANIMATION_TIME + queue_time; 
     animations[animation_index].rotation_to_change = rotation_to_change;
     animations[animation_index].position_to_change = position_to_change;
-    
+
     Vec3 pivot_point = player_position;
     Vec3 pivot_to_pack_start = vec3Subtract(pack_position, player_position);
     float d_theta_per_frame = (TAU*0.25f)/(float)TURN_ANIMATION_TIME;
@@ -1440,11 +1441,11 @@ void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direc
     {
         // rotation
         Vec4 quat_prev = directionToQuaternion(oppositeDirection(previous_pack_direction), true);
-		Vec4 quat_next = directionToQuaternion(oppositeDirection(pack_direction), true);
+        Vec4 quat_next = directionToQuaternion(oppositeDirection(pack_direction), true);
         if (quaternionDot(quat_prev, quat_next) < 0.0f) quat_next = quaternionNegate(quat_next); // resolve quat sign issue 
         float param = (float)(frame_index + 1) / (float)(TURN_ANIMATION_TIME);
         animations[animation_index].rotation[TURN_ANIMATION_TIME-(1+frame_index)] 
-        = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(quat_prev, 1.0f - param), quaternionScalarMultiply(quat_next, param)));
+            = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(quat_prev, 1.0f - param), quaternionScalarMultiply(quat_next, param)));
 
         // translation
         float theta = angle_sign * (frame_index+1) * d_theta_per_frame;
@@ -1461,15 +1462,15 @@ void createFailedWalkAnimation(Vec3 start_position, Vec3 next_position, Vec3* po
     int32 animation_index = next_free_output[0];
     int32 queue_time = next_free_output[1];
 
-	animations[animation_index].id = entity_id;
+    animations[animation_index].id = entity_id;
     animations[animation_index].frames_left = FAILED_ANIMATION_TIME + queue_time; 
     animations[animation_index].position_to_change = position_to_change;
 
-	Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(next_position, start_position), (float)(1.0f/FAILED_ANIMATION_TIME) / 2);
+    Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(next_position, start_position), (float)(1.0f/FAILED_ANIMATION_TIME) / 2);
 
-	for (int frame_index = 0; frame_index < FAILED_ANIMATION_TIME / 2; frame_index++)
-	{
-    	Vec3 position = vec3Add(start_position, vec3ScalarMultiply(translation_per_frame, (float)(1+frame_index)));
+    for (int frame_index = 0; frame_index < FAILED_ANIMATION_TIME / 2; frame_index++)
+    {
+        Vec3 position = vec3Add(start_position, vec3ScalarMultiply(translation_per_frame, (float)(1+frame_index)));
         animations[animation_index].position[FAILED_ANIMATION_TIME-(1+frame_index)] = position;
         animations[animation_index].position[1+frame_index] = position;
     }
@@ -1503,7 +1504,7 @@ void createFailedStaticRotationAnimation(Vec4 start_rotation, Vec4 input_directi
 
     if (quaternionDot(start_rotation, input_direction_as_quat) < 0.0f) input_direction_as_quat = quaternionScalarMultiply(input_direction_as_quat, -1.0f);
     for (int frame_index = 0; frame_index < FAILED_ANIMATION_TIME / 2; frame_index++)
-	{
+    {
         // similar interpolation for loop, but fill both the end and start of the array, so it bounces back
         float param = ((float)(frame_index + 1) / FAILED_ANIMATION_TIME) / 2;
         Vec4 rotation = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(start_rotation, 1.0f - param), quaternionScalarMultiply(input_direction_as_quat, param)));
@@ -1524,7 +1525,7 @@ void createFailedPackRotationAnimation(Vec3 player_position, Vec3 pack_position,
     animations[animation_index].frames_left = FAILED_ANIMATION_TIME + queue_time; 
     animations[animation_index].rotation_to_change = rotation_to_change;
     animations[animation_index].position_to_change = position_to_change;
-    
+
     Vec3 pivot_point = player_position;
     Vec3 pivot_to_pack_start = vec3Subtract(pack_position, player_position);
     float d_theta_per_frame = (TAU*0.25f)/(float)TURN_ANIMATION_TIME;
@@ -1545,7 +1546,7 @@ void createFailedPackRotationAnimation(Vec3 player_position, Vec3 pack_position,
     {
         // rotation
         Vec4 quat_prev = directionToQuaternion(oppositeDirection(previous_pack_direction), true);
-		Vec4 quat_next = directionToQuaternion(oppositeDirection(pack_direction), true);
+        Vec4 quat_next = directionToQuaternion(oppositeDirection(pack_direction), true);
         if (quaternionDot(quat_prev, quat_next) < 0.0f) quat_next = quaternionNegate(quat_next); // resolve quat sign issue 
         float param = ((float)(frame_index + 1) / FAILED_ANIMATION_TIME) / 2;
         Vec4 rotation = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(quat_prev, 1.0f - param), quaternionScalarMultiply(quat_next, param)));
@@ -1575,9 +1576,9 @@ void doFailedTurnAnimations(Direction input_direction, bool clockwise)
         current_coords = getNextCoords(current_coords, UP);
     }
     createFailedPackRotationAnimation(intCoordsToNorm(next_world_state.player.coords), 
-                                      intCoordsToNorm(next_world_state.pack.coords), 
-                                      oppositeDirection(input_direction), clockwise, 
-                                      &next_world_state.pack.position_norm, &next_world_state.pack.rotation_quat, PACK_ID);
+            intCoordsToNorm(next_world_state.pack.coords), 
+            oppositeDirection(input_direction), clockwise, 
+            &next_world_state.pack.position_norm, &next_world_state.pack.rotation_quat, PACK_ID);
 }
 
 // hard codes first fall = 12 frames total (8 acceleration, 4 at terminal velocity of 1/8 b/f)
@@ -1609,9 +1610,9 @@ void createFirstFallAnimation(Vec3 start_position, Vec3* position_to_change, int
 
 void changeMoving(Entity* e)
 {
-	if (presentInAnimations(e->id) && e->in_motion == 0 && !(e->moving_direction == NO_DIRECTION)) e->in_motion = presentInAnimations(e->id);
-	else if (e->in_motion > 0) e->in_motion--;
-	else e->moving_direction = NO_DIRECTION;
+    if (presentInAnimations(e->id) && e->in_motion == 0 && !(e->moving_direction == NO_DIRECTION)) e->in_motion = presentInAnimations(e->id);
+    else if (e->in_motion > 0) e->in_motion--;
+    else e->moving_direction = NO_DIRECTION;
 }
 
 void resetFirstFall(Entity* e)
@@ -1625,19 +1626,19 @@ PushResult canPush(Int3 coords, Direction direction)
     TileType current_tile = getTileType(current_coords);
     for (int push_index = 0; push_index < MAX_ENTITY_PUSH_COUNT; push_index++) 
     {
-		Entity* entity = getEntityPointer(current_coords);
+        Entity* entity = getEntityPointer(current_coords);
         if (isEntity(current_tile) && entity->locked) return FAILED_PUSH;
 
-		if (entity->in_motion) return PAUSE_PUSH;
+        if (entity->in_motion) return PAUSE_PUSH;
 
         // TODO(spike): need to introduce PAUSE_PUSH if entity is going to fall next frame. (this is what below is maybe doing?)
         if (isPushable(getTileType(current_coords)) && getTileType(getNextCoords(current_coords, DOWN)) == NONE && !next_world_state.player.hit_by_blue) return PAUSE_PUSH;
 
-    	current_coords = getNextCoords(current_coords, direction);
+        current_coords = getNextCoords(current_coords, direction);
         current_tile = getTileType(current_coords);
 
         Int3 coords_ahead = getNextCoords(entity->coords, direction);
-		if (isPushable(getTileType(coords_ahead)) && getEntityPointer(coords_ahead)->in_motion) return PAUSE_PUSH;
+        if (isPushable(getTileType(coords_ahead)) && getEntityPointer(coords_ahead)->in_motion) return PAUSE_PUSH;
         Int3 coords_below = getNextCoords(entity->coords, DOWN);
         if (isPushable(getTileType(coords_below)) && getEntityPointer(coords_below)->in_motion) return PAUSE_PUSH;
         Int3 coords_below_and_ahead = getNextCoords(getNextCoords(entity->coords, DOWN), direction);
@@ -1659,7 +1660,7 @@ PushResult canPushStack(Int3 coords, Direction direction)
     Int3 current_coords = coords;
     FOR(stack_index, stack_size)
     {
-		PushResult push_result = canPush(current_coords, direction);
+        PushResult push_result = canPush(current_coords, direction);
         if (push_result == PAUSE_PUSH) return PAUSE_PUSH;
         if(stack_index == 0) if (push_result == FAILED_PUSH) return FAILED_PUSH;
         current_coords = getNextCoords(current_coords, UP);
@@ -1669,7 +1670,7 @@ PushResult canPushStack(Int3 coords, Direction direction)
 
 Push pushOnceWithoutAnimation(Int3 coords, Direction direction, int32 time)
 {
-	Push entity_to_push = {0};
+    Push entity_to_push = {0};
 
     Entity* entity = getEntityPointer(coords);
     entity_to_push.type = getTileType(coords);
@@ -1697,10 +1698,10 @@ void pushOnce(Int3 coords, Direction direction, int32 animation_time)
     int32 id = getEntityId(entity_to_push.new_coords);
     TileType trailing_hitbox_type = getTileType(entity_to_push.new_coords);
     createInterpolationAnimation(intCoordsToNorm(entity_to_push.previous_coords),
-                                 intCoordsToNorm(entity_to_push.new_coords),
-                                 &entity_to_push.entity->position_norm,
-                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                 id, animation_time); 
+            intCoordsToNorm(entity_to_push.new_coords),
+            &entity_to_push.entity->position_norm,
+            IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+            id, animation_time); 
     int32 trailing_hitbox_time = TRAILING_HITBOX_TIME;
     createTrailingHitbox(coords, direction, trailing_hitbox_time, trailing_hitbox_type);
 }
@@ -1710,10 +1711,10 @@ void pushAll(Int3 coords, Direction direction, int32 animation_time, bool animat
 {
     Int3 current_coords = coords;
     int32 push_size = 0;
-	FOR(push_index, MAX_ENTITY_PUSH_COUNT)
+    FOR(push_index, MAX_ENTITY_PUSH_COUNT)
     {
         if (getTileType(current_coords) == NONE) break;
-		current_coords = getNextCoords(current_coords, direction);
+        current_coords = getNextCoords(current_coords, direction);
         push_size++;
     }
     current_coords = getNextCoords(current_coords, oppositeDirection(direction));
@@ -1739,53 +1740,53 @@ Direction getNextMirrorState(Direction start_direction, Direction push_direction
     switch (start_direction)
     {
         case NORTH: switch (push_direction)
-        {
-            case NORTH: return SOUTH;
-            case SOUTH: return SOUTH;
-            case WEST:  return UP;
-            case EAST:  return DOWN;
-            default:    return 0;
-        }
+                    {
+                        case NORTH: return SOUTH;
+                        case SOUTH: return SOUTH;
+                        case WEST:  return UP;
+                        case EAST:  return DOWN;
+                        default:    return 0;
+                    }
         case SOUTH: switch (push_direction)
-        {
-            case NORTH: return NORTH;
-            case SOUTH: return NORTH;
-            case WEST:  return DOWN;
-            case EAST:  return UP;
-            default: 	return 0;
-        }
+                    {
+                        case NORTH: return NORTH;
+                        case SOUTH: return NORTH;
+                        case WEST:  return DOWN;
+                        case EAST:  return UP;
+                        default: 	return 0;
+                    }
         case WEST: switch (push_direction)
-        {
-            case NORTH: return UP;
-            case SOUTH: return DOWN;
-            case WEST:  return EAST;
-            case EAST:  return EAST;
-            default: 	return 0;
-        }
+                   {
+                       case NORTH: return UP;
+                       case SOUTH: return DOWN;
+                       case WEST:  return EAST;
+                       case EAST:  return EAST;
+                       default: 	return 0;
+                   }
         case EAST: switch (push_direction)
-        {
-            case NORTH: return DOWN;
-            case SOUTH: return UP;
-            case WEST:  return WEST;
-            case EAST:  return WEST;
-            default: 	return 0;
-        }
+                   {
+                       case NORTH: return DOWN;
+                       case SOUTH: return UP;
+                       case WEST:  return WEST;
+                       case EAST:  return WEST;
+                       default: 	return 0;
+                   }
         case UP: switch (push_direction)
-        {
-            case NORTH: return EAST;
-            case SOUTH: return WEST;
-            case WEST:  return SOUTH;
-            case EAST:  return NORTH;
-            default: 	return 0;
-        }
+                 {
+                     case NORTH: return EAST;
+                     case SOUTH: return WEST;
+                     case WEST:  return SOUTH;
+                     case EAST:  return NORTH;
+                     default: 	return 0;
+                 }
         case DOWN: switch (push_direction)
-        {
-            case NORTH: return WEST;
-            case SOUTH: return EAST;
-            case WEST:  return NORTH;
-            case EAST:  return SOUTH;
-            default: 	return 0;
-        }
+                   {
+                       case NORTH: return WEST;
+                       case SOUTH: return EAST;
+                       case WEST:  return NORTH;
+                       case EAST:  return SOUTH;
+                       default: 	return 0;
+                   }
         default: return 0;
     }
 }
@@ -1804,129 +1805,129 @@ Direction getNextLaserDirectionMirror(Direction laser_direction, Direction mirro
     switch (mirror_direction) // N/S/W/E diagonal cases, and U/D all cases
     {
         case NORTH: switch (laser_direction)
-        {
-            case NORTH_WEST: return DOWN_WEST;
-            case NORTH_EAST: return DOWN_EAST;
-            case SOUTH_WEST: return UP_WEST;
-            case SOUTH_EAST: return UP_EAST;
+                    {
+                        case NORTH_WEST: return DOWN_WEST;
+                        case NORTH_EAST: return DOWN_EAST;
+                        case SOUTH_WEST: return UP_WEST;
+                        case SOUTH_EAST: return UP_EAST;
 
-            case UP_NORTH:   return DOWN_SOUTH;
-            //case UP_SOUTH:
-            case UP_WEST:    return SOUTH_WEST;
-            case UP_EAST:    return SOUTH_EAST;
+                        case UP_NORTH:   return DOWN_SOUTH;
+                                         //case UP_SOUTH:
+                        case UP_WEST:    return SOUTH_WEST;
+                        case UP_EAST:    return SOUTH_EAST;
 
-            //case DOWN_NORTH: 
-            case DOWN_SOUTH: return UP_NORTH;
-            case DOWN_WEST:  return NORTH_WEST;
-            case DOWN_EAST:  return NORTH_EAST;
+                                         //case DOWN_NORTH: 
+                        case DOWN_SOUTH: return UP_NORTH;
+                        case DOWN_WEST:  return NORTH_WEST;
+                        case DOWN_EAST:  return NORTH_EAST;
 
-            default: return NO_DIRECTION;
-        }
+                        default: return NO_DIRECTION;
+                    }
         case SOUTH: switch (laser_direction)
-        {
-            case NORTH_WEST: return UP_WEST;
-            case NORTH_EAST: return UP_EAST;
-            case SOUTH_WEST: return DOWN_WEST;
-            case SOUTH_EAST: return DOWN_EAST;
+                    {
+                        case NORTH_WEST: return UP_WEST;
+                        case NORTH_EAST: return UP_EAST;
+                        case SOUTH_WEST: return DOWN_WEST;
+                        case SOUTH_EAST: return DOWN_EAST;
 
-            //case UP_NORTH:
-            case UP_SOUTH:   return DOWN_NORTH;
-            case UP_WEST:	 return NORTH_WEST;
-            case UP_EAST:    return NORTH_EAST;
+                                         //case UP_NORTH:
+                        case UP_SOUTH:   return DOWN_NORTH;
+                        case UP_WEST:	 return NORTH_WEST;
+                        case UP_EAST:    return NORTH_EAST;
 
-            case DOWN_NORTH: return UP_SOUTH;
-            //case DOWN_SOUTH: 
-            case DOWN_WEST:  return SOUTH_WEST;
-            case DOWN_EAST:  return SOUTH_EAST;
+                        case DOWN_NORTH: return UP_SOUTH;
+                                         //case DOWN_SOUTH: 
+                        case DOWN_WEST:  return SOUTH_WEST;
+                        case DOWN_EAST:  return SOUTH_EAST;
 
-            default: return NO_DIRECTION;
-        }
+                        default: return NO_DIRECTION;
+                    }
         case WEST: switch (laser_direction)
-        {
-            case NORTH_WEST: return DOWN_NORTH;
-            case NORTH_EAST: return UP_NORTH;
-            case SOUTH_WEST: return DOWN_SOUTH;
-            case SOUTH_EAST: return UP_SOUTH;
+                   {
+                       case NORTH_WEST: return DOWN_NORTH;
+                       case NORTH_EAST: return UP_NORTH;
+                       case SOUTH_WEST: return DOWN_SOUTH;
+                       case SOUTH_EAST: return UP_SOUTH;
 
-            case UP_NORTH:   return NORTH_EAST;
-            case UP_SOUTH:   return SOUTH_EAST;
-            case UP_WEST:    return DOWN_EAST;
-            //case UP_EAST:    
+                       case UP_NORTH:   return NORTH_EAST;
+                       case UP_SOUTH:   return SOUTH_EAST;
+                       case UP_WEST:    return DOWN_EAST;
+                                        //case UP_EAST:    
 
-            case DOWN_NORTH: return NORTH_WEST;
-            case DOWN_SOUTH: return SOUTH_WEST;
-            //case DOWN_WEST:
-            case DOWN_EAST:  return UP_WEST;
+                       case DOWN_NORTH: return NORTH_WEST;
+                       case DOWN_SOUTH: return SOUTH_WEST;
+                                        //case DOWN_WEST:
+                       case DOWN_EAST:  return UP_WEST;
 
-            default: return NO_DIRECTION;
-        }
+                       default: return NO_DIRECTION;
+                   }
         case EAST: switch (laser_direction)
-        {
-            case NORTH_WEST: return UP_NORTH;
-            case NORTH_EAST: return DOWN_NORTH;
-            case SOUTH_WEST: return UP_SOUTH;
-            case SOUTH_EAST: return DOWN_SOUTH;
+                   {
+                       case NORTH_WEST: return UP_NORTH;
+                       case NORTH_EAST: return DOWN_NORTH;
+                       case SOUTH_WEST: return UP_SOUTH;
+                       case SOUTH_EAST: return DOWN_SOUTH;
 
-            case UP_NORTH:   return NORTH_WEST;
-            case UP_SOUTH:   return SOUTH_WEST;
-            //case UP_WEST:
-            case UP_EAST:    return DOWN_WEST;
+                       case UP_NORTH:   return NORTH_WEST;
+                       case UP_SOUTH:   return SOUTH_WEST;
+                                        //case UP_WEST:
+                       case UP_EAST:    return DOWN_WEST;
 
-            case DOWN_NORTH: return NORTH_EAST;
-            case DOWN_SOUTH: return SOUTH_EAST;
-            case DOWN_WEST:  return UP_EAST;
-            //case DOWN_EAST:
+                       case DOWN_NORTH: return NORTH_EAST;
+                       case DOWN_SOUTH: return SOUTH_EAST;
+                       case DOWN_WEST:  return UP_EAST;
+                                        //case DOWN_EAST:
 
-            default: return NO_DIRECTION;
-        }
+                       default: return NO_DIRECTION;
+                   }
         case UP: switch (laser_direction)
-        {
-            case NORTH: 	 return EAST;
-            case SOUTH: 	 return WEST;
-            case WEST:  	 return SOUTH;
-            case EAST:  	 return NORTH;
+                 {
+                     case NORTH: 	 return EAST;
+                     case SOUTH: 	 return WEST;
+                     case WEST:  	 return SOUTH;
+                     case EAST:  	 return NORTH;
 
-            case NORTH_WEST: return SOUTH_EAST;
-            //case NORTH_EAST:
-            //case SOUTH_WEST:
-            case SOUTH_EAST: return NORTH_WEST;
+                     case NORTH_WEST: return SOUTH_EAST;
+                                      //case NORTH_EAST:
+                                      //case SOUTH_WEST:
+                     case SOUTH_EAST: return NORTH_WEST;
 
-            case UP_NORTH:   return UP_EAST;
-            case UP_SOUTH:   return UP_WEST;
-            case UP_WEST:    return UP_SOUTH;
-            case UP_EAST:    return UP_NORTH;
+                     case UP_NORTH:   return UP_EAST;
+                     case UP_SOUTH:   return UP_WEST;
+                     case UP_WEST:    return UP_SOUTH;
+                     case UP_EAST:    return UP_NORTH;
 
-            case DOWN_NORTH: return DOWN_EAST;
-            case DOWN_SOUTH: return DOWN_WEST;
-            case DOWN_WEST:  return DOWN_SOUTH;
-            case DOWN_EAST:  return DOWN_NORTH;
+                     case DOWN_NORTH: return DOWN_EAST;
+                     case DOWN_SOUTH: return DOWN_WEST;
+                     case DOWN_WEST:  return DOWN_SOUTH;
+                     case DOWN_EAST:  return DOWN_NORTH;
 
-            default: return NO_DIRECTION;
-        }
+                     default: return NO_DIRECTION;
+                 }
         case DOWN: switch (laser_direction)
-        {
-            case NORTH: 	 return WEST;
-            case SOUTH: 	 return EAST;
-            case WEST:  	 return NORTH;
-            case EAST:  	 return SOUTH;
+                   {
+                       case NORTH: 	 return WEST;
+                       case SOUTH: 	 return EAST;
+                       case WEST:  	 return NORTH;
+                       case EAST:  	 return SOUTH;
 
-            //case NORTH_WEST: 
-            case NORTH_EAST: return SOUTH_WEST;
-            case SOUTH_WEST: return NORTH_EAST;
-            //case SOUTH_EAST:
+                                     //case NORTH_WEST: 
+                       case NORTH_EAST: return SOUTH_WEST;
+                       case SOUTH_WEST: return NORTH_EAST;
+                                        //case SOUTH_EAST:
 
-            case UP_NORTH:   return UP_WEST;
-            case UP_SOUTH:	 return UP_EAST;
-            case UP_WEST:    return UP_NORTH;
-            case UP_EAST:    return UP_SOUTH;
+                       case UP_NORTH:   return UP_WEST;
+                       case UP_SOUTH:	 return UP_EAST;
+                       case UP_WEST:    return UP_NORTH;
+                       case UP_EAST:    return UP_SOUTH;
 
-            case DOWN_NORTH: return DOWN_WEST;
-            case DOWN_SOUTH: return DOWN_EAST;
-            case DOWN_WEST:  return DOWN_NORTH;
-            case DOWN_EAST:  return DOWN_SOUTH;
+                       case DOWN_NORTH: return DOWN_WEST;
+                       case DOWN_SOUTH: return DOWN_EAST;
+                       case DOWN_WEST:  return DOWN_NORTH;
+                       case DOWN_EAST:  return DOWN_SOUTH;
 
-			default: return NO_DIRECTION;
-        }
+                       default: return NO_DIRECTION;
+                   }
         default: return NO_DIRECTION;
     }
 }
@@ -1938,8 +1939,8 @@ Direction getRedDirectionAtCrystal(Direction input_direction)
         case NORTH:      return NORTH_WEST;
         case NORTH_WEST: return WEST;
         case WEST:		 return SOUTH_WEST;
-    	case SOUTH_WEST: return SOUTH;
-    	case SOUTH:      return SOUTH_EAST;
+        case SOUTH_WEST: return SOUTH;
+        case SOUTH:      return SOUTH_EAST;
         case SOUTH_EAST: return EAST;
         case EAST:       return NORTH_EAST;
         case NORTH_EAST: return NORTH;
@@ -1954,8 +1955,8 @@ Direction getBlueDirectionAtCrystal(Direction input_direction)
         case NORTH:      return NORTH_EAST;
         case NORTH_WEST: return NORTH;
         case WEST:		 return NORTH_WEST;
-    	case SOUTH_WEST: return WEST;
-    	case SOUTH:      return SOUTH_WEST;
+        case SOUTH_WEST: return WEST;
+        case SOUTH:      return SOUTH_WEST;
         case SOUTH_EAST: return SOUTH;
         case EAST:       return SOUTH_EAST;
         case NORTH_EAST: return EAST;
@@ -1966,8 +1967,8 @@ Direction getBlueDirectionAtCrystal(Direction input_direction)
 bool isParallelToXZ(Direction direction)
 {
     Int3 test_coords = getNextCoords(normCoordsToInt(IDENTITY_TRANSLATION), direction);
-	if (test_coords.y != 0) return false;
-	else return true;
+    if (test_coords.y != 0) return false;
+    else return true;
 }
 
 LaserColor getLaserColor(TileType tile)
@@ -2030,10 +2031,10 @@ int32 findNextFreeInLaserBuffer()
 
 void updateLaserBuffer(void)
 {
-	Entity* player = &next_world_state.player;
+    Entity* player = &next_world_state.player;
 
     memset(laser_buffer, 0, sizeof(laser_buffer));
-        
+
     player->hit_by_red   = false;
     player->hit_by_blue  = false;
     player->green_hit = (GreenHit){0};
@@ -2066,16 +2067,16 @@ void updateLaserBuffer(void)
                 if (!intCoordsWithinLevelBounds(current_tile_coords))
                 {
                     lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
-					break;
+                    break;
                 }
 
                 if ((next_world_state.pack_hitbox_turning_from_timer > 0) 
-                && (int3IsEqual(current_tile_coords, next_world_state.pack_hitbox_turning_from_coords) && (next_world_state.pack_hitbox_turning_from_direction == current_direction)) 
-                || ((next_world_state.pack_hitbox_turning_to_timer > 0) 
-                && int3IsEqual(current_tile_coords, next_world_state.pack_hitbox_turning_to_coords)   && (next_world_state.pack_hitbox_turning_to_direction   == current_direction))) 
+                        && (int3IsEqual(current_tile_coords, next_world_state.pack_hitbox_turning_from_coords) && (next_world_state.pack_hitbox_turning_from_direction == current_direction)) 
+                        || ((next_world_state.pack_hitbox_turning_to_timer > 0) 
+                            && int3IsEqual(current_tile_coords, next_world_state.pack_hitbox_turning_to_coords)   && (next_world_state.pack_hitbox_turning_to_direction   == current_direction))) 
                 {
                     Vec3 end_coords = vec3Multiply(vec3Add(intCoordsToNorm(current_tile_coords), intCoordsToNorm(getNextCoords(current_tile_coords, oppositeDirection(current_direction)))), 0.5);
-					lb->end_coords = vec3Add(end_coords, offset); 
+                    lb->end_coords = vec3Add(end_coords, offset); 
                     break;
                 }
 
@@ -2087,13 +2088,13 @@ void updateLaserBuffer(void)
                 if (getTileType(current_tile_coords) == PLAYER || (th_hit && th.type == PLAYER))
                 {
                     bool skip_check = false;
-					if (player->moving_direction == current_direction || player->moving_direction == oppositeDirection(current_direction)) 
+                    if (player->moving_direction == current_direction || player->moving_direction == oppositeDirection(current_direction)) 
                     {
                         lb->end_coords = vec3Add(player->position_norm, offset); 
-						skip_check = true;
+                        skip_check = true;
                     }
                     if (skip_check || ((player->in_motion < STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH || player->moving_direction == NO_DIRECTION) && (th_hit == false || th.type == PLAYER)))
-                    //if (skip_check || !(player->in_motion >= STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH && th.type == PLAYER && player->moving_direction != NO_DIRECTION))
+                        //if (skip_check || !(player->in_motion >= STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH && th.type == PLAYER && player->moving_direction != NO_DIRECTION))
                     {	
                         if (!skip_check)
                         {
@@ -2142,8 +2143,8 @@ void updateLaserBuffer(void)
                         lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                     }
 
-					if 		(lb->color == RED) 	current_direction = getRedDirectionAtCrystal(current_direction);
-					else if (lb->color == BLUE) current_direction = getBlueDirectionAtCrystal(current_direction);
+                    if 		(lb->color == RED) 	current_direction = getRedDirectionAtCrystal(current_direction);
+                    else if (lb->color == BLUE) current_direction = getBlueDirectionAtCrystal(current_direction);
                     no_more_turns = false;
                     break;
                 }
@@ -2203,8 +2204,8 @@ void updateLaserBuffer(void)
                     {
                         // TODO(spike): need to figure out if pushed by pack or player, and if so change the equivalent of MOVE_OR_PUSH_ANIMATION_TIME that we're checking against
 
-                    	// trailing hitbox hit
-						if (mirror->moving_direction == getNextLaserDirectionMirror(current_direction, mirror->direction))
+                        // trailing hitbox hit
+                        if (mirror->moving_direction == getNextLaserDirectionMirror(current_direction, mirror->direction))
                         {
                             Vec3 to_vector = directionToVector(current_direction);
                             float dir_offset = (float)(mirror->in_motion) / (float)(MOVE_OR_PUSH_ANIMATION_TIME);
@@ -2212,7 +2213,7 @@ void updateLaserBuffer(void)
                             lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                             skip_next_mirror = 2;
                         }
-						else if (mirror->moving_direction == oppositeDirection(getNextLaserDirectionMirror(current_direction, mirror->direction)))
+                        else if (mirror->moving_direction == oppositeDirection(getNextLaserDirectionMirror(current_direction, mirror->direction)))
                         {
                             Vec3 to_vector = directionToVector(oppositeDirection(current_direction));
                             float dir_offset = (float)(mirror->in_motion) / (float)(MOVE_OR_PUSH_ANIMATION_TIME);
@@ -2220,7 +2221,7 @@ void updateLaserBuffer(void)
                             lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                             skip_next_mirror = 2;
                         }
-						else
+                        else
                         {
                             // get here with pack swing from top when laser is pointing straight down onto mirror
                             lb->end_coords = intCoordsToNorm(current_tile_coords);
@@ -2228,7 +2229,7 @@ void updateLaserBuffer(void)
                         }
                     }
 
-					current_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
+                    current_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
                     no_more_turns = false;
                     break;
                 }
@@ -2307,7 +2308,7 @@ void resetStandardVisuals()
 bool doFallingEntity(Entity* entity, bool do_animation)
 {
     if (entity->id == -1) return false;
-	Int3 next_coords = getNextCoords(entity->coords, DOWN);
+    Int3 next_coords = getNextCoords(entity->coords, DOWN);
     if (!(isPushable(getTileType(next_coords)) && getEntityPointer(next_coords)->id == -1) && getTileType(next_coords) != NONE) return true;
     TrailingHitbox _;
     if (trailingHitboxAtCoords(next_coords, &_) && entity->id != PLAYER_ID) return true;
@@ -2338,11 +2339,11 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         {
             if (do_animation)
             {
-            	createInterpolationAnimation(intCoordsToNorm(current_start_coords),
-                                             intCoordsToNorm(current_end_coords),
-                                             &entity_in_stack->position_norm,
-                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                             entity_in_stack->id, FALL_ANIMATION_TIME);
+                createInterpolationAnimation(intCoordsToNorm(current_start_coords),
+                        intCoordsToNorm(current_end_coords),
+                        &entity_in_stack->position_norm,
+                        IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                        entity_in_stack->id, FALL_ANIMATION_TIME);
                 createTrailingHitbox(current_start_coords, DOWN, TRAILING_HITBOX_TIME, getTileType(entity_in_stack->coords));
             }
             entity_in_stack->first_fall_already_done = true;
@@ -2354,16 +2355,16 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         entity_in_stack->coords = current_end_coords;
         current_end_coords = current_start_coords;
         current_start_coords = getNextCoords(current_start_coords, UP);
-	}
+    }
     return false;
 }
 
 void doFallingObjects(bool do_animation)
 {
- 	Entity* object_group_to_fall[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources };
-	FOR(to_fall_index, 4)
+    Entity* object_group_to_fall[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources };
+    FOR(to_fall_index, 4)
     {
-		Entity* entity_group = object_group_to_fall[to_fall_index];
+        Entity* entity_group = object_group_to_fall[to_fall_index];
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
             if (next_world_state.pack_hitbox_turning_to_timer > 0 && int3IsEqual(next_world_state.pack_hitbox_turning_to_coords, entity_group[entity_index].coords)) continue; // blocks blue-not-blue turn orthogonal case from falling immediately
@@ -2379,7 +2380,7 @@ void doHeadRotation(bool clockwise)
     int32 stack_size = getPushableStackSize(getNextCoords(next_world_state.player.coords, UP));
 
     Int3 current_tile_coords = getNextCoords(next_world_state.player.coords, UP);
-	FOR(stack_rotate_index, stack_size)
+    FOR(stack_rotate_index, stack_size)
     {
         Entity* entity = getEntityPointer(current_tile_coords);
         bool up_or_down = false;
@@ -2391,55 +2392,55 @@ void doHeadRotation(bool clockwise)
             case WEST:
             case SOUTH:
             case EAST:
-            {
-                if (clockwise) 
                 {
-                    next_direction = current_direction + 1;
-                    if (next_direction == UP) next_direction = NORTH;
+                    if (clockwise) 
+                    {
+                        next_direction = current_direction + 1;
+                        if (next_direction == UP) next_direction = NORTH;
+                    }
+                    else 
+                    {
+                        next_direction = current_direction - 1;
+                        if (next_direction == -1) next_direction = EAST;
+                    }
+                    break;
                 }
-                else 
-                {
-                    next_direction = current_direction - 1;
-                    if (next_direction == -1) next_direction = EAST;
-                }
-				break;
-            }
             case UP:
-            {
-				next_direction = DOWN;
-                up_or_down = true;
-                break;
-            }
+                {
+                    next_direction = DOWN;
+                    up_or_down = true;
+                    break;
+                }
             case DOWN:
-            {
-				next_direction = UP;
-                up_or_down = true;
-				break;
-            }
+                {
+                    next_direction = UP;
+                    up_or_down = true;
+                    break;
+                }
             default: break;
         }
 
         int32 id = getEntityId(current_tile_coords);
 
         if (!up_or_down) createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
-                                     				  directionToQuaternion(current_direction, true), 
-                                     				  directionToQuaternion(next_direction, true), 
-                                     				  &entity->rotation_quat,
-                                     				  id, TURN_ANIMATION_TIME);
+                directionToQuaternion(current_direction, true), 
+                directionToQuaternion(next_direction, true), 
+                &entity->rotation_quat,
+                id, TURN_ANIMATION_TIME);
         else 
         {
-			Vec4 start = entity->rotation_quat;
+            Vec4 start = entity->rotation_quat;
             float sign = clockwise ? 1.0f : -1.0f;
             Vec4 delta = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), sign * 0.25f * TAU);
             Vec4 end = quaternionNormalize(quaternionMultiply(delta, start));
             createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0,
-                    					 start, end, &entity->rotation_quat,
-                                         id, TURN_ANIMATION_TIME);
+                    start, end, &entity->rotation_quat,
+                    id, TURN_ANIMATION_TIME);
         }
-        
-		setTileDirection(next_direction, current_tile_coords);
-		entity->direction = next_direction;
-		current_tile_coords = getNextCoords(current_tile_coords, UP);
+
+        setTileDirection(next_direction, current_tile_coords);
+        entity->direction = next_direction;
+        current_tile_coords = getNextCoords(current_tile_coords, UP);
     }
 }
 
@@ -2453,16 +2454,16 @@ void doHeadMovement(Direction direction, bool animations_on, int32 animation_tim
 
 void doStandardMovement(Direction input_direction, Int3 next_player_coords, int32 animation_time)
 {
-	Entity* player = &next_world_state.player;
+    Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
 
     doHeadMovement(input_direction, true, animation_time);
 
     createInterpolationAnimation(intCoordsToNorm(player->coords), 
-                                 intCoordsToNorm(next_player_coords), 
-                                 &player->position_norm,
-                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                 PLAYER_ID, animation_time);
+            intCoordsToNorm(next_player_coords), 
+            &player->position_norm,
+            IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+            PLAYER_ID, animation_time);
 
     int32 trailing_hitbox_time = TRAILING_HITBOX_TIME;
     createTrailingHitbox(player->coords, input_direction, trailing_hitbox_time, PLAYER);
@@ -2479,10 +2480,10 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
         setTileDirection(NORTH, pack->coords);
         setTileType(PACK, player->coords);
         createInterpolationAnimation(intCoordsToNorm(pack->coords),
-                                     intCoordsToNorm(player->coords),
-                                     &pack->position_norm,
-                                     IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                     PACK_ID, animation_time);
+                intCoordsToNorm(player->coords),
+                &pack->position_norm,
+                IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                PACK_ID, animation_time);
 
         createTrailingHitbox(pack->coords, input_direction, trailing_hitbox_time, PACK);
 
@@ -2499,7 +2500,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
     player->moving_direction = input_direction;
 
     changeMoving(player);
-	changeMoving(pack);
+    changeMoving(pack);
 
     recordStateForUndo();
 }
@@ -2509,7 +2510,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
 // returns true if player is able to try to tp (i.e. player is facing tw green beam). doesn't consider any obstructed tps.
 bool calculateGhosts()
 {
-	Entity* player = &next_world_state.player;
+    Entity* player = &next_world_state.player;
 
     // render and calculate ghosts
     bool facing_green = false;
@@ -2569,7 +2570,7 @@ void updateTextInput(TickInput *input)
 {
     for (int32 chars_typed_index = 0; chars_typed_index < input->text.count; chars_typed_index++)
     {
-		uint32 codepoint = input->text.codepoints[chars_typed_index];
+        uint32 codepoint = input->text.codepoints[chars_typed_index];
         char c = (char)codepoint;
         editAppendChar(c);
     }
@@ -2589,9 +2590,9 @@ int32 glyphSprite(char c)
 // EDITOR
 
 /*
-contains two modes, place/break or select. is called if either one happens.
+   contains two modes, place/break or select. is called if either one happens.
 
-WASD, SPACE, SHIFT: camera movement
+   WASD, SPACE, SHIFT: camera movement
 
 J: FOV toggle (30 <-> 60)
 C: save camera
@@ -2610,7 +2611,7 @@ LMB: selet block instance
 
 void editorMode(TickInput *tick_input)
 {
-	Entity* player = &next_world_state.player;
+    Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
 
     Vec3 right_camera_basis, forward_camera_basis;
@@ -2620,26 +2621,26 @@ void editorMode(TickInput *tick_input)
     {
         if (tick_input->w_press) 
         {
-            camera.coords.x += forward_camera_basis.x * MOVE_STEP;
-            camera.coords.z += forward_camera_basis.z * MOVE_STEP;
+            camera.coords.x += forward_camera_basis.x * CAMERA_MOVE_STEP;
+            camera.coords.z += forward_camera_basis.z * CAMERA_MOVE_STEP;
         }
         if (tick_input->a_press) 
         {
-            camera.coords.x -= right_camera_basis.x * MOVE_STEP;
-            camera.coords.z -= right_camera_basis.z * MOVE_STEP;
+            camera.coords.x -= right_camera_basis.x * CAMERA_MOVE_STEP;
+            camera.coords.z -= right_camera_basis.z * CAMERA_MOVE_STEP;
         }
         if (tick_input->s_press) 
         {
-            camera.coords.x -= forward_camera_basis.x * MOVE_STEP;
-            camera.coords.z -= forward_camera_basis.z * MOVE_STEP;
+            camera.coords.x -= forward_camera_basis.x * CAMERA_MOVE_STEP;
+            camera.coords.z -= forward_camera_basis.z * CAMERA_MOVE_STEP;
         }
         if (tick_input->d_press) 
         {
-            camera.coords.x += right_camera_basis.x * MOVE_STEP;
-            camera.coords.z += right_camera_basis.z * MOVE_STEP;
+            camera.coords.x += right_camera_basis.x * CAMERA_MOVE_STEP;
+            camera.coords.z += right_camera_basis.z * CAMERA_MOVE_STEP;
         }
-        if (tick_input->space_press) camera.coords.y += MOVE_STEP;
-        if (tick_input->shift_press) camera.coords.y -= MOVE_STEP;
+        if (tick_input->space_press) camera.coords.y += CAMERA_MOVE_STEP;
+        if (tick_input->shift_press) camera.coords.y -= CAMERA_MOVE_STEP;
 
         if (tick_input->j_press && time_until_input == 0)
         {
@@ -2769,14 +2770,14 @@ void editorMode(TickInput *tick_input)
             Vec3 neg_z_basis = {0, 0, -1};
             RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), MAX_RAYCAST_SEEK_LENGTH);
 
-			if (isEntity(getTileType(raycast_output.hit_coords)))
+            if (isEntity(getTileType(raycast_output.hit_coords)))
             {
-				editor_state.selected_id = getEntityId(raycast_output.hit_coords);
+                editor_state.selected_id = getEntityId(raycast_output.hit_coords);
                 editor_state.selected_coords = raycast_output.hit_coords;
             }
-			else
+            else
             {
-				editor_state.selected_id = -1;
+                editor_state.selected_id = -1;
             }
         }
 
@@ -2800,10 +2801,10 @@ void editorMode(TickInput *tick_input)
 
 void gameInitialiseState()
 {
-	Entity* player = &next_world_state.player;
+    Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
 
-	// memset worldstate to 0 (with persistant level_name and solved levels)
+    // memset worldstate to 0 (with persistant level_name and solved levels)
     char persist_level_name[256] = {0};
     char persist_solved_levels[64][64] = {0};
     strcpy(persist_level_name, next_world_state.level_name);
@@ -2816,7 +2817,7 @@ void gameInitialiseState()
     else next_world_state.in_overworld = false;
 
     // build level_path from level_name
-	char level_path[64] = {0};
+    char level_path[64] = {0};
     buildLevelPathFromName(next_world_state.level_name, &level_path);
     loadFileToState(level_path);
 
@@ -2827,7 +2828,7 @@ void gameInitialiseState()
     memset(next_world_state.perm_mirrors,  0, sizeof(next_world_state.perm_mirrors));
     memset(next_world_state.win_blocks,    0, sizeof(next_world_state.win_blocks));
     memset(next_world_state.locked_blocks, 0, sizeof(next_world_state.locked_blocks));
-	FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+    FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
     {
         next_world_state.boxes[entity_index].id 	    = -1;
         next_world_state.mirrors[entity_index].id 	    = -1;
@@ -2851,7 +2852,7 @@ void gameInitialiseState()
         if (entity_group != 0)
         {
             int32 count = getEntityCount(entity_group);
-			entity_group[count].coords = bufferIndexToCoords(buffer_index);
+            entity_group[count].coords = bufferIndexToCoords(buffer_index);
             entity_group[count].position_norm = intCoordsToNorm(entity_group[count].coords);
             entity_group[count].direction = next_world_state.buffer[buffer_index + 1]; 
             entity_group[count].rotation_quat = directionToQuaternion(entity_group[count].direction, true);
@@ -2877,8 +2878,8 @@ void gameInitialiseState()
         }
     }
 
-	FILE* file = fopen(level_path, "rb+");
-	loadWinBlockPaths(file);
+    FILE* file = fopen(level_path, "rb+");
+    loadWinBlockPaths(file);
     loadLockedInfoPaths(file);
     camera = getCurrentCameraInFile(file);
     fclose(file);
@@ -2902,15 +2903,15 @@ void gameInitialise(char* level_name)
 
 void gameFrame(double delta_time, TickInput tick_input)
 {	
-	if (delta_time > 0.1) delta_time = 0.1;
-	accumulator += delta_time;
+    if (delta_time > 0.1) delta_time = 0.1;
+    accumulator += delta_time;
 
     if (editor_state.editor_mode != NO_MODE)
     {
-        camera.yaw += tick_input.mouse_dx * SENSITIVITY;
+        camera.yaw += tick_input.mouse_dx * CAMERA_SENSITIVITY;
         if (camera.yaw >  0.5f * TAU) camera.yaw -= TAU; 
         if (camera.yaw < -0.5f * TAU) camera.yaw += TAU; 
-        camera.pitch += tick_input.mouse_dy * SENSITIVITY;
+        camera.pitch += tick_input.mouse_dy * CAMERA_SENSITIVITY;
         float pitch_limit = 0.25f * TAU;
         if (camera.pitch >  pitch_limit) camera.pitch =  pitch_limit; 
         if (camera.pitch < -pitch_limit) camera.pitch = -pitch_limit; 
@@ -3722,6 +3723,9 @@ void gameFrame(double delta_time, TickInput tick_input)
 
 		// DRAW 2D
         
+        // display level name
+		drawDebugText(next_world_state.level_name);
+
         // player in_motion info
 		char player_moving_text[256] = {0};
         snprintf(player_moving_text, sizeof(player_moving_text), "player moving: %d", player->in_motion);
@@ -3755,8 +3759,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 drawAsset(0, OUTLINE_3D, intCoordsToNorm(editor_state.selected_coords), DEFAULT_SCALE, IDENTITY_QUATERNION);
             }
         }
-        // level name
-		drawDebugText(next_world_state.level_name);
 
 		// draw selected id info
         if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
@@ -3767,29 +3769,35 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (editor_state.selected_id > 0)
             {
                 Entity* e = getEntityFromId(editor_state.selected_id);
-
-                char selected_id_text[256] = {0};
-                snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d", editor_state.selected_id);
-                drawDebugText(selected_id_text);
-
-                char writing_field_text[256] = {0};
-                char writing_field_state[256] = {0};
-                switch (editor_state.writing_field)
+                if (e != 0) // TODO(spike): this guard is somewhat bad solution; i still persist selected_id even if that id doesn't exist anymore. this prevents crash, but later: on entity delete check if matches against id, and if so remove from editor_state.
                 {
-                    case NO_WRITING_FIELD:    		memcpy(writing_field_state, "none", 		sizeof(writing_field_state)); break;
-                    case WRITING_FIELD_NEXT_LEVEL:  memcpy(writing_field_state, "next level", 	sizeof(writing_field_state)); break;
-                    case WRITING_FIELD_UNLOCKED_BY: memcpy(writing_field_state, "unlocked by", 	sizeof(writing_field_state)); break;
-                }
-                snprintf(writing_field_text, sizeof(writing_field_text), "writing_field: %s", writing_field_state); 
-                drawDebugText(writing_field_text);
+                    char selected_id_text[256] = {0};
+                    snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d", editor_state.selected_id);
+                    drawDebugText(selected_id_text);
 
-                // TODO(spike): macro for this declaration + snprintf + drawDebugText
-				char next_level_text[256] = {0};
-                char unlocked_by_text[256] = {0};
-				snprintf(next_level_text, sizeof(next_level_text), "next_level: %s", e->next_level);
-                snprintf(unlocked_by_text, sizeof(unlocked_by_text), "unlocked_by: %s", e->unlocked_by);
-                drawDebugText(next_level_text);
-                drawDebugText(unlocked_by_text);
+                    char writing_field_text[256] = {0};
+                    char writing_field_state[256] = {0};
+                    switch (editor_state.writing_field)
+                    {
+                        case NO_WRITING_FIELD:    		memcpy(writing_field_state, "none", 		sizeof(writing_field_state)); break;
+                        case WRITING_FIELD_NEXT_LEVEL:  memcpy(writing_field_state, "next level", 	sizeof(writing_field_state)); break;
+                        case WRITING_FIELD_UNLOCKED_BY: memcpy(writing_field_state, "unlocked by", 	sizeof(writing_field_state)); break;
+                    }
+                    snprintf(writing_field_text, sizeof(writing_field_text), "writing_field: %s", writing_field_state); 
+                    drawDebugText(writing_field_text);
+
+                    // TODO(spike): macro for this declaration + snprintf + drawDebugText
+                    char next_level_text[256] = {0};
+                    char unlocked_by_text[256] = {0};
+                    snprintf(next_level_text, sizeof(next_level_text), "next_level: %s", e->next_level);
+                    snprintf(unlocked_by_text, sizeof(unlocked_by_text), "unlocked_by: %s", e->unlocked_by);
+                    drawDebugText(next_level_text);
+                    drawDebugText(unlocked_by_text);
+                }
+                else
+                {
+                    drawDebugText("selected entity deleted");
+                }
             }
             else
             {
@@ -3798,7 +3806,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // draw camera boundary lines
-        if (time_until_input == 0 && tick_input.t_press) 
+        if (time_until_input == 0 && tick_input.t_press && !(editor_state.editor_mode == SELECT_WRITE))
         {
             draw_camera_boundary = (draw_camera_boundary) ? false : true;
 			time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
@@ -3829,7 +3837,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // decide which camera to use
         if (editor_state.do_wide_camera) camera.fov = 60.0f;
-        else camera.fov = 25.0f;
+        else camera.fov = CAMERA_FOV;
 
         // write to file
         char level_path[64];
