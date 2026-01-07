@@ -162,9 +162,9 @@ Vec4 quaternionNegate(Vec4 quaternion)
 Vec4 quaternionMultiply(Vec4 a, Vec4 b)
 {
     return (Vec4){ a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
-        a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
-        a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
-        a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z};
+        		   a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
+        		   a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
+        		   a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z};
 }
 
 Vec4 quaternionNormalize(Vec4 quaternion)
@@ -186,12 +186,12 @@ Vec3 vec3RotateByQuaternion(Vec3 input_vector, Vec4 quaternion)
     float quaternion_scalar_part = quaternion.w;
     Vec3 q_cross_v = vec3CrossProduct(quaternion_vector_part, input_vector);
     Vec3 temp_vector = (Vec3){ q_cross_v.x + quaternion_scalar_part * input_vector.x,
-        q_cross_v.y + quaternion_scalar_part * input_vector.y,
-        q_cross_v.z + quaternion_scalar_part * input_vector.z};
+    q_cross_v.y + quaternion_scalar_part * input_vector.y,
+    q_cross_v.z + quaternion_scalar_part * input_vector.z};
     Vec3 q_cross_t = vec3CrossProduct(quaternion_vector_part, temp_vector);
     return (Vec3){ input_vector.x + 2.0f * q_cross_t.x,
-        input_vector.y + 2.0f * q_cross_t.y,
-        input_vector.z + 2.0f * q_cross_t.z};
+    input_vector.y + 2.0f * q_cross_t.y,
+    input_vector.z + 2.0f * q_cross_t.z};
 }
 
 // MATH HELPER FUNCTIONS
@@ -440,29 +440,29 @@ Direction getMiddleDirection(Direction direction_1, Direction direction_2)
     switch (direction_1)
     {
         case NORTH: switch (direction_2)
-                    {
-                        case WEST: return NORTH_WEST;
-                        case EAST: return NORTH_EAST;
-                        default: break;
-                    }
+        {
+            case WEST: return NORTH_WEST;
+            case EAST: return NORTH_EAST;
+            default: break;
+        }
         case WEST: switch (direction_2)
-                   {
-                       case NORTH: return NORTH_WEST;
-                       case SOUTH: return SOUTH_WEST;
-                       default: break;
-                   }
+        {
+        	case NORTH: return NORTH_WEST;
+        	case SOUTH: return SOUTH_WEST;
+        	default: break;
+        }
         case SOUTH: switch (direction_2)
-                    {
-                        case WEST: return SOUTH_WEST;
-                        case EAST: return SOUTH_EAST;
-                        default: break;
-                    }
+        {
+            case WEST: return SOUTH_WEST;
+            case EAST: return SOUTH_EAST;
+            default: break;
+        }
         case EAST: switch (direction_2)
-                   {
-                       case NORTH: return NORTH_EAST;
-                       case SOUTH: return SOUTH_EAST;
-                       default: break;
-                   }
+        {
+            case NORTH: return NORTH_EAST;
+            case SOUTH: return SOUTH_EAST;
+            default: break;
+        }
         default: return NO_DIRECTION;
     }
 }
@@ -1392,7 +1392,7 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
         for (int frame_index = 0; frame_index < animation_frames; frame_index++)
         {
             animations[animation_index].position[animation_frames-(1+frame_index)] 
-                = vec3Add(position_a, vec3ScalarMultiply(translation_per_frame, (float)(1+frame_index)));
+            = vec3Add(position_a, vec3ScalarMultiply(translation_per_frame, (float)(1+frame_index)));
         }
     }
     if (!quaternionIsZero(quaternionSubtract(rotation_b, rotation_a)))
@@ -1403,7 +1403,7 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
         {
             float param = (float)(frame_index + 1) / animation_frames;
             animations[animation_index].rotation[animation_frames-(1+frame_index)] 
-                = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(rotation_a, 1.0f - param), quaternionScalarMultiply(rotation_b, param)));
+            = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(rotation_a, 1.0f - param), quaternionScalarMultiply(rotation_b, param)));
         }
     }
 }
@@ -1698,10 +1698,10 @@ void pushOnce(Int3 coords, Direction direction, int32 animation_time)
     int32 id = getEntityId(entity_to_push.new_coords);
     TileType trailing_hitbox_type = getTileType(entity_to_push.new_coords);
     createInterpolationAnimation(intCoordsToNorm(entity_to_push.previous_coords),
-            intCoordsToNorm(entity_to_push.new_coords),
-            &entity_to_push.entity->position_norm,
-            IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-            id, animation_time); 
+                                 intCoordsToNorm(entity_to_push.new_coords),
+                                 &entity_to_push.entity->position_norm,
+                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                 id, animation_time); 
     int32 trailing_hitbox_time = TRAILING_HITBOX_TIME;
     createTrailingHitbox(coords, direction, trailing_hitbox_time, trailing_hitbox_type);
 }
@@ -1740,53 +1740,53 @@ Direction getNextMirrorState(Direction start_direction, Direction push_direction
     switch (start_direction)
     {
         case NORTH: switch (push_direction)
-                    {
-                        case NORTH: return SOUTH;
-                        case SOUTH: return SOUTH;
-                        case WEST:  return UP;
-                        case EAST:  return DOWN;
-                        default:    return 0;
-                    }
+        {
+            case NORTH: return SOUTH;
+            case SOUTH: return SOUTH;
+            case WEST:  return UP;
+            case EAST:  return DOWN;
+            default:    return 0;
+        }
         case SOUTH: switch (push_direction)
-                    {
-                        case NORTH: return NORTH;
-                        case SOUTH: return NORTH;
-                        case WEST:  return DOWN;
-                        case EAST:  return UP;
-                        default: 	return 0;
-                    }
+        {
+            case NORTH: return NORTH;
+            case SOUTH: return NORTH;
+            case WEST:  return DOWN;
+            case EAST:  return UP;
+            default: 	return 0;
+        }
         case WEST: switch (push_direction)
-                   {
-                       case NORTH: return UP;
-                       case SOUTH: return DOWN;
-                       case WEST:  return EAST;
-                       case EAST:  return EAST;
-                       default: 	return 0;
-                   }
+        {
+            case NORTH: return UP;
+            case SOUTH: return DOWN;
+            case WEST:  return EAST;
+            case EAST:  return EAST;
+            default: 	return 0;
+        }
         case EAST: switch (push_direction)
-                   {
-                       case NORTH: return DOWN;
-                       case SOUTH: return UP;
-                       case WEST:  return WEST;
-                       case EAST:  return WEST;
-                       default: 	return 0;
-                   }
+        {
+            case NORTH: return DOWN;
+            case SOUTH: return UP;
+            case WEST:  return WEST;
+            case EAST:  return WEST;
+            default: 	return 0;
+        }
         case UP: switch (push_direction)
-                 {
-                     case NORTH: return EAST;
-                     case SOUTH: return WEST;
-                     case WEST:  return SOUTH;
-                     case EAST:  return NORTH;
-                     default: 	return 0;
-                 }
+     	{
+        	case NORTH: return EAST;
+         	case SOUTH: return WEST;
+         	case WEST:  return SOUTH;
+         	case EAST:  return NORTH;
+         	default: 	return 0;
+     	}
         case DOWN: switch (push_direction)
-                   {
-                       case NORTH: return WEST;
-                       case SOUTH: return EAST;
-                       case WEST:  return NORTH;
-                       case EAST:  return SOUTH;
-                       default: 	return 0;
-                   }
+       	{
+           	case NORTH: return WEST;
+           	case SOUTH: return EAST;
+           	case WEST:  return NORTH;
+           	case EAST:  return SOUTH;
+           	default: 	return 0;
+       	}
         default: return 0;
     }
 }
@@ -1805,130 +1805,130 @@ Direction getNextLaserDirectionMirror(Direction laser_direction, Direction mirro
     switch (mirror_direction) // N/S/W/E diagonal cases, and U/D all cases
     {
         case NORTH: switch (laser_direction)
-                    {
-                        case NORTH_WEST: return DOWN_WEST;
-                        case NORTH_EAST: return DOWN_EAST;
-                        case SOUTH_WEST: return UP_WEST;
-                        case SOUTH_EAST: return UP_EAST;
+        {
+            case NORTH_WEST: return DOWN_WEST;
+            case NORTH_EAST: return DOWN_EAST;
+            case SOUTH_WEST: return UP_WEST;
+            case SOUTH_EAST: return UP_EAST;
 
-                        case UP_NORTH:   return DOWN_SOUTH;
-                                         //case UP_SOUTH:
-                        case UP_WEST:    return SOUTH_WEST;
-                        case UP_EAST:    return SOUTH_EAST;
+            case UP_NORTH:   return DOWN_SOUTH;
+                             //case UP_SOUTH:
+            case UP_WEST:    return SOUTH_WEST;
+            case UP_EAST:    return SOUTH_EAST;
 
-                                         //case DOWN_NORTH: 
-                        case DOWN_SOUTH: return UP_NORTH;
-                        case DOWN_WEST:  return NORTH_WEST;
-                        case DOWN_EAST:  return NORTH_EAST;
+                             //case DOWN_NORTH: 
+            case DOWN_SOUTH: return UP_NORTH;
+            case DOWN_WEST:  return NORTH_WEST;
+            case DOWN_EAST:  return NORTH_EAST;
 
-                        default: return NO_DIRECTION;
-                    }
+            default: return NO_DIRECTION;
+        }
         case SOUTH: switch (laser_direction)
-                    {
-                        case NORTH_WEST: return UP_WEST;
-                        case NORTH_EAST: return UP_EAST;
-                        case SOUTH_WEST: return DOWN_WEST;
-                        case SOUTH_EAST: return DOWN_EAST;
+        {
+            case NORTH_WEST: return UP_WEST;
+            case NORTH_EAST: return UP_EAST;
+            case SOUTH_WEST: return DOWN_WEST;
+            case SOUTH_EAST: return DOWN_EAST;
 
-                                         //case UP_NORTH:
-                        case UP_SOUTH:   return DOWN_NORTH;
-                        case UP_WEST:	 return NORTH_WEST;
-                        case UP_EAST:    return NORTH_EAST;
+                             //case UP_NORTH:
+            case UP_SOUTH:   return DOWN_NORTH;
+            case UP_WEST:	 return NORTH_WEST;
+            case UP_EAST:    return NORTH_EAST;
 
-                        case DOWN_NORTH: return UP_SOUTH;
-                                         //case DOWN_SOUTH: 
-                        case DOWN_WEST:  return SOUTH_WEST;
-                        case DOWN_EAST:  return SOUTH_EAST;
+            case DOWN_NORTH: return UP_SOUTH;
+                             //case DOWN_SOUTH: 
+            case DOWN_WEST:  return SOUTH_WEST;
+            case DOWN_EAST:  return SOUTH_EAST;
 
-                        default: return NO_DIRECTION;
-                    }
+            default: return NO_DIRECTION;
+        }
         case WEST: switch (laser_direction)
-                   {
-                       case NORTH_WEST: return DOWN_NORTH;
-                       case NORTH_EAST: return UP_NORTH;
-                       case SOUTH_WEST: return DOWN_SOUTH;
-                       case SOUTH_EAST: return UP_SOUTH;
+        {
+            case NORTH_WEST: return DOWN_NORTH;
+            case NORTH_EAST: return UP_NORTH;
+            case SOUTH_WEST: return DOWN_SOUTH;
+            case SOUTH_EAST: return UP_SOUTH;
+ 
+            case UP_NORTH:   return NORTH_EAST;
+            case UP_SOUTH:   return SOUTH_EAST;
+            case UP_WEST:    return DOWN_EAST;
+            //case UP_EAST:
+ 
+            case DOWN_NORTH: return NORTH_WEST;
+            case DOWN_SOUTH: return SOUTH_WEST;
+            //case DOWN_WEST:
+            case DOWN_EAST:  return UP_WEST;
+ 
+            default: return NO_DIRECTION;
+        }
+ 		case EAST: switch (laser_direction)
+        {
+            case NORTH_WEST: return UP_NORTH;
+            case NORTH_EAST: return DOWN_NORTH;
+            case SOUTH_WEST: return UP_SOUTH;
+            case SOUTH_EAST: return DOWN_SOUTH;
 
-                       case UP_NORTH:   return NORTH_EAST;
-                       case UP_SOUTH:   return SOUTH_EAST;
-                       case UP_WEST:    return DOWN_EAST;
-                                        //case UP_EAST:    
+            case UP_NORTH:   return NORTH_WEST;
+            case UP_SOUTH:   return SOUTH_WEST;
+            //case UP_WEST:
+            case UP_EAST:    return DOWN_WEST;
 
-                       case DOWN_NORTH: return NORTH_WEST;
-                       case DOWN_SOUTH: return SOUTH_WEST;
-                                        //case DOWN_WEST:
-                       case DOWN_EAST:  return UP_WEST;
+            case DOWN_NORTH: return NORTH_EAST;
+            case DOWN_SOUTH: return SOUTH_EAST;
+            case DOWN_WEST:  return UP_EAST;
+            //case DOWN_EAST:
 
-                       default: return NO_DIRECTION;
-                   }
-        case EAST: switch (laser_direction)
-                   {
-                       case NORTH_WEST: return UP_NORTH;
-                       case NORTH_EAST: return DOWN_NORTH;
-                       case SOUTH_WEST: return UP_SOUTH;
-                       case SOUTH_EAST: return DOWN_SOUTH;
-
-                       case UP_NORTH:   return NORTH_WEST;
-                       case UP_SOUTH:   return SOUTH_WEST;
-                                        //case UP_WEST:
-                       case UP_EAST:    return DOWN_WEST;
-
-                       case DOWN_NORTH: return NORTH_EAST;
-                       case DOWN_SOUTH: return SOUTH_EAST;
-                       case DOWN_WEST:  return UP_EAST;
-                                        //case DOWN_EAST:
-
-                       default: return NO_DIRECTION;
-                   }
+            default: return NO_DIRECTION;
+        }
         case UP: switch (laser_direction)
-                 {
-                     case NORTH: 	 return EAST;
-                     case SOUTH: 	 return WEST;
-                     case WEST:  	 return SOUTH;
-                     case EAST:  	 return NORTH;
+     	{
+         	case NORTH: 	 return EAST;
+         	case SOUTH: 	 return WEST;
+         	case WEST:  	 return SOUTH;
+         	case EAST:  	 return NORTH;
 
-                     case NORTH_WEST: return SOUTH_EAST;
-                                      //case NORTH_EAST:
-                                      //case SOUTH_WEST:
-                     case SOUTH_EAST: return NORTH_WEST;
+         	case NORTH_WEST: return SOUTH_EAST;
+         	//case NORTH_EAST:
+         	//case SOUTH_WEST:
+         	case SOUTH_EAST: return NORTH_WEST;
 
-                     case UP_NORTH:   return UP_EAST;
-                     case UP_SOUTH:   return UP_WEST;
-                     case UP_WEST:    return UP_SOUTH;
-                     case UP_EAST:    return UP_NORTH;
+         	case UP_NORTH:   return UP_EAST;
+         	case UP_SOUTH:   return UP_WEST;
+         	case UP_WEST:    return UP_SOUTH;
+         	case UP_EAST:    return UP_NORTH;
 
-                     case DOWN_NORTH: return DOWN_EAST;
-                     case DOWN_SOUTH: return DOWN_WEST;
-                     case DOWN_WEST:  return DOWN_SOUTH;
-                     case DOWN_EAST:  return DOWN_NORTH;
+         	case DOWN_NORTH: return DOWN_EAST;
+         	case DOWN_SOUTH: return DOWN_WEST;
+    		case DOWN_WEST:  return DOWN_SOUTH;
+         	case DOWN_EAST:  return DOWN_NORTH;
 
-                     default: return NO_DIRECTION;
-                 }
-        case DOWN: switch (laser_direction)
-                   {
-                       case NORTH: 	 return WEST;
-                       case SOUTH: 	 return EAST;
-                       case WEST:  	 return NORTH;
-                       case EAST:  	 return SOUTH;
-
-                                     //case NORTH_WEST: 
-                       case NORTH_EAST: return SOUTH_WEST;
-                       case SOUTH_WEST: return NORTH_EAST;
-                                        //case SOUTH_EAST:
-
-                       case UP_NORTH:   return UP_WEST;
-                       case UP_SOUTH:	 return UP_EAST;
-                       case UP_WEST:    return UP_NORTH;
-                       case UP_EAST:    return UP_SOUTH;
-
-                       case DOWN_NORTH: return DOWN_WEST;
-                       case DOWN_SOUTH: return DOWN_EAST;
-                       case DOWN_WEST:  return DOWN_NORTH;
-                       case DOWN_EAST:  return DOWN_SOUTH;
-
-                       default: return NO_DIRECTION;
-                   }
-        default: return NO_DIRECTION;
+         	default: return NO_DIRECTION;
+     	}
+		case DOWN: switch (laser_direction)
+       	{
+            case NORTH: 	 return WEST;
+            case SOUTH: 	 return EAST;
+            case WEST:  	 return NORTH;
+            case EAST:  	 return SOUTH;
+ 
+            //case NORTH_WEST: 
+            case NORTH_EAST: return SOUTH_WEST;
+            case SOUTH_WEST: return NORTH_EAST;
+            //case SOUTH_EAST:
+ 
+            case UP_NORTH:   return UP_WEST;
+            case UP_SOUTH:	 return UP_EAST;
+            case UP_WEST:    return UP_NORTH;
+            case UP_EAST:    return UP_SOUTH;
+ 
+            case DOWN_NORTH: return DOWN_WEST;
+            case DOWN_SOUTH: return DOWN_EAST;
+            case DOWN_WEST:  return DOWN_NORTH;
+            case DOWN_EAST:  return DOWN_SOUTH;
+ 
+            default: return NO_DIRECTION;
+        }
+		default: return NO_DIRECTION;
     }
 }
 
@@ -2071,9 +2071,9 @@ void updateLaserBuffer(void)
                 }
 
                 if ((next_world_state.pack_hitbox_turning_from_timer > 0) 
-                        && (int3IsEqual(current_tile_coords, next_world_state.pack_hitbox_turning_from_coords) && (next_world_state.pack_hitbox_turning_from_direction == current_direction)) 
-                        || ((next_world_state.pack_hitbox_turning_to_timer > 0) 
-                            && int3IsEqual(current_tile_coords, next_world_state.pack_hitbox_turning_to_coords)   && (next_world_state.pack_hitbox_turning_to_direction   == current_direction))) 
+                && (int3IsEqual(current_tile_coords, next_world_state.pack_hitbox_turning_from_coords) && (next_world_state.pack_hitbox_turning_from_direction == current_direction)) 
+                || ((next_world_state.pack_hitbox_turning_to_timer > 0) 
+                && int3IsEqual(current_tile_coords, next_world_state.pack_hitbox_turning_to_coords)   && (next_world_state.pack_hitbox_turning_to_direction   == current_direction))) 
                 {
                     Vec3 end_coords = vec3Multiply(vec3Add(intCoordsToNorm(current_tile_coords), intCoordsToNorm(getNextCoords(current_tile_coords, oppositeDirection(current_direction)))), 0.5);
                     lb->end_coords = vec3Add(end_coords, offset); 
@@ -2094,7 +2094,6 @@ void updateLaserBuffer(void)
                         skip_check = true;
                     }
                     if (skip_check || ((player->in_motion < STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH || player->moving_direction == NO_DIRECTION) && (th_hit == false || th.type == PLAYER)))
-                        //if (skip_check || !(player->in_motion >= STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH && th.type == PLAYER && player->moving_direction != NO_DIRECTION))
                     {	
                         if (!skip_check)
                         {
@@ -2392,31 +2391,31 @@ void doHeadRotation(bool clockwise)
             case WEST:
             case SOUTH:
             case EAST:
+            {
+                if (clockwise) 
                 {
-                    if (clockwise) 
-                    {
-                        next_direction = current_direction + 1;
-                        if (next_direction == UP) next_direction = NORTH;
-                    }
-                    else 
-                    {
-                        next_direction = current_direction - 1;
-                        if (next_direction == -1) next_direction = EAST;
-                    }
-                    break;
+                    next_direction = current_direction + 1;
+                    if (next_direction == UP) next_direction = NORTH;
                 }
+                else 
+                {
+                    next_direction = current_direction - 1;
+                    if (next_direction == -1) next_direction = EAST;
+                }
+                break;
+            }
             case UP:
-                {
-                    next_direction = DOWN;
-                    up_or_down = true;
-                    break;
-                }
+            {
+                next_direction = DOWN;
+                up_or_down = true;
+                break;
+            }
             case DOWN:
-                {
-                    next_direction = UP;
-                    up_or_down = true;
-                    break;
-                }
+            {
+                next_direction = UP;
+                up_or_down = true;
+                break;
+            }
             default: break;
         }
 
@@ -2434,8 +2433,8 @@ void doHeadRotation(bool clockwise)
             Vec4 delta = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), sign * 0.25f * TAU);
             Vec4 end = quaternionNormalize(quaternionMultiply(delta, start));
             createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0,
-                    start, end, &entity->rotation_quat,
-                    id, TURN_ANIMATION_TIME);
+                                         start, end, &entity->rotation_quat,
+                                         id, TURN_ANIMATION_TIME);
         }
 
         setTileDirection(next_direction, current_tile_coords);
@@ -2460,10 +2459,10 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
     doHeadMovement(input_direction, true, animation_time);
 
     createInterpolationAnimation(intCoordsToNorm(player->coords), 
-            intCoordsToNorm(next_player_coords), 
-            &player->position_norm,
-            IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-            PLAYER_ID, animation_time);
+                                 intCoordsToNorm(next_player_coords), 
+                                 &player->position_norm,
+                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                 PLAYER_ID, animation_time);
 
     int32 trailing_hitbox_time = TRAILING_HITBOX_TIME;
     createTrailingHitbox(player->coords, input_direction, trailing_hitbox_time, PLAYER);
@@ -2480,10 +2479,10 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
         setTileDirection(NORTH, pack->coords);
         setTileType(PACK, player->coords);
         createInterpolationAnimation(intCoordsToNorm(pack->coords),
-                intCoordsToNorm(player->coords),
-                &pack->position_norm,
-                IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                PACK_ID, animation_time);
+                                     intCoordsToNorm(player->coords),
+                                     &pack->position_norm,
+                                     IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                     PACK_ID, animation_time);
 
         createTrailingHitbox(pack->coords, input_direction, trailing_hitbox_time, PACK);
 
@@ -3806,7 +3805,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // draw camera boundary lines
-        if (time_until_input == 0 && tick_input.t_press && !(editor_state.editor_mode == SELECT_WRITE))
+		if (time_until_input == 0 && tick_input.t_press && !(editor_state.editor_mode == SELECT_WRITE))
         {
             draw_camera_boundary = (draw_camera_boundary) ? false : true;
 			time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
