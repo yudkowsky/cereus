@@ -808,7 +808,7 @@ void loadLockedInfoPaths(FILE* file)
 
 int32 findNextFreeInResetBlock(Entity* rb)
 {
-    FOR(to_reset_index, MAX_RESET_COUNT) if (rb->ids_to_reset[to_reset_index] == -1) return to_reset_index;
+    FOR(to_reset_index, MAX_RESET_COUNT) if (rb->reset_info[to_reset_index].id == -1) return to_reset_index;
     return -1;
 }
 
@@ -843,7 +843,7 @@ void loadResetBlockInfo(FILE* file)
                     fread(&reset_entity_coords.z, 4, 1, file);
 
                     Entity* reset_e = getEntityPointer(reset_entity_coords);
-                    rb->ids_to_reset[reset_entity_index] = reset_e->id;
+                    rb->reset_info[reset_entity_index].id = reset_e->id;
                 }
             }
         }
@@ -898,7 +898,7 @@ void writeResetInfoToFile(FILE* file, Entity* rb)
     int32 count = 0;
     FOR(to_reset_index, MAX_RESET_COUNT)
     {
-        if (rb->ids_to_reset[to_reset_index] == -1) continue;
+        if (rb->reset_info[to_reset_index].id == -1) continue;
         else count++;
     }
     int32 size = 4 + (RESET_INFO_SINGLE_ENTRY_SIZE * count);
@@ -910,8 +910,8 @@ void writeResetInfoToFile(FILE* file, Entity* rb)
 
     FOR(to_reset_index, MAX_RESET_COUNT)
     {
-        if (rb->ids_to_reset[to_reset_index] == -1) continue;
-		Entity* e = getEntityFromId(rb->ids_to_reset[to_reset_index]);
+        if (rb->reset_info[to_reset_index].id == -1) continue;
+		Entity* e = getEntityFromId(rb->reset_info[to_reset_index].id);
         fwrite(&e->coords.x, 4, 1, file);
         fwrite(&e->coords.y, 4, 1, file);
         fwrite(&e->coords.z, 4, 1, file);
@@ -2828,7 +2828,7 @@ void editorMode(TickInput *tick_input)
                 if (new_e != 0)
                 {
                     int32 present_in_rb = -1;
-                    FOR(present_check_index, MAX_RESET_COUNT) if (rb->ids_to_reset[present_check_index] == new_e->id) 
+                    FOR(present_check_index, MAX_RESET_COUNT) if (rb->reset_info[present_check_index].id == new_e->id) 
                     {
                         present_in_rb = present_check_index;
                         break;
@@ -2836,11 +2836,15 @@ void editorMode(TickInput *tick_input)
                     if (present_in_rb == -1)
                     {
                         int32 next_free = findNextFreeInResetBlock(rb);
-                        if (next_free != -1) rb->ids_to_reset[next_free] = new_e->id;
+                        if (next_free != -1) 
+                        {
+                            rb->reset_info[next_free].id = new_e->id;
+                            rb->reset_info[next_free].start_coords = new_e->coords;
+                        }
                     }
                     else
                     {
-                        rb->ids_to_reset[present_in_rb] = -1;
+                        rb->reset_info[present_in_rb].id = -1;
                     }
                     time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
                 }
@@ -2909,8 +2913,8 @@ void gameInitialiseState()
         next_world_state.win_blocks[entity_index].id    = -1;
         next_world_state.locked_blocks[entity_index].id = -1;
         next_world_state.reset_blocks[entity_index].id  = -1;
+        FOR(to_reset_index, MAX_RESET_COUNT) next_world_state.reset_blocks[entity_index].reset_info[to_reset_index].id = -1;
     }
-    FOR(rb_index, MAX_RESET_COUNT) memset(next_world_state.reset_blocks[rb_index].ids_to_reset, -1, sizeof(next_world_state.reset_blocks[rb_index].ids_to_reset));
 
     Entity *entity_group = 0;
     for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
@@ -3647,6 +3651,27 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
+        // reset block logic
+        if ((getTileType(getNextCoords(player->coords, DOWN)) == RESET_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_input == 0))
+        {
+            Entity* rb = getEntityPointer(getNextCoords(player->coords, DOWN));
+            FOR(to_reset_index, MAX_RESET_COUNT)
+            {
+                if (rb->reset_info[to_reset_index].id == -1) continue;
+                Entity* reset_e = getEntityFromId(rb->reset_info[to_reset_index].id);
+            	TileType tile = getTileType(reset_e->coords);
+
+                setTileType(NONE, reset_e->coords);
+                setTileDirection(NORTH, reset_e->coords);
+                reset_e->coords = rb->reset_info[to_reset_index].start_coords;
+                reset_e->position_norm = intCoordsToNorm(reset_e->coords);
+                //reset_e->direction = rb->reset_info[to_reset_index].start_direction;
+                //reset_e->rotation_quat = directionToQuaternion(reset_e->direction, true); // TODO(spike): check if this is actually correct for U/D mirrors
+                setTileType(tile, reset_e->coords);
+                setTileDirection(reset_e->direction, reset_e->coords); // TODO(spike): update to start_direction (and actually store this - will require file layout change)
+            }
+        }
+
 		// figure out if entities should be locked / unlocked (should probably try to update this more intelligently later?)
         if (editor_state.editor_mode == NO_MODE)
         {
@@ -3840,6 +3865,17 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (editor_state.selected_id > 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
             {
                 drawAsset(0, OUTLINE_3D, intCoordsToNorm(editor_state.selected_coords), DEFAULT_SCALE, IDENTITY_QUATERNION);
+
+                if ((editor_state.selected_id / ID_OFFSET_RESET_BLOCK) * ID_OFFSET_RESET_BLOCK)
+                {
+                    Entity* rb = getEntityFromId(editor_state.selected_id);
+                    FOR(to_reset_index, MAX_RESET_COUNT)
+                    {
+                        if (rb->reset_info[to_reset_index].id == -1) continue;
+                        Entity* e = getEntityFromId(rb->reset_info[to_reset_index].id);
+                        drawAsset(0, OUTLINE_3D, e->position_norm, DEFAULT_SCALE, IDENTITY_QUATERNION);
+                    }
+                }
             }
         }
 
@@ -3881,9 +3917,9 @@ void gameFrame(double delta_time, TickInput tick_input)
                     {
                         FOR(reset_index, MAX_RESET_COUNT)
 						{
-                            if (e->ids_to_reset[reset_index] == -1) continue;
+                            if (e->reset_info[reset_index].id == -1) continue;
 							char reset_id_text[256] = {0};
-                            snprintf(reset_id_text, sizeof(reset_id_text), "id of nr. %d reset: %d", reset_index, e->ids_to_reset[reset_index]);
+                            snprintf(reset_id_text, sizeof(reset_id_text), "id of nr. %d reset: %d", reset_index, e->reset_info[reset_index].id);
                             drawDebugText(reset_id_text);
                         }
                     }

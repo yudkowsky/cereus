@@ -276,6 +276,14 @@ typedef struct GreenHit
 }
 GreenHit;
 
+typedef struct ResetInfo
+{
+    int32 id;
+    Int3 start_coords;
+    Direction start_direction;
+}
+ResetInfo;
+
 typedef struct Entity
 {
     Int3 coords;
@@ -305,7 +313,7 @@ typedef struct Entity
     char unlocked_by[64];
 
     // for reset blocks;
-    int32 ids_to_reset[16]; // TODO(spike): change to 64
+    ResetInfo reset_info[16]; // TODO(spike): change to 64
 }
 Entity;
 
