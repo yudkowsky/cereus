@@ -2803,11 +2803,12 @@ void gameInitialiseState()
     Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
 
-    // memset worldstate to 0 (with persistant level_name and solved levels)
+    // memset worldstate to 0 (with persistant level_name, and solved levels)
     char persist_level_name[256] = {0};
     char persist_solved_levels[64][64] = {0};
     strcpy(persist_level_name, next_world_state.level_name);
     memcpy(persist_solved_levels, next_world_state.solved_levels, sizeof(persist_solved_levels));
+
     memset(&next_world_state, 0, sizeof(WorldState));
     strcpy(next_world_state.level_name, persist_level_name);
     memcpy(next_world_state.solved_levels, persist_solved_levels, sizeof(persist_solved_levels));
@@ -2947,12 +2948,16 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                 if (undo_buffer[next_undo_buffer_position].player.id != 0) // check that there is anything in the buffer (using something that should never usually happen)
                 {
+                    char previous_level_name[256] = {0};
+                    strcpy(previous_level_name, next_world_state.level_name); 
+
                     next_world_state = undo_buffer[next_undo_buffer_position];
                    	memset(&undo_buffer[undo_buffer_position], 0, sizeof(WorldState));
                     undo_buffer_position = next_undo_buffer_position;
                     memset(animations, 0, sizeof(animations));
                     resetStandardVisuals(); // set position_norm and rotation_quat to coords and direction respectively
-                    //resetStateForUndo();
+                    
+                    if (strcmp(next_world_state.level_name, previous_level_name) != 0) gameInitialise(next_world_state.level_name);
                 }
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
             }
