@@ -281,6 +281,7 @@ typedef struct ResetInfo
     int32 id;
     Int3 start_coords;
     Direction start_direction;
+    Int3 current_coords;
 }
 ResetInfo;
 

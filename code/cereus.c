@@ -78,7 +78,7 @@ const int32 WIN_BLOCK_CHUNK_SIZE = 76;
 const char WIN_BLOCK_CHUNK_TAG[4] = "WINB";
 const int32 LOCKED_INFO_CHUNK_SIZE = 76; // TODO(spike): get rid of this (have dynamic amounts)
 const char LOCKED_INFO_CHUNK_TAG[4] = "LOKB";
-const int32 RESET_INFO_SINGLE_ENTRY_SIZE = 3;
+const int32 RESET_INFO_SINGLE_ENTRY_SIZE = 7;
 const char RESET_INFO_CHUNK_TAG[4] = "RESB";
 
 const int32 OVERWORLD_SCREEN_SIZE_X = 15;
@@ -637,7 +637,7 @@ void setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction direc
 // camera: 	 		tag: CMRA, 	size: 24 (6 * 4b), 			data: x, y, z, fov, yaw, pitch (as floats)
 // win block: 		tag: WINB, 	size: 76 (3 * 4b + 64b), 	data: x, y, z (as int32), char[64] path
 // locked block: 	tag: LOKB, 	size: 76 (3 * 4b + 64b),	data: x, y, z (as int32), char[64] path
-// reset block: 	tag: RESB, 	size: 3b + n * 3b,			data: x, y, z + n * entity_to_reset(x, y, z) (as int32)
+// reset block: 	tag: RESB, 	size: 3b + n*(3+1+3)b,		data: x, y, z + n * entity_to_reset(x, y, z, direction) (as int32)
 
 void buildLevelPathFromName(char level_name[64], char (*level_path)[64])
 {
@@ -837,13 +837,21 @@ void loadResetBlockInfo(FILE* file)
                 Entity* rb = getEntityPointer(rb_coords);
 				FOR(reset_entity_index, reset_entity_count)
                 {
-                    Int3 reset_entity_coords = {0};
-                    fread(&reset_entity_coords.x, 4, 1, file);
-                    fread(&reset_entity_coords.y, 4, 1, file);
-                    fread(&reset_entity_coords.z, 4, 1, file);
+                    Int3 current_entity_coords = {0};
+                    Int3 reset_start_coords = {0};
+                    Direction reset_entity_direction = NO_DIRECTION;
+                    fread(&current_entity_coords.x, 4, 1, file);
+                    fread(&current_entity_coords.y, 4, 1, file);
+                    fread(&current_entity_coords.z, 4, 1, file);
+                    fread(&reset_start_coords.x, 4, 1, file);
+                    fread(&reset_start_coords.y, 4, 1, file);
+                    fread(&reset_start_coords.z, 4, 1, file);
+                    fread(&reset_entity_direction, 4, 1, file);
 
-                    Entity* reset_e = getEntityPointer(reset_entity_coords);
+                    Entity* reset_e = getEntityPointer(current_entity_coords);
                     rb->reset_info[reset_entity_index].id = reset_e->id;
+                    rb->reset_info[reset_entity_index].start_coords = reset_start_coords;
+                    rb->reset_info[reset_entity_index].start_direction = reset_entity_direction;
                 }
             }
         }
@@ -891,7 +899,7 @@ void writeLockedInfoToFile(FILE* file, Entity* e)
     fwrite(unlocked_by, 1, 64, file);
 }
 
-void writeResetInfoToFile(FILE* file, Entity* rb)
+void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
 {
 	fwrite(RESET_INFO_CHUNK_TAG, 4, 1, file);
 
@@ -901,7 +909,9 @@ void writeResetInfoToFile(FILE* file, Entity* rb)
         if (rb->reset_info[to_reset_index].id == -1) continue;
         else count++;
     }
-    int32 size = 4 + (RESET_INFO_SINGLE_ENTRY_SIZE * count);
+    if (count == 0) return;
+
+    int32 size = 3 + (RESET_INFO_SINGLE_ENTRY_SIZE * count);
     fwrite(&size, 4, 1, file);
 
     fwrite(&rb->coords.x, 4, 1, file);
@@ -911,18 +921,44 @@ void writeResetInfoToFile(FILE* file, Entity* rb)
     FOR(to_reset_index, MAX_RESET_COUNT)
     {
         if (rb->reset_info[to_reset_index].id == -1) continue;
-		Entity* e = getEntityFromId(rb->reset_info[to_reset_index].id);
-        fwrite(&e->coords.x, 4, 1, file);
-        fwrite(&e->coords.y, 4, 1, file);
-        fwrite(&e->coords.z, 4, 1, file);
+        if (save_reset_block_state)
+        {
+            Entity* e = getEntityFromId(rb->reset_info[to_reset_index].id);
+            // where obj is right now
+            fwrite(&e->coords.x, 4, 1, file);
+            fwrite(&e->coords.y, 4, 1, file);
+            fwrite(&e->coords.z, 4, 1, file);
+ 
+			// where i want obj to be + direction (in this case same because saving this as new reset position)
+            fwrite(&e->coords.x, 4, 1, file);
+            fwrite(&e->coords.y, 4, 1, file);
+            fwrite(&e->coords.z, 4, 1, file);
+            fwrite(&e->direction, 4, 1, file);
+        }
+        else
+        {
+            Entity* e = getEntityFromId(rb->reset_info[to_reset_index].id);
+            // where obj is right now
+            fwrite(&e->coords.x, 4, 1, file);
+            fwrite(&e->coords.y, 4, 1, file);
+            fwrite(&e->coords.z, 4, 1, file);
+
+			// where i want obj to be + direction
+            fwrite(&rb->reset_info[to_reset_index].start_coords.x, 4, 1, file);
+            fwrite(&rb->reset_info[to_reset_index].start_coords.y, 4, 1, file);
+            fwrite(&rb->reset_info[to_reset_index].start_coords.z, 4, 1, file);
+            fwrite(&rb->reset_info[to_reset_index].start_direction, 4, 1, file);
+        }
     }
 }
 
 // doesn't change the camera or reset blocks
-bool saveLevelRewrite(char* path)
+bool saveLevelRewrite(char* path, bool save_reset_block_state)
 {
     FILE* old_file = fopen(path, "rb+");
     Camera saved_camera = loadCameraInfo(old_file);
+	//Entity saved_reset_blocks[128] = {0};
+    //memcpy(saved_reset_blocks, next_world_state.reset_blocks, sizeof(saved_reset_blocks));
     fclose(old_file);
 
     char temp_path[256] = {0};
@@ -940,7 +976,6 @@ bool saveLevelRewrite(char* path)
     fwrite(&z, 1, 1, file);
 
     writeBufferToFile(file);
-
     writeCameraToFile(file, &saved_camera);
 
     FOR(win_block_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -963,18 +998,14 @@ bool saveLevelRewrite(char* path)
         }
     }
 
-    /*
-    if (save_new_reset_locations)
+    FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
     {
-        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
-        {
-            Entity* rb = &next_world_state.reset_blocks[entity_index];
-            if (rb->id == -1) continue;
-            if (rb->count_to_reset == 0) continue;
-			writeResetInfoToFile(file, rb);
-        }
+        Entity* rb = &next_world_state.reset_blocks[entity_index];
+        //else rb = &saved_reset_blocks[entity_index];
+
+        if (rb->id == -1) continue;
+        writeResetInfoToFile(file, rb, save_reset_block_state);
     }
-    */
 
     fclose(file);
 
@@ -3639,7 +3670,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 char level_path[64] = {0};
                 buildLevelPathFromName(next_world_state.level_name, &level_path);
-                saveLevelRewrite(level_path);
+                saveLevelRewrite(level_path, false);
             }
 
             Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
@@ -3974,7 +4005,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         buildLevelPathFromName(world_state.level_name, &level_path);
         if (time_until_input == 0 && editor_state.editor_mode == PLACE_BREAK && tick_input.i_press) 
         {
-            saveLevelRewrite(level_path);
+            saveLevelRewrite(level_path, true);
             // TODO(spike): writeSolvedLevelsToFile();
         }
 
