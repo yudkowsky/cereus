@@ -2290,7 +2290,7 @@ void resetVisuals(Entity* entity)
 
 void resetStandardVisuals()
 {
-    Entity* entity_group[4] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources };
+    Entity* entity_group[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources };
     FOR(entity_group_index, 4)
     {
         FOR(entity_instance_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -2311,6 +2311,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
 {
     if (entity->id == -1) return false;
     Int3 next_coords = getNextCoords(entity->coords, DOWN);
+    if (!intCoordsWithinLevelBounds(next_coords)) return false;
     if (!(isPushable(getTileType(next_coords)) && getEntityPointer(next_coords)->id == -1) && getTileType(next_coords) != NONE) return true;
     TrailingHitbox _;
     if (trailingHitboxAtCoords(next_coords, &_) && entity->id != PLAYER_ID) return true;
