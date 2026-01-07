@@ -63,6 +63,7 @@ const int32 ID_OFFSET_SOURCE  	   = 100 * 4;
 const int32 ID_OFFSET_PERM_MIRROR  = 100 * 5;
 const int32 ID_OFFSET_WIN_BLOCK    = 100 * 6;
 const int32 ID_OFFSET_LOCKED_BLOCK = 100 * 7;
+const int32 ID_OFFSET_RESET_BLOCK  = 100 * 8;
 
 const int32 FONT_FIRST_ASCII = 32;
 const int32 FONT_LAST_ASCII = 126;
@@ -352,6 +353,7 @@ Entity* getEntityPointer(Int3 coords)
         case PERM_MIRROR:  entity_group = next_world_state.perm_mirrors;  break;
         case WIN_BLOCK:    entity_group = next_world_state.win_blocks;    break;
         case LOCKED_BLOCK: entity_group = next_world_state.locked_blocks; break;
+        case RESET_BLOCK:  entity_group = next_world_state.reset_blocks;  break;
         case PLAYER: return &next_world_state.player;
         case PACK:	 return &next_world_state.pack;
         default: return 0;
@@ -384,6 +386,7 @@ Entity* getEntityFromId(int32 id)
         else if (switch_value == ID_OFFSET_PERM_MIRROR)  entity_group = next_world_state.perm_mirrors;
         else if (switch_value == ID_OFFSET_WIN_BLOCK) 	 entity_group = next_world_state.win_blocks;
         else if (switch_value == ID_OFFSET_LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
+        else if (switch_value == ID_OFFSET_RESET_BLOCK)  entity_group = next_world_state.reset_blocks;
 
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
@@ -488,6 +491,7 @@ int32 entityIdOffset(Entity *entity)
     else if (entity == next_world_state.perm_mirrors)  return ID_OFFSET_PERM_MIRROR;
     else if (entity == next_world_state.win_blocks)    return ID_OFFSET_WIN_BLOCK;
     else if (entity == next_world_state.locked_blocks) return ID_OFFSET_LOCKED_BLOCK;
+    else if (entity == next_world_state.reset_blocks)  return ID_OFFSET_RESET_BLOCK;
     return 0;
 }
 
@@ -1015,6 +1019,7 @@ SpriteId getSprite2DId(TileType tile)
         case NOT_VOID:     return SPRITE_2D_NOT_VOID;
         case WIN_BLOCK:    return SPRITE_2D_WIN_BLOCK;
         case LOCKED_BLOCK: return SPRITE_2D_LOCKED_BLOCK;
+        case RESET_BLOCK:  return SPRITE_2D_RESET_BLOCK;
 
         case SOURCE_RED:	 return SPRITE_2D_SOURCE_RED;
         case SOURCE_GREEN:	 return SPRITE_2D_SOURCE_GREEN;
@@ -1044,6 +1049,7 @@ SpriteId getCube3DId(TileType tile)
         case NOT_VOID:     return CUBE_3D_NOT_VOID;
         case WIN_BLOCK:    return CUBE_3D_WIN_BLOCK;
         case LOCKED_BLOCK: return CUBE_3D_LOCKED_BLOCK;
+        case RESET_BLOCK:  return CUBE_3D_RESET_BLOCK;
 
         case LASER_RED:     return CUBE_3D_LASER_RED;
         case LASER_GREEN:	return CUBE_3D_LASER_GREEN;
@@ -2712,6 +2718,7 @@ void editorMode(TickInput *tick_input)
                         case PERM_MIRROR:  entity_group = next_world_state.perm_mirrors;  break;
                         case WIN_BLOCK:    entity_group = next_world_state.win_blocks;    break;
                         case LOCKED_BLOCK: entity_group = next_world_state.locked_blocks; break;
+                        case RESET_BLOCK:  entity_group = next_world_state.reset_blocks;  break;
                         default: entity_group = 0;
                     }
                     if (entity_group != 0) setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
@@ -2748,7 +2755,7 @@ void editorMode(TickInput *tick_input)
         else if (time_until_input == 0 && tick_input->l_press)
         {
             editor_state.picked_tile++;
-            if (editor_state.picked_tile == LOCKED_BLOCK + 1) editor_state.picked_tile = VOID;
+            if (editor_state.picked_tile == RESET_BLOCK + 1) editor_state.picked_tile = VOID;
             time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
         }
     }
@@ -2848,6 +2855,7 @@ void gameInitialiseState()
     memset(next_world_state.perm_mirrors,  0, sizeof(next_world_state.perm_mirrors));
     memset(next_world_state.win_blocks,    0, sizeof(next_world_state.win_blocks));
     memset(next_world_state.locked_blocks, 0, sizeof(next_world_state.locked_blocks));
+    memset(next_world_state.reset_blocks,  0, sizeof(next_world_state.reset_blocks));
     FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
     {
         next_world_state.boxes[entity_index].id 	    = -1;
@@ -2857,6 +2865,7 @@ void gameInitialiseState()
         next_world_state.perm_mirrors[entity_index].id  = -1;
         next_world_state.win_blocks[entity_index].id    = -1;
         next_world_state.locked_blocks[entity_index].id = -1;
+        next_world_state.reset_blocks[entity_index].id  = -1;
     }
     Entity *entity_group = 0;
     for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
@@ -2868,6 +2877,7 @@ void gameInitialiseState()
         else if (buffer_contents == PERM_MIRROR)  entity_group = next_world_state.perm_mirrors;
         else if (buffer_contents == WIN_BLOCK)    entity_group = next_world_state.win_blocks;
         else if (buffer_contents == LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
+        else if (buffer_contents == RESET_BLOCK)  entity_group = next_world_state.reset_blocks;
         else if (isSource(buffer_contents))  	  entity_group = next_world_state.sources;
         if (entity_group != 0)
         {
