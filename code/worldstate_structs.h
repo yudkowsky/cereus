@@ -303,6 +303,10 @@ typedef struct Entity
     // for locked blocks (and other entities that are locked)
     bool locked;
     char unlocked_by[64];
+
+    // for reset blocks;
+    int32 count_to_reset;
+    int32 ids_to_reset[16]; // TODO(spike): change to 64
 }
 Entity;
 

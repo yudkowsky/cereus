@@ -77,7 +77,7 @@ const int32 WIN_BLOCK_CHUNK_SIZE = 76;
 const char WIN_BLOCK_CHUNK_TAG[4] = "WINB";
 const int32 LOCKED_INFO_CHUNK_SIZE = 76; // TODO(spike): get rid of this (have dynamic amounts)
 const char LOCKED_INFO_CHUNK_TAG[4] = "LOKB";
-// no size on reset block, dynamic
+const int32 RESET_INFO_SINGLE_ENTRY_SIZE = 3;
 const char RESET_INFO_CHUNK_TAG[4] = "RESB";
 
 const int32 OVERWORLD_SCREEN_SIZE_X = 15;
@@ -86,7 +86,7 @@ const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
-const char debug_level_name[64] = "red-mirror-i";
+const char debug_level_name[64] = "overworld";
 const char start_level_path_buffer[64] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
@@ -631,66 +631,16 @@ void setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction direc
 // .level file structure: 
 // first 4 bytes:    -,x,y,z of level dimensions
 // next x*y*z * 2 (32768 by default) bytes: actual level buffer
-// then chunking starts: 4 bytes for tag (e.g. CMRA), 4 bytes for int32 size of chunk (e.g 24), and then data for that chunk.
 
-// solved-levels.meta structure:
-// SLVL, 4 bytes for int32 size of chunk (so far always 64), and then the name of that level.
+// then chunking starts: 4 bytes for tag, 4 bytes for size (not including tag or size), and then data
+// camera: 	 		tag: CMRA, 	size: 24 (6 * 4b), 			data: x, y, z, fov, yaw, pitch (as floats)
+// win block: 		tag: WINB, 	size: 76 (3 * 4b + 64b), 	data: x, y, z (as int32), char[64] path
+// locked block: 	tag: LOKB, 	size: 76 (3 * 4b + 64b),	data: x, y, z (as int32), char[64] path
+// reset block: 	tag: RESB, 	size: 3b + n * 3b,			data: x, y, z + n * entity_to_reset(x, y, z) (as int32)
 
 void buildLevelPathFromName(char level_name[64], char (*level_path)[64])
 {
     snprintf(*level_path, sizeof(*level_path), "%s%s.level", start_level_path_buffer, level_name);
-}
-
-/*
-   void getLevelNameFromPath(char* level_path, char* output)
-   {
-   char* slash = strrchr(level_path, '/'); // gets last / or .
-   char* dot   = strrchr(level_path, '.');
-   if (slash && dot && dot > slash)
-   {
-   size_t length = dot - slash - 1;
-   strncpy(output, slash + 1, length);
-   output[length] = '\0';
-   }
-   }
-   */
-
-// find write position for 
-int32 findChunkOrEOF(FILE* file, char tag[4], bool* found)
-{
-    char chunk[4] = {0};
-    int32 chunk_size = 0; // used to seek to the next chunk if this one is full
-    int32 tag_pos = 0;
-
-    fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
-
-    while (true) 
-    {
-        tag_pos = ftell(file);
-
-        // check what this chunk says
-        if (fread(chunk, 4, 1, file) != 1) 
-        {
-            // eof without chunk tag -> append to eof
-            clearerr(file);
-            *found = false;
-            return tag_pos;
-        }
-        if (memcmp(chunk, tag, 4) == 0)
-        {
-            // camera chunk found -> overwrite
-            *found = true;
-            return tag_pos + 4;
-        }
-
-        // that chunk wasn't useful; jump ahead by chunk_size after reading it
-        if (fread(&chunk_size, 4, 1, file) != 1)
-        {
-            // truncated (chunk tag found without accompanying int32 - should never happen)
-            return -1; 
-        }
-        fseek(file, chunk_size, SEEK_CUR);
-    }
 }
 
 bool readChunkHeader(FILE* file, char out_tag[4], int32 *out_size)
@@ -700,12 +650,39 @@ bool readChunkHeader(FILE* file, char out_tag[4], int32 *out_size)
     return true;
 }
 
-// doesn't load win block info, only loads buffer + camera
-void loadFileToState(char* path)
+// gets position and count of some chunk tag. position: cursor placed right before chunk tag
+int32 getCountAndPositionOfChunk(FILE* file, char tag[4], int32 positions[16])
+{
+	char chunk[4] = {0};
+    int32 chunk_size = 0;
+    int32 tag_pos = 0;
+    int32 count = 0;
+
+    fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
+
+    while (true)
+    {
+        tag_pos = ftell(file);
+
+        if (fread(chunk, 4, 1, file) != 1)
+        {
+            // eof
+            return count;
+        }
+        if (memcmp(chunk, tag, 4) == 0)
+        {
+            // found tag
+            positions[count] = tag_pos; 
+            count++;
+        }
+        fread(&chunk_size, 4, 1, file);
+        fseek(file, chunk_size, SEEK_CUR);
+    }
+}
+
+void loadBufferInfo(FILE* file)
 {
     // get level dimensions
-    FILE *file = fopen(path, "rb");
-
     fseek(file, 1, SEEK_SET); // skip the first byte
     uint8 x, y, z;
     fread(&x, 1, 1, file);
@@ -718,112 +695,29 @@ void loadFileToState(char* path)
     uint8 buffer[65536]; // just some max level size - not all of this is necessarily copied.
     fread(&buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
 
-    bool found = false;
-    int32 seek_to = findChunkOrEOF(file, CAMERA_CHUNK_TAG, &found);
-    if (seek_to >= 0 && found == true)
-    {
-        fseek(file, seek_to, SEEK_SET); // go to after chunk marker
-        fseek(file, 4, SEEK_CUR); // ...but still want to skip over chunk size
-        fread(&camera.coords.x, 4, 1, file);
-        fread(&camera.coords.y, 4, 1, file);
-        fread(&camera.coords.z, 4, 1, file);
-        fread(&camera.fov, 4, 1, file);
-        fread(&camera.yaw, 4, 1, file);
-        fread(&camera.pitch, 4, 1, file);
-    }
-
-    fclose(file);
     memcpy(next_world_state.buffer, buffer, level_dim.x*level_dim.y*level_dim.z * 2);
 }
 
-void writeBufferToFile(FILE* file)
-{
-    fseek(file, 4, SEEK_SET);
-    fwrite(next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
-}
-
-Camera getCurrentCameraInFile(FILE* file)
+Camera loadCameraInfo(FILE* file)
 {
     Camera out_camera = {0};
 
-    bool found = false;
-    int32 seek_to = findChunkOrEOF(file, CAMERA_CHUNK_TAG, &found);
-    if (seek_to >= 0 && found == true)
-    {
-        fseek(file, seek_to, SEEK_SET); // go to after chunk marker
-        fseek(file, 4, SEEK_CUR); // ...but still want to skip over chunk size
-        fread(&out_camera.coords.x, 4, 1, file);
-        fread(&out_camera.coords.y, 4, 1, file);
-        fread(&out_camera.coords.z, 4, 1, file);
-        fread(&out_camera.fov, 4, 1, file);
-        fread(&out_camera.yaw, 4, 1, file);
-        fread(&out_camera.pitch, 4, 1, file);
-    }
+    int32 positions[16] = {0};
+    int32 count = getCountAndPositionOfChunk(file, CAMERA_CHUNK_TAG, positions);
+    if (count != 1) return out_camera;
+
+    fseek(file, positions[0] + 8, SEEK_SET);
+    fread(&out_camera.coords.x, 4, 1, file);
+    fread(&out_camera.coords.y, 4, 1, file);
+    fread(&out_camera.coords.z, 4, 1, file);
+    fread(&out_camera.fov, 4, 1, file);
+    fread(&out_camera.yaw, 4, 1, file);
+    fread(&out_camera.pitch, 4, 1, file);
+
     return out_camera;
 }
 
-void writeCameraToFile(FILE* file, Camera* in_camera)
-{
-    bool found = false; // unused, because if not found just write to EOF anyway
-    int32 seek_to = findChunkOrEOF(file, CAMERA_CHUNK_TAG, &found);
-    fseek(file, seek_to, SEEK_SET);
-    if (!found)
-    {
-        fwrite(CAMERA_CHUNK_TAG, 4, 1, file);
-    }
-    fwrite(&CAMERA_CHUNK_SIZE, 4, 1, file);
-    fwrite(&in_camera->coords.x, 4, 1, file);
-    fwrite(&in_camera->coords.y, 4, 1, file);
-    fwrite(&in_camera->coords.z, 4, 1, file);
-    fwrite(&in_camera->fov, 4, 1, file);
-    fwrite(&in_camera->yaw, 4, 1, file);
-    fwrite(&in_camera->pitch, 4, 1, file);
-}
-
-void writeWinBlockToFile(FILE* file, Entity* wb)
-{
-    fwrite(WIN_BLOCK_CHUNK_TAG, 4, 1, file);
-    fwrite(&WIN_BLOCK_CHUNK_SIZE, 4, 1, file);
-    fwrite(&wb->coords.x, 4, 1, file);
-    fwrite(&wb->coords.y, 4, 1, file);
-    fwrite(&wb->coords.z, 4, 1, file);
-    char next_level[64] = {0};
-    memcpy(next_level, wb->next_level, 63);
-    fwrite(next_level, 1, 64, file);
-}
-
-int32 findWinBlockPath(FILE* file, int32 x, int32 y, int32 z)
-{
-    fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
-
-    char tag[4] = {0};
-    int32 size = 0;
-
-    while (readChunkHeader(file, tag, &size))
-    {
-        int32 pos = ftell(file);
-
-        if (memcmp(tag, WIN_BLOCK_CHUNK_TAG, 4) == 0 && size == (int32)(WIN_BLOCK_CHUNK_SIZE))
-        {
-            int32 comp_x, comp_y, comp_z;
-            char path[64] = {0};
-            if (fread(&comp_x, 4, 1, file) != 1) return -1;
-            if (fread(&comp_y, 4, 1, file) != 1) return -1;
-            if (fread(&comp_z, 4, 1, file) != 1) return -1;
-            if (fread(path, 1, 64, file) != 64) return -1;
-
-            if (comp_x == x && comp_y == y && comp_z == z)
-            {
-                return (int32)(pos + 12);
-            }
-        }
-        fseek(file, pos + size, SEEK_SET);
-    }
-
-    return -1; // nothing found at these coords
-}
-
-// TODO(spike): these two below functions could be combined for only one sweep through the file
+// TODO(spike): use getCountAndPositionOfChunk
 void loadWinBlockPaths(FILE* file)
 {
     fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
@@ -865,6 +759,7 @@ void loadWinBlockPaths(FILE* file)
     }
 }
 
+// TODO(spike): use getCountAndPositionOfChunk
 void loadLockedInfoPaths(FILE* file)
 {
     fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
@@ -910,6 +805,75 @@ void loadLockedInfoPaths(FILE* file)
     }
 }
 
+void loadResetBlockInfo(FILE* file)
+{
+    int32 positions[16] = {0};
+    int32 rb_count = getCountAndPositionOfChunk(file, RESET_INFO_CHUNK_TAG, positions);
+
+    FOR(rb_index_file, rb_count)
+    {
+        fseek(file, positions[rb_index_file] + 4, SEEK_SET);
+
+        int32 size = 0;
+        fread(&size, 4, 1, file);
+		int32 reset_entity_count = (size - 3) / RESET_INFO_SINGLE_ENTRY_SIZE;
+		
+        Int3 rb_coords = {0};
+        fread(&rb_coords.x, 4, 1, file);
+        fread(&rb_coords.y, 4, 1, file);
+        fread(&rb_coords.z, 4, 1, file);
+
+        FOR(rb_index_state, MAX_ENTITY_INSTANCE_COUNT)
+        {
+            if (int3IsEqual(rb_coords, next_world_state.reset_blocks[rb_index_state].coords))
+            {
+                Entity* rb = getEntityPointer(rb_coords);
+                rb->count_to_reset = reset_entity_count;
+
+				FOR(reset_entity_index, reset_entity_count)
+                {
+                    Int3 reset_entity_coords = {0};
+                    fread(&reset_entity_coords.x, 4, 1, file);
+                    fread(&reset_entity_coords.y, 4, 1, file);
+                    fread(&reset_entity_coords.z, 4, 1, file);
+
+                    Entity* reset_e = getEntityPointer(reset_entity_coords);
+                    rb->ids_to_reset[reset_entity_index] = reset_e->id;
+                }
+            }
+        }
+    }
+}
+
+void writeBufferToFile(FILE* file)
+{
+    fwrite(next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
+}
+
+void writeCameraToFile(FILE* file, Camera* in_camera)
+{
+    fwrite(CAMERA_CHUNK_TAG, 4, 1, file);
+    fwrite(&CAMERA_CHUNK_SIZE, 4, 1, file);
+    fwrite(&in_camera->coords.x, 4, 1, file);
+    fwrite(&in_camera->coords.y, 4, 1, file);
+    fwrite(&in_camera->coords.z, 4, 1, file);
+    fwrite(&in_camera->fov, 4, 1, file);
+    fwrite(&in_camera->yaw, 4, 1, file);
+    fwrite(&in_camera->pitch, 4, 1, file);
+}
+
+void writeWinBlockToFile(FILE* file, Entity* wb)
+{
+    fwrite(WIN_BLOCK_CHUNK_TAG, 4, 1, file);
+    fwrite(&WIN_BLOCK_CHUNK_SIZE, 4, 1, file);
+    fwrite(&wb->coords.x, 4, 1, file);
+    fwrite(&wb->coords.y, 4, 1, file);
+    fwrite(&wb->coords.z, 4, 1, file);
+    char next_level[64] = {0};
+    memcpy(next_level, wb->next_level, 63);
+    fwrite(next_level, 1, 64, file);
+}
+
 void writeLockedInfoToFile(FILE* file, Entity* e)
 {
     fwrite(LOCKED_INFO_CHUNK_TAG, 4, 1, file);
@@ -922,55 +886,31 @@ void writeLockedInfoToFile(FILE* file, Entity* e)
     fwrite(unlocked_by, 1, 64, file);
 }
 
-void loadResetBlockInfo(FILE* file)
+void writeResetInfoToFile(FILE* file, Entity* rb)
 {
-    fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
+	fwrite(RESET_INFO_CHUNK_TAG, 4, 1, file);
 
-    char tag[4] = {0};
-    int32 size = 0;
+    int32 size = 4 + (RESET_INFO_SINGLE_ENTRY_SIZE * rb->count_to_reset);
+    fwrite(&size, 4, 1, file);
 
-    while (readChunkHeader(file, tag, &size))
+    fwrite(&rb->coords.x, 4, 1, file);
+    fwrite(&rb->coords.y, 4, 1, file);
+    fwrite(&rb->coords.z, 4, 1, file);
+
+    FOR(to_reset_index, rb->count_to_reset)
     {
-        int32 pos = ftell(file);
-
-        if (memcmp(tag, RESET_INFO_CHUNK_TAG, 4) == 0 && size == RESET_INFO_CHUNK_TAG)
-        {
-            int32 x, y, z;
-            char path[64];
-            if (fread(&x, 4, 1, file) != 1) return;
-            if (fread(&y, 4, 1, file) != 1) return;
-            if (fread(&z, 4, 1, file) != 1) return;
-            if (fread(&path, 1, 64, file) != 64) return;
-            path[63] = '\0';
-
-            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
-            {
-                Entity* rb = &next_world_state.reset_blocks[entity_index];
-                if (rb->coords.x == x && rb->coords.y == y && rb->coords.z == z)
-                {
-
-
-
-
-
-                }
-            }
-            // continue from end of chunk
-            fseek(file, pos + size, SEEK_SET);
-        }
-        else
-        {
-            // skip payload of some other chunk
-            fseek(file, pos + size, SEEK_SET);
-        }
+		Entity* e = getEntityFromId(rb->ids_to_reset[to_reset_index]);
+        fwrite(&e->coords.x, 4, 1, file);
+        fwrite(&e->coords.y, 4, 1, file);
+        fwrite(&e->coords.z, 4, 1, file);
     }
-    // RESET
 }
 
-bool saveLevelRewrite(char* path)
+// doesn't change the camera
+bool saveLevelRewrite(char* path/*, bool save_new_reset_locations*/)
 {
     FILE* old_file = fopen(path, "rb+");
-    Camera saved_camera = getCurrentCameraInFile(old_file);
+    Camera saved_camera = loadCameraInfo(old_file);
     fclose(old_file);
 
     char temp_path[256] = {0};
@@ -987,7 +927,7 @@ bool saveLevelRewrite(char* path)
     fwrite(&y, 1, 1, file);
     fwrite(&z, 1, 1, file);
 
-    fwrite(next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
+    writeBufferToFile(file);
 
     writeCameraToFile(file, &saved_camera);
 
@@ -1010,6 +950,19 @@ bool saveLevelRewrite(char* path)
             writeLockedInfoToFile(file, e);
         }
     }
+
+    /*
+    if (save_new_reset_locations)
+    {
+        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+        {
+            Entity* rb = &next_world_state.reset_blocks[entity_index];
+            if (rb->id == -1) continue;
+            if (rb->count_to_reset == 0) continue;
+			writeResetInfoToFile(file, rb);
+        }
+    }
+    */
 
     fclose(file);
 
@@ -2891,7 +2844,9 @@ void gameInitialiseState()
     // build level_path from level_name
     char level_path[64] = {0};
     buildLevelPathFromName(next_world_state.level_name, &level_path);
-    loadFileToState(level_path);
+    FILE* file = fopen(level_path, "rb+");
+    loadBufferInfo(file);
+    fclose(file);
 
     memset(next_world_state.boxes,    	   0, sizeof(next_world_state.boxes)); 
     memset(next_world_state.mirrors,  	   0, sizeof(next_world_state.mirrors));
@@ -2953,11 +2908,11 @@ void gameInitialiseState()
         }
     }
 
-    FILE* file = fopen(level_path, "rb+");
+    file = fopen(level_path, "rb+");
+    camera = loadCameraInfo(file);
     loadWinBlockPaths(file);
     loadLockedInfoPaths(file);
     loadResetBlockInfo(file);
-    camera = getCurrentCameraInFile(file);
     fclose(file);
 
     camera_screen_offset.x = (int32)(camera.coords.x / OVERWORLD_SCREEN_SIZE_X);
@@ -3932,7 +3887,19 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (time_until_input == 0 && editor_state.editor_mode == PLACE_BREAK && tick_input.c_press) 
         {
             FILE* file = fopen(level_path, "rb+");
-            writeCameraToFile(file, &camera);
+            int32 positions[16] = {0};
+			int32 count = getCountAndPositionOfChunk(file, CAMERA_CHUNK_TAG, positions);
+
+            if (count > 0)
+            {
+                fseek(file, positions[0], SEEK_SET);
+                writeCameraToFile(file, &camera);
+            }
+            else
+            {
+                fseek(file, 0, SEEK_END);
+                writeCameraToFile(file, &camera);
+            }
             fclose(file);
         }
 
