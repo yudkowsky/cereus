@@ -75,8 +75,10 @@ const int32 CAMERA_CHUNK_SIZE = 24;
 const char CAMERA_CHUNK_TAG[4] = "CMRA";
 const int32 WIN_BLOCK_CHUNK_SIZE = 76;
 const char WIN_BLOCK_CHUNK_TAG[4] = "WINB";
-const int32 LOCKED_INFO_CHUNK_SIZE = 76;
-const char LOCKED_INFO_CHUNK_TAG[4] = "LKIN";
+const int32 LOCKED_INFO_CHUNK_SIZE = 76; // TODO(spike): get rid of this (have dynamic amounts)
+const char LOCKED_INFO_CHUNK_TAG[4] = "LOKB";
+// no size on reset block, dynamic
+const char RESET_INFO_CHUNK_TAG[4] = "RESB";
 
 const int32 OVERWORLD_SCREEN_SIZE_X = 15;
 const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
@@ -653,7 +655,7 @@ void buildLevelPathFromName(char level_name[64], char (*level_path)[64])
    }
    */
 
-// find the location of specific chunk
+// find write position for 
 int32 findChunkOrEOF(FILE* file, char tag[4], bool* found)
 {
     char chunk[4] = {0};
@@ -920,6 +922,51 @@ void writeLockedInfoToFile(FILE* file, Entity* e)
     fwrite(unlocked_by, 1, 64, file);
 }
 
+void loadResetBlockInfo(FILE* file)
+{
+    fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
+
+    char tag[4] = {0};
+    int32 size = 0;
+
+    while (readChunkHeader(file, tag, &size))
+    {
+        int32 pos = ftell(file);
+
+        if (memcmp(tag, RESET_INFO_CHUNK_TAG, 4) == 0 && size == RESET_INFO_CHUNK_TAG)
+        {
+            int32 x, y, z;
+            char path[64];
+            if (fread(&x, 4, 1, file) != 1) return;
+            if (fread(&y, 4, 1, file) != 1) return;
+            if (fread(&z, 4, 1, file) != 1) return;
+            if (fread(&path, 1, 64, file) != 64) return;
+            path[63] = '\0';
+
+            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+            {
+                Entity* rb = &next_world_state.reset_blocks[entity_index];
+                if (rb->coords.x == x && rb->coords.y == y && rb->coords.z == z)
+                {
+
+
+
+
+
+                }
+            }
+            // continue from end of chunk
+            fseek(file, pos + size, SEEK_SET);
+        }
+        else
+        {
+            // skip payload of some other chunk
+            fseek(file, pos + size, SEEK_SET);
+        }
+    }
+    // RESET
+}
+
 bool saveLevelRewrite(char* path)
 {
     FILE* old_file = fopen(path, "rb+");
@@ -1132,7 +1179,7 @@ void drawDebugText(char* string)
     debug_text_coords.y -= DEBUG_TEXT_Y_DIFF;
 }
 
-// RAYCAST ALGORITHM FOR EDITOR PLACE/DESTROY
+// RAYCAST ALGORITHM FOR EDITOR
 
 RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance)
 {
@@ -2615,23 +2662,22 @@ int32 glyphSprite(char c)
 // EDITOR
 
 /*
-   contains two modes, place/break or select. is called if either one happens.
+    contains two modes, place/break or select. is called if either one happens.
 
-   WASD, SPACE, SHIFT: camera movement
+    WASD, SPACE, SHIFT: camera movement
 
-J: FOV toggle (30 <-> 60)
-C: save camera
-I: save world state
+    J: FOV toggle (30 <-> 60)
+    C: save camera
+    I: save world state
 
-1: place/break mode
-LMB: break
-RMB: place
-MMB: select block
-R: rotate block
+    1: place/break mode
+    LMB: break
+    RMB: place
+    MMB: select block
+    R: rotate block
 
-2: select mode
-LMB: selet block instance
-
+    2: select mode
+    LMB: selet block instance
 */
 
 void editorMode(TickInput *tick_input)
@@ -2711,7 +2757,6 @@ void editorMode(TickInput *tick_input)
                     Entity* entity_group = 0;
                     switch (editor_state.picked_tile)
                     {
-                        // TODO(spike): make this switch statement a function, so don't have to keep changing all of them every time there is a new entity added
                         case BOX:     	   entity_group = next_world_state.boxes;    	  break;
                         case MIRROR:  	   entity_group = next_world_state.mirrors;  	  break;
                         case CRYSTAL: 	   entity_group = next_world_state.crystals; 	  break;
@@ -2911,6 +2956,7 @@ void gameInitialiseState()
     FILE* file = fopen(level_path, "rb+");
     loadWinBlockPaths(file);
     loadLockedInfoPaths(file);
+    loadResetBlockInfo(file);
     camera = getCurrentCameraInFile(file);
     fclose(file);
 
