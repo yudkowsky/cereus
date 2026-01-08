@@ -2133,7 +2133,7 @@ void updateLaserBuffer(void)
 
     FOR(source_index, MAX_PSEUDO_SOURCE_COUNT)
     {
-        Entity* source = &sources_as_primary[source_index]; // TODO(spike): will not work with multicolored sources
+        Entity* source = &sources_as_primary[source_index];
 
         Direction current_direction = source->direction;
         Int3 current_tile_coords = source->coords;
@@ -3708,19 +3708,26 @@ void gameFrame(double delta_time, TickInput tick_input)
         // win block logic
         if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_input == 0))
         {
-            if (next_world_state.in_overworld) 
+            if (!next_world_state.pack_detached)
             {
-                char level_path[64] = {0};
-                buildLevelPathFromName(next_world_state.level_name, &level_path);
-                saveLevelRewrite(level_path, false);
-            }
+                if (next_world_state.in_overworld) 
+                {
+                    char level_path[64] = {0};
+                    buildLevelPathFromName(next_world_state.level_name, &level_path);
+                    saveLevelRewrite(level_path, false);
+                }
 
-            Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
-            if (wb->next_level[0] != 0)
+                Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
+                if (wb->next_level[0] != 0)
+                {
+                    levelChangePrep(wb->next_level);
+                    time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+                    gameInitialise(wb->next_level);
+                }
+            }
+            else
             {
-                levelChangePrep(wb->next_level);
-                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
-                gameInitialise(wb->next_level);
+                // don't allow because pack is not attached! maybe change this should be allowed..?
             }
         }
 
