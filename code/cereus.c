@@ -2089,10 +2089,52 @@ void updateLaserBuffer(void)
     player->hit_by_blue  = false;
     player->green_hit = (GreenHit){0};
 
+    Entity sources_as_primary[256] = {0};
+    int32 primary_index = 0;
+    FOR(source_index, MAX_ENTITY_INSTANCE_COUNT)
+    {
+        Entity* s = &next_world_state.sources[source_index];
+		if (s->color < MAGENTA)
+        {
+            sources_as_primary[primary_index++] = *s;
+            continue;
+        }
+		else if (s->color == MAGENTA)
+        {
+			sources_as_primary[primary_index] = *s;
+            sources_as_primary[primary_index++].color = RED;
+			sources_as_primary[primary_index] = *s;
+            sources_as_primary[primary_index++].color = BLUE;
+        }
+		else if (s->color == YELLOW)
+        {
+			sources_as_primary[primary_index] = *s;
+            sources_as_primary[primary_index++].color = RED;
+			sources_as_primary[primary_index] = *s;
+            sources_as_primary[primary_index++].color = GREEN;
+        }
+		else if (s->color == CYAN)
+        {
+			sources_as_primary[primary_index] = *s;
+            sources_as_primary[primary_index++].color = GREEN;
+			sources_as_primary[primary_index] = *s;
+            sources_as_primary[primary_index++].color = BLUE;
+        }
+		else if (s->color == WHITE)
+        {
+			sources_as_primary[primary_index] = *s;
+            sources_as_primary[primary_index++].color = RED;
+			sources_as_primary[primary_index] = *s;
+            sources_as_primary[primary_index++].color = GREEN;
+			sources_as_primary[primary_index] = *s;
+            sources_as_primary[primary_index++].color = BLUE;
+        }
+    }
+
     FOR(source_index, MAX_PSEUDO_SOURCE_COUNT)
     {
-        Entity* source = &next_world_state.sources[source_index]; // TODO(spike): will not work with multicolored sources
-        if (source->id == -1) continue;
+        Entity* source = &sources_as_primary[source_index]; // TODO(spike): will not work with multicolored sources
+
         Direction current_direction = source->direction;
         Int3 current_tile_coords = source->coords;
         Vec3 offset = {0};
@@ -2123,7 +2165,7 @@ void updateLaserBuffer(void)
                 if ((next_world_state.pack_hitbox_turning_from_timer > 0) 
                 && (int3IsEqual(current_tile_coords, next_world_state.pack_hitbox_turning_from_coords) && (next_world_state.pack_hitbox_turning_from_direction == current_direction)) 
                 || ((next_world_state.pack_hitbox_turning_to_timer > 0) 
-                && int3IsEqual(current_tile_coords, next_world_state.pack_hitbox_turning_to_coords)   && (next_world_state.pack_hitbox_turning_to_direction   == current_direction))) 
+                && int3IsEqual(current_tile_coords, next_world_state.pack_hitbox_turning_to_coords) && (next_world_state.pack_hitbox_turning_to_direction == current_direction))) 
                 {
                     Vec3 end_coords = vec3Multiply(vec3Add(intCoordsToNorm(current_tile_coords), intCoordsToNorm(getNextCoords(current_tile_coords, oppositeDirection(current_direction)))), 0.5);
                     lb->end_coords = vec3Add(end_coords, offset); 
