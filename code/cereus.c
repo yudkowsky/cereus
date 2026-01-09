@@ -87,7 +87,7 @@ const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
-const char debug_level_name[64] = "overworld";
+const char debug_level_name[64] = "blue-business-ii";
 const char start_level_path_buffer[64] = "w:/cereus/data/levels/";
 Int3 level_dim = {0};
 
@@ -2174,8 +2174,14 @@ void updateLaserBuffer(void)
 
                 TrailingHitbox th = {0};
                 bool th_hit = false;
-                if (trailingHitboxAtCoords(current_tile_coords, &th) && th.frames > 0) th_hit = true;
-                else memset(&th, 0, sizeof(TrailingHitbox));
+                if (trailingHitboxAtCoords(current_tile_coords, &th) && th.frames > 0) 
+                {
+                    th_hit = true;
+                }
+                else 
+                {
+                    memset(&th, 0, sizeof(TrailingHitbox));
+                }
 
                 if (getTileType(current_tile_coords) == PLAYER || (th_hit && th.type == PLAYER))
                 {
@@ -2185,7 +2191,7 @@ void updateLaserBuffer(void)
                         lb->end_coords = vec3Add(player->position_norm, offset); 
                         skip_check = true;
                     }
-                    if (skip_check || ((player->in_motion < STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH || player->moving_direction == NO_DIRECTION) && (th_hit == false || th.type == PLAYER)))
+                    if (skip_check || ((player->in_motion < STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH || player->moving_direction == NO_DIRECTION || (th.type == PLAYER)) && (th_hit == false || th.type == PLAYER)))
                     {	
                         if (!skip_check)
                         {
