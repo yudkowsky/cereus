@@ -1145,6 +1145,35 @@ void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotati
     a->instance_count++;
 }
 
+// TODO(spike): maybe compact this into above function later
+void drawLaser(Vec3 coords, Vec3 scale, Vec4 rotation, Vec3 color)
+{
+    int32 asset_location = -1;
+    FOR(asset_index, 256)
+    {
+        if (assets_to_load[asset_index].instance_count == 0)
+        {
+            if (asset_location == -1) asset_location = asset_index;
+            continue;
+        }
+        if (assets_to_load[asset_index].type == LASER)
+        {
+            asset_location = asset_index;
+            break;
+        }
+    }
+
+    AssetToLoad* a = &assets_to_load[asset_location];
+    a->type = LASER;
+
+    int32 index = a->instance_count;
+    a->coords[index] = coords;
+    a->scale[index] = scale;
+    a->rotation[index] = rotation;
+    a->color[index] = color;
+    a->instance_count++;
+}
+
 void drawText(char* string, Vec2 coords, float scale)
 {
     float pen_x = coords.x;
@@ -3830,15 +3859,14 @@ void gameFrame(double delta_time, TickInput tick_input)
 		FOR(laser_buffer_index, 64)
         {
             LaserBuffer lb = laser_buffer[laser_buffer_index];
-            int32 color_id = 0;
+            Vec3 laser_rgb = {0};
             switch (lb.color)
             {
-                case RED: color_id = getCube3DId(LASER_RED); break;
-                case GREEN: color_id = getCube3DId(LASER_GREEN); break;
-                case BLUE: color_id = getCube3DId(LASER_BLUE); break;
-                default: break;
+                case RED:   laser_rgb = (Vec3){ 1.0f, 0.0f, 0.0f }; break;
+                case GREEN: laser_rgb = (Vec3){ 0.0f, 1.0f, 0.0f }; break;
+                case BLUE:  laser_rgb = (Vec3){ 0.0f, 0.0f, 1.0f }; break;
+                default: continue;
             }
-            if (color_id == 0) break;
 
 			Vec3 diff = vec3Subtract(lb.end_coords, lb.start_coords);
             Vec3 center = vec3Add(lb.start_coords, vec3Multiply(diff, 0.5));
@@ -3862,7 +3890,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 rotation = directionToQuaternion(lb.direction, false);
             }
 
-            drawAsset(color_id, CUBE_3D, center, scale, rotation);
+            drawLaser(center, scale, rotation, laser_rgb);
         }
 
         // clear laser buffer 

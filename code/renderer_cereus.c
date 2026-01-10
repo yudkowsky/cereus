@@ -49,6 +49,15 @@ typedef struct Cube
 }
 Cube;
 
+typedef struct Laser
+{
+    Vec3 center;
+    Vec3 scale;
+    Vec4 rotation;
+    Vec3 color;
+}
+Laser;
+
 typedef struct CachedAsset
 {
 	VkImage image;
@@ -232,6 +241,9 @@ uint32 cube_instance_count = 0;
 
 Cube outline_instances[1024];
 uint32 outline_instance_count = 0;
+
+Laser laser_instances[1024];
+uint32 laser_instance_count = 0;
 
 Camera renderer_camera = {0};
 
@@ -1393,7 +1405,6 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 
     // SETTING UP LASER VERTEX SHADER
 
-    /*
     void* laser_vert_bytes = 0;
     size_t laser_vert_size = 0;
     if (!readEntireFile("data/shaders/spirv/laser.vert.spv", &laser_vert_bytes, &laser_vert_size))
@@ -1413,7 +1424,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 
     void* laser_frag_bytes = 0;
     size_t laser_frag_size = 0;
-    if (!readEntireFile("data/shaders/spirv/laser.vert.spv", &laser_frag_bytes, &laser_frag_size))
+    if (!readEntireFile("data/shaders/spirv/laser.frag.spv", &laser_frag_bytes, &laser_frag_size))
 	{
         return;
     }
@@ -1425,8 +1436,8 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 
     vkCreateShaderModule(renderer_state.logical_device_handle, &laser_frag_shader_module_ci, 0, &renderer_state.laser_fragment_shader_module_handle);
     free(laser_frag_bytes);
-    */
 
+    // TODO(spike): try moving below into their respective setups later
     // vertex shader stage
 
     VkPipelineShaderStageCreateInfo vertex_shader_stage_create_info = {0};
@@ -1451,8 +1462,25 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 	outline_frag_shader_stage_ci.module = renderer_state.outline_fragment_shader_module_handle;
 	outline_frag_shader_stage_ci.pName = "main";
 
+    // laser vertex shader
+    
+    VkPipelineShaderStageCreateInfo laser_vert_stage_create_info = {0};
+    laser_vert_stage_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    laser_vert_stage_create_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    laser_vert_stage_create_info.module = renderer_state.laser_vertex_shader_module_handle;
+    laser_vert_stage_create_info.pName = "main";
+
+    // laser fragment shader
+
+    VkPipelineShaderStageCreateInfo laser_frag_stage_create_info = {0};;
+    laser_frag_stage_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	laser_frag_stage_create_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    laser_frag_stage_create_info.module = renderer_state.laser_fragment_shader_module_handle;
+    laser_frag_stage_create_info.pName = "main";
+
     VkPipelineShaderStageCreateInfo shader_stages[2] = { vertex_shader_stage_create_info, fragment_shader_stage_create_info };
     VkPipelineShaderStageCreateInfo outline_stages[2] = { vertex_shader_stage_create_info, outline_frag_shader_stage_ci };
+    VkPipelineShaderStageCreateInfo laser_stages[2] = { laser_vert_stage_create_info, laser_frag_stage_create_info };
 
     VkVertexInputBindingDescription vertex_binding = {0};
     vertex_binding.binding   = 0;
@@ -1692,7 +1720,6 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 
     // define sprite pipeline: depth off, blending on
     {
-        VkGraphicsPipelineCreateInfo sprite_ci = base_graphics_pipeline_creation_info;
         color_blend_attachment_state.blendEnable = VK_TRUE;
         color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
         color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
@@ -1705,57 +1732,71 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 		depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_ALWAYS;
 
+        VkGraphicsPipelineCreateInfo sprite_ci = base_graphics_pipeline_creation_info;
         vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &sprite_ci, 0, &renderer_state.sprite_pipeline_handle);
     }
 
 	// define cube pipeline: depth on, blending off
     {
-        VkGraphicsPipelineCreateInfo cube_ci = base_graphics_pipeline_creation_info;
         color_blend_attachment_state.blendEnable = VK_FALSE;
         
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
 
+        VkGraphicsPipelineCreateInfo cube_ci = base_graphics_pipeline_creation_info;
         vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &cube_ci, 0, &renderer_state.cube_pipeline_handle);
     }
 
     // define outline pipeline
     {
-		VkGraphicsPipelineCreateInfo outline_ci = base_graphics_pipeline_creation_info;
-        outline_ci.pStages = outline_stages;
-		
-        // use outline pipeline layout (no descriptors)
-        outline_ci.layout = renderer_state.outline_pipeline_layout;
-
-		rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_LINE;
-        rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
-        rasterization_state_creation_info.lineWidth = 1.0f;
+        color_blend_attachment_state.blendEnable = VK_FALSE;
 
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 
-        color_blend_attachment_state.blendEnable = VK_FALSE;
+		rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_LINE;
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
+        rasterization_state_creation_info.lineWidth = 1.0f;
+
+		VkGraphicsPipelineCreateInfo outline_ci = base_graphics_pipeline_creation_info;
+        outline_ci.pStages = outline_stages;
+        outline_ci.layout = renderer_state.outline_pipeline_layout; // use outline pipeline layout (no descriptors)
 
         vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &outline_ci, 0, &renderer_state.outline_pipeline_handle);
 
-        // TODO(spike): is this needed?
+        // TODO(spike): is this needed? if decide yes, then add this to the other pipelines as well
         rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_FILL;
         depth_stencil_state_creation_info.depthWriteEnable  = VK_TRUE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
     }
 
     // define laser pipeline
-    /*
     {
-		VkPipelineShaderStageCreateInfo laser_vert_stage_ci = {0};
-        laser_vert_stage_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        laser_vert_stage_ci.
-        laser_vert_stage_ci.
-        laser_vert_stage_ci.
+        // additive blending
+        color_blend_attachment_state.blendEnable = VK_TRUE;
+        color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE; 
+        color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
+        color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
+
+		// depth test on, write off
+        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
+        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
+
+        // no backface culling
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
+
+        VkGraphicsPipelineCreateInfo laser_ci = base_graphics_pipeline_creation_info;
+        laser_ci.pStages = laser_stages;
+        laser_ci.layout = renderer_state.laser_pipeline_layout;
+
+        vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &laser_ci, 0, &renderer_state.laser_pipeline_handle);
     }
-    */
 }
 
 void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
@@ -1765,6 +1806,7 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
     sprite_instance_count = 0;
 	cube_instance_count = 0;
     outline_instance_count = 0;
+    laser_instance_count = 0;
 
     for (int asset_index = 0; asset_index < 1024; asset_index++)
     {
@@ -1813,6 +1855,17 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
                 cube->asset_index = 0; // unused by shader
             }
             continue;
+        }
+        else if (type == LASER)
+        {
+            for (int32 i = 0; i < batch->instance_count; i++)
+            {
+				Laser* laser = &laser_instances[laser_instance_count++];
+                laser->center = batch->coords[i];
+                laser->scale = batch->scale[i];
+                laser->rotation = batch->rotation[i];
+                laser->color = batch->color[i];
+            }
         }
 
         if (atlas_asset_index < 0) continue;
@@ -2003,6 +2056,32 @@ void rendererDraw(void)
         vkCmdDrawIndexed(command_buffer, renderer_state.cube_index_count, 1, 0, 0, 0);
 
 		vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
+    }
+
+    // LASER PIPELINE
+
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.laser_pipeline_handle);
+
+    VkDeviceSize laser_vb_offset = 0;
+    vkCmdBindVertexBuffers(command_buffer, 0, 1, &renderer_state.cube_vertex_buffer, &laser_vb_offset);
+    vkCmdBindIndexBuffer(command_buffer, renderer_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+    for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
+    {
+        Laser* laser = &laser_instances[laser_index];
+        
+        float model_matrix[16];
+        mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser->scale);
+
+        LaserPushConstants pc = {0};
+        memcpy(pc.model, model_matrix, sizeof(pc.model));
+        memcpy(pc.view, view_matrix, sizeof(pc.view));
+        memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
+        pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 1.0f };
+
+        vkCmdPushConstants(command_buffer, renderer_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &pc);
+
+        vkCmdDrawIndexed(command_buffer, renderer_state.cube_index_count, 1, 0, 0, 0);
     }
 
 	// SPRITE PIPELINE
