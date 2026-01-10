@@ -6,12 +6,14 @@ layout(location = 1) in vec3 normal;
 
 layout(location = 0) out vec4 out_color;
 
-layout(push_constant) uniform PC {
+layout(push_constant) uniform PC 
+{
     mat4 model;
     mat4 view;
     mat4 projection;
     vec4 uv_rect;
-} pc;
+}
+pc;
 
 const vec3 light_direction = vec3(0.3, 1, 0.5);
 

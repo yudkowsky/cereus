@@ -661,6 +661,7 @@ int32 getCountAndPositionOfChunk(FILE* file, char tag[4], int32 positions[16])
 
     fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
 
+
     while (true)
     {
         tag_pos = ftell(file);

@@ -58,7 +58,7 @@ typedef struct CachedAsset
 }
 CachedAsset;
 
-typedef struct PushConstants
+typedef struct PushConstants // TODO(spike): rename
 {
     float model[16];
     float view[16];
@@ -66,6 +66,15 @@ typedef struct PushConstants
     Vec4 uv_rect;
 }
 PushConstants;
+
+typedef struct LaserPushConstants
+{
+    float model[16];
+    float view[16];
+    float proj[16];
+    Vec4 color;
+}
+LaserPushConstants;
 
 typedef struct RendererState
 {
@@ -98,9 +107,11 @@ typedef struct RendererState
     VkFence* in_flight_fences; 
     VkFence* images_in_flight; // for each swapchain image, when GPU finishes that submission, the fence signals; we store the fence to check if image is still in flight.
 
-    VkShaderModule vertex_shader_module_handle;
-    VkShaderModule fragment_shader_module_handle;
+    VkShaderModule vertex_shader_module_handle; // TODO(spike): rename
+    VkShaderModule fragment_shader_module_handle; // TODO(spike): rename
     VkShaderModule outline_fragment_shader_module_handle;
+    VkShaderModule laser_vertex_shader_module_handle;
+    VkShaderModule laser_fragment_shader_module_handle;
 
     VkPipelineLayout graphics_pipeline_layout; // TODO(spike): rename
     VkPipeline cube_pipeline_handle;
@@ -108,6 +119,9 @@ typedef struct RendererState
 
 	VkPipelineLayout outline_pipeline_layout;
     VkPipeline outline_pipeline_handle;
+
+    VkPipelineLayout laser_pipeline_layout;
+    VkPipeline laser_pipeline_handle;
 
     VkSampler pixel_art_sampler;
     CachedAsset asset_cache[256];
@@ -1340,11 +1354,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     vertex_shader_module_creation_info.codeSize = vert_size;
     vertex_shader_module_creation_info.pCode = (const uint32*)vert_bytes;
 
-    VkResult vertex_shader_module_creation_result = vkCreateShaderModule(renderer_state.logical_device_handle, &vertex_shader_module_creation_info, 0, &renderer_state.vertex_shader_module_handle);
-    if (vertex_shader_module_creation_result != VK_SUCCESS)
-    {
-        return;
-    }
+    vkCreateShaderModule(renderer_state.logical_device_handle, &vertex_shader_module_creation_info, 0, &renderer_state.vertex_shader_module_handle);
     free(vert_bytes);
 
 	// SETTING UP FRAGMENT SHADER MODULE
@@ -1361,11 +1371,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     fragment_shader_module_creation_info.codeSize = frag_size;
     fragment_shader_module_creation_info.pCode = (const uint32*)frag_bytes;
 
-    VkResult fragment_shader_module_creation_result = vkCreateShaderModule(renderer_state.logical_device_handle, &fragment_shader_module_creation_info, 0, &renderer_state.fragment_shader_module_handle);
-    if (fragment_shader_module_creation_result != VK_SUCCESS)
-    {
-        return;
-    }
+    vkCreateShaderModule(renderer_state.logical_device_handle, &fragment_shader_module_creation_info, 0, &renderer_state.fragment_shader_module_handle);
     free(frag_bytes);
 
     // SETTING UP OUTLINE SHADER MODULE
@@ -1382,12 +1388,44 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     outline_frag_shader_module_ci.codeSize = outline_frag_size;
     outline_frag_shader_module_ci.pCode = (const uint32*)outline_frag_bytes;
 
-	VkResult outline_frag_result = vkCreateShaderModule(renderer_state.logical_device_handle, &outline_frag_shader_module_ci, 0, &renderer_state.outline_fragment_shader_module_handle);
-	if (outline_frag_result != VK_SUCCESS)
-    {
+	vkCreateShaderModule(renderer_state.logical_device_handle, &outline_frag_shader_module_ci, 0, &renderer_state.outline_fragment_shader_module_handle);
+	free(outline_frag_bytes);
+
+    // SETTING UP LASER VERTEX SHADER
+
+    /*
+    void* laser_vert_bytes = 0;
+    size_t laser_vert_size = 0;
+    if (!readEntireFile("data/shaders/spirv/laser.vert.spv", &laser_vert_bytes, &laser_vert_size))
+	{
         return;
     }
-	free(outline_frag_bytes);
+    
+    VkShaderModuleCreateInfo laser_vert_shader_module_ci = {0};
+    laser_vert_shader_module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    laser_vert_shader_module_ci.codeSize = laser_vert_size;
+    laser_vert_shader_module_ci.pCode = (const uint32*)laser_vert_bytes;
+
+    vkCreateShaderModule(renderer_state.logical_device_handle, &laser_vert_shader_module_ci, 0, &renderer_state.laser_vertex_shader_module_handle);
+    free(laser_vert_bytes);
+
+    // SETTING UP LASER FRAGMENT SHADER
+
+    void* laser_frag_bytes = 0;
+    size_t laser_frag_size = 0;
+    if (!readEntireFile("data/shaders/spirv/laser.vert.spv", &laser_frag_bytes, &laser_frag_size))
+	{
+        return;
+    }
+    
+    VkShaderModuleCreateInfo laser_frag_shader_module_ci = {0};
+    laser_frag_shader_module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    laser_frag_shader_module_ci.codeSize = laser_frag_size;
+    laser_frag_shader_module_ci.pCode = (const uint32*)laser_frag_bytes;
+
+    vkCreateShaderModule(renderer_state.logical_device_handle, &laser_frag_shader_module_ci, 0, &renderer_state.laser_fragment_shader_module_handle);
+    free(laser_frag_bytes);
+    */
 
     // vertex shader stage
 
@@ -1574,7 +1612,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 
     vkCreateDescriptorPool(renderer_state.logical_device_handle, &descriptor_pool_creation_info, 0, &renderer_state.descriptor_pool);
 
-	// CREATE TRIANGLE GRAPHICES PIPELINE LAYOUT
+	// CREATE TRIANGLE GRAPHICS PIPELINE LAYOUT
 
     {
         VkPushConstantRange push_constant_range = {0};
@@ -1610,6 +1648,24 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
         vkCreatePipelineLayout(renderer_state.logical_device_handle, &outline_pipeline_layout_ci, 0, &renderer_state.outline_pipeline_layout);
     }
 
+    // CREATE LASER PIPELINE LAYOUT
+
+    {
+		VkPushConstantRange push_constant_range = {0};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = (uint32)sizeof(PushConstants);
+
+        VkPipelineLayoutCreateInfo laser_pipeline_layout_ci = {0};
+        laser_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        laser_pipeline_layout_ci.setLayoutCount = 0;
+        laser_pipeline_layout_ci.pSetLayouts = 0;
+        laser_pipeline_layout_ci.pushConstantRangeCount = 1;
+        laser_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
+
+        vkCreatePipelineLayout(renderer_state.logical_device_handle, &laser_pipeline_layout_ci, 0, &renderer_state.laser_pipeline_layout);
+    }
+
     // base graphics pipeline info
 
    	VkGraphicsPipelineCreateInfo base_graphics_pipeline_creation_info = {0}; // struct that points to all those sub-blocks we just defined; it actually builds the pipeline object
@@ -1634,8 +1690,9 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     renderer_state.atlas_font_asset_index = getOrLoadAsset((char*)ATLAS_FONT_PATH);
     renderer_state.atlas_3d_asset_index   = getOrLoadAsset((char*)ATLAS_3D_PATH);
 
-    // sprite pipeline: depth off, blending on
+    // define sprite pipeline: depth off, blending on
     {
+        VkGraphicsPipelineCreateInfo sprite_ci = base_graphics_pipeline_creation_info;
         color_blend_attachment_state.blendEnable = VK_TRUE;
         color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
         color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
@@ -1648,23 +1705,22 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
 		depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_ALWAYS;
 
-        VkGraphicsPipelineCreateInfo sprite_ci = base_graphics_pipeline_creation_info;
         vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &sprite_ci, 0, &renderer_state.sprite_pipeline_handle);
     }
 
-	// cube pipeline: depth on, blending off
+	// define cube pipeline: depth on, blending off
     {
+        VkGraphicsPipelineCreateInfo cube_ci = base_graphics_pipeline_creation_info;
         color_blend_attachment_state.blendEnable = VK_FALSE;
         
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
 
-        VkGraphicsPipelineCreateInfo cube_ci = base_graphics_pipeline_creation_info;
         vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &cube_ci, 0, &renderer_state.cube_pipeline_handle);
     }
 
-    // outline pipeline
+    // define outline pipeline
     {
 		VkGraphicsPipelineCreateInfo outline_ci = base_graphics_pipeline_creation_info;
         outline_ci.pStages = outline_stages;
@@ -1689,6 +1745,17 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
         depth_stencil_state_creation_info.depthWriteEnable  = VK_TRUE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
     }
+
+    // define laser pipeline
+    /*
+    {
+		VkPipelineShaderStageCreateInfo laser_vert_stage_ci = {0};
+        laser_vert_stage_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        laser_vert_stage_ci.
+        laser_vert_stage_ci.
+        laser_vert_stage_ci.
+    }
+    */
 }
 
 void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
