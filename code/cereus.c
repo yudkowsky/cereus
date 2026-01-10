@@ -16,7 +16,7 @@ const float CAMERA_MOVE_STEP = 0.075f;
 const float CAMERA_FOV = 25.0f;
 const Vec3 DEFAULT_SCALE = { 1.0f,  1.0f,  1.0f  };
 const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
-const float LASER_WIDTH = 0.125f;
+const float LASER_WIDTH = 0.25;
 const float MAX_RAYCAST_SEEK_LENGTH = 50.0f;
 
 const int32 EDITOR_INPUT_TIME_UNTIL_ALLOW = 9;
