@@ -226,6 +226,11 @@ bool int3IsEqual(Int3 a, Int3 b)
     return (a.x == b.x && a.y == b.y && a.z == b.z); 
 }
 
+bool vec3IsEqual(Vec3 a, Vec3 b)
+{
+    return (a.x == b.x && a.y == b.y && a.z == b.z); 
+}
+
 Vec3 vec3Negate(Vec3 coords) 
 {
     return (Vec3){ -coords.x, -coords.y, -coords.z }; 
@@ -2266,15 +2271,15 @@ void updateLaserBuffer(void)
                         offset = vec3Add(vec3Negate(to_vector), vec3Multiply(to_vector, dir_offset));
                         lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                     }
-                    else if (!th_hit && !(crystal->in_motion < STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH)) // check slo-mo if want to use different in_motion calc if moving because of turn
+                    else if ((!th_hit && !(crystal->in_motion < STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH))) // check slo-mo if want to use different in_motion calc if moving because of turn
                     {
                         // passthrough
                         current_tile_coords = getNextCoords(current_tile_coords, current_direction);
                         continue;
                     }
-                    else if (crystal->in_motion > 1)
+                    else if (crystal->in_motion > 0)
                     {
-                        // NOTE(spike): may want to change how this works, looks slightly janky right now; note that without this we have slightly unexpected behavior (121 with blue crystal first)
+                        // NOTE(spike): may want to change how this works, looks slightly janky right now; note that without this we have slightly unexpected behavior (see 121 with blue crystal first)
                         lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                         break;
                     }
@@ -3885,25 +3890,10 @@ void gameFrame(double delta_time, TickInput tick_input)
 
 			Vec3 diff = vec3Subtract(lb.end_coords, lb.start_coords);
             Vec3 center = vec3Add(lb.start_coords, vec3Multiply(diff, 0.5));
-    		Vec3 scale = {0};
-            Vec4 rotation = IDENTITY_QUATERNION;
 
-            if (!isDiagonal(lb.direction))
-            {
-                scale = vec3Abs(diff);
-                if (scale.x == 0) scale.x = LASER_WIDTH;
-                if (scale.y == 0) scale.y = LASER_WIDTH;
-                if (scale.z == 0) scale.z = LASER_WIDTH;
-            }
-            else
-            {
-                scale.x = LASER_WIDTH;
-                scale.y = LASER_WIDTH;
-				if 		(diff.x == 0) scale.z = (float)sqrt((diff.y*diff.y) + (diff.z*diff.z));
-				else if (diff.y == 0) scale.z = (float)sqrt((diff.x*diff.x) + (diff.z*diff.z));
-				else if (diff.z == 0) scale.z = (float)sqrt((diff.x*diff.x) + (diff.y*diff.y));
-                rotation = directionToQuaternion(lb.direction, false);
-            }
+			float length = sqrtf(diff.x*diff.x + diff.y*diff.y + diff.z*diff.z);
+            Vec3 scale = { LASER_WIDTH, LASER_WIDTH, length };
+        	Vec4 rotation = directionToQuaternion(lb.direction, false);
 
             drawLaser(center, scale, rotation, laser_rgb);
         }

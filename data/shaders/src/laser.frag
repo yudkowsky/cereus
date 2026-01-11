@@ -17,17 +17,6 @@ pc;
 
 void main()
 {
-    float dist_from_axis = length(frag_pos_model.xy); // treating z as length, which already happens in scale code, i think... if there is a bug that applies only to diagonal / non-diagonal lasers, check this line.
-	
-    float radius = 1.0;
-    float alpha = 0.5;
-    /*
-    float falloff = 1.0 - smoothstep(0.0, radius, dist_from_axis);
-	float alpha = falloff * 0.6;
-	float core = 1.0 - smoothstep(0.0, radius * 0.3, dist_from_axis);
-    alpha += core * 0.4;
-    */
-
-    vec3 laser_color = pc.color.xyz;
-    out_color = vec4(laser_color * alpha, alpha);
+    float alpha = 0.4;
+    out_color = vec4(pc.color.rgb * alpha, alpha);
 }
