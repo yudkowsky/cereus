@@ -2129,6 +2129,7 @@ void updateLaserBuffer(void)
     FOR(source_index, MAX_ENTITY_INSTANCE_COUNT)
     {
         Entity* s = &next_world_state.sources[source_index];
+        if (s->id == -1) continue;
 		if (s->color < MAGENTA)
         {
             sources_as_primary[primary_index++] = *s;
@@ -2271,11 +2272,16 @@ void updateLaserBuffer(void)
                         offset = vec3Add(vec3Negate(to_vector), vec3Multiply(to_vector, dir_offset));
                         lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                     }
-                    else if ((!th_hit && !(crystal->in_motion < STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH))) // check slo-mo if want to use different in_motion calc if moving because of turn
+                    else if ((!th_hit && crystal->in_motion >= STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH)) // check slo-mo if want to use different in_motion calc if moving because of turn
                     {
                         // passthrough
                         current_tile_coords = getNextCoords(current_tile_coords, current_direction);
                         continue;
+                    }
+                    else if (crystal->locked)
+                    {
+                        lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                        break;
                     }
                     else if (crystal->in_motion > 0)
                     {
@@ -2339,6 +2345,11 @@ void updateLaserBuffer(void)
                                 current_tile_coords = getNextCoords(current_tile_coords, current_direction);
                                 continue;
                             }
+                        }
+                        else if (mirror->locked)
+                        {
+                            lb->end_coords = intCoordsToNorm(current_tile_coords);
+                            break;
                         }
                         else
                         {
@@ -2532,6 +2543,7 @@ void doFallingObjects(bool do_animation)
         Entity* entity_group = object_group_to_fall[to_fall_index];
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
+            if (entity_group[entity_index].locked == true) continue;
             if (next_world_state.pack_hitbox_turning_to_timer > 0 && int3IsEqual(next_world_state.pack_hitbox_turning_to_coords, entity_group[entity_index].coords)) continue; // blocks blue-not-blue turn orthogonal case from falling immediately
             doFallingEntity(&entity_group[entity_index], do_animation);
         }
@@ -2875,16 +2887,20 @@ void editorMode(TickInput *tick_input)
             }
             else if (tick_input->r_press && raycast_output.hit)
             {   
-                Direction direction = getTileDirection(raycast_output.hit_coords);
-                if (direction == DOWN) direction = NORTH;
-                else direction++;
-                setTileDirection(direction, raycast_output.hit_coords);
-                Entity *entity = getEntityPointer(raycast_output.hit_coords);
-                if (entity != 0)
+                TileType tile = getTileType(raycast_output.hit_coords);
+                if (isEntity(tile) && tile != VOID && tile != NOT_VOID)
                 {
-                    entity->direction = direction;
-                    if (getTileType(entity->coords) == MIRROR || getTileType(entity->coords) == PERM_MIRROR) entity->rotation_quat = directionToQuaternion(direction, true); // unclear why this is required, something to do with my sprite layout
-                    else entity->rotation_quat = directionToQuaternion(direction, false);
+                    Direction direction = getTileDirection(raycast_output.hit_coords);
+                    if (direction == DOWN) direction = NORTH;
+                    else direction++;
+                    setTileDirection(direction, raycast_output.hit_coords);
+                    Entity *entity = getEntityPointer(raycast_output.hit_coords);
+                    if (entity != 0)
+                    {
+                        entity->direction = direction;
+                        if (getTileType(entity->coords) == MIRROR || getTileType(entity->coords) == PERM_MIRROR) entity->rotation_quat = directionToQuaternion(direction, true); // unclear why this is required, something to do with my sprite layout
+                        else entity->rotation_quat = directionToQuaternion(direction, false);
+                    }
                 }
             }
             else if ((tick_input->middle_mouse_press || tick_input->g_press) && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
@@ -3843,7 +3859,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 		updateLaserBuffer();
 
 		// adjust overworld camera based on position
-        if (next_world_state.in_overworld)
+        if (next_world_state.in_overworld && player->id == PLAYER_ID)
         {
             int32 screen_offset_x = 0;
             int32 dx = player->coords.x - camera_center_start.x;
@@ -3952,17 +3968,22 @@ void gameFrame(double delta_time, TickInput tick_input)
         // display level name
 		drawDebugText(next_world_state.level_name);
 
+		// player id
+        char player_id_text[256] = {0};
+        snprintf(player_id_text, sizeof(player_id_text), "player id: %d", player->id);
+        drawDebugText(player_id_text);
+
+        /*
         // player in_motion info
 		char player_moving_text[256] = {0};
         snprintf(player_moving_text, sizeof(player_moving_text), "player moving: %d", player->in_motion);
 		drawDebugText(player_moving_text);
 
-        // player in_motion info
+        // player movement direction 
 		char player_dir_text[256] = {0};
         snprintf(player_dir_text, sizeof(player_dir_text), "player moving: %d", player->moving_direction);
 		drawDebugText(player_dir_text);
 
-        /*
         // camera pos info
         char camera_text[256] = {0};
         snprintf(camera_text, sizeof(camera_text), "camera pos: %f, %f, %f", camera.coords.x, camera.coords.y, camera.coords.z);
@@ -4061,7 +4082,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             draw_camera_boundary = (draw_camera_boundary) ? false : true;
 			time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
         }
-
         if (draw_camera_boundary && next_world_state.in_overworld)
         {
         	int32 x_draw_offset = 0;
