@@ -829,7 +829,7 @@ void loadResetBlockInfo(FILE* file)
 
         int32 size = 0;
         fread(&size, 4, 1, file);
-		int32 reset_entity_count = (size - 3) / RESET_INFO_SINGLE_ENTRY_SIZE;
+		int32 reset_entity_count = (size/4 - 3) / RESET_INFO_SINGLE_ENTRY_SIZE;
 		
         Int3 rb_coords = {0};
         fread(&rb_coords.x, 4, 1, file);
@@ -905,10 +905,9 @@ void writeLockedInfoToFile(FILE* file, Entity* e)
     fwrite(unlocked_by, 1, 64, file);
 }
 
+// if save_reset_block_state, save current positions of reset block as their new homes. otherwise, save their position to file, but keep their old homes
 void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
 {
-	fwrite(RESET_INFO_CHUNK_TAG, 4, 1, file);
-
     int32 count = 0;
     FOR(to_reset_index, MAX_RESET_COUNT)
     {
@@ -917,7 +916,9 @@ void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
     }
     if (count == 0) return;
 
-    int32 size = 3 + (RESET_INFO_SINGLE_ENTRY_SIZE * count);
+	fwrite(RESET_INFO_CHUNK_TAG, 4, 1, file);
+
+    int32 size = 4 * (3 + (RESET_INFO_SINGLE_ENTRY_SIZE * count));
     fwrite(&size, 4, 1, file);
 
     fwrite(&rb->coords.x, 4, 1, file);
@@ -963,8 +964,6 @@ bool saveLevelRewrite(char* path, bool save_reset_block_state)
 {
     FILE* old_file = fopen(path, "rb+");
     Camera saved_camera = loadCameraInfo(old_file);
-	//Entity saved_reset_blocks[128] = {0};
-    //memcpy(saved_reset_blocks, next_world_state.reset_blocks, sizeof(saved_reset_blocks));
     fclose(old_file);
 
     char temp_path[256] = {0};
@@ -1007,8 +1006,6 @@ bool saveLevelRewrite(char* path, bool save_reset_block_state)
     FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
     {
         Entity* rb = &next_world_state.reset_blocks[entity_index];
-        //else rb = &saved_reset_blocks[entity_index];
-
         if (rb->id == -1) continue;
         writeResetInfoToFile(file, rb, save_reset_block_state);
     }
