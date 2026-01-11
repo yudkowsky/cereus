@@ -270,18 +270,18 @@ Vec3 vec3ScalarMultiply(Vec3 position, float scalar)
 }
 
 /*
-   int32 roundFloatToInt(float f)
-   {
+int32 roundFloatToInt(float f)
+{
    float d = fmod(f, 1);
    if (d >= 0.5f) return (int32)f + 1;
    else return (int32)f;
-   }
+}
 
-   Int3 roundToInt3(Vec3 coords)
-   {
+Int3 roundToInt3(Vec3 coords)
+{
    return (Int3){ roundFloatToInt(coords.x), roundFloatToInt(coords.y), roundFloatToInt(coords.z) };
-   }
-   */
+}
+*/
 
 // BUFFER / STATE INTERFACING
 
@@ -2255,15 +2255,28 @@ void updateLaserBuffer(void)
 
                     if (crystal->in_motion && crystal->moving_direction == oppositeDirection(current_direction)) 
                     {
+						bool player_turning = next_world_state.pack_intermediate_states_timer > 0;
+                        int32 offset_timer = 0;
+
+                        if (player_turning) offset_timer = PUSH_FROM_TURN_ANIMATION_TIME;
+                        else offset_timer = MOVE_OR_PUSH_ANIMATION_TIME;
+
                         Vec3 to_vector = directionToVector(crystal->moving_direction);
-                        float dir_offset = (float)(MOVE_OR_PUSH_ANIMATION_TIME - crystal->in_motion) / (float)(MOVE_OR_PUSH_ANIMATION_TIME);
+                        float dir_offset = (float)(offset_timer - crystal->in_motion) / (float)offset_timer;
                         offset = vec3Add(vec3Negate(to_vector), vec3Multiply(to_vector, dir_offset));
                         lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                     }
-                    else if (!th_hit && !(crystal->in_motion < STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH)) 
+                    else if (!th_hit && !(crystal->in_motion < STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH)) // check slo-mo if want to use different in_motion calc if moving because of turn
                     {
+                        // passthrough
                         current_tile_coords = getNextCoords(current_tile_coords, current_direction);
                         continue;
+                    }
+                    else if (crystal->in_motion > 1)
+                    {
+                        // NOTE(spike): may want to change how this works, looks slightly janky right now; note that without this we have slightly unexpected behavior (121 with blue crystal first)
+                        lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                        break;
                     }
                     else
                     {
@@ -2500,6 +2513,8 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         entity_in_stack->coords = current_end_coords;
         current_end_coords = current_start_coords;
         current_start_coords = getNextCoords(current_start_coords, UP);
+
+        entity->moving_direction = NO_DIRECTION;
     }
     return false;
 }
@@ -3947,7 +3962,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         // display level name
 		drawDebugText(next_world_state.level_name);
 
-        /*
         // player in_motion info
 		char player_moving_text[256] = {0};
         snprintf(player_moving_text, sizeof(player_moving_text), "player moving: %d", player->in_motion);
@@ -3958,6 +3972,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         snprintf(player_dir_text, sizeof(player_dir_text), "player moving: %d", player->moving_direction);
 		drawDebugText(player_dir_text);
 
+        /*
         // camera pos info
         char camera_text[256] = {0};
         snprintf(camera_text, sizeof(camera_text), "camera pos: %f, %f, %f", camera.coords.x, camera.coords.y, camera.coords.z);
