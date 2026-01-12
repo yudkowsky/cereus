@@ -274,20 +274,6 @@ Vec3 vec3ScalarMultiply(Vec3 position, float scalar)
     return (Vec3){ position.x*scalar, position.y*scalar, position.z*scalar }; 
 }
 
-/*
-int32 roundFloatToInt(float f)
-{
-   float d = fmod(f, 1);
-   if (d >= 0.5f) return (int32)f + 1;
-   else return (int32)f;
-}
-
-Int3 roundToInt3(Vec3 coords)
-{
-   return (Int3){ roundFloatToInt(coords.x), roundFloatToInt(coords.y), roundFloatToInt(coords.z) };
-}
-*/
-
 // BUFFER / STATE INTERFACING
 
 int32 coordsToBufferIndexType(Int3 coords)
@@ -3006,6 +2992,16 @@ void editorMode(TickInput *tick_input)
                 editor_state.editor_mode = SELECT_WRITE;
                 editor_state.writing_field = WRITING_FIELD_UNLOCKED_BY;
             }
+            else if (tick_input->q_press && editor_state.selected_id / ID_OFFSET_WIN_BLOCK * ID_OFFSET_WIN_BLOCK == ID_OFFSET_WIN_BLOCK)
+            {
+				Entity* wb = getEntityFromId(editor_state.selected_id);
+                if (wb->next_level[0] != 0)
+                {
+                    levelChangePrep(wb->next_level);
+                    time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+                    gameInitialise(wb->next_level);
+                }
+            }
         }
     }
 }
@@ -3596,15 +3592,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             next_world_state.pack_intermediate_states_timer--;
         }
 
-        if (player->in_motion > 0)
-        {
-            updateLaserBuffer();
-        }
-        else
-        {
-            updateLaserBuffer();
-        }
-
         // falling logic
 		if (!player->hit_by_blue) doFallingObjects(true); // built in guard here against pushable at location of pack_hitbox_turning_to_timer;
 
@@ -3887,8 +3874,6 @@ void gameFrame(double delta_time, TickInput tick_input)
 		// DRAW 3D
 
         // draw lasers
-        updateLaserBuffer();
-
 		FOR(laser_buffer_index, 64)
         {
             LaserBuffer lb = laser_buffer[laser_buffer_index];

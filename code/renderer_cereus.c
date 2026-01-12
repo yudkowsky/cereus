@@ -990,7 +990,8 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     VkPresentModeKHR* present_modes = malloc(sizeof(*present_modes) * present_mode_count);
     vkGetPhysicalDeviceSurfacePresentModesKHR(renderer_state.physical_device_handle, renderer_state.surface_handle, &present_mode_count, present_modes);
 
-    VkPresentModeKHR chosen_present_mode = VK_PRESENT_MODE_FIFO_KHR; // FIFO guaranteed - will now overwrite with MAILBOX if possible
+    //VkPresentModeKHR chosen_present_mode = VK_PRESENT_MODE_FIFO_KHR; 
+    VkPresentModeKHR chosen_present_mode = VK_PRESENT_MODE_IMMEDIATE_KHR; 
 
     for (uint32 present_mode_increment = 0; present_mode_increment < present_mode_count; present_mode_increment++)
     {
@@ -1439,7 +1440,25 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     vkCreateShaderModule(renderer_state.logical_device_handle, &fragment_shader_module_creation_info, 0, &renderer_state.fragment_shader_module_handle);
     free(frag_bytes);
 
-    // SETTING UP OUTLINE SHADER MODULE
+    // SETTING UP OUTLINE FRAGMENT SHADER 
+
+    void* outline_vert_bytes = 0;
+    size_t outline_vert_size = 0;
+    if (!readEntireFile("data/shaders/spirv/outline.vert.spv", &outline_vert_bytes, &outline_vert_size))
+    {
+        return;
+    }
+
+    VkShaderModuleCreateInfo outline_vert_shader_module_ci = {0};
+    outline_vert_shader_module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    outline_vert_shader_module_ci.codeSize = outline_vert_size;
+    outline_vert_shader_module_ci.pCode = (const uint32*)outline_vert_bytes;
+
+    VkShaderModule outline_vertex_shader_module_handle;
+    vkCreateShaderModule(renderer_state.logical_device_handle, &outline_vert_shader_module_ci, 0, &outline_vertex_shader_module_handle);
+    free(outline_vert_bytes);
+
+    // SETTING UP OUTLINE FRAGMENT SHADER 
 
     void* outline_frag_bytes = 0;
     size_t outline_frag_size = 0;
@@ -1539,6 +1558,12 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     fragment_shader_stage_create_info.module = renderer_state.fragment_shader_module_handle;
     fragment_shader_stage_create_info.pName = "main";
 
+    VkPipelineShaderStageCreateInfo outline_vert_stage_ci = {0};
+    outline_vert_stage_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    outline_vert_stage_ci.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    outline_vert_stage_ci.module = outline_vertex_shader_module_handle;  // Use dedicated outline vertex shader
+    outline_vert_stage_ci.pName = "main";
+
     // outline fragment shader stage
     VkPipelineShaderStageCreateInfo outline_frag_shader_stage_ci = {0};
 	outline_frag_shader_stage_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -1574,10 +1599,10 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     sprite_frag_stage_ci.module = renderer_state.sprite_fragment_shader_module_handle;
     sprite_frag_stage_ci.pName = "main";
 
-    VkPipelineShaderStageCreateInfo shader_stages[2] = { vertex_shader_stage_create_info, fragment_shader_stage_create_info }; // TODO(spike): rename standard_ or somelike
-    VkPipelineShaderStageCreateInfo outline_stages[2] = { vertex_shader_stage_create_info, outline_frag_shader_stage_ci };
-    VkPipelineShaderStageCreateInfo laser_stages[2] = { laser_vert_stage_create_info, laser_frag_stage_create_info };
-    VkPipelineShaderStageCreateInfo sprite_stages[2] = { sprite_vert_stage_ci, sprite_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo shader_stages[2]  = { vertex_shader_stage_create_info, fragment_shader_stage_create_info }; // TODO(spike): rename standard_ or somelike
+    VkPipelineShaderStageCreateInfo outline_stages[2] = { outline_vert_stage_ci, outline_frag_shader_stage_ci }; // TODO(spike): consistent naming in general
+    VkPipelineShaderStageCreateInfo laser_stages[2]   = { laser_vert_stage_create_info, laser_frag_stage_create_info };
+    VkPipelineShaderStageCreateInfo sprite_stages[2]  = { sprite_vert_stage_ci, sprite_frag_stage_ci };
 
     // simple vertex input (sprites, outlines, lasers)
     VkVertexInputBindingDescription vertex_binding_simple = {0};
