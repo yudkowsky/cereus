@@ -17,7 +17,7 @@ const float CAMERA_FOV = 20.0f;
 const Vec3 DEFAULT_SCALE = { 1.0f,  1.0f,  1.0f  };
 const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 const float LASER_WIDTH = 0.25;
-const float MAX_RAYCAST_SEEK_LENGTH = 50.0f;
+const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
 
 const int32 EDITOR_INPUT_TIME_UNTIL_ALLOW = 9;
 const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9; // TODO(spike): make this freely editable (want to up this by a few frames to emphasise pushing stacked box mechanics)
@@ -36,14 +36,14 @@ const int32 PACK_TIME_IN_INTERMEDIATE_STATE = 4;
 const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
 
-const int32 MAX_ENTITY_INSTANCE_COUNT = 128;
+const int32 MAX_ENTITY_INSTANCE_COUNT = 64;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
 const int32 MAX_ANIMATION_COUNT = 32;
 const int32 MAX_LASER_TRAVEL_DISTANCE = 48;
 const int32 MAX_LASER_TURNS_ALLOWED = 16;
 const int32 MAX_PSEUDO_SOURCE_COUNT = 32;
 const int32 MAX_PUSHABLE_STACK_SIZE = 32;
-const int32 MAX_TRAILING_HITBOX_COUNT = 64;
+const int32 MAX_TRAILING_HITBOX_COUNT = 8;
 const int32 MAX_LEVEL_COUNT = 64;
 const int32 MAX_RESET_COUNT = 16;
 
@@ -2266,12 +2266,14 @@ void updateLaserBuffer(void)
                         lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                         break;
                     }
+                    /*
                     else if (crystal->in_motion > 0)
                     {
                         // NOTE(spike): may want to change how this works, looks slightly janky right now; note that without this we have slightly unexpected behavior (see 121 with blue crystal first)
                         lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                         break;
                     }
+                    */
                     else
                     {
                         lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
@@ -2369,7 +2371,7 @@ void updateLaserBuffer(void)
                     }
 
                     current_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
-                    no_more_turns = false;
+					if (current_direction != NO_DIRECTION) no_more_turns = false;
                     break;
                 }
                 if (getTileType(current_tile_coords) != NONE || (th_hit))

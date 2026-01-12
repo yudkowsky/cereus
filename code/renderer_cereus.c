@@ -1558,6 +1558,7 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     fragment_shader_stage_create_info.module = renderer_state.fragment_shader_module_handle;
     fragment_shader_stage_create_info.pName = "main";
 
+    // outline vertex shader stage
     VkPipelineShaderStageCreateInfo outline_vert_stage_ci = {0};
     outline_vert_stage_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     outline_vert_stage_ci.stage = VK_SHADER_STAGE_VERTEX_BIT;
