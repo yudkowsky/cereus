@@ -252,9 +252,16 @@ int CALLBACK WinMain(
 
     gameInitialise(file_path); 
 
-    int32 mspt_timer = 0;
+	double frame_times[60] = {0};
+	int32 frame_time_index = 0;
+    int32 title_update_counter = 0;
+
+	LARGE_INTEGER work_start, work_end;
+
     while (running)
     {
+		QueryPerformanceCounter(&work_start);
+
 		while (PeekMessageW(&queued_message, 0, 0, 0, PM_REMOVE))
         {
             if (queued_message.message == WM_QUIT) 
@@ -271,15 +278,6 @@ int CALLBACK WinMain(
         double delta_time = (current_tick.QuadPart - last_tick.QuadPart) * seconds_per_tick;
         last_tick = current_tick;
 
-        wchar_t title_buffer[256];
-        if (mspt_timer == 0)
-        {
-        	swprintf(title_buffer, 256, L"mspt: %.1f", delta_time*1000);
-            mspt_timer = 20;
-        }
-        else (mspt_timer --);
-		SetWindowTextW(window_handle, title_buffer);
-
         gameFrame(delta_time, tick_input); 
 
         tick_input.mouse_dx = 0;
@@ -289,6 +287,24 @@ int CALLBACK WinMain(
         tick_input.enter_pressed_this_frame = false;
 
         centerCursorInWindow();
+
+        QueryPerformanceCounter(&work_end);
+        double work_ms = (work_end.QuadPart - work_start.QuadPart) * seconds_per_tick * 1000.0;
+        frame_times[frame_time_index] = work_ms;
+        frame_time_index = (frame_time_index + 1) % 60;
+        
+        title_update_counter++;
+        if (title_update_counter >= 30)
+        {
+            double avg_ms = 0.0;
+            for (int i = 0; i < 60; i++) avg_ms += frame_times[i];
+            avg_ms /= 60.0;
+
+            wchar_t title_buffer[256];
+            swprintf(title_buffer, 256, L"mspt: %.2f", work_ms);
+            SetWindowTextW(window_handle, title_buffer);
+            title_update_counter = 0;
+        }
     }
 
     return (int)queued_message.wParam;

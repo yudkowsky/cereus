@@ -9,6 +9,8 @@ glslc tri.frag -g -o ..\spirv\tri.frag.spv
 glslc outline.frag -g -o ..\spirv\outline.frag.spv
 glslc laser.vert -g -o ..\spirv\laser.vert.spv
 glslc laser.frag -g -o ..\spirv\laser.frag.spv 
+glslc sprite.vert -g -o ..\spirv\sprite.vert.spv
+glslc sprite.frag -g -o ..\spirv\sprite.frag.spv
 popd
 
 IF NOT EXIST ..\..\build_cereus mkdir ..\..\build_cereus

@@ -13,7 +13,7 @@ const float TAU = 6.2831853071f;
 
 const float CAMERA_SENSITIVITY = 0.005f;
 const float CAMERA_MOVE_STEP = 0.075f;
-const float CAMERA_FOV = 25.0f;
+const float CAMERA_FOV = 20.0f;
 const Vec3 DEFAULT_SCALE = { 1.0f,  1.0f,  1.0f  };
 const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 const float LASER_WIDTH = 0.25;
