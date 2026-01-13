@@ -91,11 +91,11 @@ SpriteId;
 typedef struct AssetToLoad 
 {
     SpriteId sprite_id;
-	AssetType type;
+    AssetType type;
     Vec3 coords[2048];
-	Vec3 scale[2048];
+    Vec3 scale[2048];
     Vec4 rotation[2048];
-    Vec3 color[2048]; // used by LASER type
+    Vec3 color[2048];
     int32 instance_count;
 }
 AssetToLoad;

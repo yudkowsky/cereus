@@ -12,7 +12,7 @@ const int32	SCREEN_HEIGHT_PX = 1080;
 const float TAU = 6.2831853071f;
 
 const float CAMERA_SENSITIVITY = 0.005f;
-const float CAMERA_MOVE_STEP = 0.075f;
+const float CAMERA_MOVE_STEP = 0.1f;
 const float CAMERA_FOV = 20.0f;
 const Vec3 DEFAULT_SCALE = { 1.0f,  1.0f,  1.0f  };
 const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
@@ -1102,25 +1102,15 @@ SpriteId getCube3DId(TileType tile)
     }
 }
 
+// TODO(spike):
+// drawAsset is slow (<1mspt by itself) likely due to cache misses on AssetToDraw (CUBE_3D_VOID accessing ~9MB into array)
+// when we have actual 3D models, hopefully can cut this size hugely, because we won't have >1000 of the same entity on screen, probably? right now its basically all VOIDs 
+
 // assuming one path -> one asset type.
 void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation)
 {
-    int32 asset_location = -1;
-    for (int32 asset_index = 0; asset_index < 256; asset_index++)
-    {
-        if (assets_to_load[asset_index].instance_count == 0)
-        {
-            if (asset_location == -1) asset_location = asset_index;
-            continue;
-        }
-        if (assets_to_load[asset_index].sprite_id == id && assets_to_load[asset_index].type == type)
-        {
-            asset_location = asset_index;
-            break;
-        }
-    }
-    AssetToLoad* a = &assets_to_load[asset_location];
-
+    if (id <= 0) return; // should probably just not call like this
+    AssetToLoad* a = &assets_to_load[id];
     if (a->instance_count == 0)
     {
         a->type = type;
@@ -3139,8 +3129,10 @@ void gameFrame(double delta_time, TickInput tick_input)
         camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
     }
 
-    //while (accumulator >= PHYSICS_INCREMENT)
-   	//{
+    int32 loop_count = 0;
+    while (accumulator >= PHYSICS_INCREMENT)
+   	{
+        loop_count++;
 		next_world_state = world_state;
         Entity* player = &next_world_state.player;
         Entity* pack = &next_world_state.pack;
@@ -3841,7 +3833,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // final redo of laser buffer, after all logic is complete, for drawing
 		updateLaserBuffer();
-
+        
 		// adjust overworld camera based on position
         if (next_world_state.in_overworld && player->id == PLAYER_ID)
         {
@@ -4013,7 +4005,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 {
                     char selected_id_text[256] = {0};
                     snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d", editor_state.selected_id);
-                    drawDebugText(selected_id_text);
 
                     char writing_field_text[256] = {0};
                     char writing_field_state[256] = {0};
@@ -4124,11 +4115,11 @@ void gameFrame(double delta_time, TickInput tick_input)
 
 		if (time_until_input > 0) time_until_input--;
 
+        accumulator -= PHYSICS_INCREMENT;
+
         rendererSubmitFrame(assets_to_load, camera);
         FOR(i, 2048) assets_to_load[i].instance_count = 0;
-
-        accumulator -= PHYSICS_INCREMENT;
-    //}
+	}
 
     rendererDraw();
 }

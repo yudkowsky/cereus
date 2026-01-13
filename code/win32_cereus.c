@@ -294,14 +294,17 @@ int CALLBACK WinMain(
         frame_time_index = (frame_time_index + 1) % 60;
         
         title_update_counter++;
-        if (title_update_counter >= 10)
+        if (title_update_counter >= 100)
         {
             double avg_ms = 0.0;
             for (int i = 0; i < 60; i++) avg_ms += frame_times[i];
             avg_ms /= 60.0;
 
+            double fps = 1000.0 / avg_ms;
+
             wchar_t title_buffer[256];
-            swprintf(title_buffer, 256, L"mspt: %.2f", work_ms);
+            //swprintf(title_buffer, 256, L"mspt: %.2f", work_ms);
+            swprintf(title_buffer, 256, L"fps: %.0f", fps);
             SetWindowTextW(window_handle, title_buffer);
             title_update_counter = 0;
         }
