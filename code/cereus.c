@@ -27,14 +27,14 @@ const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6;
 const int32 FAILED_ANIMATION_TIME = 8;
 const int32 STANDARD_IN_MOTION_TIME = 7;
 const int32 STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH = 5;
+const int32 SUCCESSFUL_TP_TIME = 8;
+
+const int32 FAILED_TP_TIME = 8;
 
 const int32 TRAILING_HITBOX_TIME = 5;
 const int32 FIRST_TRAILING_PACK_TURN_HITBOX_TIME = 2;
 const int32 TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN = 2;
 const int32 PACK_TIME_IN_INTERMEDIATE_STATE = 4;
-
-const int32 SUCCESSFUL_TP_TIME = 8;
-const int32 FAILED_TP_TIME = 8;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 64;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
@@ -2266,14 +2266,12 @@ void updateLaserBuffer(void)
                         lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                         break;
                     }
-                    /*
                     else if (crystal->in_motion > 0)
                     {
                         // NOTE(spike): may want to change how this works, looks slightly janky right now; note that without this we have slightly unexpected behavior (see 121 with blue crystal first)
                         lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                         break;
                     }
-                    */
                     else
                     {
                         lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
@@ -3141,8 +3139,8 @@ void gameFrame(double delta_time, TickInput tick_input)
         camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
     }
 
-    while (accumulator >= PHYSICS_INCREMENT)
-    {
+    //while (accumulator >= PHYSICS_INCREMENT)
+   	//{
 		next_world_state = world_state;
         Entity* player = &next_world_state.player;
         Entity* pack = &next_world_state.pack;
@@ -3813,7 +3811,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 		// figure out if entities should be locked / unlocked (should probably try to update this more intelligently later?)
         if (editor_state.editor_mode == NO_MODE)
         {
-            Entity* entity_group[2] = {next_world_state.boxes, next_world_state.mirrors, /*next_world_state.crystals, next_world_state.sources*/};
+            Entity* entity_group[2] = { next_world_state.boxes, next_world_state.mirrors };
 
             FOR(group_index, 2)
             {
@@ -3934,8 +3932,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             else if (                            		   player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
             else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
 
-            if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(world_state.player_ghost_coords), PLAYER_SCALE, directionToQuaternion(world_state.player_ghost_direction, true));
-            if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(world_state.pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(world_state.pack_ghost_direction, true));
+            //if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(world_state.player_ghost_coords), PLAYER_SCALE, directionToQuaternion(world_state.player_ghost_direction, true));
+            //if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(world_state.pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(world_state.pack_ghost_direction, true));
         }
 		if (world_state.pack.id != -1) drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat);
 
@@ -3957,22 +3955,20 @@ void gameFrame(double delta_time, TickInput tick_input)
         snprintf(player_id_text, sizeof(player_id_text), "player id: %d", player->id);
         drawDebugText(player_id_text);
 
-        /*
         // player in_motion info
-		char player_moving_text[256] = {0};
-        snprintf(player_moving_text, sizeof(player_moving_text), "player moving: %d", player->in_motion);
-		drawDebugText(player_moving_text);
+		//char player_moving_text[256] = {0};
+        //snprintf(player_moving_text, sizeof(player_moving_text), "player moving: %d", player->in_motion);
+		//drawDebugText(player_moving_text);
 
         // player movement direction 
-		char player_dir_text[256] = {0};
-        snprintf(player_dir_text, sizeof(player_dir_text), "player moving: %d", player->moving_direction);
-		drawDebugText(player_dir_text);
+		//char player_dir_text[256] = {0};
+        //snprintf(player_dir_text, sizeof(player_dir_text), "player moving: %d", player->moving_direction);
+		//drawDebugText(player_dir_text);
 
         // camera pos info
-        char camera_text[256] = {0};
-        snprintf(camera_text, sizeof(camera_text), "camera pos: %f, %f, %f", camera.coords.x, camera.coords.y, camera.coords.z);
-        drawDebugText(camera_text);
-        */
+        //char camera_text[256] = {0};
+        //snprintf(camera_text, sizeof(camera_text), "camera pos: %f, %f, %f", camera.coords.x, camera.coords.y, camera.coords.z);
+        //drawDebugText(camera_text);
 
 		if (editor_state.editor_mode != NO_MODE)
         {
@@ -4129,10 +4125,10 @@ void gameFrame(double delta_time, TickInput tick_input)
 		if (time_until_input > 0) time_until_input--;
 
         rendererSubmitFrame(assets_to_load, camera);
-        memset(assets_to_load, 0, sizeof(assets_to_load));
+        FOR(i, 2048) assets_to_load[i].instance_count = 0;
 
         accumulator -= PHYSICS_INCREMENT;
-    }
+    //}
 
     rendererDraw();
 }
