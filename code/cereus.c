@@ -57,6 +57,7 @@ const Vec4 IDENTITY_QUATERNION  = { 0, 0, 0, 1 };
 
 const int32 PLAYER_ID = 1;
 const int32 PACK_ID   = 2;
+const int32 OUTLINE_DRAW_ID = 3;
 const int32 ID_OFFSET_BOX     	   = 100 * 1;
 const int32 ID_OFFSET_MIRROR  	   = 100 * 2;
 const int32 ID_OFFSET_CRYSTAL 	   = 100 * 3;
@@ -2888,35 +2889,6 @@ void editorMode(TickInput *tick_input)
         }
     }
 
-    if (editor_state.editor_mode == SELECT_WRITE)
-    {
-        char (*writing_to_field)[64] = 0;
-        Entity* e = getEntityFromId(editor_state.selected_id);
-        if 		(editor_state.writing_field == WRITING_FIELD_NEXT_LEVEL)  writing_to_field = &e->next_level;
-        else if (editor_state.writing_field == WRITING_FIELD_UNLOCKED_BY) writing_to_field = &e->unlocked_by;
-
-        if (tick_input->enter_pressed_this_frame)
-        {
-            memset(*writing_to_field, '0', sizeof(*writing_to_field));
-            memcpy(*writing_to_field, editor_state.edit_buffer.string, sizeof(*writing_to_field) - 1);
-            editor_state.editor_mode = SELECT;
-            editor_state.selected_id = 0;
-            editor_state.writing_field = NO_WRITING_FIELD;
-        }
-        else if (tick_input->escape_press)
-        {
-            editor_state.editor_mode = SELECT;
-            editor_state.selected_id = 0;
-            editor_state.writing_field = NO_WRITING_FIELD;
-        }
-
-        updateTextInput(tick_input);
-    }
-    else // TODO(spike): maybe only need to memset this when exiting select write, or when changing modes
-    {
-        memset(&editor_state.edit_buffer, 0, sizeof(editor_state.edit_buffer));
-    }
-
     if (editor_state.editor_mode == SELECT)
     {
         if (tick_input->left_mouse_press)
@@ -3114,6 +3086,7 @@ void gameFrame(double delta_time, TickInput tick_input)
     if (delta_time > 0.1) delta_time = 0.1;
     accumulator += delta_time;
 
+    // fix camera once per present frame
     if (editor_state.editor_mode != NO_MODE)
     {
         camera.yaw += tick_input.mouse_dx * CAMERA_SENSITIVITY;
@@ -3128,11 +3101,42 @@ void gameFrame(double delta_time, TickInput tick_input)
         Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera.pitch);
         camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
     }
+    // handle writing once per present frame
 
-    int32 loop_count = 0;
+    if (editor_state.editor_mode == SELECT_WRITE)
+    {
+        char (*writing_to_field)[64] = 0;
+        Entity* e = getEntityFromId(editor_state.selected_id);
+        if 		(editor_state.writing_field == WRITING_FIELD_NEXT_LEVEL)  writing_to_field = &e->next_level;
+        else if (editor_state.writing_field == WRITING_FIELD_UNLOCKED_BY) writing_to_field = &e->unlocked_by;
+
+        if (tick_input.enter_pressed_this_frame)
+        {
+            memset(*writing_to_field, 0, sizeof(*writing_to_field));
+            memcpy(*writing_to_field, editor_state.edit_buffer.string, sizeof(*writing_to_field) - 1);
+
+            world_state = next_world_state; // this is a bit messy...
+
+            editor_state.editor_mode = SELECT;
+            editor_state.selected_id = 0;
+            editor_state.writing_field = NO_WRITING_FIELD;
+        }
+        else if (tick_input.escape_press)
+        {
+            editor_state.editor_mode = SELECT;
+            editor_state.selected_id = 0;
+            editor_state.writing_field = NO_WRITING_FIELD;
+        }
+
+        updateTextInput(&tick_input);
+    }
+    else
+    {
+        memset(&editor_state.edit_buffer, 0, sizeof(editor_state.edit_buffer));
+    }
+
     while (accumulator >= PHYSICS_INCREMENT)
    	{
-        loop_count++;
 		next_world_state = world_state;
         Entity* player = &next_world_state.player;
         Entity* pack = &next_world_state.pack;
@@ -3924,8 +3928,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             else if (                            		   player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
             else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
 
-            //if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(world_state.player_ghost_coords), PLAYER_SCALE, directionToQuaternion(world_state.player_ghost_direction, true));
-            //if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(world_state.pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(world_state.pack_ghost_direction, true));
+            if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(world_state.player_ghost_coords), PLAYER_SCALE, directionToQuaternion(world_state.player_ghost_direction, true));
+            if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(world_state.pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(world_state.pack_ghost_direction, true));
         }
 		if (world_state.pack.id != -1) drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat);
 
@@ -3977,7 +3981,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
             if (editor_state.selected_id > 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
             {
-                drawAsset(0, OUTLINE_3D, intCoordsToNorm(editor_state.selected_coords), DEFAULT_SCALE, IDENTITY_QUATERNION);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(editor_state.selected_coords), DEFAULT_SCALE, IDENTITY_QUATERNION);
 
                 if ((editor_state.selected_id / ID_OFFSET_RESET_BLOCK) * ID_OFFSET_RESET_BLOCK)
                 {
@@ -3986,7 +3990,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     {
                         if (rb->reset_info[to_reset_index].id == -1) continue;
                         Entity* e = getEntityFromId(rb->reset_info[to_reset_index].id);
-                        drawAsset(0, OUTLINE_3D, e->position_norm, DEFAULT_SCALE, IDENTITY_QUATERNION);
+                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, e->position_norm, DEFAULT_SCALE, IDENTITY_QUATERNION);
                     }
                 }
             }
@@ -4067,8 +4071,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                 {
                     Vec3 x_draw_coords = (Vec3){ (float)(x_draw_offset + camera_center_start.x), 3, (float)(z_draw_offset + camera_center_start.z) + ((float)OVERWORLD_SCREEN_SIZE_Z / 2) }; 
                     Vec3 z_draw_coords = (Vec3){ (float)(x_draw_offset + camera_center_start.x) - ((float)OVERWORLD_SCREEN_SIZE_X / 2), 3, (float)(z_draw_offset + camera_center_start.z) }; 
-                    drawAsset(0, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION);
-                    drawAsset(0, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION);
+                    drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION);
+                    drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION);
 					x_draw_offset += OVERWORLD_SCREEN_SIZE_X;
                 }
                 x_draw_offset = 0;
@@ -4107,11 +4111,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             fclose(file);
         }
-
-        tick_input.mouse_dx = 0;
-        tick_input.text.count = 0;
-        tick_input.backspace_pressed_this_frame = false;
-        tick_input.enter_pressed_this_frame = false;
 
 		if (time_until_input > 0) time_until_input--;
 
