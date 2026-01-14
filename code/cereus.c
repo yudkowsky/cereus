@@ -1763,7 +1763,7 @@ void pushOnce(Int3 coords, Direction direction, int32 animation_time)
                                  &entity_to_push.entity->position_norm,
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                  id, animation_time); 
-    int32 trailing_hitbox_time = animation_time / 2; // not particularly thought out; more sophisticated function here could be better
+    int32 trailing_hitbox_time = (animation_time / 2) + 1;
     createTrailingHitbox(coords, direction, NO_DIRECTION, trailing_hitbox_time, trailing_hitbox_type);
 }
 
@@ -2090,15 +2090,19 @@ int32 findNextFreeInLaserBuffer()
     return -1;
 }
 
-Vec3 calculateOffset(Entity* e, Vec3 offset, bool player_turning)
+// TODO(spike): RESUME HERE: look again at (and probably rewrite) this function; want to input offset and mirror.position_norm, and output the offset from start position, given also the direction the mirror is pointing. 
+// 				maybe get rid of dependency on timings? just have it work regardless? shouldn't need to be relevant.
+Vec3 calculateOffset(Entity* e, Vec3 offset)
 {
+    /*
     int32 offset_timer = 0;
     if (player_turning) offset_timer = PUSH_FROM_TURN_ANIMATION_TIME;
     else offset_timer = MOVE_OR_PUSH_ANIMATION_TIME;
 
     Vec3 to_vector = directionToVector(e->moving_direction);
     float dir_offset = (float)(offset_timer - e->in_motion) / (float)offset_timer;
-    return vec3Add(vec3Negate(to_vector), vec3Multiply(to_vector, dir_offset));
+    return vec3Add(offset, vec3Add(vec3Negate(to_vector), vec3Multiply(to_vector, dir_offset)));
+    */
 }
 
 void updateLaserBuffer(void)
@@ -2162,6 +2166,7 @@ void updateLaserBuffer(void)
         Int3 current_tile_coords = source->coords;
         Vec3 offset = {0};
 
+        int32 skip_mirror_id = 0;
         int32 skip_next_mirror = 0;
 
         FOR(laser_turn_index, MAX_LASER_TURNS_ALLOWED)
@@ -2242,12 +2247,12 @@ void updateLaserBuffer(void)
 
                 if (real_hit_type == MIRROR)
                 {
-                    if (skip_next_mirror == 0)
-                    {
-                        Entity* mirror = {0};
-                        if (th_hit) mirror = getEntityPointer(getNextCoords(current_tile_coords, th.moving_direction));
-                        else mirror = getEntityPointer(current_tile_coords);
+                    Entity* mirror = {0};
+                    if (th_hit) mirror = getEntityPointer(getNextCoords(current_tile_coords, th.moving_direction));
+                    else mirror = getEntityPointer(current_tile_coords);
 
+                    if (skip_next_mirror == 0 || skip_mirror_id != mirror->id)
+                    {
                         if (mirror->in_motion)
                         {
                             int32 passthrough_comparison = 0;
@@ -2261,15 +2266,15 @@ void updateLaserBuffer(void)
 
                                 if (mirror->in_motion > passthrough_comparison)
                                 {
-                                    /*
-                                    // if moving tw laser, but early in movement, advance laser one step and give offset from the far block towards laser.
+                                    // if moving tw laser, but early in movement, advance laser one step and off-set offset by 1 block tw far laser.
                                     current_tile_coords = getNextCoords(current_tile_coords, current_direction);
                                     offset = vec3Add(offset, directionToVector(oppositeDirection(current_direction)));
-                                    */
                                 }
+                                lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                             }
                             else
                             {
+                                // moving sideways
                                 if (!th_hit && mirror->in_motion > passthrough_comparison)
                                 {
                                     // passthrough
@@ -2278,13 +2283,17 @@ void updateLaserBuffer(void)
                                 }
                             }
                         }
-                        lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                        else
+                        {
+                            lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                        }
 
                         current_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
                         if (current_direction != NO_DIRECTION)
                         {
                             no_more_turns = false;
                             skip_next_mirror = 2;
+                            skip_mirror_id = mirror->id;
                         }
                         else
                         {
