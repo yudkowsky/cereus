@@ -316,7 +316,7 @@ typedef struct Entity
     char unlocked_by[64];
 
     // for reset blocks;
-    ResetInfo reset_info[16]; // TODO(spike): change to 64
+    ResetInfo reset_info[16];
 }
 Entity;
 
@@ -334,7 +334,8 @@ Animation;
 typedef struct TrailingHitbox
 {
 	Int3 coords;
-    Direction direction;
+    Direction hit_direction;
+    Direction moving_direction;
     int32 frames;
     TileType type;
 }
@@ -359,29 +360,26 @@ typedef struct WorldState
     char level_name[64];
     bool in_overworld;
 
-	char solved_levels[64][64];
+	char solved_levels[64][64]; // TODO(spike): make this enum? after finalised level names, so don't need to change at two places? maybe this is too late for this, but need to figure something out here
 
-    TrailingHitbox trailing_hitboxes[64];
+    TrailingHitbox trailing_hitboxes[16];
     bool bypass_player_fall;
 
     // handle pack turning sequence
     int32 pack_intermediate_states_timer;
+
     Int3 pack_intermediate_coords;
+
+    Int3 pack_hitbox_turning_to_coords;
+    int32 pack_hitbox_turning_to_timer; // used for blue-not-blue logic
+
     Direction pack_orthogonal_push_direction;
-    bool do_diagonal_push_on_turn ;
+    bool do_diagonal_push_on_turn;
     bool do_orthogonal_push_on_turn;
     bool do_player_and_pack_fall_after_turn;
     bool player_hit_by_blue_in_turn;
     Int3 entity_to_fall_after_blue_not_blue_turn_coords;
-    int32 entity_to_fall_after_blue_not_blue_turn_timer;
-
-    // patch on diagonal pass through due to pack hitbox being only on the diagonal in the middle of turn
-    int32 pack_hitbox_turning_from_timer;
-    Int3 pack_hitbox_turning_from_coords;
-    Direction pack_hitbox_turning_from_direction;
-    int32 pack_hitbox_turning_to_timer;
-    Int3 pack_hitbox_turning_to_coords;
-    Direction pack_hitbox_turning_to_direction;
+    int32 entity_to_fall_after_blue_not_blue_turn_timer; // why required?
 
     // ghosts from tp
     Int3 player_ghost_coords;
