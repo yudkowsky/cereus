@@ -86,7 +86,7 @@ const char RESET_INFO_CHUNK_TAG[4] = "RESB";
 const int32 OVERWORLD_SCREEN_SIZE_X = 15;
 const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 
-const double PHYSICS_INCREMENT = 1.0/25.0;
+const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
 const char debug_level_name[64] = "testing";
@@ -1105,7 +1105,7 @@ SpriteId getCube3DId(TileType tile)
 }
 
 // TODO(spike):
-// drawAsset is slow (<1mspt by itself) likely due to cache misses on AssetToDraw (CUBE_3D_VOID accessing ~9MB into array)
+// drawAsset is slow (<1mspt by itself) likely due to cache misses on AssetToDraw (CUBE_3D_*** accessing ~9MB into array)
 // when we have actual 3D models, hopefully can cut this size hugely, because we won't have >1000 of the same entity on screen, probably? right now its basically all VOIDs 
 
 // assuming one path -> one asset type.
@@ -3912,6 +3912,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
+        /*
         // temp draw outline around trailing hitboxes
         FOR(th_index, MAX_TRAILING_HITBOX_COUNT)
         {
@@ -3919,6 +3920,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (th.frames == 0 || th.hit_direction != NO_DIRECTION) continue;
             drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION);
         }
+        */
 
 		// draw selected id info
         if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
