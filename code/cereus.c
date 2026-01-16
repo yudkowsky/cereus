@@ -3111,9 +3111,12 @@ void gameFrame(double delta_time, TickInput tick_input)
 			if (time_until_input == 0 && tick_input.escape_press && !next_world_state.in_overworld)
             {
                 // leave current level if not in overworld. for now get first win block and go to their next location
+                char save_solved_levels[64][64] = {0};
+                memcpy(save_solved_levels, next_world_state.solved_levels, sizeof(save_solved_levels));
                 levelChangePrep("overworld");
                 time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
                 gameInitialise("overworld");
+                memcpy(next_world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
             }
 
             if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && player->in_motion == 0)
