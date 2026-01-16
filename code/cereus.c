@@ -86,7 +86,7 @@ const char RESET_INFO_CHUNK_TAG[4] = "RESB";
 const int32 OVERWORLD_SCREEN_SIZE_X = 15;
 const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 
-const double PHYSICS_INCREMENT = 1.0/60.0;
+const double PHYSICS_INCREMENT = 1.0/20.0;
 double accumulator = 0;
 
 const char debug_level_name[64] = "testing";
@@ -2090,11 +2090,9 @@ int32 findNextFreeInLaserBuffer()
     return -1;
 }
 
-// TODO(spike): RESUME HERE: look again at (and probably rewrite) this function; want to input offset and mirror.position_norm, and output the offset from start position, given also the direction the mirror is pointing. 
-// 				maybe get rid of dependency on timings? just have it work regardless? shouldn't need to be relevant.
-Vec3 calculateOffset(Entity* e, Vec3 offset)
+/*
+void calculateOffset(Entity* e, Vec3* offset)
 {
-    /*
     int32 offset_timer = 0;
     if (player_turning) offset_timer = PUSH_FROM_TURN_ANIMATION_TIME;
     else offset_timer = MOVE_OR_PUSH_ANIMATION_TIME;
@@ -2102,8 +2100,8 @@ Vec3 calculateOffset(Entity* e, Vec3 offset)
     Vec3 to_vector = directionToVector(e->moving_direction);
     float dir_offset = (float)(offset_timer - e->in_motion) / (float)offset_timer;
     return vec3Add(offset, vec3Add(vec3Negate(to_vector), vec3Multiply(to_vector, dir_offset)));
-    */
 }
+*/
 
 void updateLaserBuffer(void)
 {
@@ -2231,13 +2229,54 @@ void updateLaserBuffer(void)
 
                 if (real_hit_type == CRYSTAL)
                 {
-                    /*
                     Entity* crystal = {0};
-                    if (th_hit) crystal = getEntityPointer(getNextCoords(current_tile_coords, th.direction));
+                    if (th_hit) crystal = getEntityPointer(getNextCoords(current_tile_coords, th.moving_direction));
                     else crystal = getEntityPointer(current_tile_coords);
-                    */
 
-                    lb->end_coords = intCoordsToNorm(current_tile_coords);
+                    if (crystal->in_motion)
+                    {
+                        int32 passthrough_comparison = 0;
+                        bool player_turning = next_world_state.pack_intermediate_states_timer > 0;
+                        if (player_turning) passthrough_comparison = PUSH_FROM_TURN_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH;
+                        else passthrough_comparison = STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH; 
+
+                        if (crystal->moving_direction == oppositeDirection(current_direction))
+                        {
+                            offset = vec3Subtract(crystal->position_norm, intCoordsToNorm(crystal->coords));
+
+                            if (crystal->in_motion > passthrough_comparison)
+                            {
+                                // if moving tw laser, but early in movement, advance laser one step and off-set offset by 1 block tw far laser.
+                                current_tile_coords = getNextCoords(current_tile_coords, current_direction);
+                                offset = vec3Add(offset, directionToVector(oppositeDirection(current_direction)));
+                            }
+                        }
+                        else
+                        {
+                            // moving sideways
+                            if (!th_hit)
+                            {
+                                if (crystal->in_motion > passthrough_comparison)
+                                {
+                                    // passthrough
+                                    current_tile_coords = getNextCoords(current_tile_coords, current_direction);
+                                    continue;
+                                }
+                                else
+                                {
+                                    // break if not exactly aligned. TODO(spike): if we're including this, should also guard against offset.* > 0 not along the axis of travel of laser
+                                    lb->end_coords = intCoordsToNorm(current_tile_coords);
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                lb->end_coords = intCoordsToNorm(current_tile_coords);
+                                break;
+                            }
+                        }
+                    }
+                    lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
 
                     if 		(lb->color == RED) 	current_direction = getRedDirectionAtCrystal(current_direction);
                     else if (lb->color == BLUE) current_direction = getBlueDirectionAtCrystal(current_direction);
@@ -2253,7 +2292,6 @@ void updateLaserBuffer(void)
 
                     if (skip_next_mirror == 0 || skip_mirror_id != mirror->id)
                     {
-                        /*
                         if (mirror->in_motion)
                         {
                             int32 passthrough_comparison = 0;
@@ -2263,7 +2301,7 @@ void updateLaserBuffer(void)
 
                             if (mirror->moving_direction == oppositeDirection(current_direction))
                             {
-                                //offset = calculateOffset(mirror, offset);
+                                offset = vec3Subtract(mirror->position_norm, intCoordsToNorm(mirror->coords));
 
                                 if (mirror->in_motion > passthrough_comparison)
                                 {
@@ -2271,7 +2309,6 @@ void updateLaserBuffer(void)
                                     current_tile_coords = getNextCoords(current_tile_coords, current_direction);
                                     offset = vec3Add(offset, directionToVector(oppositeDirection(current_direction)));
                                 }
-                                lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                             }
                             else
                             {
@@ -2284,11 +2321,7 @@ void updateLaserBuffer(void)
                                 }
                             }
                         }
-                        */
-                        //else
-                        {
-                            lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
-                        }
+                        lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
 
                         current_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
                         if (current_direction != NO_DIRECTION)
