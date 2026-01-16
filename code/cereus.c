@@ -2253,6 +2253,7 @@ void updateLaserBuffer(void)
 
                     if (skip_next_mirror == 0 || skip_mirror_id != mirror->id)
                     {
+                        /*
                         if (mirror->in_motion)
                         {
                             int32 passthrough_comparison = 0;
@@ -2262,7 +2263,7 @@ void updateLaserBuffer(void)
 
                             if (mirror->moving_direction == oppositeDirection(current_direction))
                             {
-                                offset = calculateOffset(mirror, offset, player_turning);
+                                //offset = calculateOffset(mirror, offset);
 
                                 if (mirror->in_motion > passthrough_comparison)
                                 {
@@ -2283,7 +2284,8 @@ void updateLaserBuffer(void)
                                 }
                             }
                         }
-                        else
+                        */
+                        //else
                         {
                             lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                         }
