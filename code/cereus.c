@@ -86,7 +86,7 @@ const char RESET_INFO_CHUNK_TAG[4] = "RESB";
 const int32 OVERWORLD_SCREEN_SIZE_X = 15;
 const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 
-const double PHYSICS_INCREMENT = 1.0/20.0;
+const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
 const char debug_level_name[64] = "testing";
@@ -2264,7 +2264,7 @@ void updateLaserBuffer(void)
                                 }
                                 else
                                 {
-                                    // break if not exactly aligned. TODO(spike): if we're including this, should also guard against offset.* > 0 not along the axis of travel of laser
+                                    // break if not exactly aligned. TODO(spike): if including this, should also guard against offset.* > 0 not along the axis of travel of laser
                                     lb->end_coords = intCoordsToNorm(current_tile_coords);
                                     break;
                                 }
