@@ -2866,7 +2866,8 @@ void editorMode(TickInput *tick_input)
         {
             Vec3 neg_z_basis = {0, 0, -1};
             RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), MAX_RAYCAST_SEEK_LENGTH);
-            Entity* rb = getEntityFromId(editor_state.selected_id);
+            Entity* rb = 0;
+            if (editor_state.selected_id > 0) rb = getEntityFromId(editor_state.selected_id);
             if (rb != 0 && getTileType(rb->coords) == RESET_BLOCK)
             {
                 Entity* new_e = getEntityPointer(raycast_output.hit_coords);
@@ -3723,7 +3724,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                     buildLevelPathFromName(next_world_state.level_name, &level_path);
                     saveLevelRewrite(level_path, false);
                 }
-
                 if (wb->next_level[0] != 0)
                 {
                     levelChangePrep(wb->next_level);
@@ -3761,10 +3761,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                 setTileDirection(NORTH, reset_e->coords);
                 reset_e->coords = rb->reset_info[to_reset_index].start_coords;
                 reset_e->position_norm = intCoordsToNorm(reset_e->coords);
-                //reset_e->direction = rb->reset_info[to_reset_index].start_direction;
-                //reset_e->rotation_quat = directionToQuaternion(reset_e->direction, true); // TODO(spike): check if this is actually correct for U/D mirrors
                 setTileType(tile, reset_e->coords);
-                setTileDirection(reset_e->direction, reset_e->coords); // TODO(spike): update to start_direction (and actually store this - will require file layout change)
+                setTileDirection(reset_e->direction, reset_e->coords);
             }
         }
 
