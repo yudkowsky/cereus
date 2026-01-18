@@ -19,7 +19,7 @@ const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 const float LASER_WIDTH = 0.25;
 const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
 
-const int32 EDITOR_INPUT_TIME_UNTIL_ALLOW = 9;
+const int32 META_INPUT_TIME_UNTIL_ALLOW = 9;
 const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9; // TODO(spike): make this freely editable (want to up this by a few frames to emphasise pushing stacked box mechanics)
 const int32 TURN_ANIMATION_TIME = 9; // somewhat hard coded, tied to PUSH_FROM_TURN...
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
@@ -1018,7 +1018,7 @@ int32 findInSolvedLevels(char level_name[64], char (*solved_levels)[64][64])
     return -1;
 }
 
-int32 findNextFreeInSolvedLevels(char (*solved_levels)[64][64])
+int32 nextFreeInSolvedLevels(char (*solved_levels)[64][64])
 {
     FOR(solved_level_index, MAX_LEVEL_COUNT) if ((*solved_levels)[solved_level_index][0] == 0) return solved_level_index;
     return -1;
@@ -2393,7 +2393,7 @@ void levelChangePrep(char next_level[64])
 {
     if (!next_world_state.in_overworld && findInSolvedLevels(next_world_state.level_name, &next_world_state.solved_levels) == -1)
     {
-        int32 next_free = findNextFreeInSolvedLevels(&next_world_state.solved_levels);
+        int32 next_free = nextFreeInSolvedLevels(&next_world_state.solved_levels);
         strcpy(next_world_state.solved_levels[next_free], next_world_state.level_name);
     }
 
@@ -2752,7 +2752,7 @@ void editorMode(TickInput *tick_input)
         {
             if (editor_state.do_wide_camera) editor_state.do_wide_camera = false;
             else editor_state.do_wide_camera = true;
-            time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
         }
     }
 
@@ -2834,13 +2834,13 @@ void editorMode(TickInput *tick_input)
             }
             else if ((tick_input->middle_mouse_press || tick_input->g_press) && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
 
-            time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
         }
         else if (time_until_input == 0 && tick_input->l_press)
         {
             editor_state.picked_tile++;
             if (editor_state.picked_tile == RESET_BLOCK + 1) editor_state.picked_tile = VOID;
-            time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
         }
     }
 
@@ -2891,7 +2891,7 @@ void editorMode(TickInput *tick_input)
                     {
                         rb->reset_info[present_in_rb].id = -1;
                     }
-                    time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+                    time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
                 }
                 // did not click on entity
             }
@@ -2915,7 +2915,7 @@ void editorMode(TickInput *tick_input)
                 if (wb->next_level[0] != 0)
                 {
                     levelChangePrep(wb->next_level);
-                    time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+                    time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
                     gameInitialise(wb->next_level);
                 }
             }
@@ -3130,7 +3130,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     next_world_state = undo_buffer[next_undo_buffer_position];
                     resetStandardVisuals();
                 }
-                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+                time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
             }
             if (time_until_input == 0 && tick_input.r_press)
             {
@@ -3138,7 +3138,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (!restart_last_turn) recordStateForUndo();
                 memset(animations, 0, sizeof(animations));
                 gameInitialiseState();
-                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+                time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
                 restart_last_turn = true;
             }
 			if (time_until_input == 0 && tick_input.escape_press && !next_world_state.in_overworld)
@@ -3147,7 +3147,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 char save_solved_levels[64][64] = {0};
                 memcpy(save_solved_levels, next_world_state.solved_levels, sizeof(save_solved_levels));
                 levelChangePrep("overworld");
-                time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+                time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
                 gameInitialise("overworld");
                 memcpy(next_world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
             }
@@ -3700,21 +3700,22 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             if (!player->hit_by_blue)
             {
-                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID   || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID  ) && !presentInAnimations(PACK_ID))   pack->id = -1;
+                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PACK_ID)) pack->id = -1;
             }
         }
         else
         {
             if (!player->hit_by_red)
             {
-                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID   || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID  ) && !presentInAnimations(PACK_ID))   pack->id = -1;
+                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PACK_ID)) pack->id = -1;
             }
         }
 
         // win block logic
         if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_input == 0))
         {
-            if (!next_world_state.pack_detached)
+            Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
+            if (!next_world_state.pack_detached && !wb->locked)
             {
                 if (next_world_state.in_overworld) 
                 {
@@ -3723,18 +3724,27 @@ void gameFrame(double delta_time, TickInput tick_input)
                     saveLevelRewrite(level_path, false);
                 }
 
-                Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
                 if (wb->next_level[0] != 0)
                 {
                     levelChangePrep(wb->next_level);
-                    time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+                    time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
                     gameInitialise(wb->next_level);
                 }
             }
             else
             {
-                // don't allow because pack is not attached! maybe change this should be allowed..?
+                // don't allow because pack is not attached, or win block is locked!
             }
+        }
+        if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.f_press && time_until_input == 0))
+        {
+            Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
+			if (findInSolvedLevels(wb->next_level, &next_world_state.solved_levels) == -1)
+            {
+                int32 next_free = nextFreeInSolvedLevels(&next_world_state.solved_levels);
+                strcpy(next_world_state.solved_levels[next_free], wb->next_level);
+            }
+            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
         }
 
         // reset block logic
@@ -3758,12 +3768,12 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-		// figure out if entities should be locked / unlocked (should probably try to update this more intelligently later?)
+		// figure out if entities should be locked / unlocked (TODO(spike): should probably try to update this more intelligently later?)
         if (editor_state.editor_mode == NO_MODE)
         {
-            Entity* entity_group[2] = { next_world_state.boxes, next_world_state.mirrors };
+            Entity* entity_group[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.win_blocks };
 
-            FOR(group_index, 2)
+            FOR(group_index, 3)
             {
                 FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
                 {
@@ -4019,7 +4029,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 		if (time_until_input == 0 && tick_input.t_press && !(editor_state.editor_mode == SELECT_WRITE))
         {
             draw_camera_boundary = (draw_camera_boundary) ? false : true;
-			time_until_input = EDITOR_INPUT_TIME_UNTIL_ALLOW;
+			time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
         }
         if (draw_camera_boundary && next_world_state.in_overworld)
         {
