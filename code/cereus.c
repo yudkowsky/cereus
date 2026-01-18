@@ -90,7 +90,7 @@ const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
 const char debug_level_name[64] = "testing";
-const char start_level_path_buffer[64] = "w:/cereus/data/levels/";
+const char start_level_path_buffer[64] = "../cereus/data/levels/";
 Int3 level_dim = {0};
 
 Camera camera = {0};
@@ -248,8 +248,10 @@ bool vec3IsZero(Vec3 position)
     return (position.x == 0 && position.y == 0 && position.z == 0); 
 }
 
-Vec3 vec3Add(Vec3 a, Vec3 b) {
-    return (Vec3){ a.x+b.x, a.y+b.y, a.z+b.z }; }
+Vec3 vec3Add(Vec3 a, Vec3 b) 
+{
+    return (Vec3){ a.x+b.x, a.y+b.y, a.z+b.z };
+}
 
 Int3 int3Add(Int3 a, Int3 b)
 {
@@ -653,7 +655,6 @@ int32 getCountAndPositionOfChunk(FILE* file, char tag[4], int32 positions[16])
     int32 count = 0;
 
     fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
-
 
     while (true)
     {
@@ -1105,7 +1106,7 @@ SpriteId getCube3DId(TileType tile)
 }
 
 // TODO(spike):
-// drawAsset is slow (<1mspt by itself) likely due to cache misses on AssetToDraw (CUBE_3D_*** accessing ~9MB into array)
+// drawAsset is slow (>1mspt by itself) likely due to cache misses on AssetToDraw (CUBE_3D_*** accessing ~9MB into array)
 // when we have actual 3D models, hopefully can cut this size hugely, because we won't have >1000 of the same entity on screen, probably? right now its basically all VOIDs 
 
 // assuming one path -> one asset type.
@@ -1691,8 +1692,6 @@ PushResult canPush(Int3 coords, Direction direction)
         if (isEntity(current_tile) && entity->locked) return FAILED_PUSH;
 
         if (entity->in_motion) return PAUSE_PUSH;
-
-        // TODO(spike): need to introduce PAUSE_PUSH if entity is going to fall next frame. (this is what below is maybe doing?)
         if (isPushable(getTileType(current_coords)) && getTileType(getNextCoords(current_coords, DOWN)) == NONE && !next_world_state.player.hit_by_blue) return PAUSE_PUSH;
 
         current_coords = getNextCoords(current_coords, direction);
@@ -3212,6 +3211,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             // tp obstructed
                             time_until_input = FAILED_TP_TIME;
                         }
+
+                        updateLaserBuffer();
                     }
                     else
                     {
@@ -3756,7 +3757,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (rb->reset_info[to_reset_index].id == -1) continue;
                 Entity* reset_e = getEntityFromId(rb->reset_info[to_reset_index].id);
             	TileType tile = getTileType(reset_e->coords);
-
                 setTileType(NONE, reset_e->coords);
                 setTileDirection(NORTH, reset_e->coords);
                 reset_e->coords = rb->reset_info[to_reset_index].start_coords;
@@ -3770,7 +3770,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (editor_state.editor_mode == NO_MODE)
         {
             Entity* entity_group[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.win_blocks };
-
             FOR(group_index, 3)
             {
                 FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
