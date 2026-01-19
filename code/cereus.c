@@ -283,6 +283,13 @@ float vec3Length(Vec3 v)
     return sqrtf(v.x*v.x + v.y*v.y + v.z*v.z);
 }
 
+float vec3SignedLength(Vec3 v)
+{
+    float len = vec3Length(v);
+    if (vec3IsEqual(vec3Abs(v), v)) return len;
+    else return -len;
+}
+
 // BUFFER / STATE INTERFACING
 
 int32 coordsToBufferIndexType(Int3 coords)
@@ -2171,6 +2178,8 @@ void updateLaserBuffer(void)
             lb->color = source->color;
             current_tile_coords = getNextCoords(current_tile_coords, current_direction);
 
+            offset = vec3Inner(directionToVector(oppositeDirection(current_direction)), vec3SignedLength(offset));
+
             FOR(laser_tile_index, MAX_LASER_TRAVEL_DISTANCE)
             {
                 if (skip_next_mirror > 0) skip_next_mirror--;
@@ -2303,10 +2312,8 @@ void updateLaserBuffer(void)
                                     Direction next_laser_dir = getNextLaserDirectionMirror(current_direction, mirror->direction);
                                     {
                                         float offset_magnitude = vec3Length(vec3Subtract(mirror->position_norm, intCoordsToNorm(mirror->coords)));
-                                        //if (next_laser_dir == mirror->moving_direction) offset = vec3Inner(directionToVector(oppositeDirection(current_direction)), offset_magnitude);
-                                        //else if (next_laser_dir == oppositeDirection(mirror->moving_direction)) offset = vec3Inner(directionToVector(current_direction), offset_magnitude);
-                                        if (!th_hit) offset = vec3Inner(directionToVector(current_direction), offset_magnitude);
-                                        else offset = vec3Add(vec3Inner(directionToVector(current_direction), offset_magnitude), directionToVector(oppositeDirection(current_direction)));
+                                        if (!th_hit) offset = vec3Add(offset, vec3Inner(directionToVector(current_direction), offset_magnitude));
+                                        else offset = vec3Add(offset, vec3Add(vec3Inner(directionToVector(current_direction), offset_magnitude), directionToVector(oppositeDirection(current_direction))));
                                     }
                                 }
                             }
