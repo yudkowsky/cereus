@@ -2255,25 +2255,11 @@ void updateLaserBuffer(void)
                         else
                         {
                             // moving sideways
-                            if (!th_hit)
+                            if (!th_hit && crystal->in_motion > passthrough_comparison)
                             {
-                                if (crystal->in_motion > passthrough_comparison)
-                                {
-                                    // passthrough
-                                    current_tile_coords = getNextCoords(current_tile_coords, current_direction);
-                                    continue;
-                                }
-                                else
-                                {
-                                    // break if not exactly aligned. TODO(spike): if including this, should also guard against offset.* > 0 not along the axis of travel of laser
-                                    lb->end_coords = intCoordsToNorm(current_tile_coords);
-                                    break;
-                                }
-                            }
-                            else
-                            {
-                                lb->end_coords = intCoordsToNorm(current_tile_coords);
-                                break;
+                                // passthrough
+                                current_tile_coords = getNextCoords(current_tile_coords, current_direction);
+                                continue;
                             }
                         }
                     }
@@ -2466,8 +2452,8 @@ bool doFallingEntity(Entity* entity, bool do_animation)
 
 void doFallingObjects(bool do_animation)
 {
-    Entity* object_group_to_fall[5] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources, next_world_state.win_blocks };
-    FOR(to_fall_index, 5)
+    Entity* object_group_to_fall[6] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources, next_world_state.win_blocks, next_world_state.reset_blocks };
+    FOR(to_fall_index, 6)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
@@ -3255,7 +3241,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                             case CRYSTAL:
                             case PACK:
                             case MIRROR:
-
                             case SOURCE_RED:
                             case SOURCE_GREEN:
                             case SOURCE_BLUE:
@@ -3649,8 +3634,8 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // decrement in_motion / moving_direction and reset first_fall_already_done
-        Entity* falling_entity_groups[5] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources, next_world_state.win_blocks };
-        FOR(falling_object_index, 5)
+        Entity* falling_entity_groups[6] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources, next_world_state.win_blocks, next_world_state.reset_blocks };
+        FOR(falling_object_index, 6)
         {
             Entity* entity_group = falling_entity_groups[falling_object_index];
             FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) 
