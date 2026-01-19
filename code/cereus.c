@@ -1693,7 +1693,7 @@ PushResult canPush(Int3 coords, Direction direction)
         Entity* entity = getEntityPointer(current_coords);
         if (isEntity(current_tile) && entity->locked) return FAILED_PUSH;
 
-        if (entity->in_motion) return PAUSE_PUSH;
+        if (entity->in_motion > 0) return PAUSE_PUSH;
         if (isPushable(getTileType(current_coords)) && getTileType(getNextCoords(current_coords, DOWN)) == NONE && !next_world_state.player.hit_by_blue) return PAUSE_PUSH;
 
         current_coords = getNextCoords(current_coords, direction);
@@ -3243,7 +3243,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 Int3 coords_ahead = next_player_coords;
                                 Int3 coords_below_and_ahead = getNextCoords(next_player_coords, DOWN);
                                 if (isPushable(getTileType(coords_ahead)) && getEntityPointer(coords_ahead)->in_motion) move_player = false;
-                                else if (isPushable(getTileType(coords_below_and_ahead)) && getEntityPointer(coords_below_and_ahead)->in_motion) move_player = false;
+                                else if (isPushable(getTileType(coords_below_and_ahead)) && getEntityPointer(coords_below_and_ahead)->moving_direction != NO_DIRECTION) move_player = false;
                                 else
                                 {
                                     move_player = true;
@@ -3264,7 +3264,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             case SOURCE_CYAN:
                             case SOURCE_WHITE:
                             {
-                                //figure out if push, pause, or fail here.
+                                // figure out if push, pause, or fail here.
                             	PushResult push_check = canPushStack(next_player_coords, input_direction);
                                 if (push_check == CAN_PUSH) 
                                 {
@@ -3353,151 +3353,155 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (input_direction != oppositeDirection(player->direction)) // check if turning (as opposed to trying to reverse)
                     {
                         // player is turning
-                        Direction polarity_direction = NORTH;
-                        int32 clockwise = false;
-                        int32 clockwise_calculation = player->direction - input_direction;
-                        if (clockwise_calculation == -1 || clockwise_calculation == 3) clockwise = true;
 
-                        if (next_world_state.pack_detached)
+                        if (player->hit_by_red || getTileType(getNextCoords(player->coords, DOWN)) != NONE)
                         {
-                            // if pack detached, always allow turn
-                            if (isPushable(getTileType(getNextCoords(player->coords, UP)))) doHeadRotation(clockwise);
+                            Direction polarity_direction = NORTH;
+                            int32 clockwise = false;
+                            int32 clockwise_calculation = player->direction - input_direction;
+                            if (clockwise_calculation == -1 || clockwise_calculation == 3) clockwise = true;
 
-                            createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
-                                                         directionToQuaternion(player->direction, true), 
-                                                         directionToQuaternion(input_direction, true), 
-                                                         &player->rotation_quat,
-                                                         1, TURN_ANIMATION_TIME); 
-                            player->direction = input_direction;
-                            setTileDirection(player->direction, player->coords);
-                            player->moving_direction = NO_DIRECTION;
-
-                            recordStateForUndo();
-                        }
-                        else
-                        {
-							if (clockwise) polarity_direction = (input_direction + 1) % 4;
-							else 		   polarity_direction = (input_direction + 3) % 4;
-
-                            Int3 orthogonal_coords = getNextCoords(player->coords, oppositeDirection(input_direction));			
-                            Int3 diagonal_coords = getNextCoords(orthogonal_coords, polarity_direction);
-                            Direction diagonal_push_direction = oppositeDirection(input_direction);	
-                            Direction orthogonal_push_direction = oppositeDirection(polarity_direction); 
-                            
-                            bool pause_turn = false;
-                            TrailingHitbox _;
-                            if (trailingHitboxAtCoords(diagonal_coords, &_)) pause_turn = true;
-                            else if (isEntity(getTileType(orthogonal_coords)) && getEntityPointer(orthogonal_coords)->in_motion) pause_turn = true;
-                            else if (isEntity(getTileType(diagonal_coords))   && getEntityPointer(diagonal_coords)->in_motion)   pause_turn = true;
-
-                            if (!pause_turn)
+                            if (next_world_state.pack_detached)
                             {
-                                TileType diagonal_tile_type = getTileType(diagonal_coords); 
-                                TileType orthogonal_tile_type = getTileType(orthogonal_coords);
+                                // if pack detached, always allow turn
+                                if (isPushable(getTileType(getNextCoords(player->coords, UP)))) doHeadRotation(clockwise);
 
-                                bool allow_turn_diagonal = false;
-                                bool allow_turn_orthogonal = false;
-                                bool push_diagonal = false;
-                                bool push_orthogonal = false;
+                                createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
+                                                             directionToQuaternion(player->direction, true), 
+                                                             directionToQuaternion(input_direction, true), 
+                                                             &player->rotation_quat,
+                                                             1, TURN_ANIMATION_TIME); 
+                                player->direction = input_direction;
+                                setTileDirection(player->direction, player->coords);
+                                player->moving_direction = NO_DIRECTION;
 
-                                switch (diagonal_tile_type)
+                                recordStateForUndo();
+                            }
+                            else
+                            {
+                                if (clockwise) polarity_direction = (input_direction + 1) % 4;
+                                else 		   polarity_direction = (input_direction + 3) % 4;
+
+                                Int3 orthogonal_coords = getNextCoords(player->coords, oppositeDirection(input_direction));			
+                                Int3 diagonal_coords = getNextCoords(orthogonal_coords, polarity_direction);
+                                Direction diagonal_push_direction = oppositeDirection(input_direction);	
+                                Direction orthogonal_push_direction = oppositeDirection(polarity_direction); 
+                                
+                                bool pause_turn = false;
+                                TrailingHitbox _;
+                                if (trailingHitboxAtCoords(diagonal_coords, &_)) pause_turn = true;
+                                else if (isEntity(getTileType(orthogonal_coords)) && getEntityPointer(orthogonal_coords)->in_motion) pause_turn = true;
+                                else if (isEntity(getTileType(diagonal_coords))   && getEntityPointer(diagonal_coords)->in_motion)   pause_turn = true;
+
+                                if (!pause_turn)
                                 {
-                                    case NONE:
-                                    {
-                                        allow_turn_diagonal = true;
-                                        break;
-                                    }
-                                    case BOX:
-                                    case CRYSTAL:
-                                    case MIRROR:
+                                    TileType diagonal_tile_type = getTileType(diagonal_coords); 
+                                    TileType orthogonal_tile_type = getTileType(orthogonal_coords);
 
-                                    case SOURCE_RED:
-                                    case SOURCE_GREEN:
-                                    case SOURCE_BLUE:
-                                    case SOURCE_MAGENTA:
-                                    case SOURCE_YELLOW:
-                                    case SOURCE_CYAN:
-                                    case SOURCE_WHITE:
+                                    bool allow_turn_diagonal = false;
+                                    bool allow_turn_orthogonal = false;
+                                    bool push_diagonal = false;
+                                    bool push_orthogonal = false;
+
+                                    switch (diagonal_tile_type)
                                     {
-                                        PushResult push_result = canPushStack(diagonal_coords, diagonal_push_direction);
-                                        if (push_result == CAN_PUSH)
+                                        case NONE:
                                         {
-                                            push_diagonal = true;
                                             allow_turn_diagonal = true;
+                                            break;
                                         }
-                                        break;
-                                    }
-                                    default: break;
-                                }
+                                        case BOX:
+                                        case CRYSTAL:
+                                        case MIRROR:
 
-                                if (allow_turn_diagonal == true) switch (orthogonal_tile_type)
-                                {
-                                    case NONE:
-                                    {
-                                        allow_turn_orthogonal = true;
-                                        break;
-                                    }
-                                    case BOX:
-                                    case CRYSTAL:
-                                    case MIRROR:
-
-                                    case SOURCE_RED:
-                                    case SOURCE_GREEN:
-                                    case SOURCE_BLUE:
-                                    case SOURCE_MAGENTA:
-                                    case SOURCE_YELLOW:
-                                    case SOURCE_CYAN:
-                                    case SOURCE_WHITE:
-                                    {
-                                        PushResult push_result = canPushStack(orthogonal_coords, orthogonal_push_direction);
-                                        if (push_result == CAN_PUSH)
+                                        case SOURCE_RED:
+                                        case SOURCE_GREEN:
+                                        case SOURCE_BLUE:
+                                        case SOURCE_MAGENTA:
+                                        case SOURCE_YELLOW:
+                                        case SOURCE_CYAN:
+                                        case SOURCE_WHITE:
                                         {
-                                            push_orthogonal = true;
-                                            allow_turn_orthogonal = true;
+                                            PushResult push_result = canPushStack(diagonal_coords, diagonal_push_direction);
+                                            if (push_result == CAN_PUSH)
+                                            {
+                                                push_diagonal = true;
+                                                allow_turn_diagonal = true;
+                                            }
+                                            break;
                                         }
-                                        break;
+                                        default: break;
                                     }
-                                    default: break;
+
+                                    if (allow_turn_diagonal == true) switch (orthogonal_tile_type)
+                                    {
+                                        case NONE:
+                                        {
+                                            allow_turn_orthogonal = true;
+                                            break;
+                                        }
+                                        case BOX:
+                                        case CRYSTAL:
+                                        case MIRROR:
+
+                                        case SOURCE_RED:
+                                        case SOURCE_GREEN:
+                                        case SOURCE_BLUE:
+                                        case SOURCE_MAGENTA:
+                                        case SOURCE_YELLOW:
+                                        case SOURCE_CYAN:
+                                        case SOURCE_WHITE:
+                                        {
+                                            PushResult push_result = canPushStack(orthogonal_coords, orthogonal_push_direction);
+                                            if (push_result == CAN_PUSH)
+                                            {
+                                                push_orthogonal = true;
+                                                allow_turn_orthogonal = true;
+                                            }
+                                            break;
+                                        }
+                                        default: break;
+                                    }
+
+                                    if (allow_turn_orthogonal)
+                                    {
+                                        createTrailingHitbox(pack->coords, input_direction, NO_DIRECTION, FIRST_TRAILING_PACK_TURN_HITBOX_TIME, PACK);
+
+                                        if (isPushable(getTileType(getNextCoords(player->coords, UP)))) doHeadRotation(clockwise);
+
+                                        createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
+                                                                     directionToQuaternion(player->direction, true), 
+                                                                     directionToQuaternion(input_direction, true), 
+                                                                     &player->rotation_quat,
+                                                                     PLAYER_ID, TURN_ANIMATION_TIME); 
+
+                                        player->direction = input_direction;
+                                        setTileDirection(player->direction, player->coords);
+                                        player->moving_direction = NO_DIRECTION;
+
+                                        createPackRotationAnimation(intCoordsToNorm(player->coords), 
+                                                                    intCoordsToNorm(pack->coords), 
+                                                                    oppositeDirection(input_direction), clockwise, 
+                                                                    &pack->position_norm, &pack->rotation_quat, PACK_ID);
+
+                                        if (push_diagonal)   next_world_state.do_diagonal_push_on_turn = true;
+                                        if (push_orthogonal) next_world_state.do_orthogonal_push_on_turn = true;
+
+                                        next_world_state.pack_intermediate_states_timer = TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN + PACK_TIME_IN_INTERMEDIATE_STATE + 1; // + 1 because we stop when timer hits 1 (and then reset to 0)
+                                        next_world_state.pack_intermediate_coords = diagonal_coords;
+                                        next_world_state.pack_orthogonal_push_direction = orthogonal_push_direction;
+                                        next_world_state.pack_hitbox_turning_to_timer = TURN_ANIMATION_TIME + TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN;
+                                        next_world_state.pack_hitbox_turning_to_coords = orthogonal_coords;
+
+                                        recordStateForUndo();
+                                    }
+                                    else
+                                    {
+                                        // failed turn animation
+                                        doFailedTurnAnimations(input_direction, clockwise);
+                                    }
                                 }
-
-                                if (allow_turn_orthogonal)
-                                {
-									createTrailingHitbox(pack->coords, input_direction, NO_DIRECTION, FIRST_TRAILING_PACK_TURN_HITBOX_TIME, PACK);
-
-                                    if (isPushable(getTileType(getNextCoords(player->coords, UP)))) doHeadRotation(clockwise);
-
-                                    createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
-                                                                 directionToQuaternion(player->direction, true), 
-                                                                 directionToQuaternion(input_direction, true), 
-                                                                 &player->rotation_quat,
-                                                                 PLAYER_ID, TURN_ANIMATION_TIME); 
-
-                                    player->direction = input_direction;
-                                    setTileDirection(player->direction, player->coords);
-                                    player->moving_direction = NO_DIRECTION;
-
-                                    createPackRotationAnimation(intCoordsToNorm(player->coords), 
-                                                                intCoordsToNorm(pack->coords), 
-                                                                oppositeDirection(input_direction), clockwise, 
-                                                                &pack->position_norm, &pack->rotation_quat, PACK_ID);
-
-                                    if (push_diagonal)   next_world_state.do_diagonal_push_on_turn = true;
-                                    if (push_orthogonal) next_world_state.do_orthogonal_push_on_turn = true;
-
-                                    next_world_state.pack_intermediate_states_timer = TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN + PACK_TIME_IN_INTERMEDIATE_STATE + 1; // + 1 because we stop when timer hits 1 (and then reset to 0)
-                                    next_world_state.pack_intermediate_coords = diagonal_coords;
-                                    next_world_state.pack_orthogonal_push_direction = orthogonal_push_direction;
-                                    next_world_state.pack_hitbox_turning_to_timer = TURN_ANIMATION_TIME + TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN;
-                                    next_world_state.pack_hitbox_turning_to_coords = orthogonal_coords;
-
-                                    recordStateForUndo();
-                                }
-                                else
-                                {
-                                    // failed turn animation
-                                    doFailedTurnAnimations(input_direction, clockwise);
-                               	}
-                        	}
+                            }
                         }
                     }
                     time_until_input = TURN_ANIMATION_TIME;
@@ -3570,11 +3574,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     // not red and pack attached: player always falls, if no bypass. pack only falls if player falls
                     if (!next_world_state.bypass_player_fall && !doFallingEntity(player, true))
                     {
-                        if (doFallingEntity(pack, true))
-                        {
-                            // pack wants to fall but cannot: we already know player can fall, so pack will become unattached // TODO(spike): is this required with the new check below?
-                            next_world_state.pack_detached = true;
-                        }
+                        doFallingEntity(pack, true);
                     }
                 }
                 else
