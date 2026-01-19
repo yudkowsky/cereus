@@ -2469,12 +2469,19 @@ void doFallingObjects(bool do_animation)
     Entity* object_group_to_fall[5] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources, next_world_state.win_blocks };
     FOR(to_fall_index, 5)
     {
-        Entity* entity_group = object_group_to_fall[to_fall_index];
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            if (entity_group[entity_index].locked == true) continue;
-            if (next_world_state.pack_hitbox_turning_to_timer > 0 && int3IsEqual(next_world_state.pack_hitbox_turning_to_coords, entity_group[entity_index].coords)) continue; // blocks blue-not-blue turn orthogonal case from falling immediately
-            doFallingEntity(&entity_group[entity_index], do_animation);
+            Entity* entity = &object_group_to_fall[to_fall_index][entity_index];
+
+            if (entity->locked == true || entity->id == -1) continue;
+            if (next_world_state.pack_hitbox_turning_to_timer > 0 && int3IsEqual(next_world_state.pack_hitbox_turning_to_coords, entity->coords)) continue; // blocks blue-not-blue turn orthogonal case from falling immediately
+            doFallingEntity(entity, do_animation);
+
+            if (getTileType(getNextCoords(entity->coords, DOWN)) == VOID && !entity->in_motion)
+            {
+                setTileType(NONE, entity->coords);
+                entity->id = -1;
+            }
         }
     }
 }
@@ -3549,7 +3556,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // falling logic
-		if (!player->hit_by_blue) doFallingObjects(true); // built in guard here against pushable at location of pack_hitbox_turning_to_timer;
+		if (!player->hit_by_blue) doFallingObjects(true);
 
         if (next_world_state.pack_intermediate_states_timer == 0)
         {
@@ -3664,9 +3671,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         FOR(i, MAX_TRAILING_HITBOX_COUNT) if (next_world_state.trailing_hitboxes[i].frames > 0) next_world_state.trailing_hitboxes[i].frames--;
         if (next_world_state.bypass_player_fall) next_world_state.bypass_player_fall = false;
 
-        // don't allow inputs if player is moving
-        if (player->in_motion) time_until_input = 1; // TODO(spike): is this needed? it's at least somewhat redundant
-
         // decide which ghosts to render, if ghosts should be rendered
         bool do_player_ghost = false;
         bool do_pack_ghost = false;
@@ -3674,26 +3678,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             do_player_ghost = true;
             if (!next_world_state.pack_detached) do_pack_ghost = true;
-        }
-
-		// delete objects if above void
-        if (!player->hit_by_blue) // TODO(spike): maybe just wrap this into the falling logic?
-        {
-            Entity* entity_group[5] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources, next_world_state.win_blocks };
-            FOR(entity_group_index, 5)
-            {
-                FOR(entity_instance_index, MAX_ENTITY_INSTANCE_COUNT)
-                {
-                    Entity* entity = &entity_group[entity_group_index][entity_instance_index];
-                    if (entity->id == -1) continue;
-                    if (getTileType(getNextCoords(entity->coords, DOWN)) == VOID && !entity->in_motion) // TODO(spike): still some bug when pushing walking onto a place where another 
-                                                                                                             // entity has fallen and disappeared causing player to be able to walk over void for a few frames
-                    {
-                        setTileType(NONE, entity->coords);
-                        entity->id = -1;
-                    }
-                }
-            }
         }
 
         // delete player / pack if above void
