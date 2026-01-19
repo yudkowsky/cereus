@@ -86,7 +86,7 @@ const char RESET_INFO_CHUNK_TAG[4] = "RESB";
 const int32 OVERWORLD_SCREEN_SIZE_X = 15;
 const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 
-const double PHYSICS_INCREMENT = 1.0/60.0;
+const double PHYSICS_INCREMENT = 1.0/20.0;
 double accumulator = 0;
 
 const char debug_level_name[64] = "testing";
@@ -2436,6 +2436,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
             }
             entity_in_stack->first_fall_already_done = true;
             entity_in_stack->in_motion = STANDARD_IN_MOTION_TIME + 4;
+            entity_in_stack->moving_direction = DOWN; 
         }
         else
         {
@@ -2449,7 +2450,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
                 createTrailingHitbox(current_start_coords, DOWN, NO_DIRECTION, TRAILING_HITBOX_TIME, getTileType(entity_in_stack->coords));
             }
             entity_in_stack->first_fall_already_done = true;
-            entity_in_stack->in_motion = STANDARD_IN_MOTION_TIME;
+            entity_in_stack->moving_direction = DOWN; 
         }
 
         setTileType(getTileType(current_start_coords), current_end_coords); 
@@ -2457,8 +2458,6 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         entity_in_stack->coords = current_end_coords;
         current_end_coords = current_start_coords;
         current_start_coords = getNextCoords(current_start_coords, UP);
-
-        entity->moving_direction = NO_DIRECTION;
     }
     return false;
 }
@@ -3276,7 +3275,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             // don't allow walking off edge
                             Int3 coords_below = getNextCoords(next_player_coords, DOWN);
                             TileType tile_below = getTileType(coords_below);
-                            if (tile_below != NONE || player->hit_by_red)
+                            if ((tile_below != NONE || player->hit_by_red) && (!isEntity(tile_below) || getEntityPointer(coords_below)->moving_direction == NO_DIRECTION))
                             {
                                 if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
                                 doStandardMovement(input_direction, next_player_coords, animation_time);
@@ -3907,25 +3906,29 @@ void gameFrame(double delta_time, TickInput tick_input)
         // display level name
 		drawDebugText(next_world_state.level_name);
 
+        /*
 		// player id
         char player_id_text[256] = {0};
         snprintf(player_id_text, sizeof(player_id_text), "player id: %d", player->id);
         drawDebugText(player_id_text);
+        */
 
-        // player in_motion info
-		//char player_moving_text[256] = {0};
-        //snprintf(player_moving_text, sizeof(player_moving_text), "player moving: %d", player->in_motion);
-		//drawDebugText(player_moving_text);
+        // box in_motion info
+        Entity box = next_world_state.boxes[0];
+		char box_moving_text[256] = {0};
+        snprintf(box_moving_text, sizeof(box_moving_text), "box moving: %d", box.in_motion);
+		drawDebugText(box_moving_text);
 
-        // player movement direction 
-		//char player_dir_text[256] = {0};
-        //snprintf(player_dir_text, sizeof(player_dir_text), "player moving: %d", player->moving_direction);
-		//drawDebugText(player_dir_text);
+		char box_dir_text[256] = {0};
+        snprintf(box_dir_text, sizeof(box_dir_text), "box moving: %d", box.moving_direction);
+		drawDebugText(box_dir_text);
 
+        /*
         // camera pos info
-        //char camera_text[256] = {0};
-        //snprintf(camera_text, sizeof(camera_text), "camera pos: %f, %f, %f", camera.coords.x, camera.coords.y, camera.coords.z);
-        //drawDebugText(camera_text);
+        char camera_text[256] = {0};
+        snprintf(camera_text, sizeof(camera_text), "camera pos: %f, %f, %f", camera.coords.x, camera.coords.y, camera.coords.z);
+        drawDebugText(camera_text);
+        */
 
 		if (editor_state.editor_mode != NO_MODE)
         {
