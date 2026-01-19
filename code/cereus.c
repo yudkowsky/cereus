@@ -263,7 +263,7 @@ Vec3 vec3Subtract(Vec3 a, Vec3 b)
     return (Vec3){ a.x-b.x, a.y-b.y, a.z-b.z }; 
 }
 
-Vec3 vec3Multiply(Vec3 v, float s)
+Vec3 vec3Inner(Vec3 v, float s)
 {
     return (Vec3){ v.x * s, v.y * s, v.z * s}; 
 }
@@ -276,6 +276,11 @@ Vec3 vec3Abs(Vec3 a)
 Vec3 vec3ScalarMultiply(Vec3 position, float scalar) 
 {
     return (Vec3){ position.x*scalar, position.y*scalar, position.z*scalar }; 
+}
+
+float vec3Length(Vec3 v)
+{
+    return sqrtf(v.x*v.x + v.y*v.y + v.z*v.z);
 }
 
 // BUFFER / STATE INTERFACING
@@ -2091,19 +2096,6 @@ int32 findNextFreeInLaserBuffer()
     return -1;
 }
 
-/*
-void calculateOffset(Entity* e, Vec3* offset)
-{
-    int32 offset_timer = 0;
-    if (player_turning) offset_timer = PUSH_FROM_TURN_ANIMATION_TIME;
-    else offset_timer = MOVE_OR_PUSH_ANIMATION_TIME;
-
-    Vec3 to_vector = directionToVector(e->moving_direction);
-    float dir_offset = (float)(offset_timer - e->in_motion) / (float)offset_timer;
-    return vec3Add(offset, vec3Add(vec3Negate(to_vector), vec3Multiply(to_vector, dir_offset)));
-}
-*/
-
 void updateLaserBuffer(void)
 {
     Entity* player = &next_world_state.player;
@@ -2305,6 +2297,17 @@ void updateLaserBuffer(void)
                                     // passthrough
                                     current_tile_coords = getNextCoords(current_tile_coords, current_direction);
                                     continue;
+                                }
+                                else
+                                {
+                                    Direction next_laser_dir = getNextLaserDirectionMirror(current_direction, mirror->direction);
+                                    {
+                                        float offset_magnitude = vec3Length(vec3Subtract(mirror->position_norm, intCoordsToNorm(mirror->coords)));
+                                        //if (next_laser_dir == mirror->moving_direction) offset = vec3Inner(directionToVector(oppositeDirection(current_direction)), offset_magnitude);
+                                        //else if (next_laser_dir == oppositeDirection(mirror->moving_direction)) offset = vec3Inner(directionToVector(current_direction), offset_magnitude);
+                                        if (!th_hit) offset = vec3Inner(directionToVector(current_direction), offset_magnitude);
+                                        else offset = vec3Add(vec3Inner(directionToVector(current_direction), offset_magnitude), directionToVector(oppositeDirection(current_direction)));
+                                    }
                                 }
                             }
                         }
@@ -3510,8 +3513,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                 createTrailingHitbox(pack->coords, next_world_state.pack_orthogonal_push_direction, NO_DIRECTION, 3, PACK);
 
                 // for sneaky diagonal laser
-                createTrailingHitbox(next_world_state.pack_hitbox_turning_to_coords, NO_DIRECTION, getMiddleDirection(next_world_state.pack_orthogonal_push_direction, oppositeDirection(player->direction)), 4, PACK);
-                createTrailingHitbox(pack->coords, NO_DIRECTION, getMiddleDirection(oppositeDirection(next_world_state.pack_orthogonal_push_direction), player->direction), 4, PACK);
+                createTrailingHitbox(next_world_state.pack_hitbox_turning_to_coords, NO_DIRECTION, getMiddleDirection(next_world_state.pack_orthogonal_push_direction, oppositeDirection(player->direction)), 5, PACK);
+                createTrailingHitbox(pack->coords, NO_DIRECTION, getMiddleDirection(oppositeDirection(next_world_state.pack_orthogonal_push_direction), player->direction), 5, PACK);
 
                 setTileType(NONE, pack->coords);
                 setTileDirection(NORTH, pack->coords);
@@ -3816,7 +3819,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
 
 			Vec3 diff = vec3Subtract(lb.end_coords, lb.start_coords);
-            Vec3 center = vec3Add(lb.start_coords, vec3Multiply(diff, 0.5));
+            Vec3 center = vec3Add(lb.start_coords, vec3Inner(diff, 0.5));
 
 			float length = sqrtf(diff.x*diff.x + diff.y*diff.y + diff.z*diff.z);
             Vec3 scale = { LASER_WIDTH, LASER_WIDTH, length };
@@ -3887,6 +3890,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         */
 
         // box in_motion info
+        /*
         Entity box = next_world_state.boxes[0];
 		char box_moving_text[256] = {0};
         snprintf(box_moving_text, sizeof(box_moving_text), "box moving: %d", box.in_motion);
@@ -3895,6 +3899,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 		char box_dir_text[256] = {0};
         snprintf(box_dir_text, sizeof(box_dir_text), "box moving: %d", box.moving_direction);
 		drawDebugText(box_dir_text);
+        */
 
         /*
         // camera pos info
