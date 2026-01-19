@@ -86,10 +86,10 @@ const char RESET_INFO_CHUNK_TAG[4] = "RESB";
 const int32 OVERWORLD_SCREEN_SIZE_X = 15;
 const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 
-const double PHYSICS_INCREMENT = 1.0/20.0;
+const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
-const char debug_level_name[64] = "testing";
+const char debug_level_name[64] = "overworld";
 const char start_level_path_buffer[64] = "../cereus/data/levels/";
 Int3 level_dim = {0};
 
@@ -919,7 +919,9 @@ void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
         if (rb->reset_info[to_reset_index].id == -1) continue;
         if (save_reset_block_state)
         {
+            // TODO(spike): this is null ptr if delete an entity that wants to be reset, causing crash
             Entity* e = getEntityFromId(rb->reset_info[to_reset_index].id);
+
             // where obj is right now
             fwrite(&e->coords.x, 4, 1, file);
             fwrite(&e->coords.y, 4, 1, file);
@@ -2464,8 +2466,8 @@ bool doFallingEntity(Entity* entity, bool do_animation)
 
 void doFallingObjects(bool do_animation)
 {
-    Entity* object_group_to_fall[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources };
-    FOR(to_fall_index, 4)
+    Entity* object_group_to_fall[5] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources, next_world_state.win_blocks };
+    FOR(to_fall_index, 5)
     {
         Entity* entity_group = object_group_to_fall[to_fall_index];
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -2771,6 +2773,8 @@ void editorMode(TickInput *tick_input)
                     entity->coords = (Int3){0};
                     entity->position_norm = (Vec3){0};
                     entity->id = -1;
+
+                    // TODO(spike): if deleting entity, go through reset blocks and remove from reset block
                 }
                 setTileType(NONE, raycast_output.hit_coords);
                 setTileDirection(NORTH, raycast_output.hit_coords);
@@ -2800,7 +2804,7 @@ void editorMode(TickInput *tick_input)
                         default: entity_group = 0;
                     }
                     if (entity_group != 0) setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
-                    setTileType(editor_state.picked_tile, raycast_output.place_coords); 
+                    setTileType(editor_state.picked_tile, raycast_output.place_coords);
 
                     if (editor_state.picked_tile != VOID && editor_state.picked_tile != NOT_VOID && editor_state.picked_tile != GRID) 
                     {
@@ -3638,8 +3642,8 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // decrement in_motion / moving_direction and reset first_fall_already_done
-        Entity* falling_entity_groups[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources };
-        FOR(falling_object_index, 4)
+        Entity* falling_entity_groups[5] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources, next_world_state.win_blocks };
+        FOR(falling_object_index, 5)
         {
             Entity* entity_group = falling_entity_groups[falling_object_index];
             FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) 
@@ -3675,8 +3679,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 		// delete objects if above void
         if (!player->hit_by_blue) // TODO(spike): maybe just wrap this into the falling logic?
         {
-            Entity* entity_group[4] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources };
-            FOR(entity_group_index, 4)
+            Entity* entity_group[5] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources, next_world_state.win_blocks };
+            FOR(entity_group_index, 5)
             {
                 FOR(entity_instance_index, MAX_ENTITY_INSTANCE_COUNT)
                 {
