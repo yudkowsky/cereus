@@ -2178,6 +2178,7 @@ void updateLaserBuffer(void)
             lb->color = source->color;
             current_tile_coords = getNextCoords(current_tile_coords, current_direction);
 
+            // change offset direction
             offset = vec3Inner(directionToVector(oppositeDirection(current_direction)), vec3SignedLength(offset));
 
             FOR(laser_tile_index, MAX_LASER_TRAVEL_DISTANCE)
@@ -2309,12 +2310,9 @@ void updateLaserBuffer(void)
                                 }
                                 else
                                 {
-                                    Direction next_laser_dir = getNextLaserDirectionMirror(current_direction, mirror->direction);
-                                    {
-                                        float offset_magnitude = vec3Length(vec3Subtract(mirror->position_norm, intCoordsToNorm(mirror->coords)));
-                                        if (!th_hit) offset = vec3Add(offset, vec3Inner(directionToVector(current_direction), offset_magnitude));
-                                        else offset = vec3Add(offset, vec3Add(vec3Inner(directionToVector(current_direction), offset_magnitude), directionToVector(oppositeDirection(current_direction))));
-                                    }
+                                    float offset_magnitude = vec3Length(vec3Subtract(mirror->position_norm, intCoordsToNorm(mirror->coords)));
+                                    if (!th_hit) offset = vec3Add(offset, vec3Inner(directionToVector(current_direction), offset_magnitude));
+                                    else offset = vec3Add(offset, vec3Add(vec3Inner(directionToVector(current_direction), offset_magnitude), directionToVector(oppositeDirection(current_direction))));
                                 }
                             }
                         }
