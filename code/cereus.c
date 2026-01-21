@@ -89,7 +89,7 @@ const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
-const char debug_level_name[64] = "overworld";
+const char debug_level_name[64] = "testing";
 const char start_level_path_buffer[64] = "../cereus/data/levels/";
 Int3 level_dim = {0};
 
@@ -263,11 +263,6 @@ Vec3 vec3Subtract(Vec3 a, Vec3 b)
     return (Vec3){ a.x-b.x, a.y-b.y, a.z-b.z }; 
 }
 
-Vec3 vec3Inner(Vec3 v, float s)
-{
-    return (Vec3){ v.x * s, v.y * s, v.z * s}; 
-}
-
 Vec3 vec3Abs(Vec3 a) 
 {
     return (Vec3){ (float)fabs(a.x), (float)fabs(a.y), (float)fabs(a.z) }; 
@@ -276,6 +271,11 @@ Vec3 vec3Abs(Vec3 a)
 Vec3 vec3ScalarMultiply(Vec3 position, float scalar) 
 {
     return (Vec3){ position.x*scalar, position.y*scalar, position.z*scalar }; 
+}
+
+float vec3Inner(Vec3 a, Vec3 b)
+{
+	return a.x*b.x + a.y*b.y + a.z*b.z;
 }
 
 float vec3Length(Vec3 v)
@@ -2164,6 +2164,8 @@ void updateLaserBuffer(void)
         }
     }
 
+    // offset still has problems, because only 1 of 3 fields are filled at the moment - need to sometimes have two when dealing with mirrors. 
+    // also, the first offset isn't calculated because of next_offset system.
     FOR(source_index, MAX_PSEUDO_SOURCE_COUNT)
     {
         Entity* source = &sources_as_primary[source_index];
@@ -2171,6 +2173,7 @@ void updateLaserBuffer(void)
         Direction current_direction = source->direction;
         Int3 current_tile_coords = source->coords;
         Vec3 offset = {0};
+        Vec3 next_offset = {0};
 
         int32 skip_mirror_id = 0;
         int32 skip_next_mirror = 0;
@@ -2181,13 +2184,16 @@ void updateLaserBuffer(void)
             LaserBuffer* lb = &laser_buffer[laser_buffer_index];
             bool no_more_turns = true; 
 
+            offset = next_offset;
+            // TODO(spike): unsure why this is required... something to do with next_offset vs. offset on first turn 
+            if (laser_turn_index == 0) next_offset = vec3ScalarMultiply(directionToVector(oppositeDirection(current_direction)),  vec3SignedLength(offset));
+            else					   next_offset = vec3ScalarMultiply(directionToVector(oppositeDirection(current_direction)), -vec3SignedLength(offset));
+
             lb->start_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
             lb->direction = current_direction;
             lb->color = source->color;
-            current_tile_coords = getNextCoords(current_tile_coords, current_direction);
 
-            // change offset direction
-            offset = vec3Inner(directionToVector(oppositeDirection(current_direction)), vec3SignedLength(offset));
+            current_tile_coords = getNextCoords(current_tile_coords, current_direction);
 
             FOR(laser_tile_index, MAX_LASER_TRAVEL_DISTANCE)
             {
@@ -2253,13 +2259,13 @@ void updateLaserBuffer(void)
 
                         if (crystal->moving_direction == oppositeDirection(current_direction))
                         {
-                            offset = vec3Subtract(crystal->position_norm, intCoordsToNorm(crystal->coords));
+                            next_offset = vec3Subtract(crystal->position_norm, intCoordsToNorm(crystal->coords));
 
                             if (crystal->in_motion > passthrough_comparison)
                             {
                                 // if moving tw laser, but early in movement, advance laser one step and off-set offset by 1 block tw far laser.
                                 current_tile_coords = getNextCoords(current_tile_coords, current_direction);
-                                offset = vec3Add(offset, directionToVector(oppositeDirection(current_direction)));
+                                next_offset = vec3Add(next_offset, directionToVector(oppositeDirection(current_direction)));
                             }
                         }
                         else
@@ -2298,13 +2304,13 @@ void updateLaserBuffer(void)
 
                             if (mirror->moving_direction == oppositeDirection(current_direction))
                             {
-                                offset = vec3Subtract(mirror->position_norm, intCoordsToNorm(mirror->coords));
+                                next_offset = vec3Subtract(mirror->position_norm, intCoordsToNorm(mirror->coords));
 
                                 if (mirror->in_motion > passthrough_comparison)
                                 {
                                     // if moving tw laser, but early in movement, advance laser one step and off-set offset by 1 block tw far laser.
                                     current_tile_coords = getNextCoords(current_tile_coords, current_direction);
-                                    offset = vec3Add(offset, directionToVector(oppositeDirection(current_direction)));
+                                    next_offset = vec3Add(next_offset, directionToVector(oppositeDirection(current_direction)));
                                 }
                             }
                             else
@@ -2319,8 +2325,8 @@ void updateLaserBuffer(void)
                                 else
                                 {
                                     float offset_magnitude = vec3Length(vec3Subtract(mirror->position_norm, intCoordsToNorm(mirror->coords)));
-                                    if (!th_hit) offset = vec3Add(offset, vec3Inner(directionToVector(current_direction), offset_magnitude));
-                                    else offset = vec3Add(offset, vec3Add(vec3Inner(directionToVector(current_direction), offset_magnitude), directionToVector(oppositeDirection(current_direction))));
+                                    if (!th_hit) next_offset = vec3Add(next_offset, vec3ScalarMultiply(directionToVector(current_direction), offset_magnitude));
+                                    else next_offset = vec3Add(next_offset, vec3Add(vec3ScalarMultiply(directionToVector(current_direction), offset_magnitude), directionToVector(oppositeDirection(current_direction))));
                                 }
                             }
                         }
@@ -2348,7 +2354,7 @@ void updateLaserBuffer(void)
 
                 if (real_hit_type != NONE)
                 {
-                    lb->end_coords = intCoordsToNorm(current_tile_coords);
+                    lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                     break;
                 }
 
@@ -3831,13 +3837,22 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
 
 			Vec3 diff = vec3Subtract(lb.end_coords, lb.start_coords);
-            Vec3 center = vec3Add(lb.start_coords, vec3Inner(diff, 0.5));
+            Vec3 center = vec3Add(lb.start_coords, vec3ScalarMultiply(diff, 0.5));
 
-			float length = sqrtf(diff.x*diff.x + diff.y*diff.y + diff.z*diff.z);
+			float length = vec3Length(diff);
             Vec3 scale = { LASER_WIDTH, LASER_WIDTH, length };
         	Vec4 rotation = directionToQuaternion(lb.direction, false);
 
             drawLaser(center, scale, rotation, laser_rgb);
+        }
+
+        FOR(lb_index, 64)
+        {
+            LaserBuffer lb = laser_buffer[lb_index];
+            if (vec3IsEqual(lb.start_coords, IDENTITY_TRANSLATION)) continue;
+            char lb_text[256] = {0};
+            snprintf(lb_text, sizeof(lb_text), "lb start coords: %.2f, %.2f, %.2f, lb end coords: %.2f, %.2f, %.2f", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z);
+            drawDebugText(lb_text);
         }
 
         // clear laser buffer 
@@ -3852,6 +3867,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 Entity* e = getEntityPointer(bufferIndexToCoords(tile_index));
                 if (e->locked) draw_tile = LOCKED_BLOCK;
+
                 drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat); 
             }
 			else
