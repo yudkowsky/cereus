@@ -58,7 +58,7 @@ const Vec4 IDENTITY_QUATERNION  = { 0, 0, 0, 1 };
 
 const int32 PLAYER_ID = 1;
 const int32 PACK_ID   = 2;
-const int32 OUTLINE_DRAW_ID = 3;
+const int32 OUTLINE_DRAW_ID = ASSET_COUNT;
 const int32 ID_OFFSET_BOX     	   = 100 * 1;
 const int32 ID_OFFSET_MIRROR  	   = 100 * 2;
 const int32 ID_OFFSET_CRYSTAL 	   = 100 * 3;
@@ -1020,16 +1020,10 @@ bool saveLevelRewrite(char* path, bool save_reset_block_state)
     return true;
 }
 
-int32 findInSolvedLevels(char level_name[64], char (*solved_levels)[64][64])
+int32 findInSolvedLevels(char level[64])
 {
-    if (level_name[0] == '\0') return INT32_MAX; // if NULL string passed, return large number
-    FOR(solved_level_index, MAX_LEVEL_COUNT) 
-    {
-        if (strcmp((*solved_levels)[solved_level_index], level_name) == 0) 
-        {
-            return solved_level_index;
-        }
-    }
+    if (level[0] == '\0') return INT32_MAX; // if NULL string passed, return large number
+    FOR(level_index, MAX_LEVEL_COUNT) if (strcmp(next_world_state.solved_levels[level_index], level) == 0) return level_index;
     return -1;
 }
 
@@ -1037,6 +1031,20 @@ int32 nextFreeInSolvedLevels(char (*solved_levels)[64][64])
 {
     FOR(solved_level_index, MAX_LEVEL_COUNT) if ((*solved_levels)[solved_level_index][0] == 0) return solved_level_index;
     return -1;
+}
+
+void addToSolvedLevels(char level[64])
+{
+    int32 next_free = nextFreeInSolvedLevels(&next_world_state.solved_levels);
+    if (next_free == -1) return; // no free space (should not happen)
+    strcpy(next_world_state.solved_levels[next_free], level);
+}
+
+void removeFromSolvedLevels(char level[64])
+{
+    int32 index = findInSolvedLevels(level);
+    if (index == -1 || index > MAX_LEVEL_COUNT) return; // not in solved levels, or null string passed
+    memset(next_world_state.solved_levels[index], 0, sizeof(next_world_state.solved_levels[0]));
 }
 
 void writeSolvedLevelsToFile()
@@ -2386,10 +2394,9 @@ void resetStandardVisuals()
 
 void levelChangePrep(char next_level[64])
 {
-    if (!next_world_state.in_overworld && findInSolvedLevels(next_world_state.level_name, &next_world_state.solved_levels) == -1)
+    if (!next_world_state.in_overworld && findInSolvedLevels(next_world_state.level_name) == -1)
     {
-        int32 next_free = nextFreeInSolvedLevels(&next_world_state.solved_levels);
-        strcpy(next_world_state.solved_levels[next_free], next_world_state.level_name);
+        addToSolvedLevels(next_world_state.level_name);
     }
 
     if (strcmp(next_level, "overworld") == 0) next_world_state.in_overworld = true;
@@ -3720,7 +3727,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.f_press && time_until_input == 0))
         {
             Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
-			if (findInSolvedLevels(wb->next_level, &next_world_state.solved_levels) == -1)
+			if (findInSolvedLevels(wb->next_level) == -1)
             {
                 int32 next_free = nextFreeInSolvedLevels(&next_world_state.solved_levels);
                 strcpy(next_world_state.solved_levels[next_free], wb->next_level);
@@ -3756,7 +3763,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 {
                     Entity* e = &entity_group[group_index][entity_index];
                     if (e->id == -1) continue;
-                    if (findInSolvedLevels(e->unlocked_by, &next_world_state.solved_levels) == -1) e->locked = true; 
+                    if (findInSolvedLevels(e->unlocked_by) == -1) e->locked = true; 
                     else e->locked = false;
                 }
             }
@@ -3765,7 +3772,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 Entity* lb = &next_world_state.locked_blocks[locked_block_index];
                 if (lb->id == -1) continue;
-                int32 find_result = findInSolvedLevels(lb->unlocked_by, &next_world_state.solved_levels);
+                int32 find_result = findInSolvedLevels(lb->unlocked_by);
                 if (find_result != -1 && find_result != INT32_MAX)
                 {
 					// locked block to be unlocked
@@ -3926,7 +3933,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             Vec3 picked_block_coords = { SCREEN_WIDTH_PX - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
             drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION);
 
-            if (editor_state.selected_id > 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
+            if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
             {
                 drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(editor_state.selected_coords), DEFAULT_SCALE, IDENTITY_QUATERNION);
 
