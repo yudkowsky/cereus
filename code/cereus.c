@@ -290,6 +290,19 @@ float vec3SignedLength(Vec3 v)
     else return -len;
 }
 
+Vec3 vec3Normalize(Vec3 v)
+{
+    float length_squared = v.x*v.x + v.y*v.y + v.z*v.z;
+    if (length_squared <= 1e-8f) return IDENTITY_TRANSLATION; 
+    float inverse_length = 1.0f / sqrtf(length_squared);
+    return vec3ScalarMultiply(v, inverse_length);
+}
+
+Vec3 vec3Hadamard(Vec3 a, Vec3 b)
+{
+    return (Vec3){ a.x*b.x, a.y*b.y, a.z*b.z };
+}
+
 // BUFFER / STATE INTERFACING
 
 int32 coordsToBufferIndexType(Int3 coords)
@@ -2105,17 +2118,6 @@ bool isDiagonal(Direction direction)
     else return true;
 }
 
-Vec3 adjustEndCoords(Int3 current_tile_coords, Vec3 start_coords)
-{
-    /*
-    Vec3 end_coords = intCoordsToNorm(current_tile_coords);
-	if (fmod(start_coords.x, 1) != 0) end_coords.x = start_coords.x;
-	if (fmod(start_coords.y, 1) != 0) end_coords.y = start_coords.y;
-	if (fmod(start_coords.z, 1) != 0) end_coords.z = start_coords.z;
-    return end_coords;
-    */
-}
-
 int32 findNextFreeInLaserBuffer()
 {
     FOR(laser_buffer_index, MAX_PSEUDO_SOURCE_COUNT) if (laser_buffer[laser_buffer_index].color == NO_COLOR) return laser_buffer_index;
@@ -2175,31 +2177,36 @@ void updateLaserBuffer(void)
         }
     }
 
-    // TODO(spike): tomorrow: get rid off offset sytem (again) and solve the issue of offset needing two values
     FOR(source_index, MAX_PSEUDO_SOURCE_COUNT)
     {
         Entity* source = &sources_as_primary[source_index];
 
         Direction current_direction = source->direction;
         Int3 current_tile_coords = source->coords;
-        Vec3 offset = {0};
 
         int32 skip_mirror_id = 0;
         int32 skip_next_mirror = 0;
+        int32 laser_buffer_start_index = findNextFreeInLaserBuffer();
 
         FOR(laser_turn_index, MAX_LASER_TURNS_ALLOWED)
         {
-            int32 laser_buffer_index = findNextFreeInLaserBuffer();
-            LaserBuffer* lb = &laser_buffer[laser_buffer_index];
             bool no_more_turns = true; 
 
-            lb->start_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+            LaserBuffer* lb = &laser_buffer[laser_buffer_start_index + laser_turn_index];
+            LaserBuffer prev_lb = {0}; 
+            if (laser_turn_index != 0)
+            {
+                prev_lb = laser_buffer[laser_buffer_start_index + laser_turn_index - 1];
+                lb->start_coords = prev_lb.end_coords;
+            }
+            else
+            {
+                lb->start_coords = intCoordsToNorm(current_tile_coords);
+            }
             lb->direction = current_direction;
             lb->color = source->color;
 
             current_tile_coords = getNextCoords(current_tile_coords, current_direction);
-
-            if (!vec3IsZero(offset)) offset = vec3ScalarMultiply(directionToVector(oppositeDirection(current_direction)), vec3SignedLength(offset));
 
             FOR(laser_tile_index, MAX_LASER_TRAVEL_DISTANCE)
             {
@@ -2208,8 +2215,7 @@ void updateLaserBuffer(void)
 
                 if (!intCoordsWithinLevelBounds(current_tile_coords))
                 {
-                    //lb->end_coords = adjustEndCoords(current_tile_coords, lb->start_coords);
-                    lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                    lb->end_coords = intCoordsToNorm(current_tile_coords);
                     break;
                 }
 
@@ -2231,8 +2237,7 @@ void updateLaserBuffer(void)
                         current_tile_coords = getNextCoords(current_tile_coords, current_direction);
                         continue;
                     }
-                    //lb->end_coords = adjustEndCoords(current_tile_coords, lb->start_coords);
-                    lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                    lb->end_coords = intCoordsToNorm(current_tile_coords);
                     LaserColor laser_color = colorToLaserColor(lb->color);
                     if (laser_color.red) player->hit_by_red = true;
                     if (laser_color.green) 
@@ -2267,14 +2272,7 @@ void updateLaserBuffer(void)
 
                         if (crystal->moving_direction == oppositeDirection(current_direction))
                         {
-                            offset = vec3Subtract(crystal->position_norm, intCoordsToNorm(crystal->coords));
 
-                            if (crystal->in_motion > passthrough_comparison)
-                            {
-                                // if moving tw laser, but early in movement, advance laser one step and off-set offset by 1 block tw far laser.
-                                current_tile_coords = getNextCoords(current_tile_coords, current_direction);
-                                offset = vec3Add(offset, directionToVector(oppositeDirection(current_direction)));
-                            }
                         }
                         else
                         {
@@ -2287,8 +2285,7 @@ void updateLaserBuffer(void)
                             }
                         }
                     }
-                    //lb->end_coords = adjustEndCoords(current_tile_coords, lb->start_coords);
-                    lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                    lb->end_coords = intCoordsToNorm(current_tile_coords);
 
                     if 		(lb->color == RED) 	current_direction = getRedDirectionAtCrystal(current_direction);
                     else if (lb->color == BLUE) current_direction = getBlueDirectionAtCrystal(current_direction);
@@ -2313,14 +2310,15 @@ void updateLaserBuffer(void)
 
                             if (mirror->moving_direction == oppositeDirection(current_direction))
                             {
-                                offset = vec3Subtract(mirror->position_norm, intCoordsToNorm(mirror->coords));
+                                Vec3 offset = vec3Subtract(mirror->position_norm, intCoordsToNorm(mirror->coords));
 
                                 if (mirror->in_motion > passthrough_comparison)
                                 {
-                                    // if moving tw laser, but early in movement, advance laser one step and off-set offset by 1 block tw far laser.
                                     current_tile_coords = getNextCoords(current_tile_coords, current_direction);
                                     offset = vec3Add(offset, directionToVector(oppositeDirection(current_direction)));
                                 }
+
+                                lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                             }
                             else
                             {
@@ -2333,14 +2331,124 @@ void updateLaserBuffer(void)
                                 }
                                 else
                                 {
-                                    float offset_magnitude = vec3Length(vec3Subtract(mirror->position_norm, intCoordsToNorm(mirror->coords)));
-                                    if (!th_hit) offset = vec3Add(offset, vec3ScalarMultiply(directionToVector(current_direction), offset_magnitude));
-                                    else offset = vec3Add(offset, vec3Add(vec3ScalarMultiply(directionToVector(current_direction), offset_magnitude), directionToVector(oppositeDirection(current_direction))));
+
                                 }
                             }
                         }
-                        //lb->end_coords = adjustEndCoords(current_tile_coords, lb->start_coords);
-                        lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                        if (vec3IsZero(lb->end_coords)) // if end_coords has not already been updated in above logic
+                        {
+                            if (!isDiagonal(current_direction))
+                            {
+                                Vec3 current_dir_basis = directionToVector(current_direction);
+                                Vec3 next_dir_basis = directionToVector(getNextLaserDirectionMirror(current_direction, mirror->direction));
+
+                                lb->end_coords = lb->start_coords;
+                                if (current_dir_basis.x != 0) lb->end_coords.x = intCoordsToNorm(current_tile_coords).x;
+                                if (current_dir_basis.y != 0) lb->end_coords.y = intCoordsToNorm(current_tile_coords).y;
+                                if (current_dir_basis.z != 0) lb->end_coords.z = intCoordsToNorm(current_tile_coords).z;
+
+                                Vec3 comparison_coords = intCoordsToNorm(mirror->coords);
+                                if (th_hit) comparison_coords = intCoordsToNorm(getNextCoords(mirror->coords, oppositeDirection(th.moving_direction)));
+
+                                Vec3 mirror_shift = vec3Subtract(mirror->position_norm, comparison_coords);
+                        		Vec3 laser_shift = vec3Subtract(intCoordsToNorm(current_tile_coords), lb->end_coords);
+                                Vec3 total_shift = vec3Subtract(mirror_shift, laser_shift);
+                                bool reverse_offset = false;
+                                if (vec3IsZero(vec3Subtract(lb->end_coords, intCoordsToNorm(current_tile_coords)))) reverse_offset = true;
+
+                                if (!vec3IsZero(vec3Hadamard(total_shift, next_dir_basis)))
+                                {
+                                	// debug
+                                    if (player->moving_direction != NO_DIRECTION)
+                                    {
+                                        int _ = 0;
+                                        (void)_;
+                                    }
+
+                                    float offset_magnitude = 0;
+                                    if (next_dir_basis.x != 0)
+                                    {
+                                        offset_magnitude = total_shift.x;
+                                        Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                                        Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
+                                        bool curr_dir_bit;
+                                        if (current_dir_basis.y != 0) curr_dir_bit = (current_dir_basis.y < 0) != (guess_comparison.y < 0);
+                                        else 					   	  curr_dir_bit = (current_dir_basis.z < 0) != (guess_comparison.z < 0);
+                                        bool next_dir_bit = (next_dir_basis.x < 0) != (offset_magnitude < 0);
+                                        if (curr_dir_bit != next_dir_bit) offset_magnitude = -offset_magnitude;
+                                    }
+                                    if (next_dir_basis.y != 0)
+                                    {
+                                        offset_magnitude = total_shift.y;
+                                        Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                                        Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
+                                        bool curr_dir_bit;
+                                        if (current_dir_basis.x != 0) curr_dir_bit = (current_dir_basis.x < 0) != (guess_comparison.x < 0);
+                                        else 					   	  curr_dir_bit = (current_dir_basis.z < 0) != (guess_comparison.z < 0);
+                                        bool next_dir_bit = (next_dir_basis.y < 0) != (offset_magnitude < 0);
+                                        if (curr_dir_bit != next_dir_bit) offset_magnitude = -offset_magnitude;
+                                    }
+                                    if (next_dir_basis.z != 0)
+                                    {
+                                        offset_magnitude = total_shift.z;
+                                        Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                                        Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
+                                        bool curr_dir_bit;
+                                        if (current_dir_basis.x != 0) curr_dir_bit = (current_dir_basis.x < 0) != (guess_comparison.x < 0);
+                                        else 					   	  curr_dir_bit = (current_dir_basis.y < 0) != (guess_comparison.y < 0);
+                                        bool next_dir_bit = (next_dir_basis.z < 0) != (offset_magnitude < 0);
+                                        if (curr_dir_bit != next_dir_bit) offset_magnitude = -offset_magnitude;
+                                    }
+
+                                    if (reverse_offset) offset_magnitude = -offset_magnitude;
+                                    lb->end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                                }
+                                if (!vec3IsZero(vec3Hadamard(total_shift, directionToVector(current_direction))))
+                                {
+                                    float offset_magnitude = 0;
+                                    if (current_dir_basis.x != 0)
+                                    {
+                                        offset_magnitude = total_shift.x;
+                                        Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                                        Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
+                                        bool curr_dir_bit = !(current_dir_basis.x > 0) != !(offset_magnitude > 0);
+                                        bool next_dir_bit;
+                                        if (next_dir_basis.y != 0) next_dir_bit = !(next_dir_basis.y > 0) != !(guess_comparison.y > 0);
+                                        else 					   next_dir_bit = !(next_dir_basis.z > 0) != !(guess_comparison.z > 0);
+                                        if (!curr_dir_bit != !next_dir_bit) offset_magnitude = -offset_magnitude;
+                                    }
+                                    if (current_dir_basis.y != 0)
+                                    {
+                                        offset_magnitude = total_shift.y;
+                                        Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                                        Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
+                                        bool curr_dir_bit = !(current_dir_basis.y > 0) != !(offset_magnitude > 0);
+                                        bool next_dir_bit;
+                                        if (next_dir_basis.x != 0) next_dir_bit = !(next_dir_basis.x > 0) != !(guess_comparison.x > 0);
+                                        else 					   next_dir_bit = !(next_dir_basis.z > 0) != !(guess_comparison.z > 0);
+                                        if (!curr_dir_bit != !next_dir_bit) offset_magnitude = -offset_magnitude;
+                                    }
+                                    if (current_dir_basis.z != 0)
+                                    {
+                                        offset_magnitude = total_shift.z;
+                                        Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                                        Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
+                                        bool curr_dir_bit = !(current_dir_basis.z > 0) != !(offset_magnitude > 0);
+                                        bool next_dir_bit;
+                                        if (next_dir_basis.x != 0) next_dir_bit = !(next_dir_basis.x > 0) != !(guess_comparison.x > 0);
+                                        else 					   next_dir_bit = !(next_dir_basis.y > 0) != !(guess_comparison.y > 0);
+                                        if (!curr_dir_bit != !next_dir_bit) offset_magnitude = -offset_magnitude;
+                                    }
+
+                                    if (reverse_offset) offset_magnitude = -offset_magnitude;
+                                    lb->end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                                }
+                            }
+                            else
+                            {
+                                lb->end_coords = intCoordsToNorm(current_tile_coords);
+                            }
+                        }
 
                         current_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
                         if (current_direction != NO_DIRECTION)
@@ -2364,8 +2472,18 @@ void updateLaserBuffer(void)
 
                 if (real_hit_type != NONE)
                 {
-                    //lb->end_coords = adjustEndCoords(current_tile_coords, lb->start_coords);
-                    lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
+                    if (!isDiagonal(current_direction))
+                    {
+                        lb->end_coords = intCoordsToNorm(current_tile_coords);
+                        Vec3 dir_basis = directionToVector(current_direction);
+                        if (dir_basis.x == 0) lb->end_coords.x = lb->start_coords.x;
+                        if (dir_basis.y == 0) lb->end_coords.y = lb->start_coords.y;
+                        if (dir_basis.z == 0) lb->end_coords.z = lb->start_coords.z;
+                    }
+                    else
+                    {
+                        lb->end_coords = intCoordsToNorm(current_tile_coords);
+                    }
                     break;
                 }
 
