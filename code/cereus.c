@@ -441,6 +441,15 @@ Direction oppositeDirection(Direction direction)
         case SOUTH_EAST: return NORTH_WEST;
         case NORTH_EAST: return SOUTH_WEST;
 
+        case UP_NORTH: 	 return DOWN_SOUTH;
+        case UP_WEST:	 return DOWN_EAST;
+        case UP_SOUTH:   return DOWN_NORTH;
+        case UP_EAST:    return DOWN_WEST;
+        case DOWN_NORTH: return UP_SOUTH;
+        case DOWN_WEST:  return UP_EAST;
+        case DOWN_SOUTH: return UP_NORTH;
+        case DOWN_EAST:  return UP_WEST;
+
         default: return NO_DIRECTION;
     }
 }
@@ -528,6 +537,21 @@ Vec3 directionToVector(Direction direction)
         case EAST:  return (Vec3){  1,  0,  0 };
         case UP:    return (Vec3){  0,  1,  0 };
         case DOWN:  return (Vec3){  0, -1,  0 };
+
+    	case NORTH_WEST: return (Vec3){ -1,  0, -1 };
+        case SOUTH_WEST: return (Vec3){ -1,  0,  1 };
+        case SOUTH_EAST: return (Vec3){  1,  0,  1 };
+        case NORTH_EAST: return (Vec3){  1,  0, -1 };
+
+        case UP_NORTH: 	 return (Vec3){  0,  1, -1 };
+        case UP_WEST:	 return (Vec3){ -1,  1,  0 };
+        case UP_SOUTH:   return (Vec3){  0,  1,  1 };
+        case UP_EAST:    return (Vec3){  1,  1,  0 };
+        case DOWN_NORTH: return (Vec3){  0, -1, -1 };
+        case DOWN_WEST:  return (Vec3){ -1, -1,  0 };
+        case DOWN_SOUTH: return (Vec3){  0, -1,  1 };
+        case DOWN_EAST:  return (Vec3){  1, -1,  0 };
+
         default: return IDENTITY_TRANSLATION;
     }
 }
@@ -2124,6 +2148,13 @@ int32 findNextFreeInLaserBuffer()
     return -1;
 }
 
+// TODO(spike): seems mostly functional, but it is still slightly inaccurate when pushing two mirrors at the same time perpendicular to laser.
+// 				looks like a 2x factor offset, maybe some implicit assumption about only one mirror moving, where as in this case the two mirrors moving would compound offset magnitude?
+//
+// 				otherwise: 
+// 				- not handling diagonals at all right now in the mirror cases
+// 				- need guard on offset_magnitude in the mirrors: if too close to edge, don't want to allow reflection
+
 void updateLaserBuffer(void)
 {
     Entity* player = &next_world_state.player;
@@ -2215,17 +2246,32 @@ void updateLaserBuffer(void)
 
                 if (!intCoordsWithinLevelBounds(current_tile_coords))
                 {
+                    lb->end_coords = intCoordsToNorm(current_tile_coords);
+                    Vec3 dir_basis = directionToVector(current_direction);
                     if (!isDiagonal(current_direction))
                     {
-                        lb->end_coords = intCoordsToNorm(current_tile_coords);
-                        Vec3 dir_basis = directionToVector(current_direction);
                         if (dir_basis.x == 0) lb->end_coords.x = lb->start_coords.x;
                         if (dir_basis.y == 0) lb->end_coords.y = lb->start_coords.y;
                         if (dir_basis.z == 0) lb->end_coords.z = lb->start_coords.z;
                     }
                     else
                     {
-                        lb->end_coords = intCoordsToNorm(current_tile_coords);
+                        // cases x and z are untested here
+                        if (dir_basis.x == 0)
+                        {
+							if 		(fmod(lb->start_coords.y, 1) != 0) lb->end_coords.y = lb->start_coords.y - (lb->start_coords.z - lb->end_coords.z) * dir_basis.y * dir_basis.z;
+							else if (fmod(lb->start_coords.z, 1) != 0) lb->end_coords.z = lb->start_coords.z - (lb->start_coords.y - lb->end_coords.y) * dir_basis.y * dir_basis.z;
+                        }
+                        if (dir_basis.y == 0)
+                        {
+							if 		(fmod(lb->start_coords.x, 1) != 0) lb->end_coords.x = lb->start_coords.x - (lb->start_coords.z - lb->end_coords.z) * dir_basis.x * dir_basis.z;
+							else if (fmod(lb->start_coords.z, 1) != 0) lb->end_coords.z = lb->start_coords.z - (lb->start_coords.x - lb->end_coords.x) * dir_basis.x * dir_basis.z;
+                        }
+                        if (dir_basis.z == 0)
+                        {
+							if 		(fmod(lb->start_coords.x, 1) != 0) lb->end_coords.x = lb->start_coords.x - (lb->start_coords.y - lb->end_coords.y) * dir_basis.x * dir_basis.y;
+							else if (fmod(lb->start_coords.y, 1) != 0) lb->end_coords.y = lb->start_coords.y - (lb->start_coords.x - lb->end_coords.x) * dir_basis.x * dir_basis.y;
+                        }
                     }
                     break;
                 }
@@ -2288,7 +2334,15 @@ void updateLaserBuffer(void)
 
                         if (crystal->moving_direction == oppositeDirection(current_direction))
                         {
+                            Vec3 offset = vec3Subtract(crystal->position_norm, intCoordsToNorm(crystal->coords));
 
+                            if (crystal->in_motion > passthrough_comparison)
+                            {
+                                current_tile_coords = getNextCoords(current_tile_coords, current_direction);
+                                offset = vec3Add(offset, directionToVector(oppositeDirection(current_direction)));
+                            }
+
+                            lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
                         }
                         else
                         {
@@ -2301,7 +2355,7 @@ void updateLaserBuffer(void)
                             }
                         }
                     }
-                    lb->end_coords = intCoordsToNorm(current_tile_coords);
+                    if (vec3IsZero(lb->end_coords)) lb->end_coords = intCoordsToNorm(current_tile_coords);
 
                     if 		(lb->color == RED) 	current_direction = getRedDirectionAtCrystal(current_direction);
                     else if (lb->color == BLUE) current_direction = getBlueDirectionAtCrystal(current_direction);
@@ -2319,14 +2373,6 @@ void updateLaserBuffer(void)
                     {
                         if (mirror->in_motion)
                         {
-                            // debug
-                            if (player->moving_direction != NO_DIRECTION)
-                            {
-                                int _ = 0;
-                                int b = 1;
-                                (void)(_ + b);
-                            }
-
                             int32 passthrough_comparison = 0;
                             bool player_turning = next_world_state.pack_intermediate_states_timer > 0;
                             if (player_turning) passthrough_comparison = PUSH_FROM_TURN_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH;
@@ -2379,14 +2425,6 @@ void updateLaserBuffer(void)
                                 Vec3 total_shift = vec3Subtract(mirror_shift, laser_shift);
                                 bool reverse_offset = false;
                                 if (vec3IsZero(vec3Subtract(lb->end_coords, intCoordsToNorm(current_tile_coords)))) reverse_offset = true;
-
-                                // debug
-                                if (player->moving_direction != NO_DIRECTION)
-                                {
-                                    int _ = 0;
-                                    int b = 1;
-                                    (void)(_ + b);
-                                }
 
                                 if (!vec3IsZero(vec3Hadamard(total_shift, next_dir_basis)))
                                 {
@@ -2497,17 +2535,32 @@ void updateLaserBuffer(void)
 
                 if (real_hit_type != NONE)
                 {
+                    lb->end_coords = intCoordsToNorm(current_tile_coords);
+                    Vec3 dir_basis = directionToVector(current_direction);
                     if (!isDiagonal(current_direction))
                     {
-                        lb->end_coords = intCoordsToNorm(current_tile_coords);
-                        Vec3 dir_basis = directionToVector(current_direction);
                         if (dir_basis.x == 0) lb->end_coords.x = lb->start_coords.x;
                         if (dir_basis.y == 0) lb->end_coords.y = lb->start_coords.y;
                         if (dir_basis.z == 0) lb->end_coords.z = lb->start_coords.z;
                     }
                     else
                     {
-                        lb->end_coords = intCoordsToNorm(current_tile_coords);
+                        // cases x and z are untested here
+                        if (dir_basis.x == 0)
+                        {
+							if 		(fmod(lb->start_coords.y, 1) != 0) lb->end_coords.y = lb->start_coords.y - (lb->start_coords.z - lb->end_coords.z) * dir_basis.y * dir_basis.z;
+							else if (fmod(lb->start_coords.z, 1) != 0) lb->end_coords.z = lb->start_coords.z - (lb->start_coords.y - lb->end_coords.y) * dir_basis.y * dir_basis.z;
+                        }
+                        if (dir_basis.y == 0)
+                        {
+							if 		(fmod(lb->start_coords.x, 1) != 0) lb->end_coords.x = lb->start_coords.x - (lb->start_coords.z - lb->end_coords.z) * dir_basis.x * dir_basis.z;
+							else if (fmod(lb->start_coords.z, 1) != 0) lb->end_coords.z = lb->start_coords.z - (lb->start_coords.x - lb->end_coords.x) * dir_basis.x * dir_basis.z;
+                        }
+                        if (dir_basis.z == 0)
+                        {
+							if 		(fmod(lb->start_coords.x, 1) != 0) lb->end_coords.x = lb->start_coords.x - (lb->start_coords.y - lb->end_coords.y) * dir_basis.x * dir_basis.y;
+							else if (fmod(lb->start_coords.y, 1) != 0) lb->end_coords.y = lb->start_coords.y - (lb->start_coords.x - lb->end_coords.x) * dir_basis.x * dir_basis.y;
+                        }
                     }
                     break;
                 }
