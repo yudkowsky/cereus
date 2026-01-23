@@ -2215,7 +2215,18 @@ void updateLaserBuffer(void)
 
                 if (!intCoordsWithinLevelBounds(current_tile_coords))
                 {
-                    lb->end_coords = intCoordsToNorm(current_tile_coords);
+                    if (!isDiagonal(current_direction))
+                    {
+                        lb->end_coords = intCoordsToNorm(current_tile_coords);
+                        Vec3 dir_basis = directionToVector(current_direction);
+                        if (dir_basis.x == 0) lb->end_coords.x = lb->start_coords.x;
+                        if (dir_basis.y == 0) lb->end_coords.y = lb->start_coords.y;
+                        if (dir_basis.z == 0) lb->end_coords.z = lb->start_coords.z;
+                    }
+                    else
+                    {
+                        lb->end_coords = intCoordsToNorm(current_tile_coords);
+                    }
                     break;
                 }
 
