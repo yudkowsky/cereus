@@ -2152,8 +2152,11 @@ int32 findNextFreeInLaserBuffer()
 // 				looks like a 2x factor offset, maybe some implicit assumption about only one mirror moving, where as in this case the two mirrors moving would compound offset magnitude?
 //
 // 				otherwise: 
-// 				- not handling diagonals at all right now in the mirror cases
+// 				- not handling diagonals at all right now in the mirror cases (causes visual glitch when moving crystal such that diagonal laser passes across perpendicular mirror)
 // 				- need guard on offset_magnitude in the mirrors: if too close to edge, don't want to allow reflection
+// 				- look if we need to round from position_norm instead of checking if player is turning for some calculations; does this handle first falls vs. other falls correctly..? maybe yes, but should probably fix this anyway
+// 				- figure out moving sources and their lasers
+// 				- mirror / crystal / mirror problem (see mirror-bypass)
 
 void updateLaserBuffer(void)
 {
@@ -2214,6 +2217,10 @@ void updateLaserBuffer(void)
 
         Direction current_direction = source->direction;
         Int3 current_tile_coords = source->coords;
+        if (source->in_motion)
+        {
+			
+        }
 
         int32 skip_mirror_id = 0;
         int32 skip_next_mirror = 0;
@@ -2277,11 +2284,13 @@ void updateLaserBuffer(void)
                 }
 
                 TileType real_hit_type = getTileType(current_tile_coords);
+                if (lb->color == GREEN && real_hit_type == CRYSTAL) real_hit_type = NONE;
                 TrailingHitbox th = {0};
                 bool th_hit = false;
-                if (trailingHitboxAtCoords(current_tile_coords, &th) && th.frames > 0) 
+                if (trailingHitboxAtCoords(current_tile_coords, &th) && th.frames > 0)
                 {
                     if (th.hit_direction == NO_DIRECTION || th.hit_direction == current_direction) th_hit = true;
+                    if (lb->color == GREEN && th.type == CRYSTAL) th_hit = false;
                 }
                 else memset(&th, 0, sizeof(TrailingHitbox));
                 if (th_hit) real_hit_type = th.type;
@@ -2316,11 +2325,6 @@ void updateLaserBuffer(void)
 
                 if (real_hit_type == CRYSTAL)
                 {
-                    if (lb->color == GREEN)
-                    {
-						current_tile_coords = getNextCoords(current_tile_coords, current_direction);
-                        continue;
-                    }
                     Entity* crystal = {0};
                     if (th_hit) crystal = getEntityPointer(getNextCoords(current_tile_coords, th.moving_direction));
                     else crystal = getEntityPointer(current_tile_coords);
