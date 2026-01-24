@@ -2156,7 +2156,7 @@ int32 findNextFreeInLaserBuffer()
 // 				- need guard on offset_magnitude in the mirrors: if too close to edge, don't want to allow reflection
 // 				- look if we need to round from position_norm instead of checking if player is turning for some calculations; does this handle first falls vs. other falls correctly..? maybe yes, but should probably fix this anyway
 // 				- figure out moving sources and their lasers
-// 				- mirror / crystal / mirror problem (see mirror-bypass)
+// 				- green: mirror / crystal / mirror problem (see mirror-bypass)
 
 void updateLaserBuffer(void)
 {
