@@ -3828,9 +3828,13 @@ void gameFrame(double delta_time, TickInput tick_input)
 				if (player->hit_by_blue) next_world_state.player_hit_by_blue_in_turn = true;
                 if (!player->hit_by_blue && next_world_state.player_hit_by_blue_in_turn && next_world_state.pack_intermediate_states_timer > 0)
                 {
-                    next_world_state.entity_to_fall_after_blue_not_blue_turn_timer = next_world_state.pack_intermediate_states_timer + 4; // this number is magic (sorry); it is the frame count that makes the entity fall as soon as possible, i.e., at the same time as the player (if magenta-not-magenta)
-                    next_world_state.entity_to_fall_after_blue_not_blue_turn_coords = getNextCoords(next_world_state.pack_hitbox_turning_to_coords, next_world_state.pack_orthogonal_push_direction);
-                    next_world_state.player_hit_by_blue_in_turn = false;
+                    Int3 maybe_blue_not_blue_coords = getNextCoords(next_world_state.pack_hitbox_turning_to_coords, next_world_state.pack_orthogonal_push_direction);
+                    if (getTileType(getNextCoords(maybe_blue_not_blue_coords, DOWN)) == NONE)
+                    {
+                        next_world_state.entity_to_fall_after_blue_not_blue_turn_timer = next_world_state.pack_intermediate_states_timer + 4; // this number is magic (sorry); it is the frame count that makes the entity fall as soon as possible, i.e., at the same time as the player (if magenta-not-magenta)
+                        next_world_state.entity_to_fall_after_blue_not_blue_turn_coords = getNextCoords(maybe_blue_not_blue_coords, next_world_state.pack_orthogonal_push_direction);
+                        next_world_state.player_hit_by_blue_in_turn = false;
+                    }
                 }
             }
         }
