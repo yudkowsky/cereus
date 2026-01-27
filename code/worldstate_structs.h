@@ -280,6 +280,7 @@ GreenHit;
 
 typedef struct ResetInfo
 {
+    // TODO(spike): tomorrow: add entity type here, and add to relevant functions, and use this instead of getting the entity at the location in reset block logic
     int32 id;
     Int3 start_coords;
     Direction start_direction;

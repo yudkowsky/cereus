@@ -3962,14 +3962,21 @@ void gameFrame(double delta_time, TickInput tick_input)
             FOR(to_reset_index, MAX_RESET_COUNT)
             {
                 if (rb->reset_info[to_reset_index].id == -1) continue;
-                Entity* reset_e = getEntityFromId(rb->reset_info[to_reset_index].id);
-            	TileType tile = getTileType(reset_e->coords);
-                setTileType(NONE, reset_e->coords);
-                setTileDirection(NORTH, reset_e->coords);
-                reset_e->coords = rb->reset_info[to_reset_index].start_coords;
-                reset_e->position_norm = intCoordsToNorm(reset_e->coords);
-                setTileType(tile, reset_e->coords);
-                setTileDirection(reset_e->direction, reset_e->coords);
+                if (getEntityFromId(rb->reset_info[to_reset_index].id) != 0)
+                {
+                    Entity* reset_e = getEntityFromId(rb->reset_info[to_reset_index].id);
+                    TileType tile = getTileType(reset_e->coords);
+                    setTileType(NONE, reset_e->coords);
+                    setTileDirection(NORTH, reset_e->coords);
+                    reset_e->coords = rb->reset_info[to_reset_index].start_coords;
+                    reset_e->position_norm = intCoordsToNorm(reset_e->coords);
+                    setTileType(tile, reset_e->coords);
+                    setTileDirection(reset_e->direction, reset_e->coords);
+                }
+                else
+                {
+                    // TODO(spike): figure this situation out... probably need to remove -1 as 'removed' indicator
+                }
             }
         }
 
