@@ -4218,7 +4218,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                     {
                         if (rb->reset_info[to_reset_index].id == -1) continue;
                         Entity* e = getEntityFromId(rb->reset_info[to_reset_index].id);
-                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, e->position_norm, DEFAULT_SCALE, IDENTITY_QUATERNION);
+                        Vec3 draw_coords = {0};
+                        if (e != 0) draw_coords = e->position_norm;
+                        else draw_coords = intCoordsToNorm(rb->reset_info[to_reset_index].start_coords);
+                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, draw_coords, DEFAULT_SCALE, IDENTITY_QUATERNION);
                     }
                 }
             }
