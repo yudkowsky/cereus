@@ -48,7 +48,7 @@ const int32 MAX_TRAILING_HITBOX_COUNT = 16;
 const int32 MAX_LEVEL_COUNT = 64;
 const int32 MAX_RESET_COUNT = 16;
 
-const int32 UNDO_BUFFER_SIZE = 256; // remember to modify undo_buffer
+const int32 UNDO_BUFFER_SIZE = 128; // remember to modify undo_buffer
 
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
@@ -80,7 +80,7 @@ const int32 WIN_BLOCK_CHUNK_SIZE = 76;
 const char WIN_BLOCK_CHUNK_TAG[4] = "WINB";
 const int32 LOCKED_INFO_CHUNK_SIZE = 76; // TODO(spike): get rid of this (have dynamic amounts)
 const char LOCKED_INFO_CHUNK_TAG[4] = "LOKB";
-const int32 RESET_INFO_SINGLE_ENTRY_SIZE = 7;
+const int32 RESET_INFO_SINGLE_ENTRY_SIZE = 8;
 const char RESET_INFO_CHUNK_TAG[4] = "RESB";
 
 const int32 OVERWORLD_SCREEN_SIZE_X = 15;
@@ -103,7 +103,7 @@ AssetToLoad assets_to_load[1024] = {0};
 WorldState world_state = {0};
 WorldState next_world_state = {0};
 
-WorldState undo_buffer[256] = {0};
+WorldState undo_buffer[128] = {0};
 int32 undo_buffer_position = 0;
 bool restart_last_turn = false;
 
@@ -655,7 +655,7 @@ Vec4 directionToQuaternion(Direction direction, bool roll_z)
     return IDENTITY_QUATERNION;
 }
 
-void setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction direction, Color color) 
+int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction direction, Color color) 
 {
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
     {
@@ -667,8 +667,9 @@ void setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction direc
         entity_group[entity_index].id = entity_index + entityIdOffset(entity_group);
         entity_group[entity_index].color = color;
         setTileDirection(direction, coords);
-        break;
+        return entity_group[entity_index].id;
     }
+    return 0;
 }
 
 // FILE I/O
@@ -883,6 +884,7 @@ void loadResetBlockInfo(FILE* file)
                 {
                     Int3 current_entity_coords = {0};
                     Int3 reset_start_coords = {0};
+                    TileType reset_entity_type = 0;
                     Direction reset_entity_direction = NO_DIRECTION;
                     fread(&current_entity_coords.x, 4, 1, file);
                     fread(&current_entity_coords.y, 4, 1, file);
@@ -890,11 +892,13 @@ void loadResetBlockInfo(FILE* file)
                     fread(&reset_start_coords.x, 4, 1, file);
                     fread(&reset_start_coords.y, 4, 1, file);
                     fread(&reset_start_coords.z, 4, 1, file);
+                    fread(&reset_entity_type, 4, 1, file);
                     fread(&reset_entity_direction, 4, 1, file);
 
                     Entity* reset_e = getEntityPointer(current_entity_coords);
                     rb->reset_info[reset_entity_index].id = reset_e->id;
                     rb->reset_info[reset_entity_index].start_coords = reset_start_coords;
+                    rb->reset_info[reset_entity_index].start_type = reset_entity_type;
                     rb->reset_info[reset_entity_index].start_direction = reset_entity_direction;
                 }
             }
@@ -970,6 +974,7 @@ void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
         {
             // TODO(spike): this is null ptr if delete an entity that wants to be reset, causing crash
             Entity* e = getEntityFromId(rb->reset_info[to_reset_index].id);
+            TileType type = getTileType(e->coords);
 
             // where obj is right now
             fwrite(&e->coords.x, 4, 1, file);
@@ -980,6 +985,7 @@ void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
             fwrite(&e->coords.x, 4, 1, file);
             fwrite(&e->coords.y, 4, 1, file);
             fwrite(&e->coords.z, 4, 1, file);
+            fwrite(&type, 4, 1, file);
             fwrite(&e->direction, 4, 1, file);
         }
         else
@@ -994,6 +1000,7 @@ void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
             fwrite(&rb->reset_info[to_reset_index].start_coords.x, 4, 1, file);
             fwrite(&rb->reset_info[to_reset_index].start_coords.y, 4, 1, file);
             fwrite(&rb->reset_info[to_reset_index].start_coords.z, 4, 1, file);
+            fwrite(&rb->reset_info[to_reset_index].start_type, 4, 1, file);
             fwrite(&rb->reset_info[to_reset_index].start_direction, 4, 1, file);
         }
     }
@@ -3113,6 +3120,8 @@ void editorMode(TickInput *tick_input)
                         {
                             rb->reset_info[next_free].id = new_e->id;
                             rb->reset_info[next_free].start_coords = new_e->coords;
+                            rb->reset_info[next_free].start_type = editor_state.picked_tile;
+                            rb->reset_info[next_free].start_direction = new_e->direction;
                         }
                     }
                     else
@@ -3961,21 +3970,45 @@ void gameFrame(double delta_time, TickInput tick_input)
             Entity* rb = getEntityPointer(getNextCoords(player->coords, DOWN));
             FOR(to_reset_index, MAX_RESET_COUNT)
             {
-                if (rb->reset_info[to_reset_index].id == -1) continue;
-                if (getEntityFromId(rb->reset_info[to_reset_index].id) != 0)
+                ResetInfo ri = rb->reset_info[to_reset_index];
+                if (ri.id == -1) continue;
+                if (getEntityFromId(ri.id) != 0)
                 {
-                    Entity* reset_e = getEntityFromId(rb->reset_info[to_reset_index].id);
-                    TileType tile = getTileType(reset_e->coords);
+                    Entity* reset_e = getEntityFromId(ri.id);
+                    //TileType type = getTileType(reset_e->coords);
                     setTileType(NONE, reset_e->coords);
                     setTileDirection(NORTH, reset_e->coords);
-                    reset_e->coords = rb->reset_info[to_reset_index].start_coords;
+                    reset_e->coords = ri.start_coords;
                     reset_e->position_norm = intCoordsToNorm(reset_e->coords);
-                    setTileType(tile, reset_e->coords);
+                    setTileType(ri.start_type, reset_e->coords);
                     setTileDirection(reset_e->direction, reset_e->coords);
                 }
                 else
                 {
-                    // TODO(spike): figure this situation out... probably need to remove -1 as 'removed' indicator
+                    // TODO(spike): handle sources
+                    Entity* entity_group = 0;
+                    switch (ri.start_type)
+                    {
+                        case BOX:     	   entity_group = next_world_state.boxes;    	  break;
+                        case MIRROR:  	   entity_group = next_world_state.mirrors;  	  break;
+                        case CRYSTAL: 	   entity_group = next_world_state.crystals; 	  break;
+                        case PERM_MIRROR:  entity_group = next_world_state.perm_mirrors;  break;
+                        case WIN_BLOCK:    entity_group = next_world_state.win_blocks;    break;
+                        case LOCKED_BLOCK: entity_group = next_world_state.locked_blocks; break;
+                        case RESET_BLOCK:  entity_group = next_world_state.reset_blocks;  break;
+                        default: entity_group = 0;
+                    }
+                    if (entity_group != 0) 
+                    {
+                        ri.id = setEntityInstanceInGroup(entity_group, ri.start_coords, ri.start_direction, NO_COLOR); // overwrite old id with new
+                        Entity* reset_e = getEntityFromId(ri.id);
+                        setTileType(NONE, reset_e->coords);
+                        setTileDirection(NORTH, reset_e->coords);
+                        reset_e->coords = ri.start_coords;
+                        reset_e->position_norm = intCoordsToNorm(reset_e->coords);
+                        setTileType(ri.start_type, reset_e->coords);
+                        setTileDirection(reset_e->direction, reset_e->coords);
+                    }
                 }
             }
         }

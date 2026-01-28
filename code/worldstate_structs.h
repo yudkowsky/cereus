@@ -280,9 +280,9 @@ GreenHit;
 
 typedef struct ResetInfo
 {
-    // TODO(spike): tomorrow: add entity type here, and add to relevant functions, and use this instead of getting the entity at the location in reset block logic
     int32 id;
     Int3 start_coords;
+    TileType start_type;
     Direction start_direction;
     Int3 current_coords;
 }
@@ -347,14 +347,14 @@ typedef struct WorldState
     uint8 buffer[32768]; // 2 bytes info per tile 
     Entity player;
     Entity pack;
-    Entity boxes[128];
-    Entity mirrors[128];
-    Entity sources[128];
-    Entity crystals[128];
-    Entity perm_mirrors[128];
-    Entity win_blocks[128];
-    Entity locked_blocks[128];
-    Entity reset_blocks[128];
+    Entity boxes[64];
+    Entity mirrors[64];
+    Entity sources[64];
+    Entity crystals[64];
+    Entity perm_mirrors[64];
+    Entity win_blocks[64];
+    Entity locked_blocks[64];
+    Entity reset_blocks[64];
 
     bool player_will_fall_next_turn; // used for not being able to walk one extra tile after walking out of red beam
     bool pack_detached;
