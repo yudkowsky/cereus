@@ -91,6 +91,7 @@ double accumulator = 0;
 
 const char debug_level_name[64] = "overworld";
 const char start_level_path_buffer[64] = "../cereus/data/levels/";
+const char solved_level_path[64] = "../cereus/data/meta/solved-levels.meta";
 Int3 level_dim = {0};
 
 Camera camera = {0};
@@ -697,7 +698,7 @@ bool readChunkHeader(FILE* file, char out_tag[4], int32 *out_size)
     return true;
 }
 
-// gets position and count of some chunk tag. position: cursor placed right before chunk tag
+// gets position and count of some chunk tag. cursor placed right before chunk tag
 int32 getCountAndPositionOfChunk(FILE* file, char tag[4], int32 positions[16])
 {
 	char chunk[4] = {0};
@@ -1101,9 +1102,34 @@ void removeFromSolvedLevels(char level[64])
     memset(next_world_state.solved_levels[index], 0, sizeof(next_world_state.solved_levels[0]));
 }
 
+void loadSolvedLevelsFromFile()
+{
+    memset(next_world_state.solved_levels, 0, sizeof(next_world_state.solved_levels));
+	FILE* file = fopen(solved_level_path, "rb+");
+    FOR(level_index, MAX_LEVEL_COUNT)
+    {
+        if (fread(next_world_state.solved_levels[level_index], 64, 1, file) != 1) break;
+        if (next_world_state.solved_levels[level_index][0] == 0) break;
+    }
+    fclose(file);
+}
+
 void writeSolvedLevelsToFile()
 {
+	FILE* file = fopen(solved_level_path, "wb");
+    if (!file) return;
+    FOR(level_index, MAX_LEVEL_COUNT)
+    {
+		if (next_world_state.solved_levels[level_index][0] == 0) break;
+        fwrite(&next_world_state.solved_levels[level_index], 64, 1, file);
+    }
+    fclose(file);
+}
 
+void clearSolvedLevels()
+{
+	FILE* file = fopen(solved_level_path, "wb");
+    fclose(file);
 }
 
 // DRAW ASSET
@@ -2631,6 +2657,7 @@ void levelChangePrep(char next_level[64])
     if (!next_world_state.in_overworld && findInSolvedLevels(next_world_state.level_name) == -1)
     {
         addToSolvedLevels(next_world_state.level_name);
+        writeSolvedLevelsToFile();
     }
 
     if (strcmp(next_level, "overworld") == 0) next_world_state.in_overworld = true;
@@ -3266,6 +3293,8 @@ void gameInitialiseState()
     loadResetBlockInfo(file);
     fclose(file);
 
+    loadSolvedLevelsFromFile();
+
     camera_screen_offset.x = (int32)(camera.coords.x / OVERWORLD_SCREEN_SIZE_X);
     camera_screen_offset.z = (int32)(camera.coords.z / OVERWORLD_SCREEN_SIZE_Z);
 
@@ -3795,6 +3824,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             next_world_state.pack_intermediate_states_timer--;
         }
 
+		updateLaserBuffer();
+
         // falling logic
 		if (!player->hit_by_blue) doFallingObjects(true);
 
@@ -3945,14 +3976,14 @@ void gameFrame(double delta_time, TickInput tick_input)
             Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
             if (!next_world_state.pack_detached && !wb->locked)
             {
-                if (next_world_state.in_overworld) 
-                {
-                    char level_path[64] = {0};
-                    buildLevelPathFromName(next_world_state.level_name, &level_path);
-                    saveLevelRewrite(level_path, false);
-                }
                 if (wb->next_level[0] != 0)
                 {
+                    if (next_world_state.in_overworld) 
+                    {
+                        char level_path[64] = {0};
+                        buildLevelPathFromName(next_world_state.level_name, &level_path);
+                        saveLevelRewrite(level_path, false);
+                    }
                     levelChangePrep(wb->next_level);
                     time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
                     gameInitialise(wb->next_level);
@@ -4337,13 +4368,13 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (editor_state.do_wide_camera) camera.fov = 60.0f;
         else camera.fov = CAMERA_FOV;
 
-        // write to file
+        // write to file on i press
         char level_path[64];
         buildLevelPathFromName(world_state.level_name, &level_path);
         if (time_until_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.i_press) 
         {
             saveLevelRewrite(level_path, true);
-            // TODO(spike): writeSolvedLevelsToFile();
+            writeSolvedLevelsToFile();
         }
 
         if (time_until_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.c_press) 
