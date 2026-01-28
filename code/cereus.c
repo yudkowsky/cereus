@@ -89,7 +89,7 @@ const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
-const char debug_level_name[64] = "testing";
+const char debug_level_name[64] = "overworld";
 const char start_level_path_buffer[64] = "../cereus/data/levels/";
 Int3 level_dim = {0};
 
@@ -396,6 +396,7 @@ int32 getEntityId(Int3 coords)
 
 Entity* getEntityFromId(int32 id)
 {
+    if (id < 0) return 0;
     if (id == PLAYER_ID) return &next_world_state.player;
     else if (id == PACK_ID) return &next_world_state.pack;
     else 
@@ -896,7 +897,8 @@ void loadResetBlockInfo(FILE* file)
                     fread(&reset_entity_direction, 4, 1, file);
 
                     Entity* reset_e = getEntityPointer(current_entity_coords);
-                    rb->reset_info[reset_entity_index].id = reset_e->id;
+                    if (reset_e != 0) rb->reset_info[reset_entity_index].id = reset_e->id;
+                    else			  rb->reset_info[reset_entity_index].id = -2;
                     rb->reset_info[reset_entity_index].start_coords = reset_start_coords;
                     rb->reset_info[reset_entity_index].start_type = reset_entity_type;
                     rb->reset_info[reset_entity_index].start_direction = reset_entity_direction;
@@ -970,33 +972,41 @@ void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
     FOR(to_reset_index, MAX_RESET_COUNT)
     {
         if (rb->reset_info[to_reset_index].id == -1) continue;
-        if (save_reset_block_state)
+        Entity* e = getEntityFromId(rb->reset_info[to_reset_index].id);
+        if (e != 0)
         {
-            // TODO(spike): this is null ptr if delete an entity that wants to be reset, causing crash
-            Entity* e = getEntityFromId(rb->reset_info[to_reset_index].id);
-            TileType type = getTileType(e->coords);
-
             // where obj is right now
             fwrite(&e->coords.x, 4, 1, file);
             fwrite(&e->coords.y, 4, 1, file);
             fwrite(&e->coords.z, 4, 1, file);
- 
-			// where i want obj to be + direction (in this case same because saving this as new reset position)
-            fwrite(&e->coords.x, 4, 1, file);
-            fwrite(&e->coords.y, 4, 1, file);
-            fwrite(&e->coords.z, 4, 1, file);
-            fwrite(&type, 4, 1, file);
-            fwrite(&e->direction, 4, 1, file);
+
+            if (save_reset_block_state)
+            {
+                TileType type = getTileType(e->coords);
+     
+                // where i want obj to be + direction (in this case same because saving this as new reset position)
+                fwrite(&e->coords.x, 4, 1, file);
+                fwrite(&e->coords.y, 4, 1, file);
+                fwrite(&e->coords.z, 4, 1, file);
+                fwrite(&type, 4, 1, file);
+                fwrite(&e->direction, 4, 1, file);
+            }
+            else
+            {
+                // where i want obj to be + direction
+                fwrite(&rb->reset_info[to_reset_index].start_coords.x, 4, 1, file);
+                fwrite(&rb->reset_info[to_reset_index].start_coords.y, 4, 1, file);
+                fwrite(&rb->reset_info[to_reset_index].start_coords.z, 4, 1, file);
+                fwrite(&rb->reset_info[to_reset_index].start_type, 4, 1, file);
+                fwrite(&rb->reset_info[to_reset_index].start_direction, 4, 1, file);
+            }
         }
         else
         {
-            Entity* e = getEntityFromId(rb->reset_info[to_reset_index].id);
-            // where obj is right now
-            fwrite(&e->coords.x, 4, 1, file);
-            fwrite(&e->coords.y, 4, 1, file);
-            fwrite(&e->coords.z, 4, 1, file);
-
-			// where i want obj to be + direction
+            Vec3 null_coords = (Vec3){ 0, 1, 0 };
+            fwrite(&null_coords.x, 4, 1, file);
+            fwrite(&null_coords.y, 4, 1, file);
+            fwrite(&null_coords.z, 4, 1, file);
             fwrite(&rb->reset_info[to_reset_index].start_coords.x, 4, 1, file);
             fwrite(&rb->reset_info[to_reset_index].start_coords.y, 4, 1, file);
             fwrite(&rb->reset_info[to_reset_index].start_coords.z, 4, 1, file);
@@ -3972,7 +3982,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 ResetInfo ri = rb->reset_info[to_reset_index];
                 if (ri.id == -1) continue;
-                if (getEntityFromId(ri.id) != 0)
+                if (ri.id != -2 && getEntityFromId(ri.id) != 0)
                 {
                     Entity* reset_e = getEntityFromId(ri.id);
                     //TileType type = getTileType(reset_e->coords);
@@ -4216,11 +4226,13 @@ void gameFrame(double delta_time, TickInput tick_input)
                     Entity* rb = getEntityFromId(editor_state.selected_id);
                     FOR(to_reset_index, MAX_RESET_COUNT)
                     {
-                        if (rb->reset_info[to_reset_index].id == -1) continue;
-                        Entity* e = getEntityFromId(rb->reset_info[to_reset_index].id);
+                        ResetInfo ri = rb->reset_info[to_reset_index];
+                        if (ri.id == -1) continue;
+                        Entity* e = 0; 
+                        if (ri.id != -2) e = getEntityFromId(ri.id);
                         Vec3 draw_coords = {0};
                         if (e != 0) draw_coords = e->position_norm;
-                        else draw_coords = intCoordsToNorm(rb->reset_info[to_reset_index].start_coords);
+                        else draw_coords = intCoordsToNorm(ri.start_coords);
                         drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, draw_coords, DEFAULT_SCALE, IDENTITY_QUATERNION);
                     }
                 }
