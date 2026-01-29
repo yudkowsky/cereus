@@ -2724,7 +2724,9 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         }
 
         setTileType(getTileType(current_start_coords), current_end_coords); 
+        setTileDirection(entity_in_stack->direction, current_end_coords);
         setTileType(NONE, current_start_coords);
+        setTileDirection(NORTH, current_start_coords);
         entity_in_stack->coords = current_end_coords;
         current_end_coords = current_start_coords;
         current_start_coords = getNextCoords(current_start_coords, UP);
@@ -3201,6 +3203,7 @@ void editorMode(TickInput *tick_input)
                     levelChangePrep(wb->next_level);
                     time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
                     gameInitialise(wb->next_level);
+                    writeSolvedLevelsToFile();
                 }
             }
         }
@@ -3445,6 +3448,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
                 gameInitialise("overworld");
                 memcpy(next_world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
+                writeSolvedLevelsToFile();
             }
 
             if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && player->in_motion == 0)
@@ -4021,6 +4025,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 int32 next_free = nextFreeInSolvedLevels(&next_world_state.solved_levels);
                 strcpy(next_world_state.solved_levels[next_free], wb->next_level);
             }
+            writeSolvedLevelsToFile();
             time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
         }
 
