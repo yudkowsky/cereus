@@ -4,6 +4,11 @@
 #include <math.h> // TODO(spike): also temporary, for sin/cos
 #include <stdio.h> // TODO(spike): "temporary", for fopen 
 
+#include <windows.h>
+#ifdef VOID
+#undef VOID
+#endif
+
 #define FOR(i, n) for (int i = 0; i < n; i++)
 
 const int32 SCREEN_WIDTH_PX = 1920; // TODO(spike): get from platform layer
@@ -90,8 +95,8 @@ const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
 const char debug_level_name[64] = "overworld";
-const char start_level_path_buffer[64] = "../cereus/data/levels/";
-const char solved_level_path[64] = "../cereus/data/meta/solved-levels.meta";
+const char start_level_path_buffer[64] = "data/levels/";
+const char solved_level_path[64] = "data/meta/solved-levels.meta";
 Int3 level_dim = {0};
 
 Camera camera = {0};
@@ -3226,6 +3231,15 @@ void gameInitialiseState()
     char level_path[64] = {0};
     buildLevelPathFromName(next_world_state.level_name, &level_path);
     FILE* file = fopen(level_path, "rb+");
+    if (!file)
+    {
+        char msg[512];
+        char cwd[MAX_PATH];
+        GetCurrentDirectoryA(MAX_PATH, cwd);
+        sprintf(msg, "Failed to open:\n%s\n\nCWD: %s", level_path, cwd);
+        MessageBoxA(NULL, msg, "Error", MB_OK);
+        return;
+    }
     loadBufferInfo(file);
     fclose(file);
 

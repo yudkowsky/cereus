@@ -203,6 +203,14 @@ int CALLBACK WinMain(
 {
 	(void)_;
 
+    /*
+    char exe_path[MAX_PATH];
+    GetModuleFileNameA(NULL, exe_path, MAX_PATH);
+    char* last_slash = strrchr(exe_path, '\\');
+    if (last_slash) *last_slash = '\0';
+    SetCurrentDirectoryA(exe_path);
+    */
+
 	WNDCLASSEXW window_class = {0};
 
 	window_class.cbSize = sizeof(window_class);
@@ -237,7 +245,9 @@ int CALLBACK WinMain(
     RegisterRawInputDevices(&raw_input_device, 1, sizeof(raw_input_device));
 
     RendererPlatformHandles platform_handles = { .module_handle = module_handle, .window_handle = window_handle};
+
     rendererInitialise(platform_handles);
+    //MessageBoxA(NULL, "renderer init done", "Debug", MB_OK); 
 
     LARGE_INTEGER ticks_per_second;
     LARGE_INTEGER last_tick;
@@ -255,6 +265,7 @@ int CALLBACK WinMain(
     }
 
     gameInitialise(file_path); 
+    //MessageBoxA(NULL, "game init done", "Debug", MB_OK); 
 
 	double frame_times[60] = {0};
 	int32 frame_time_index = 0;

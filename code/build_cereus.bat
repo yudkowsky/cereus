@@ -14,6 +14,8 @@ glslc sprite.vert -g -o ..\spirv\sprite.vert.spv
 glslc sprite.frag -g -o ..\spirv\sprite.frag.spv
 popd
 
+IF EXIST ..\..\build_cereus rmdir \S \Q ..\..\build_cereus 2>nul
+
 IF NOT EXIST ..\..\build_cereus mkdir ..\..\build_cereus
 pushd ..\..\build_cereus
 xcopy /E /I /Y ..\cereus\data .\data >nul
