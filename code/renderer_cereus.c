@@ -2202,7 +2202,7 @@ void rendererDraw(void)
     // shared camera matrices for cubes
     float aspect = (float)renderer_state.swapchain_extent.width / (float)renderer_state.swapchain_extent.height;
     float projection_matrix[16], view_matrix[16];
-    mat4BuildPerspective(projection_matrix, renderer_camera.fov * (6.283185f / 360.0f), aspect, 0.1f, 100.0f);
+    mat4BuildPerspective(projection_matrix, renderer_camera.fov * (6.283185f / 360.0f), aspect, 0.1f, 200.0f);
     mat4BuildViewFromQuat(view_matrix, renderer_camera.coords, renderer_camera.rotation);
 
 	// CUBE PIPELINE (INSTANCED)
