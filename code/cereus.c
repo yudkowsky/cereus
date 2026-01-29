@@ -1130,6 +1130,7 @@ void clearSolvedLevels()
 {
 	FILE* file = fopen(solved_level_path, "wb");
     fclose(file);
+    memset(next_world_state.solved_levels, 0, sizeof(next_world_state.solved_levels));
 }
 
 // DRAW ASSET
@@ -3016,13 +3017,6 @@ void editorMode(TickInput *tick_input)
         }
         if (tick_input->space_press) camera.coords.y += CAMERA_MOVE_STEP;
         if (tick_input->shift_press) camera.coords.y -= CAMERA_MOVE_STEP;
-
-        if (tick_input->j_press && time_until_input == 0)
-        {
-            if (editor_state.do_wide_camera) editor_state.do_wide_camera = false;
-            else editor_state.do_wide_camera = true;
-            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
-        }
     }
 
     if (time_until_input != 0) return; 
@@ -3107,10 +3101,21 @@ void editorMode(TickInput *tick_input)
 
             time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
         }
-        else if (time_until_input == 0 && tick_input->l_press)
+        if (tick_input->l_press)
         {
             editor_state.picked_tile++;
             if (editor_state.picked_tile == RESET_BLOCK + 1) editor_state.picked_tile = VOID;
+            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+        }
+        if (tick_input->j_press)
+        {
+            if (editor_state.do_wide_camera) editor_state.do_wide_camera = false;
+            else editor_state.do_wide_camera = true;
+            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+        }
+        if (tick_input->m_press)
+        {
+            clearSolvedLevels();
             time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
         }
     }
@@ -4054,7 +4059,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-		// figure out if entities should be locked / unlocked (TODO(spike): should probably try to update this more intelligently later?)
+		// figure out if entities should be locked / unlocked
         if (editor_state.editor_mode == NO_MODE)
         {
             Entity* entity_group[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.win_blocks };

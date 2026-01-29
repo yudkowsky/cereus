@@ -114,6 +114,8 @@ LRESULT CALLBACK windowMessageProcessor(
                 case 'J': tick_input.j_press = true; break;
                 case 'K': tick_input.k_press = true; break;
                 case 'L': tick_input.l_press = true; break;
+                case 'M': tick_input.m_press = true; break;
+                case 'N': tick_input.n_press = true; break;
                 case 'O': tick_input.o_press = true; break;
                 case 'P': tick_input.p_press = true; break;
                 case 'Q': tick_input.q_press = true; break;
@@ -158,6 +160,8 @@ LRESULT CALLBACK windowMessageProcessor(
                 case 'J': tick_input.j_press = false; break;
                 case 'K': tick_input.k_press = false; break;
                 case 'L': tick_input.l_press = false; break;
+                case 'M': tick_input.m_press = false; break;
+                case 'N': tick_input.n_press = false; break;
                 case 'O': tick_input.o_press = false; break;
                 case 'P': tick_input.p_press = false; break;
                 case 'Q': tick_input.q_press = false; break;
