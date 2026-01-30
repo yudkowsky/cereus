@@ -3912,7 +3912,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 {
                     // backwards movement: allow only when climbing down a ladder. right now just move, and let player fall (functionally the same, but animation is goofy)
                     Direction backwards_direction = oppositeDirection(player->direction);
-					if (getTileType(getNextCoords(player->coords, DOWN)) == LADDER && getTileType(getNextCoords(pack->coords, DOWN)) == NONE)
+					if (getTileType(getNextCoords(player->coords, DOWN)) == LADDER && (next_world_state.pack_detached || (!next_world_state.pack_detached && getTileType(getNextCoords(pack->coords, DOWN)) == NONE)))
                     {
                         bool can_move = false;
                         bool do_push = false;
