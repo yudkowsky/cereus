@@ -2631,6 +2631,15 @@ void updateLaserBuffer(void)
 
                 if (real_hit_type != NONE)
                 {
+                    if (isEntity(real_hit_type))
+                    {
+                        Entity* e = getEntityPointer(current_tile_coords);
+                        if (!th_hit && e->in_motion > STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH)
+                        {
+                            current_tile_coords = getNextCoords(current_tile_coords, current_direction);
+                            continue;
+                        }
+                    }
                     lb->end_coords = intCoordsToNorm(current_tile_coords);
                     Vec3 dir_basis = directionToVector(current_direction);
                     if (!isDiagonal(current_direction))
