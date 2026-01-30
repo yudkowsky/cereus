@@ -3702,10 +3702,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     pack->in_motion = CLIMB_ANIMATION_TIME;
                                     pack->moving_direction = UP;
                                 }
+                                time_until_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
                             }
                             else
                             {
                                 //doFailedClimbUpAnimation();
+                                //time_until_input = FAILED_CLIMB_TIME;
                             }
                         }
 						else if (do_failed_animations) 
@@ -3995,6 +3997,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             bool do_push = false;
             bool can_move = false;
+            bool try_climb_more = true;
             Int3 next_coords = getNextCoords(player->coords, player->direction);
             TileType tile_ahead = getTileType(next_coords);
             if (tile_ahead == NONE)
@@ -4009,6 +4012,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                     do_push = true;
                 }
             }
+            else if (tile_ahead == LADDER)
+            {
+                try_climb_more = true;
+            }
 
             if (can_move)
             {
@@ -4016,6 +4023,45 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (do_push) pushAll(next_coords, player->direction, animation_time, true, false);
                 doStandardMovement(player->direction, next_coords, animation_time);
                 time_until_input = animation_time;
+            }
+            else if (try_climb_more)
+            {
+				// assume works for now.
+                Int3 coords_above = getNextCoords(player->coords, UP);
+
+                setTileType(NONE, player->coords);
+                setTileDirection(NORTH, player->coords);
+                player->coords = coords_above;
+                setTileType(PLAYER, player->coords);
+                setTileDirection(player->direction, player->coords);
+
+                createInterpolationAnimation(intCoordsToNorm(getNextCoords(player->coords, DOWN)),
+                                             intCoordsToNorm(player->coords),
+                                             &player->position_norm,
+                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                             PLAYER_ID, CLIMB_ANIMATION_TIME);
+
+                player->in_motion = CLIMB_ANIMATION_TIME;
+                player->moving_direction = UP;
+
+                if (!next_world_state.pack_detached)
+                {
+                    setTileType(NONE, pack->coords);
+                    setTileDirection(NORTH, pack->coords);
+                    pack->coords = getNextCoords(pack->coords, UP);
+                    setTileType(PACK, pack->coords);
+                    setTileDirection(pack->direction, pack->coords);
+
+                    createInterpolationAnimation(intCoordsToNorm(getNextCoords(pack->coords, DOWN)),
+                                                 intCoordsToNorm(pack->coords),
+                                                 &pack->position_norm,
+                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                 PACK_ID, CLIMB_ANIMATION_TIME);
+
+                    pack->in_motion = CLIMB_ANIMATION_TIME;
+                    pack->moving_direction = UP;
+                }
+                time_until_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
             }
         }
 
