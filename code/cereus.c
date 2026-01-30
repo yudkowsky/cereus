@@ -2842,7 +2842,7 @@ void doHeadMovement(Direction direction, bool animations_on, int32 animation_tim
     if (canPushStack(coords_above_player, direction) == CAN_PUSH) pushAll(coords_above_player, direction, animation_time, animations_on, false);
 }
 
-void doStandardMovement(Direction input_direction, Int3 next_player_coords, int32 animation_time)
+void doStandardMovement(Direction input_direction, Int3 next_player_coords, int32 animation_time, bool record_for_undo)
 {
     Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
@@ -2892,7 +2892,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
     changeMoving(player);
     changeMoving(pack);
 
-    recordStateForUndo();
+    if (record_for_undo) recordStateForUndo();
 }
 
 // GHOSTS
@@ -3597,7 +3597,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             if ((tile_below != NONE || player->hit_by_red) && (!isEntity(tile_below) || getEntityPointer(coords_below)->moving_direction == NO_DIRECTION))
                             {
                                 if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
-                                doStandardMovement(input_direction, next_player_coords, animation_time);
+                                doStandardMovement(input_direction, next_player_coords, animation_time, true);
                                 time_until_input = animation_time;
                             }
                             else
@@ -3636,7 +3636,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 if (leap_of_faith_worked)
                                 {
                                     if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
-                                    doStandardMovement(input_direction, next_player_coords, animation_time);
+                                    doStandardMovement(input_direction, next_player_coords, animation_time, true);
                                     next_world_state.bypass_player_fall = true; 
                                     time_until_input = MOVE_OR_PUSH_ANIMATION_TIME;
                                 }
@@ -3702,6 +3702,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     pack->in_motion = CLIMB_ANIMATION_TIME;
                                     pack->moving_direction = UP;
                                 }
+
+                                recordStateForUndo();
                                 time_until_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
                             }
                             else
@@ -3874,6 +3876,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         		}
                 else if (input_direction == oppositeDirection(player->direction))
                 {
+                    // backwards movement: allow only when climbing down a ladder. right now just move, and let player fall (functionally the same, but animation is goofy)
                     Direction backwards_direction = oppositeDirection(player->direction);
 					if (getTileType(getNextCoords(player->coords, DOWN)) == LADDER && getTileType(getNextCoords(pack->coords, DOWN)) == NONE)
                     {
@@ -3890,7 +3893,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                             can_move = true;
                             do_push = true;
                         }
-                        // allow backwards movement only when climbing down a ladder. right now just move, and let player fall (functionally the same, but animation is goofy)
                         doHeadMovement(backwards_direction, true, MOVE_OR_PUSH_ANIMATION_TIME);
 
                         if (can_move)
@@ -3932,6 +3934,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             player->in_motion = MOVE_OR_PUSH_ANIMATION_TIME;
                             player->moving_direction = backwards_direction;
 
+                            recordStateForUndo();
                             time_until_input = MOVE_OR_PUSH_ANIMATION_TIME;
                         }
                     }
@@ -4082,7 +4085,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 int32 animation_time = MOVE_OR_PUSH_ANIMATION_TIME;
                 if (do_push) pushAll(next_coords, player->direction, animation_time, true, false);
-                doStandardMovement(player->direction, next_coords, animation_time);
+                doStandardMovement(player->direction, next_coords, animation_time, false);
                 time_until_input = animation_time;
             }
             else if (try_climb_more)
