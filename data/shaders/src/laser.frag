@@ -18,7 +18,7 @@ pc;
 void main()
 {
     float alpha = 0.4;
-    vec3 color_cap = vec3(0.5, 0.5, 0.5);
+    vec3 color_cap = vec3(0.8, 0.8, 0.8);
     vec3 clamped_color = min(pc.color.rgb, color_cap);
     out_color = vec4(clamped_color * alpha, alpha);
 }

@@ -28,6 +28,7 @@ const int32 META_INPUT_TIME_UNTIL_ALLOW = 9;
 const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9; // TODO(spike): make this freely editable (want to up this by a few frames to emphasise pushing stacked box mechanics)
 const int32 TURN_ANIMATION_TIME = 9; // somewhat hard coded, tied to PUSH_FROM_TURN...
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
+const int32 CLIMB_ANIMATION_TIME = 12;
 const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6;
 const int32 FAILED_ANIMATION_TIME = 8;
 const int32 STANDARD_IN_MOTION_TIME = 7;
@@ -94,8 +95,9 @@ const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
-const char debug_level_name[64] = "overworld";
-const char start_level_path_buffer[64] = "data/levels/";
+const char debug_level_name[64] = "testing";
+const char relative_start_level_path_buffer[64] = "data/levels/";
+const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
 Int3 level_dim = {0};
 
@@ -691,9 +693,12 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
 // locked block: 	tag: LOKB, 	size: 76 (3 * 4b + 64b),	data: x, y, z (as int32), char[64] path
 // reset block: 	tag: RESB, 	size: 3b + n*(3+1+3)b,		data: x, y, z + n * entity_to_reset(x, y, z, direction) (as int32)
 
-void buildLevelPathFromName(char level_name[64], char (*level_path)[64])
+void buildLevelPathFromName(char level_name[64], char (*level_path)[64], bool overwrite_source)
 {
-    snprintf(*level_path, sizeof(*level_path), "%s%s.level", start_level_path_buffer, level_name);
+    char prefix[64];
+    if (overwrite_source) memcpy(prefix, source_start_level_path_buffer, sizeof(prefix));
+    else			      memcpy(prefix, relative_start_level_path_buffer, sizeof(prefix));
+    snprintf(*level_path, sizeof(*level_path), "%s%s.level", prefix, level_name);
 }
 
 bool readChunkHeader(FILE* file, char out_tag[4], int32 *out_size)
@@ -1163,6 +1168,7 @@ SpriteId getSprite2DId(TileType tile)
         case WIN_BLOCK:    return SPRITE_2D_WIN_BLOCK;
         case LOCKED_BLOCK: return SPRITE_2D_LOCKED_BLOCK;
         case RESET_BLOCK:  return SPRITE_2D_RESET_BLOCK;
+        case LADDER:	   return SPRITE_2D_LADDER;
 
         case SOURCE_RED:	 return SPRITE_2D_SOURCE_RED;
         case SOURCE_GREEN:	 return SPRITE_2D_SOURCE_GREEN;
@@ -1193,6 +1199,7 @@ SpriteId getCube3DId(TileType tile)
         case WIN_BLOCK:    return CUBE_3D_WIN_BLOCK;
         case LOCKED_BLOCK: return CUBE_3D_LOCKED_BLOCK;
         case RESET_BLOCK:  return CUBE_3D_RESET_BLOCK;
+        case LADDER: 	   return CUBE_3D_LADDER;
 
         case LASER_RED:     return CUBE_3D_LASER_RED;
         case LASER_GREEN:	return CUBE_3D_LASER_GREEN;
@@ -2832,8 +2839,7 @@ void doHeadMovement(Direction direction, bool animations_on, int32 animation_tim
 {
     Int3 coords_above_player = getNextCoords(next_world_state.player.coords, UP);
     if (!isPushable(getTileType(coords_above_player))) return;
-    PushResult push_result = canPushStack(coords_above_player, direction);
-    if (push_result == CAN_PUSH) pushAll(coords_above_player, direction, animation_time, animations_on, false);
+    if (canPushStack(coords_above_player, direction) == CAN_PUSH) pushAll(coords_above_player, direction, animation_time, animations_on, false);
 }
 
 void doStandardMovement(Direction input_direction, Int3 next_player_coords, int32 animation_time)
@@ -3103,6 +3109,13 @@ void editorMode(TickInput *tick_input)
                         else entity->rotation_quat = directionToQuaternion(direction, false);
                     }
                 }
+                else if (tile == LADDER)
+                {
+                    Direction direction = getTileDirection(raycast_output.hit_coords);
+                    if (direction == EAST) direction = NORTH;
+                    else direction++;
+                    setTileDirection(direction, raycast_output.hit_coords);
+                }
             }
             else if ((tick_input->middle_mouse_press || tick_input->g_press) && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
 
@@ -3111,7 +3124,7 @@ void editorMode(TickInput *tick_input)
         if (tick_input->l_press)
         {
             editor_state.picked_tile++;
-            if (editor_state.picked_tile == RESET_BLOCK + 1) editor_state.picked_tile = VOID;
+            if (editor_state.picked_tile == LADDER + 1) editor_state.picked_tile = VOID;
             time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
         }
         if (tick_input->j_press)
@@ -3232,7 +3245,7 @@ void gameInitialiseState()
 
     // build level_path from level_name
     char level_path[64] = {0};
-    buildLevelPathFromName(next_world_state.level_name, &level_path);
+    buildLevelPathFromName(next_world_state.level_name, &level_path, false);
     FILE* file = fopen(level_path, "rb+");
     if (!file)
     {
@@ -3518,6 +3531,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         // no ghosts, but still need to check if player is green at all 
                         bool do_push = false;
                         bool move_player = false;
+                        bool climb = false;
                         bool do_failed_animations = false;
                         int32 animation_time = 0;
                         if 		(tick_input.w_press) next_player_coords = int3Add(player->coords, int3Negate(AXIS_Z));
@@ -3561,6 +3575,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     animation_time = MOVE_OR_PUSH_ANIMATION_TIME;
                                 }
                                 else if (push_check == FAILED_PUSH) do_failed_animations = true;
+                                break;
+                            }
+                            case LADDER:
+                            {
+                                if (getTileDirection(next_player_coords) == oppositeDirection(player->direction)) climb = true;
+                                else do_failed_animations = true;
                                 break;
                             }
                             default:
@@ -3626,7 +3646,66 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     time_until_input = FAILED_ANIMATION_TIME;
                                     updateLaserBuffer();
                                 }
+                            }
+                        }
+						else if (climb)
+                        {
+                            bool can_climb = false;
+                            Int3 coords_above = getNextCoords(player->coords, UP);
 
+                            if (getTileType(coords_above) == NONE)
+                            {
+                                can_climb = true;
+                            }
+                            else if (isPushable(getTileType(coords_above)))
+                            {
+                                /*
+                                if (canPushUp(coords_above) == CAN_PUSH) 
+                                {
+                                    pushUp(coords_above, CLIMB_ANIMATION_TIME);
+                                    can_climb = true;
+                                }
+                                */
+                            }
+
+                            if (can_climb)
+                            {
+                                setTileType(NONE, player->coords);
+                                setTileDirection(NORTH, player->coords);
+                                player->coords = coords_above;
+                                setTileType(PLAYER, player->coords);
+                                setTileDirection(player->direction, player->coords);
+			
+                                createInterpolationAnimation(intCoordsToNorm(getNextCoords(player->coords, DOWN)),
+                                                             intCoordsToNorm(player->coords),
+                                                             &player->position_norm,
+                                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                             PLAYER_ID, CLIMB_ANIMATION_TIME);
+
+                                player->in_motion = CLIMB_ANIMATION_TIME;
+                                player->moving_direction = UP;
+
+                                if (!next_world_state.pack_detached)
+                                {
+                                    setTileType(NONE, pack->coords);
+                                    setTileDirection(NORTH, pack->coords);
+                                    pack->coords = getNextCoords(pack->coords, UP);
+                                    setTileType(PACK, pack->coords);
+                                    setTileDirection(pack->direction, pack->coords);
+
+                                    createInterpolationAnimation(intCoordsToNorm(getNextCoords(pack->coords, DOWN)),
+                                                                 intCoordsToNorm(pack->coords),
+                                                                 &pack->position_norm,
+                                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                                 PACK_ID, CLIMB_ANIMATION_TIME);
+
+                                    pack->in_motion = CLIMB_ANIMATION_TIME;
+                                    pack->moving_direction = UP;
+                                }
+                            }
+                            else
+                            {
+                                //doFailedClimbUpAnimation();
                             }
                         }
 						else if (do_failed_animations) 
@@ -3911,6 +3990,35 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
+        // climb logic
+        if (player->moving_direction == UP && player->in_motion == 1)
+        {
+            bool do_push = false;
+            bool can_move = false;
+            Int3 next_coords = getNextCoords(player->coords, player->direction);
+            TileType tile_ahead = getTileType(next_coords);
+            if (tile_ahead == NONE)
+            {
+				can_move = true;
+            }
+            else if (isPushable(tile_ahead)) 
+            {
+                if (canPushStack(next_coords, player->direction) == CAN_PUSH)
+                {
+                    can_move = true;
+                    do_push = true;
+                }
+            }
+
+            if (can_move)
+            {
+                int32 animation_time = MOVE_OR_PUSH_ANIMATION_TIME;
+                if (do_push) pushAll(next_coords, player->direction, animation_time, true, false);
+                doStandardMovement(player->direction, next_coords, animation_time);
+                time_until_input = animation_time;
+            }
+        }
+
         if (next_world_state.entity_to_fall_after_blue_not_blue_turn_timer > 0)
         {
             if (next_world_state.entity_to_fall_after_blue_not_blue_turn_timer == 1) 
@@ -4004,7 +4112,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (next_world_state.in_overworld) 
                     {
                         char level_path[64] = {0};
-                        buildLevelPathFromName(next_world_state.level_name, &level_path);
+                        buildLevelPathFromName(next_world_state.level_name, &level_path, false);
                         saveLevelRewrite(level_path, false);
                     }
                     levelChangePrep(wb->next_level);
@@ -4394,7 +4502,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // write to file on i press
         char level_path[64];
-        buildLevelPathFromName(world_state.level_name, &level_path);
+        buildLevelPathFromName(world_state.level_name, &level_path, true);
         if (time_until_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.i_press) 
         {
             saveLevelRewrite(level_path, true);
