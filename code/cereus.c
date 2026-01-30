@@ -1794,7 +1794,7 @@ void changeMoving(Entity* e)
 
 void resetFirstFall(Entity* e)
 {
-    if (!e->in_motion) if (getTileType(getNextCoords(e->coords, DOWN)) != NONE) e->first_fall_already_done = false;
+    if (!e->in_motion && getTileType(getNextCoords(e->coords, DOWN)) != NONE) e->first_fall_already_done = false;
 }
 
 PushResult canPush(Int3 coords, Direction direction)
@@ -1822,9 +1822,7 @@ PushResult canPush(Int3 coords, Direction direction)
         if (!intCoordsWithinLevelBounds(current_coords)) return FAILED_PUSH;
 
         if (current_tile == NONE) return CAN_PUSH;
-        if (current_tile == GRID) return FAILED_PUSH;
-        if (current_tile == WALL) return FAILED_PUSH;
-        if (current_tile == PERM_MIRROR) return FAILED_PUSH;
+        if (current_tile == GRID || current_tile == WALL || current_tile == LADDER || current_tile == PERM_MIRROR) return FAILED_PUSH;
     }
     return FAILED_PUSH; // only here if hit the max entity push count
 }
@@ -2892,7 +2890,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
     Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
 
-    doHeadMovement(input_direction, true, animation_time);
+    if (!player->hit_by_blue) doHeadMovement(input_direction, true, animation_time);
 
     createInterpolationAnimation(intCoordsToNorm(player->coords), 
                                  intCoordsToNorm(next_player_coords), 
@@ -3658,9 +3656,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 {
                                     doFallingObjects(animations_on);
                                     if (next_world_state.pack_detached) doFallingEntity(pack, animations_on);
+                                    doHeadMovement(input_direction, animations_on, 1);
                                 }
-
-                                doHeadMovement(input_direction, animations_on, 1);
 
                                 setTileType(NONE, player->coords);
                                 player->coords = next_player_coords;
@@ -3776,7 +3773,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                         if (next_world_state.pack_detached)
                         {
                             // if pack detached, always allow turn
-                            if (isPushable(getTileType(getNextCoords(player->coords, UP)))) doHeadRotation(clockwise);
+                            if (isPushable(getTileType(getNextCoords(player->coords, UP)))) 
+                            {
+                                if (!player->hit_by_blue) doHeadRotation(clockwise);
+                            }
 
                             createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
                                                          directionToQuaternion(player->direction, true), 
@@ -3879,7 +3879,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 {
                                     createTrailingHitbox(pack->coords, input_direction, NO_DIRECTION, FIRST_TRAILING_PACK_TURN_HITBOX_TIME, PACK);
 
-                                    if (isPushable(getTileType(getNextCoords(player->coords, UP)))) doHeadRotation(clockwise);
+                                    if (isPushable(getTileType(getNextCoords(player->coords, UP)))) 
+                                    {
+                                        if (!player->hit_by_blue) doHeadRotation(clockwise);
+                                    }
 
                                     createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
                                                                  directionToQuaternion(player->direction, true), 
@@ -3943,7 +3946,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             {
                                 if (canPushStack(coords_behind_pack, backwards_direction) == CAN_PUSH) pushAll(coords_behind_pack, backwards_direction, MOVE_OR_PUSH_ANIMATION_TIME, true, false);
                             }
-                            doHeadMovement(backwards_direction, true, MOVE_OR_PUSH_ANIMATION_TIME);
+                            if (!player->hit_by_blue) doHeadMovement(backwards_direction, true, MOVE_OR_PUSH_ANIMATION_TIME);
 
                             if (!next_world_state.pack_detached)
                             {
@@ -3997,7 +4000,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             if (next_world_state.pack_intermediate_states_timer == 7)
             {
-				if (next_world_state.do_diagonal_push_on_turn) pushAll(next_world_state.pack_intermediate_coords, oppositeDirection(player->direction), PUSH_FROM_TURN_ANIMATION_TIME, true, true);
+				if (next_world_state.do_diagonal_push_on_turn) pushAll(next_world_state.pack_intermediate_coords, oppositeDirection(player->direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false); // CHANGE THIS IF WANT PACK TO SWEEP
             }
             else if (next_world_state.pack_intermediate_states_timer == 5)
             {
@@ -4016,7 +4019,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             else if (next_world_state.pack_intermediate_states_timer == 4)
             {
-                if (next_world_state.do_orthogonal_push_on_turn) pushAll(next_world_state.pack_hitbox_turning_to_coords, next_world_state.pack_orthogonal_push_direction, PUSH_FROM_TURN_ANIMATION_TIME, true, true);
+                if (next_world_state.do_orthogonal_push_on_turn) pushAll(next_world_state.pack_hitbox_turning_to_coords, next_world_state.pack_orthogonal_push_direction, PUSH_FROM_TURN_ANIMATION_TIME, true, false); // CHANGE THIS IF WANT PACK TO SWEEP
 
                 setTileType(NONE, pack->coords);
                 setTileDirection(NORTH, pack->coords);
