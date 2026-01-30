@@ -4098,7 +4098,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             bool do_push = false;
             bool can_move = false;
-            bool try_climb_more = true;
+            bool try_climb_more = false;
             Int3 next_coords = getNextCoords(player->coords, player->direction);
             TileType tile_ahead = getTileType(next_coords);
             if (tile_ahead == NONE)
@@ -4182,6 +4182,16 @@ void gameFrame(double delta_time, TickInput tick_input)
                     }
                     time_until_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
                 }
+            }
+            else
+            {
+                // can't move or climb more
+                doFailedWalkAnimations();
+                player->in_motion = FAILED_ANIMATION_TIME;
+                player->moving_direction = NO_DIRECTION;
+                pack->in_motion = FAILED_ANIMATION_TIME;
+                pack->moving_direction = NO_DIRECTION;
+                time_until_input = FAILED_ANIMATION_TIME;
             }
         }
 
