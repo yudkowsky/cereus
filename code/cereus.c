@@ -28,7 +28,7 @@ const int32 META_INPUT_TIME_UNTIL_ALLOW = 9;
 const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9; // TODO(spike): make this freely editable (want to up this by a few frames to emphasise pushing stacked box mechanics)
 const int32 TURN_ANIMATION_TIME = 9; // somewhat hard coded, tied to PUSH_FROM_TURN...
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
-const int32 CLIMB_ANIMATION_TIME = 12;
+const int32 CLIMB_ANIMATION_TIME = 10;
 const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6;
 const int32 FAILED_ANIMATION_TIME = 8;
 const int32 STANDARD_IN_MOTION_TIME = 7;
@@ -2736,7 +2736,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         Entity* entity_in_stack = getEntityPointer(current_start_coords);
         if (entity_in_stack->id == -1) return false; // should never happen, shouldn't have id == -1 in the middle of a stack somewhere
         if (entity_in_stack->in_motion) return false; 
-        if (entity_in_stack == &next_world_state.pack && !next_world_state.pack_detached) return false;
+        //if (entity_in_stack == &next_world_state.pack && !next_world_state.pack_detached) return false;
         if (entity_in_stack == &next_world_state.player && !next_world_state.player.hit_by_red) time_until_input = FALL_ANIMATION_TIME;
 
         // switch on if this is going to be first fall
@@ -3927,7 +3927,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                             can_move = true;
                             do_push = true;
                         }
-                        doHeadMovement(backwards_direction, true, MOVE_OR_PUSH_ANIMATION_TIME);
 
                         if (can_move)
                         {
@@ -3935,6 +3934,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             {
                                 if (canPushStack(coords_behind_pack, backwards_direction) == CAN_PUSH) pushAll(coords_behind_pack, backwards_direction, MOVE_OR_PUSH_ANIMATION_TIME, true, false);
                             }
+                            doHeadMovement(backwards_direction, true, MOVE_OR_PUSH_ANIMATION_TIME);
 
                             if (!next_world_state.pack_detached)
                             {
@@ -3967,6 +3967,9 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                             player->in_motion = MOVE_OR_PUSH_ANIMATION_TIME;
                             player->moving_direction = backwards_direction;
+
+                            player->first_fall_already_done = true;
+                            if (!next_world_state.pack_detached) pack->first_fall_already_done = true;
 
                             recordStateForUndo();
                             time_until_input = MOVE_OR_PUSH_ANIMATION_TIME;
