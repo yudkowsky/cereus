@@ -4688,29 +4688,52 @@ void gameFrame(double delta_time, TickInput tick_input)
         // write to file on i press
         char level_path[64];
         buildLevelPathFromName(world_state.level_name, &level_path, true);
+        char relative_level_path[64];
+        buildLevelPathFromName(world_state.level_name, &relative_level_path, false);
         if (time_until_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.i_press) 
         {
             saveLevelRewrite(level_path, true);
+            saveLevelRewrite(relative_level_path, true);
             writeSolvedLevelsToFile();
         }
 
         if (time_until_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.c_press) 
         {
-            FILE* file = fopen(level_path, "rb+");
-            int32 positions[16] = {0};
-			int32 count = getCountAndPositionOfChunk(file, CAMERA_CHUNK_TAG, positions);
+            {
+                FILE* file = fopen(level_path, "rb+");
+                int32 positions[16] = {0};
+                int32 count = getCountAndPositionOfChunk(file, CAMERA_CHUNK_TAG, positions);
 
-            if (count > 0)
-            {
-                fseek(file, positions[0], SEEK_SET);
-                writeCameraToFile(file, &camera);
+                if (count > 0)
+                {
+                    fseek(file, positions[0], SEEK_SET);
+                    writeCameraToFile(file, &camera);
+                }
+                else
+                {
+                    fseek(file, 0, SEEK_END);
+                    writeCameraToFile(file, &camera);
+                }
+                fclose(file);
             }
-            else
+
             {
-                fseek(file, 0, SEEK_END);
-                writeCameraToFile(file, &camera);
+                FILE* file = fopen(relative_level_path, "rb+");
+                int32 positions[16] = {0};
+                int32 count = getCountAndPositionOfChunk(file, CAMERA_CHUNK_TAG, positions);
+
+                if (count > 0)
+                {
+                    fseek(file, positions[0], SEEK_SET);
+                    writeCameraToFile(file, &camera);
+                }
+                else
+                {
+                    fseek(file, 0, SEEK_END);
+                    writeCameraToFile(file, &camera);
+                }
+                fclose(file);
             }
-            fclose(file);
         }
 
 		if (time_until_input > 0) time_until_input--;

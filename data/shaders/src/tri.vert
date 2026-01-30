@@ -3,8 +3,10 @@
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec2 input_uv;
 layout(location = 2) in vec3 input_normal;
-
-layout(location = 3) in mat4 instance_model;
+layout(location = 3) in vec4 model_col0;
+layout(location = 4) in vec4 model_col1;
+layout(location = 5) in vec4 model_col2;
+layout(location = 6) in vec4 model_col3;
 layout(location = 7) in vec4 instance_uv_rect;
 
 layout(location = 0) out vec2 uv;
@@ -19,6 +21,7 @@ pc;
 
 void main()
 {
+    mat4 instance_model = mat4(model_col0, model_col1, model_col2, model_col3);
     mat4 mvp = pc.projection * pc.view * instance_model;
     gl_Position = mvp * vec4(position, 1.0);
     uv = instance_uv_rect.xy + input_uv * (instance_uv_rect.zw - instance_uv_rect.xy);

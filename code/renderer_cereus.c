@@ -55,6 +55,7 @@ typedef struct CubeInstanceData
 {
     float model[16];
     Vec4 uv_rect;
+    float padding[4];
 }
 CubeInstanceData;
 
@@ -874,6 +875,7 @@ void createInstanceBuffer()
     vkBindBufferMemory(renderer_state.logical_device_handle, renderer_state.cube_instance_buffer, renderer_state.cube_instance_memory, 0);
 
     vkMapMemory(renderer_state.logical_device_handle, renderer_state.cube_instance_memory, 0, buffer_size, 0, &renderer_state.cube_instance_mapped);
+    memset(renderer_state.cube_instance_mapped, 0, (size_t)buffer_size);
 }
 
 void rendererInitialise(RendererPlatformHandles platform_handles)
@@ -1665,22 +1667,22 @@ void rendererInitialise(RendererPlatformHandles platform_handles)
     vertex_attributes_instanced[3].binding = 1;
     vertex_attributes_instanced[3].location = 3;
     vertex_attributes_instanced[3].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    vertex_attributes_instanced[3].offset = 0;
+    vertex_attributes_instanced[3].offset = offsetof(CubeInstanceData, model) + 0;
 
     vertex_attributes_instanced[4].binding = 1;
     vertex_attributes_instanced[4].location = 4;
     vertex_attributes_instanced[4].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    vertex_attributes_instanced[4].offset = sizeof(float) * 4;
+    vertex_attributes_instanced[4].offset = offsetof(CubeInstanceData, model) + 16;
 
     vertex_attributes_instanced[5].binding = 1;
     vertex_attributes_instanced[5].location = 5;
     vertex_attributes_instanced[5].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    vertex_attributes_instanced[5].offset = sizeof(float) * 8;
+    vertex_attributes_instanced[5].offset = offsetof(CubeInstanceData, model) + 32;
 
     vertex_attributes_instanced[6].binding = 1;
     vertex_attributes_instanced[6].location = 6;
     vertex_attributes_instanced[6].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    vertex_attributes_instanced[6].offset = sizeof(float) * 12;
+    vertex_attributes_instanced[6].offset = offsetof(CubeInstanceData, model) + 48;
 
     vertex_attributes_instanced[7].binding = 1;
     vertex_attributes_instanced[7].location = 7;
@@ -2110,6 +2112,13 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
         mat4BuildTRS(gpu_instances[i].model, cube->coords, cube->rotation, cube->scale);
         gpu_instances[i].uv_rect = cube->uv;
     }
+
+    VkMappedMemoryRange flush_range = {0};
+    flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    flush_range.memory = renderer_state.cube_instance_memory;
+    flush_range.offset = 0;
+    flush_range.size = VK_WHOLE_SIZE;
+    vkFlushMappedMemoryRanges(renderer_state.logical_device_handle, 1, &flush_range);
 }
 
 void rendererDraw(void)
