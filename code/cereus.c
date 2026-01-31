@@ -2374,13 +2374,15 @@ void updateLaserBuffer(void)
                 }
 
                 TileType real_hit_type = getTileType(current_tile_coords);
-                if (lb->color == GREEN && real_hit_type == CRYSTAL) real_hit_type = NONE;
+                //if (lb->color == GREEN && real_hit_type == CRYSTAL) real_hit_type = NONE;
+                if (real_hit_type == CRYSTAL) real_hit_type = NONE; // trying out crystal as glass
                 TrailingHitbox th = {0};
                 bool th_hit = false;
                 if (trailingHitboxAtCoords(current_tile_coords, &th) && th.frames > 0)
                 {
                     if (th.hit_direction == NO_DIRECTION || th.hit_direction == current_direction) th_hit = true;
-                    if (lb->color == GREEN && th.type == CRYSTAL) th_hit = false;
+                    //if (lb->color == GREEN && th.type == CRYSTAL) th_hit = false;
+                    if (th.type == CRYSTAL) th_hit = false;
                 }
                 else memset(&th, 0, sizeof(TrailingHitbox));
                 if (th_hit) real_hit_type = th.type;
@@ -2413,6 +2415,7 @@ void updateLaserBuffer(void)
                     break;
                 }
 
+                /*
                 if (real_hit_type == CRYSTAL)
                 {
                     Entity* crystal = {0};
@@ -2456,6 +2459,7 @@ void updateLaserBuffer(void)
                     no_more_turns = false;
                     break;
                 }
+                */
 
                 if (real_hit_type == MIRROR)
                 {
