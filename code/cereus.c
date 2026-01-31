@@ -2238,15 +2238,10 @@ int32 findNextFreeInLaserBuffer()
     return -1;
 }
 
-// TODO(spike): seems mostly functional, but it is still slightly inaccurate when pushing two mirrors at the same time perpendicular to laser.
-// 				looks like a 2x factor offset, maybe some implicit assumption about only one mirror moving, where as in this case the two mirrors moving would compound offset magnitude?
-//
-// 				otherwise: 
-// 				- not handling diagonals at all right now in the mirror cases (causes visual glitch when moving crystal such that diagonal laser passes across perpendicular mirror)
-// 				- need guard on offset_magnitude in the mirrors: if too close to edge, don't want to allow reflection
+// TODO(spike): - need guard on offset_magnitude in the mirrors: if too close to edge, don't want to allow reflection
 // 				- look if we need to round from position_norm instead of checking if player is turning for some calculations; does this handle first falls vs. other falls correctly..? maybe yes, but should probably fix this anyway
 // 				- figure out moving sources and their lasers
-// 				- green: mirror / crystal / mirror problem (see mirror-bypass)
+// 				- two mirrors moving at once isnt handled.
 
 void updateLaserBuffer(void)
 {
@@ -4004,16 +3999,11 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             if (next_world_state.pack_intermediate_states_timer == 7)
             {
+                createTrailingHitbox(pack->coords, next_world_state.pack_orthogonal_push_direction, NO_DIRECTION, 4, PACK); // trailing hitbox created before actually moving pack... fixes problem with fast inputs
 				if (next_world_state.do_diagonal_push_on_turn) pushAll(next_world_state.pack_intermediate_coords, oppositeDirection(player->direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false); // CHANGE THIS IF WANT PACK TO SWEEP
             }
             else if (next_world_state.pack_intermediate_states_timer == 5)
             {
-                createTrailingHitbox(pack->coords, next_world_state.pack_orthogonal_push_direction, NO_DIRECTION, 3, PACK);
-
-                // for sneaky diagonal laser
-                createTrailingHitbox(next_world_state.pack_hitbox_turning_to_coords, NO_DIRECTION, getMiddleDirection(next_world_state.pack_orthogonal_push_direction, oppositeDirection(player->direction)), 5, PACK);
-                createTrailingHitbox(pack->coords, NO_DIRECTION, getMiddleDirection(oppositeDirection(next_world_state.pack_orthogonal_push_direction), player->direction), 5, PACK);
-
                 setTileType(NONE, pack->coords);
                 setTileDirection(NORTH, pack->coords);
                 pack->coords = next_world_state.pack_intermediate_coords;
