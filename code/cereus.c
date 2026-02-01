@@ -18,7 +18,7 @@ const float TAU = 6.2831853071f;
 
 const float CAMERA_SENSITIVITY = 0.005f;
 const float CAMERA_MOVE_STEP = 0.1f;
-const float CAMERA_FOV = 12.0f;
+const float CAMERA_FOV = 15.0f;
 const Vec3 DEFAULT_SCALE = { 1.0f,  1.0f,  1.0f  };
 const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 const float LASER_WIDTH = 0.25;
@@ -3919,11 +3919,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                     }
                     time_until_input = TURN_ANIMATION_TIME;
         		}
-                else if (input_direction == oppositeDirection(player->direction))
+                else if (input_direction == oppositeDirection(player->direction)) // TODO(spike): CONTINUE (don't allow climb on all sides) 
                 {
                     // backwards movement: allow only when climbing down a ladder. right now just move, and let player fall (functionally the same, but animation is goofy)
                     Direction backwards_direction = oppositeDirection(player->direction);
-					if (getTileType(getNextCoords(player->coords, DOWN)) == LADDER && (next_world_state.pack_detached || (!next_world_state.pack_detached && getTileType(getNextCoords(pack->coords, DOWN)) == NONE)))
+                    Int3 coords_below = getNextCoords(player->coords, DOWN);
+					if (getTileType(coords_below) == LADDER && getTileDirection(coords_below) == input_direction && (next_world_state.pack_detached || (!next_world_state.pack_detached && getTileType(getNextCoords(pack->coords, DOWN)) == NONE)))
                     {
                         bool can_move = false;
                         bool do_push = false;
@@ -3946,7 +3947,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 if (canPushStack(coords_behind_pack, backwards_direction) == CAN_PUSH) pushAll(coords_behind_pack, backwards_direction, MOVE_OR_PUSH_ANIMATION_TIME, true, false);
                             }
                             if (!player->hit_by_blue) doHeadMovement(backwards_direction, true, MOVE_OR_PUSH_ANIMATION_TIME);
-
+		
                             if (!next_world_state.pack_detached)
                             {
                                 setTileType(NONE, pack->coords);
