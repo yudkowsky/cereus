@@ -121,19 +121,6 @@ typedef enum
     EAST  = 3,
     UP	  = 4,
     DOWN  = 5,
-    
-    NORTH_WEST = 6,
-    NORTH_EAST = 7,
-    SOUTH_WEST = 8,
-    SOUTH_EAST = 9,
-    UP_NORTH   = 10,
-    UP_WEST    = 11,
-    UP_SOUTH   = 12,
-    UP_EAST    = 13,
-    DOWN_NORTH = 14,
-    DOWN_WEST  = 15,
-    DOWN_SOUTH = 16,
-    DOWN_EAST  = 17
 }
 Direction;
 

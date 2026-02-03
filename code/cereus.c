@@ -445,20 +445,6 @@ Direction oppositeDirection(Direction direction)
         case UP:    return DOWN;
         case DOWN:  return UP;
 
-        case NORTH_WEST: return SOUTH_EAST;
-        case SOUTH_WEST: return NORTH_EAST;
-        case SOUTH_EAST: return NORTH_WEST;
-        case NORTH_EAST: return SOUTH_WEST;
-
-        case UP_NORTH: 	 return DOWN_SOUTH;
-        case UP_WEST:	 return DOWN_EAST;
-        case UP_SOUTH:   return DOWN_NORTH;
-        case UP_EAST:    return DOWN_WEST;
-        case DOWN_NORTH: return UP_SOUTH;
-        case DOWN_WEST:  return UP_EAST;
-        case DOWN_SOUTH: return UP_NORTH;
-        case DOWN_EAST:  return UP_WEST;
-
         default: return NO_DIRECTION;
     }
 }
@@ -477,39 +463,6 @@ Direction getNextRotationalDirection(Direction direction, bool clockwise)
         if (next_direction == 4) next_direction = NORTH;
     }
     return next_direction;
-}
-
-// assumes NWSE
-Direction getMiddleDirection(Direction direction_1, Direction direction_2)
-{
-    switch (direction_1)
-    {
-        case NORTH: switch (direction_2)
-        {
-            case WEST: return NORTH_WEST;
-            case EAST: return NORTH_EAST;
-            default: break;
-        }
-        case WEST: switch (direction_2)
-        {
-        	case NORTH: return NORTH_WEST;
-        	case SOUTH: return SOUTH_WEST;
-        	default: break;
-        }
-        case SOUTH: switch (direction_2)
-        {
-            case WEST: return SOUTH_WEST;
-            case EAST: return SOUTH_EAST;
-            default: break;
-        }
-        case EAST: switch (direction_2)
-        {
-            case NORTH: return NORTH_EAST;
-            case SOUTH: return SOUTH_EAST;
-            default: break;
-        }
-        default: return NO_DIRECTION;
-    }
 }
 
 int32 getEntityCount(Entity *entity_group)
@@ -547,20 +500,6 @@ Vec3 directionToVector(Direction direction)
         case UP:    return (Vec3){  0,  1,  0 };
         case DOWN:  return (Vec3){  0, -1,  0 };
 
-    	case NORTH_WEST: return (Vec3){ -1,  0, -1 };
-        case SOUTH_WEST: return (Vec3){ -1,  0,  1 };
-        case SOUTH_EAST: return (Vec3){  1,  0,  1 };
-        case NORTH_EAST: return (Vec3){  1,  0, -1 };
-
-        case UP_NORTH: 	 return (Vec3){  0,  1, -1 };
-        case UP_WEST:	 return (Vec3){ -1,  1,  0 };
-        case UP_SOUTH:   return (Vec3){  0,  1,  1 };
-        case UP_EAST:    return (Vec3){  1,  1,  0 };
-        case DOWN_NORTH: return (Vec3){  0, -1, -1 };
-        case DOWN_WEST:  return (Vec3){ -1, -1,  0 };
-        case DOWN_SOUTH: return (Vec3){  0, -1,  1 };
-        case DOWN_EAST:  return (Vec3){  1, -1,  0 };
-
         default: return IDENTITY_TRANSLATION;
     }
 }
@@ -575,92 +514,46 @@ Vec4 directionToQuaternion(Direction direction, bool roll_z)
     switch (direction)
     {
         case NORTH: 
+        {
             yaw = 0.0f;
             do_yaw = true;
             break;
+        }
         case WEST: 
+        {
             yaw = 0.25f  * TAU;
             do_yaw = true;
             break;
+        }
         case SOUTH: 
+        {
             yaw = 0.5f   * TAU;
             do_yaw = true;
             break;
+        }
         case EAST:
+        {
             yaw = -0.25f * TAU;
             do_yaw = true;
             break;
+        }
         case UP:
+        {
             roll = 0.25f * TAU;
             do_roll = true;
             break;
+        }
         case DOWN:
+        {
             roll = -0.25f * TAU;
             do_roll = true;
             break;
-        case NORTH_WEST:
-            yaw = 0.125f * TAU;
-            do_yaw = true;
-            break;
-        case NORTH_EAST:
-            yaw = -0.125f * TAU;
-            do_yaw = true;
-            break;
-        case SOUTH_WEST:
-            yaw = 0.375f * TAU;
-            do_yaw = true;
-            break;
-        case SOUTH_EAST:
-            yaw = -0.375f * TAU;
-            do_yaw = true;
-            break;
-        case UP_NORTH:
-            yaw  = 0.0f;         roll = 0.125f * TAU;
-            do_yaw = true;       do_roll = true;
-            break;
-        case UP_SOUTH:
-            yaw  = 0.5f * TAU;   roll = -0.125f * TAU;
-            do_yaw = true;       do_roll = true;
-            break;
-        case UP_WEST:
-            yaw  = 0.25f * TAU;  roll = -0.125f * TAU;
-            do_yaw = true; 		 do_roll = true;
-            roll_z = true;
-            break;
-        case UP_EAST:
-            yaw  = -0.25f * TAU; roll = 0.125f * TAU;
-            do_yaw = true; 		 do_roll = true;
-            roll_z = true;
-            break;
-        case DOWN_NORTH:
-            yaw  = 0.0f;         roll = -0.125f * TAU;
-            do_yaw = true;       do_roll = true;
-            break;
-        case DOWN_SOUTH:
-            yaw  = 0.5f * TAU;   roll = 0.125f * TAU;
-            do_yaw = true; 	     do_roll = true;
-            break;
-        case DOWN_WEST:
-            yaw  = 0.25f * TAU;  roll = 0.125f * TAU;
-            do_yaw = true;       do_roll = true;
-            roll_z = true;
-            break;
-        case DOWN_EAST:
-            yaw  = -0.25f * TAU; roll = -0.125f * TAU;
-            do_yaw = true;       do_roll = true;
-            roll_z = true;
-            break;
+        }
         default: return (Vec4){ 0, 0, 0, 0 };
     }
 
     if (do_yaw && !do_roll) return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), yaw);
     if (!do_yaw && do_roll) return quaternionFromAxisAngle(intCoordsToNorm(roll_z ? AXIS_Z : AXIS_X), roll);
-    if (do_yaw && do_roll)
-    {
-        Vec4 quaternion_yaw  = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), yaw);
-        Vec4 quaternion_roll = quaternionFromAxisAngle(intCoordsToNorm(roll_z ? AXIS_Z : AXIS_X), roll);
-        return quaternionMultiply(quaternion_roll, quaternion_yaw);
-    }
     return IDENTITY_QUATERNION;
 }
 
@@ -839,8 +732,8 @@ void loadLockedInfoPaths(FILE* file)
             if (fread(&path, 1, 64, file) != 64) return;
             path[63] = '\0';
 
-            Entity* entity_group[3] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, /*next_world_state.crystals, next_world_state.sources*/};
-            FOR(group_index, 3)
+            Entity* entity_group[4] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, next_world_state.sources};
+            FOR(group_index, 4)
             {
                 FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
                 {
@@ -1421,21 +1314,6 @@ Int3 getNextCoords(Int3 coords, Direction direction)
         case UP:	return int3Add(coords, AXIS_Y);
         case DOWN:	return int3Add(coords, int3Negate(AXIS_Y));
 
-        case NORTH_WEST: return int3Add(coords, int3Add(int3Negate(AXIS_Z), int3Negate(AXIS_X)));
-        case NORTH_EAST: return int3Add(coords, int3Add(int3Negate(AXIS_Z), AXIS_X));
-        case SOUTH_WEST: return int3Add(coords, int3Add(AXIS_Z, int3Negate(AXIS_X)));
-        case SOUTH_EAST: return int3Add(coords, int3Add(AXIS_Z, AXIS_X));
-
-        case UP_NORTH:   return int3Add(coords, int3Add(int3Negate(AXIS_Z), AXIS_Y));
-        case UP_SOUTH:   return int3Add(coords, int3Add(AXIS_Z, AXIS_Y));
-        case UP_WEST:	 return int3Add(coords, int3Add(int3Negate(AXIS_X), AXIS_Y));
-        case UP_EAST:    return int3Add(coords, int3Add(AXIS_X, AXIS_Y));
-
-        case DOWN_NORTH: return int3Add(coords, int3Add(int3Negate(AXIS_Z), int3Negate(AXIS_Y)));
-        case DOWN_SOUTH: return int3Add(coords, int3Add(AXIS_Z, int3Negate(AXIS_Y)));
-        case DOWN_WEST:  return int3Add(coords, int3Add(int3Negate(AXIS_X), int3Negate(AXIS_Y)));
-        case DOWN_EAST:  return int3Add(coords, int3Add(AXIS_X, int3Negate(AXIS_Y)));
-
         default: return (Int3){0};
     }
 }
@@ -2013,190 +1891,23 @@ Direction getNextLaserDirectionMirror(Direction laser_direction, Direction mirro
     }
     switch (mirror_direction) // N/S/W/E diagonal cases, and U/D all cases
     {
-        case NORTH: switch (laser_direction)
-        {
-            case NORTH_WEST: return DOWN_WEST;
-            case NORTH_EAST: return DOWN_EAST;
-            case SOUTH_WEST: return UP_WEST;
-            case SOUTH_EAST: return UP_EAST;
-
-            case UP_NORTH:   return DOWN_SOUTH;
-                             //case UP_SOUTH:
-            case UP_WEST:    return SOUTH_WEST;
-            case UP_EAST:    return SOUTH_EAST;
-
-                             //case DOWN_NORTH: 
-            case DOWN_SOUTH: return UP_NORTH;
-            case DOWN_WEST:  return NORTH_WEST;
-            case DOWN_EAST:  return NORTH_EAST;
-
-            default: return NO_DIRECTION;
-        }
-        case SOUTH: switch (laser_direction)
-        {
-            case NORTH_WEST: return UP_WEST;
-            case NORTH_EAST: return UP_EAST;
-            case SOUTH_WEST: return DOWN_WEST;
-            case SOUTH_EAST: return DOWN_EAST;
-
-                             //case UP_NORTH:
-            case UP_SOUTH:   return DOWN_NORTH;
-            case UP_WEST:	 return NORTH_WEST;
-            case UP_EAST:    return NORTH_EAST;
-
-            case DOWN_NORTH: return UP_SOUTH;
-                             //case DOWN_SOUTH: 
-            case DOWN_WEST:  return SOUTH_WEST;
-            case DOWN_EAST:  return SOUTH_EAST;
-
-            default: return NO_DIRECTION;
-        }
-        case WEST: switch (laser_direction)
-        {
-            case NORTH_WEST: return DOWN_NORTH;
-            case NORTH_EAST: return UP_NORTH;
-            case SOUTH_WEST: return DOWN_SOUTH;
-            case SOUTH_EAST: return UP_SOUTH;
- 
-            case UP_NORTH:   return NORTH_EAST;
-            case UP_SOUTH:   return SOUTH_EAST;
-            case UP_WEST:    return DOWN_EAST;
-            //case UP_EAST:
- 
-            case DOWN_NORTH: return NORTH_WEST;
-            case DOWN_SOUTH: return SOUTH_WEST;
-            //case DOWN_WEST:
-            case DOWN_EAST:  return UP_WEST;
- 
-            default: return NO_DIRECTION;
-        }
- 		case EAST: switch (laser_direction)
-        {
-            case NORTH_WEST: return UP_NORTH;
-            case NORTH_EAST: return DOWN_NORTH;
-            case SOUTH_WEST: return UP_SOUTH;
-            case SOUTH_EAST: return DOWN_SOUTH;
-
-            case UP_NORTH:   return NORTH_WEST;
-            case UP_SOUTH:   return SOUTH_WEST;
-            //case UP_WEST:
-            case UP_EAST:    return DOWN_WEST;
-
-            case DOWN_NORTH: return NORTH_EAST;
-            case DOWN_SOUTH: return SOUTH_EAST;
-            case DOWN_WEST:  return UP_EAST;
-            //case DOWN_EAST:
-
-            default: return NO_DIRECTION;
-        }
         case UP: switch (laser_direction)
      	{
-         	case NORTH: 	 return EAST;
-         	case SOUTH: 	 return WEST;
-         	case WEST:  	 return SOUTH;
-         	case EAST:  	 return NORTH;
-
-         	case NORTH_WEST: return SOUTH_EAST;
-         	//case NORTH_EAST:
-         	//case SOUTH_WEST:
-         	case SOUTH_EAST: return NORTH_WEST;
-
-         	case UP_NORTH:   return UP_EAST;
-         	case UP_SOUTH:   return UP_WEST;
-         	case UP_WEST:    return UP_SOUTH;
-         	case UP_EAST:    return UP_NORTH;
-
-         	case DOWN_NORTH: return DOWN_EAST;
-         	case DOWN_SOUTH: return DOWN_WEST;
-    		case DOWN_WEST:  return DOWN_SOUTH;
-         	case DOWN_EAST:  return DOWN_NORTH;
-
-         	default: return NO_DIRECTION;
+         	case NORTH: return EAST;
+         	case SOUTH: return WEST;
+         	case WEST:  return SOUTH;
+         	case EAST:  return NORTH;
+            default: 	return NO_DIRECTION;
      	}
 		case DOWN: switch (laser_direction)
        	{
-            case NORTH: 	 return WEST;
-            case SOUTH: 	 return EAST;
-            case WEST:  	 return NORTH;
-            case EAST:  	 return SOUTH;
- 
-            //case NORTH_WEST: 
-            case NORTH_EAST: return SOUTH_WEST;
-            case SOUTH_WEST: return NORTH_EAST;
-            //case SOUTH_EAST:
- 
-            case UP_NORTH:   return UP_WEST;
-            case UP_SOUTH:	 return UP_EAST;
-            case UP_WEST:    return UP_NORTH;
-            case UP_EAST:    return UP_SOUTH;
- 
-            case DOWN_NORTH: return DOWN_WEST;
-            case DOWN_SOUTH: return DOWN_EAST;
-            case DOWN_WEST:  return DOWN_NORTH;
-            case DOWN_EAST:  return DOWN_SOUTH;
- 
-            default: return NO_DIRECTION;
+            case NORTH: return WEST;
+            case SOUTH: return EAST;
+            case WEST:  return NORTH;
+            case EAST:  return SOUTH;
+            default: 	return NO_DIRECTION;
         }
 		default: return NO_DIRECTION;
-    }
-}
-
-Direction getRedDirectionAtCrystal(Direction input_direction)
-{
-    switch(input_direction)
-    {
-        case NORTH:      return NORTH_WEST;
-        case NORTH_WEST: return WEST;
-        case WEST:		 return SOUTH_WEST;
-        case SOUTH_WEST: return SOUTH;
-        case SOUTH:      return SOUTH_EAST;
-        case SOUTH_EAST: return EAST;
-        case EAST:       return NORTH_EAST;
-        case NORTH_EAST: return NORTH;
-        default: return NO_DIRECTION;
-    }
-}
-
-Direction getBlueDirectionAtCrystal(Direction input_direction)
-{
-    switch(input_direction)
-    {
-        case NORTH:      return NORTH_EAST;
-        case NORTH_WEST: return NORTH;
-        case WEST:		 return NORTH_WEST;
-        case SOUTH_WEST: return WEST;
-        case SOUTH:      return SOUTH_WEST;
-        case SOUTH_EAST: return SOUTH;
-        case EAST:       return SOUTH_EAST;
-        case NORTH_EAST: return EAST;
-        default: return NO_DIRECTION;
-    }
-}
-
-bool isParallelToXZ(Direction direction)
-{
-    Int3 test_coords = getNextCoords(normCoordsToInt(IDENTITY_TRANSLATION), direction);
-    if (test_coords.y != 0) return false;
-    else return true;
-}
-
-LaserColor getLaserColor(TileType tile)
-{
-    LaserColor laser_color = {0};
-    if (tile == LASER_RED   || tile == LASER_MAGENTA || tile == LASER_YELLOW  || tile == LASER_WHITE) laser_color.red = true;
-    if (tile == LASER_GREEN || tile == LASER_YELLOW  || tile == LASER_CYAN    || tile == LASER_WHITE) laser_color.green = true;
-    if (tile == LASER_BLUE  || tile == LASER_CYAN    || tile == LASER_MAGENTA || tile == LASER_WHITE) laser_color.blue = true;
-    return laser_color;
-}
-
-bool isSourcePrimary(TileType tile)
-{
-    switch (tile)
-    {
-        case SOURCE_RED:   return true;
-        case SOURCE_GREEN: return true;
-        case SOURCE_BLUE:  return true;
-        default: return false;
     }
 }
 
@@ -2215,21 +1926,6 @@ LaserColor colorToLaserColor(Color color)
         default: break;
     }
     return laser_color;
-}
-
-void addPrimarySource(Entity* new_source, Entity* original_source, int32 *total_source_count, Color color)
-{
-    new_source->coords = original_source->coords;
-    new_source->direction = original_source->direction;
-    new_source->id = 10000 + original_source->id;
-    new_source->color = color;
-    (*total_source_count)++;
-}
-
-bool isDiagonal(Direction direction)
-{
-    if (direction == NORTH || direction == SOUTH || direction == WEST || direction == EAST || direction == UP || direction == DOWN) return false;
-    else return true;
 }
 
 int32 findNextFreeInLaserBuffer()
@@ -2340,31 +2036,9 @@ void updateLaserBuffer(void)
                 {
                     lb->end_coords = intCoordsToNorm(current_tile_coords);
                     Vec3 dir_basis = directionToVector(current_direction);
-                    if (!isDiagonal(current_direction))
-                    {
-                        if (dir_basis.x == 0) lb->end_coords.x = lb->start_coords.x;
-                        if (dir_basis.y == 0) lb->end_coords.y = lb->start_coords.y;
-                        if (dir_basis.z == 0) lb->end_coords.z = lb->start_coords.z;
-                    }
-                    else
-                    {
-                        // cases x and z are untested here
-                        if (dir_basis.x == 0)
-                        {
-							if 		(fmod(lb->start_coords.y, 1) != 0) lb->end_coords.y = lb->start_coords.y - (lb->start_coords.z - lb->end_coords.z) * dir_basis.y * dir_basis.z;
-							else if (fmod(lb->start_coords.z, 1) != 0) lb->end_coords.z = lb->start_coords.z - (lb->start_coords.y - lb->end_coords.y) * dir_basis.y * dir_basis.z;
-                        }
-                        if (dir_basis.y == 0)
-                        {
-							if 		(fmod(lb->start_coords.x, 1) != 0) lb->end_coords.x = lb->start_coords.x - (lb->start_coords.z - lb->end_coords.z) * dir_basis.x * dir_basis.z;
-							else if (fmod(lb->start_coords.z, 1) != 0) lb->end_coords.z = lb->start_coords.z - (lb->start_coords.x - lb->end_coords.x) * dir_basis.x * dir_basis.z;
-                        }
-                        if (dir_basis.z == 0)
-                        {
-							if 		(fmod(lb->start_coords.x, 1) != 0) lb->end_coords.x = lb->start_coords.x - (lb->start_coords.y - lb->end_coords.y) * dir_basis.x * dir_basis.y;
-							else if (fmod(lb->start_coords.y, 1) != 0) lb->end_coords.y = lb->start_coords.y - (lb->start_coords.x - lb->end_coords.x) * dir_basis.x * dir_basis.y;
-                        }
-                    }
+                    if (dir_basis.x == 0) lb->end_coords.x = lb->start_coords.x;
+                    if (dir_basis.y == 0) lb->end_coords.y = lb->start_coords.y;
+                    if (dir_basis.z == 0) lb->end_coords.z = lb->start_coords.z;
                     break;
                 }
 
@@ -2410,52 +2084,6 @@ void updateLaserBuffer(void)
                     break;
                 }
 
-                /*
-                if (real_hit_type == CRYSTAL)
-                {
-                    Entity* crystal = {0};
-                    if (th_hit) crystal = getEntityPointer(getNextCoords(current_tile_coords, th.moving_direction));
-                    else crystal = getEntityPointer(current_tile_coords);
-
-                    if (crystal->in_motion)
-                    {
-                        int32 passthrough_comparison = 0;
-                        bool player_turning = next_world_state.pack_intermediate_states_timer > 0;
-                        if (player_turning) passthrough_comparison = PUSH_FROM_TURN_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH;
-                        else passthrough_comparison = STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH; 
-
-                        if (crystal->moving_direction == oppositeDirection(current_direction))
-                        {
-                            Vec3 offset = vec3Subtract(crystal->position_norm, intCoordsToNorm(crystal->coords));
-
-                            if (crystal->in_motion > passthrough_comparison)
-                            {
-                                current_tile_coords = getNextCoords(current_tile_coords, current_direction);
-                                offset = vec3Add(offset, directionToVector(oppositeDirection(current_direction)));
-                            }
-
-                            lb->end_coords = vec3Add(intCoordsToNorm(current_tile_coords), offset);
-                        }
-                        else
-                        {
-                            // moving sideways
-                            if (!th_hit && crystal->in_motion > passthrough_comparison)
-                            {
-                                // passthrough
-                                current_tile_coords = getNextCoords(current_tile_coords, current_direction);
-                                continue;
-                            }
-                        }
-                    }
-                    if (vec3IsZero(lb->end_coords)) lb->end_coords = intCoordsToNorm(current_tile_coords);
-
-                    if 		(lb->color == RED) 	current_direction = getRedDirectionAtCrystal(current_direction);
-                    else if (lb->color == BLUE) current_direction = getBlueDirectionAtCrystal(current_direction);
-                    no_more_turns = false;
-                    break;
-                }
-                */
-
                 if (real_hit_type == MIRROR)
                 {
                     Entity* mirror = {0};
@@ -2500,105 +2128,102 @@ void updateLaserBuffer(void)
                         }
                         if (vec3IsZero(lb->end_coords)) // if end_coords has not already been updated in above logic
                         {
-                            if (!isDiagonal(current_direction))
+                            Vec3 current_dir_basis = directionToVector(current_direction);
+                            Vec3 next_dir_basis = directionToVector(getNextLaserDirectionMirror(current_direction, mirror->direction));
+
+                            lb->end_coords = lb->start_coords;
+                            if (current_dir_basis.x != 0) lb->end_coords.x = intCoordsToNorm(current_tile_coords).x;
+                            if (current_dir_basis.y != 0) lb->end_coords.y = intCoordsToNorm(current_tile_coords).y;
+                            if (current_dir_basis.z != 0) lb->end_coords.z = intCoordsToNorm(current_tile_coords).z;
+
+                            Vec3 comparison_coords = intCoordsToNorm(mirror->coords);
+                            if (th_hit) comparison_coords = intCoordsToNorm(getNextCoords(mirror->coords, oppositeDirection(th.moving_direction)));
+
+                            Vec3 mirror_shift = vec3Subtract(mirror->position_norm, comparison_coords);
+                            Vec3 laser_shift = vec3Subtract(intCoordsToNorm(current_tile_coords), lb->end_coords);
+                            Vec3 total_shift = vec3Subtract(mirror_shift, laser_shift);
+                            bool reverse_offset = false;
+                            if (vec3IsZero(vec3Subtract(lb->end_coords, intCoordsToNorm(current_tile_coords)))) reverse_offset = true;
+
+                            if (!vec3IsZero(vec3Hadamard(total_shift, next_dir_basis)))
                             {
-                                Vec3 current_dir_basis = directionToVector(current_direction);
-                                Vec3 next_dir_basis = directionToVector(getNextLaserDirectionMirror(current_direction, mirror->direction));
-
-                                lb->end_coords = lb->start_coords;
-                                if (current_dir_basis.x != 0) lb->end_coords.x = intCoordsToNorm(current_tile_coords).x;
-                                if (current_dir_basis.y != 0) lb->end_coords.y = intCoordsToNorm(current_tile_coords).y;
-                                if (current_dir_basis.z != 0) lb->end_coords.z = intCoordsToNorm(current_tile_coords).z;
-
-                                Vec3 comparison_coords = intCoordsToNorm(mirror->coords);
-                                if (th_hit) comparison_coords = intCoordsToNorm(getNextCoords(mirror->coords, oppositeDirection(th.moving_direction)));
-
-                                Vec3 mirror_shift = vec3Subtract(mirror->position_norm, comparison_coords);
-                        		Vec3 laser_shift = vec3Subtract(intCoordsToNorm(current_tile_coords), lb->end_coords);
-                                Vec3 total_shift = vec3Subtract(mirror_shift, laser_shift);
-                                bool reverse_offset = false;
-                                if (vec3IsZero(vec3Subtract(lb->end_coords, intCoordsToNorm(current_tile_coords)))) reverse_offset = true;
-
-                                if (!vec3IsZero(vec3Hadamard(total_shift, next_dir_basis)))
+                                float offset_magnitude = 0;
+                                if (next_dir_basis.x != 0)
                                 {
-                                    float offset_magnitude = 0;
-                                    if (next_dir_basis.x != 0)
-                                    {
-                                        offset_magnitude = total_shift.x;
-                                        Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
-                                        Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
-                                        bool curr_dir_bit;
-                                        if (current_dir_basis.y != 0) curr_dir_bit = (current_dir_basis.y < 0) != (guess_comparison.y < 0);
-                                        else 					   	  curr_dir_bit = (current_dir_basis.z < 0) != (guess_comparison.z < 0);
-                                        bool next_dir_bit = (next_dir_basis.x < 0) != (offset_magnitude < 0);
-                                        if (curr_dir_bit != next_dir_bit) offset_magnitude = -offset_magnitude;
-                                    }
-                                    if (next_dir_basis.y != 0)
-                                    {
-                                        offset_magnitude = total_shift.y;
-                                        Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
-                                        Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
-                                        bool curr_dir_bit;
-                                        if (current_dir_basis.x != 0) curr_dir_bit = (current_dir_basis.x < 0) != (guess_comparison.x < 0);
-                                        else 					   	  curr_dir_bit = (current_dir_basis.z < 0) != (guess_comparison.z < 0);
-                                        bool next_dir_bit = (next_dir_basis.y < 0) != (offset_magnitude < 0);
-                                        if (curr_dir_bit != next_dir_bit) offset_magnitude = -offset_magnitude;
-                                    }
-                                    if (next_dir_basis.z != 0)
-                                    {
-                                        offset_magnitude = total_shift.z;
-                                        Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
-                                        Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
-                                        bool curr_dir_bit;
-                                        if (current_dir_basis.x != 0) curr_dir_bit = (current_dir_basis.x < 0) != (guess_comparison.x < 0);
-                                        else 					   	  curr_dir_bit = (current_dir_basis.y < 0) != (guess_comparison.y < 0);
-                                        bool next_dir_bit = (next_dir_basis.z < 0) != (offset_magnitude < 0);
-                                        if (curr_dir_bit != next_dir_bit) offset_magnitude = -offset_magnitude;
-                                    }
-
-                                    if (reverse_offset) offset_magnitude = -offset_magnitude;
-                                    lb->end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                                    offset_magnitude = total_shift.x;
+                                    Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                                    Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
+                                    bool curr_dir_bit;
+                                    if (current_dir_basis.y != 0) curr_dir_bit = (current_dir_basis.y < 0) != (guess_comparison.y < 0);
+                                    else 					   	  curr_dir_bit = (current_dir_basis.z < 0) != (guess_comparison.z < 0);
+                                    bool next_dir_bit = (next_dir_basis.x < 0) != (offset_magnitude < 0);
+                                    if (curr_dir_bit != next_dir_bit) offset_magnitude = -offset_magnitude;
                                 }
-                                else if (!vec3IsZero(vec3Hadamard(total_shift, directionToVector(current_direction))))
+                                if (next_dir_basis.y != 0)
                                 {
-                                    float offset_magnitude = 0;
-                                    if (current_dir_basis.x != 0)
-                                    {
-                                        offset_magnitude = total_shift.x;
-                                        Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
-                                        Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
-                                        bool curr_dir_bit = (current_dir_basis.x < 0) != (offset_magnitude < 0);
-                                        bool next_dir_bit;
-                                        if (next_dir_basis.y != 0) next_dir_bit = (next_dir_basis.y < 0) != (guess_comparison.y < 0);
-                                        else 					   next_dir_bit = (next_dir_basis.z < 0) != (guess_comparison.z < 0);
-                                        if (curr_dir_bit != next_dir_bit) offset_magnitude = -offset_magnitude;
-                                    }
-                                    if (current_dir_basis.y != 0)
-                                    {
-                                        offset_magnitude = total_shift.y;
-                                        Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
-                                        Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
-                                        bool curr_dir_bit = (current_dir_basis.y < 0) != (offset_magnitude < 0);
-                                        bool next_dir_bit;
-                                        if (next_dir_basis.x != 0) next_dir_bit = (next_dir_basis.x < 0) != (guess_comparison.x < 0);
-                                        else 					   next_dir_bit = (next_dir_basis.z < 0) != (guess_comparison.z < 0);
-                                        if (curr_dir_bit != next_dir_bit) offset_magnitude = -offset_magnitude;
-                                    }
-                                    if (current_dir_basis.z != 0)
-                                    {
-                                        offset_magnitude = total_shift.z;
-                                        Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
-                                        Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
-                                        bool curr_dir_bit = (current_dir_basis.z < 0) != (offset_magnitude < 0);
-                                        bool next_dir_bit;
-                                        if (next_dir_basis.x != 0) next_dir_bit = (next_dir_basis.x < 0) != (guess_comparison.x < 0);
-                                        else 					   next_dir_bit = (next_dir_basis.y < 0) != (guess_comparison.y < 0);
-                                        if (curr_dir_bit != next_dir_bit) offset_magnitude = -offset_magnitude;
-                                    }
-
-                                    if (reverse_offset) offset_magnitude = -offset_magnitude;
-                                    lb->end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                                    offset_magnitude = total_shift.y;
+                                    Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                                    Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
+                                    bool curr_dir_bit;
+                                    if (current_dir_basis.x != 0) curr_dir_bit = (current_dir_basis.x < 0) != (guess_comparison.x < 0);
+                                    else 					   	  curr_dir_bit = (current_dir_basis.z < 0) != (guess_comparison.z < 0);
+                                    bool next_dir_bit = (next_dir_basis.y < 0) != (offset_magnitude < 0);
+                                    if (curr_dir_bit != next_dir_bit) offset_magnitude = -offset_magnitude;
                                 }
+                                if (next_dir_basis.z != 0)
+                                {
+                                    offset_magnitude = total_shift.z;
+                                    Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                                    Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
+                                    bool curr_dir_bit;
+                                    if (current_dir_basis.x != 0) curr_dir_bit = (current_dir_basis.x < 0) != (guess_comparison.x < 0);
+                                    else 					   	  curr_dir_bit = (current_dir_basis.y < 0) != (guess_comparison.y < 0);
+                                    bool next_dir_bit = (next_dir_basis.z < 0) != (offset_magnitude < 0);
+                                    if (curr_dir_bit != next_dir_bit) offset_magnitude = -offset_magnitude;
+                                }
+
+                                if (reverse_offset) offset_magnitude = -offset_magnitude;
+                                lb->end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                            }
+                            else if (!vec3IsZero(vec3Hadamard(total_shift, directionToVector(current_direction))))
+                            {
+                                float offset_magnitude = 0;
+                                if (current_dir_basis.x != 0)
+                                {
+                                    offset_magnitude = total_shift.x;
+                                    Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                                    Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
+                                    bool curr_dir_bit = (current_dir_basis.x < 0) != (offset_magnitude < 0);
+                                    bool next_dir_bit;
+                                    if (next_dir_basis.y != 0) next_dir_bit = (next_dir_basis.y < 0) != (guess_comparison.y < 0);
+                                    else 					   next_dir_bit = (next_dir_basis.z < 0) != (guess_comparison.z < 0);
+                                    if (curr_dir_bit != next_dir_bit) offset_magnitude = -offset_magnitude;
+                                }
+                                if (current_dir_basis.y != 0)
+                                {
+                                    offset_magnitude = total_shift.y;
+                                    Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                                    Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
+                                    bool curr_dir_bit = (current_dir_basis.y < 0) != (offset_magnitude < 0);
+                                    bool next_dir_bit;
+                                    if (next_dir_basis.x != 0) next_dir_bit = (next_dir_basis.x < 0) != (guess_comparison.x < 0);
+                                    else 					   next_dir_bit = (next_dir_basis.z < 0) != (guess_comparison.z < 0);
+                                    if (curr_dir_bit != next_dir_bit) offset_magnitude = -offset_magnitude;
+                                }
+                                if (current_dir_basis.z != 0)
+                                {
+                                    offset_magnitude = total_shift.z;
+                                    Vec3 guess_end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
+                                    Vec3 guess_comparison = vec3Subtract(guess_end_coords, lb->end_coords);
+                                    bool curr_dir_bit = (current_dir_basis.z < 0) != (offset_magnitude < 0);
+                                    bool next_dir_bit;
+                                    if (next_dir_basis.x != 0) next_dir_bit = (next_dir_basis.x < 0) != (guess_comparison.x < 0);
+                                    else 					   next_dir_bit = (next_dir_basis.y < 0) != (guess_comparison.y < 0);
+                                    if (curr_dir_bit != next_dir_bit) offset_magnitude = -offset_magnitude;
+                                }
+
+                                if (reverse_offset) offset_magnitude = -offset_magnitude;
+                                lb->end_coords = vec3Add(lb->end_coords, vec3ScalarMultiply(current_dir_basis, offset_magnitude));
                             }
                             else
                             {
@@ -2639,31 +2264,9 @@ void updateLaserBuffer(void)
                     }
                     lb->end_coords = intCoordsToNorm(current_tile_coords);
                     Vec3 dir_basis = directionToVector(current_direction);
-                    if (!isDiagonal(current_direction))
-                    {
-                        if (dir_basis.x == 0) lb->end_coords.x = lb->start_coords.x;
-                        if (dir_basis.y == 0) lb->end_coords.y = lb->start_coords.y;
-                        if (dir_basis.z == 0) lb->end_coords.z = lb->start_coords.z;
-                    }
-                    else
-                    {
-                        // cases x and z are untested here
-                        if (dir_basis.x == 0)
-                        {
-							if 		(fmod(lb->start_coords.y, 1) != 0) lb->end_coords.y = lb->start_coords.y - (lb->start_coords.z - lb->end_coords.z) * dir_basis.y * dir_basis.z;
-							else if (fmod(lb->start_coords.z, 1) != 0) lb->end_coords.z = lb->start_coords.z - (lb->start_coords.y - lb->end_coords.y) * dir_basis.y * dir_basis.z;
-                        }
-                        if (dir_basis.y == 0)
-                        {
-							if 		(fmod(lb->start_coords.x, 1) != 0) lb->end_coords.x = lb->start_coords.x - (lb->start_coords.z - lb->end_coords.z) * dir_basis.x * dir_basis.z;
-							else if (fmod(lb->start_coords.z, 1) != 0) lb->end_coords.z = lb->start_coords.z - (lb->start_coords.x - lb->end_coords.x) * dir_basis.x * dir_basis.z;
-                        }
-                        if (dir_basis.z == 0)
-                        {
-							if 		(fmod(lb->start_coords.x, 1) != 0) lb->end_coords.x = lb->start_coords.x - (lb->start_coords.y - lb->end_coords.y) * dir_basis.x * dir_basis.y;
-							else if (fmod(lb->start_coords.y, 1) != 0) lb->end_coords.y = lb->start_coords.y - (lb->start_coords.x - lb->end_coords.x) * dir_basis.x * dir_basis.y;
-                        }
-                    }
+                    if (dir_basis.x == 0) lb->end_coords.x = lb->start_coords.x;
+                    if (dir_basis.y == 0) lb->end_coords.y = lb->start_coords.y;
+                    if (dir_basis.z == 0) lb->end_coords.z = lb->start_coords.z;
                     break;
                 }
 
@@ -2817,7 +2420,7 @@ void doHeadRotation(bool clockwise)
         Entity* entity = getEntityPointer(current_tile_coords);
         bool up_or_down = false;
         Direction current_direction = getTileDirection(current_tile_coords);
-        Direction next_direction = NORTH_WEST;
+        Direction next_direction = NO_DIRECTION;
         switch (current_direction)
         {
             case NORTH:
