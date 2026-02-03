@@ -103,7 +103,7 @@ Int3 level_dim = {0};
 
 Camera camera = {0};
 Int3 camera_screen_offset = {0};
-const Int3 camera_center_start = { 7, 0, -17 };
+const Int3 camera_center_start = { 7, 0, -18 };
 bool draw_camera_boundary = false;
 
 AssetToLoad assets_to_load[1024] = {0};
@@ -2258,7 +2258,7 @@ void updateLaserBuffer(void)
     FOR(source_index, MAX_ENTITY_INSTANCE_COUNT)
     {
         Entity* s = &next_world_state.sources[source_index];
-        if (s->id == -1) continue;
+        if (s->id == -1 || s->locked) continue;
 		if (s->color < MAGENTA)
         {
             sources_as_primary[primary_index++] = *s;
@@ -4372,8 +4372,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 		// figure out if entities should be locked / unlocked
         if (editor_state.editor_mode == NO_MODE)
         {
-            Entity* entity_group[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.win_blocks };
-            FOR(group_index, 3)
+            Entity* entity_group[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.win_blocks, next_world_state.sources };
+            FOR(group_index, 4)
             {
                 FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
                 {
@@ -4515,7 +4515,9 @@ void gameFrame(double delta_time, TickInput tick_input)
 		for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)
         {
             if (world_state.sources[source_index].id == -1) continue;
-            int32 id = getCube3DId(getTileType(world_state.sources[source_index].coords));
+            int32 id = 0;
+            if (world_state.sources[source_index].locked) id = CUBE_3D_LOCKED_BLOCK;
+            else id = getCube3DId(getTileType(world_state.sources[source_index].coords));
             drawAsset(id, CUBE_3D, world_state.sources[source_index].position_norm, DEFAULT_SCALE, world_state.sources[source_index].rotation_quat);
         }
 
