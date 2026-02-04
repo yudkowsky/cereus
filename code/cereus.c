@@ -4288,7 +4288,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (editor_state.do_wide_camera) camera.fov = 60.0f;
         else camera.fov = CAMERA_FOV;
 
-        // write to file on i press
+        // write level to file on i press
         char level_path[64];
         buildLevelPathFromName(world_state.level_name, &level_path, true);
         char relative_level_path[64];
@@ -4300,6 +4300,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             writeSolvedLevelsToFile();
         }
 
+        // write camera to file on c press
         if (time_until_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.c_press) 
         {
             {
