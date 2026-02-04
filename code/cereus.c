@@ -103,7 +103,7 @@ Int3 level_dim = {0};
 
 Camera camera = {0};
 Int3 camera_screen_offset = {0};
-const Int3 camera_center_start = { 7, 0, -18 };
+const Int3 camera_center_start = { 7, 0, -17 };
 bool draw_camera_boundary = false;
 
 AssetToLoad assets_to_load[1024] = {0};
