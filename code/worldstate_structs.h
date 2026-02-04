@@ -26,7 +26,7 @@ typedef enum SpriteId
     SPRITE_2D_BOX,
     SPRITE_2D_PLAYER,
 	SPRITE_2D_MIRROR,
-    SPRITE_2D_CRYSTAL,
+    SPRITE_2D_GLASS,
     SPRITE_2D_PACK,
     SPRITE_2D_PERM_MIRROR,
     SPRITE_2D_NOT_VOID,
@@ -54,7 +54,7 @@ typedef enum SpriteId
     CUBE_3D_BOX,
     CUBE_3D_PLAYER,
     CUBE_3D_MIRROR,
-    CUBE_3D_CRYSTAL,
+    CUBE_3D_GLASS,
     CUBE_3D_PACK,
     CUBE_3D_PERM_MIRROR,
     CUBE_3D_NOT_VOID,
@@ -208,7 +208,7 @@ typedef enum TileType
     BOX,
     PLAYER,
     MIRROR,
-    CRYSTAL,
+    GLASS,
     PACK,
     PERM_MIRROR,
     NOT_VOID,
@@ -340,8 +340,7 @@ typedef struct WorldState
     Entity boxes[64];
     Entity mirrors[64];
     Entity sources[64];
-    Entity crystals[64];
-    Entity perm_mirrors[64];
+    Entity glass_blocks[64];
     Entity win_blocks[64];
     Entity locked_blocks[64];
     Entity reset_blocks[64];

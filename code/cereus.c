@@ -67,12 +67,11 @@ const int32 PACK_ID   = 2;
 const int32 OUTLINE_DRAW_ID = ASSET_COUNT;
 const int32 ID_OFFSET_BOX     	   = 100 * 1;
 const int32 ID_OFFSET_MIRROR  	   = 100 * 2;
-const int32 ID_OFFSET_CRYSTAL 	   = 100 * 3;
+const int32 ID_OFFSET_GLASS 	   = 100 * 3;
 const int32 ID_OFFSET_SOURCE  	   = 100 * 4;
-const int32 ID_OFFSET_PERM_MIRROR  = 100 * 5;
-const int32 ID_OFFSET_WIN_BLOCK    = 100 * 6;
-const int32 ID_OFFSET_LOCKED_BLOCK = 100 * 7;
-const int32 ID_OFFSET_RESET_BLOCK  = 100 * 8;
+const int32 ID_OFFSET_WIN_BLOCK    = 100 * 5;
+const int32 ID_OFFSET_LOCKED_BLOCK = 100 * 6;
+const int32 ID_OFFSET_RESET_BLOCK  = 100 * 7;
 
 const int32 FONT_FIRST_ASCII = 32;
 const int32 FONT_LAST_ASCII = 126;
@@ -380,8 +379,7 @@ Entity* getEntityPointer(Int3 coords)
     {
         case BOX:     	   entity_group = next_world_state.boxes;    	  break;
         case MIRROR:  	   entity_group = next_world_state.mirrors;  	  break;
-        case CRYSTAL: 	   entity_group = next_world_state.crystals; 	  break;
-        case PERM_MIRROR:  entity_group = next_world_state.perm_mirrors;  break;
+        case GLASS: 	   entity_group = next_world_state.glass_blocks;  break;
         case WIN_BLOCK:    entity_group = next_world_state.win_blocks;    break;
         case LOCKED_BLOCK: entity_group = next_world_state.locked_blocks; break;
         case RESET_BLOCK:  entity_group = next_world_state.reset_blocks;  break;
@@ -413,9 +411,8 @@ Entity* getEntityFromId(int32 id)
         int32 switch_value =  ((id / 100) * 100);
         if 		(switch_value == ID_OFFSET_BOX)    		 entity_group = next_world_state.boxes; 
         else if (switch_value == ID_OFFSET_MIRROR) 		 entity_group = next_world_state.mirrors;
-        else if (switch_value == ID_OFFSET_CRYSTAL) 	 entity_group = next_world_state.crystals;
+        else if (switch_value == ID_OFFSET_GLASS) 	 entity_group = next_world_state.glass_blocks;
         else if (switch_value == ID_OFFSET_SOURCE) 		 entity_group = next_world_state.sources;
-        else if (switch_value == ID_OFFSET_PERM_MIRROR)  entity_group = next_world_state.perm_mirrors;
         else if (switch_value == ID_OFFSET_WIN_BLOCK) 	 entity_group = next_world_state.win_blocks;
         else if (switch_value == ID_OFFSET_LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
         else if (switch_value == ID_OFFSET_RESET_BLOCK)  entity_group = next_world_state.reset_blocks;
@@ -480,9 +477,8 @@ int32 entityIdOffset(Entity *entity)
 {
     if 		(entity == next_world_state.boxes)    	   return ID_OFFSET_BOX;
     else if (entity == next_world_state.mirrors)  	   return ID_OFFSET_MIRROR;
-    else if (entity == next_world_state.crystals) 	   return ID_OFFSET_CRYSTAL;
+    else if (entity == next_world_state.glass_blocks)  return ID_OFFSET_GLASS;
     else if (entity == next_world_state.sources)  	   return ID_OFFSET_SOURCE;
-    else if (entity == next_world_state.perm_mirrors)  return ID_OFFSET_PERM_MIRROR;
     else if (entity == next_world_state.win_blocks)    return ID_OFFSET_WIN_BLOCK;
     else if (entity == next_world_state.locked_blocks) return ID_OFFSET_LOCKED_BLOCK;
     else if (entity == next_world_state.reset_blocks)  return ID_OFFSET_RESET_BLOCK;
@@ -732,7 +728,7 @@ void loadLockedInfoPaths(FILE* file)
             if (fread(&path, 1, 64, file) != 64) return;
             path[63] = '\0';
 
-            Entity* entity_group[5] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, next_world_state.crystals, next_world_state.sources};
+            Entity* entity_group[5] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, next_world_state.glass_blocks, next_world_state.sources};
             FOR(group_index, 5)
             {
                 FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -952,7 +948,7 @@ bool saveLevelRewrite(char* path, bool save_reset_block_state)
         writeWinBlockToFile(file, wb);
     }
 
-    Entity* entity_group[5] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, next_world_state.crystals, next_world_state.sources};
+    Entity* entity_group[5] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, next_world_state.glass_blocks, next_world_state.sources};
     FOR(group_index, 5)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -1054,9 +1050,8 @@ SpriteId getSprite2DId(TileType tile)
         case BOX:          return SPRITE_2D_BOX;
         case PLAYER:       return SPRITE_2D_PLAYER;
         case MIRROR:       return SPRITE_2D_MIRROR;
-        case CRYSTAL:      return SPRITE_2D_CRYSTAL;
+        case GLASS:        return SPRITE_2D_GLASS;
         case PACK:    	   return SPRITE_2D_PACK;
-        case PERM_MIRROR:  return SPRITE_2D_PERM_MIRROR;
         case NOT_VOID:     return SPRITE_2D_NOT_VOID;
         case WIN_BLOCK:    return SPRITE_2D_WIN_BLOCK;
         case LOCKED_BLOCK: return SPRITE_2D_LOCKED_BLOCK;
@@ -1085,9 +1080,8 @@ SpriteId getCube3DId(TileType tile)
         case BOX:          return CUBE_3D_BOX;
         case PLAYER:       return CUBE_3D_PLAYER;
         case MIRROR:       return CUBE_3D_MIRROR;
-        case CRYSTAL:      return CUBE_3D_CRYSTAL;
+        case GLASS:        return CUBE_3D_GLASS;
         case PACK:    	   return CUBE_3D_PACK;
-        case PERM_MIRROR:  return CUBE_3D_PERM_MIRROR;
         case NOT_VOID:     return CUBE_3D_NOT_VOID;
         case WIN_BLOCK:    return CUBE_3D_WIN_BLOCK;
         case LOCKED_BLOCK: return CUBE_3D_LOCKED_BLOCK;
@@ -1328,13 +1322,13 @@ Vec3 rollingAxis(Direction direction)
 // only checks tile types - doesn't do what canPush does
 bool isPushable(TileType tile)
 {
-    if (tile == BOX || tile == CRYSTAL || tile == MIRROR || tile == PACK || isSource(tile)) return true;
+    if (tile == BOX || tile == GLASS || tile == MIRROR || tile == PACK || isSource(tile)) return true;
     else return false;
 }
 
 bool isEntity(TileType tile)
 {
-    if (tile == BOX || tile == CRYSTAL || tile == MIRROR || tile == PERM_MIRROR || tile == PACK || tile == PLAYER || tile == WIN_BLOCK || tile == LOCKED_BLOCK || tile == RESET_BLOCK || isSource(tile)) return true;
+    if (tile == BOX || tile == GLASS || tile == MIRROR || tile == PACK || tile == PLAYER || tile == WIN_BLOCK || tile == LOCKED_BLOCK || tile == RESET_BLOCK || isSource(tile)) return true;
     else return false;
 }
 
@@ -1700,7 +1694,7 @@ PushResult canPush(Int3 coords, Direction direction)
         if (!intCoordsWithinLevelBounds(current_coords)) return FAILED_PUSH;
 
         if (current_tile == NONE) return CAN_PUSH;
-        if (current_tile == GRID || current_tile == WALL || current_tile == LADDER || current_tile == PERM_MIRROR) return FAILED_PUSH;
+        if (current_tile == GRID || current_tile == WALL || current_tile == LADDER ) return FAILED_PUSH;
     }
     return FAILED_PUSH; // only here if hit the max entity push count
 }
@@ -2043,15 +2037,13 @@ void updateLaserBuffer(void)
                 }
 
                 TileType real_hit_type = getTileType(current_tile_coords);
-                //if (lb->color == GREEN && real_hit_type == CRYSTAL) real_hit_type = NONE;
-                if (real_hit_type == CRYSTAL) real_hit_type = NONE; // trying out crystal as glass
+                if (real_hit_type == GLASS) real_hit_type = NONE;
                 TrailingHitbox th = {0};
                 bool th_hit = false;
                 if (trailingHitboxAtCoords(current_tile_coords, &th) && th.frames > 0)
                 {
                     if (th.hit_direction == NO_DIRECTION || th.hit_direction == current_direction) th_hit = true;
-                    //if (lb->color == GREEN && th.type == CRYSTAL) th_hit = false;
-                    if (th.type == CRYSTAL) th_hit = false;
+                    if (th.type == GLASS) th_hit = false;
                 }
                 else memset(&th, 0, sizeof(TrailingHitbox));
                 if (th_hit) real_hit_type = th.type;
@@ -2296,7 +2288,7 @@ void resetVisuals(Entity* entity)
 
 void resetStandardVisuals()
 {
-    Entity* entity_group[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources };
+    Entity* entity_group[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.glass_blocks, next_world_state.sources };
     FOR(entity_group_index, 4)
     {
         FOR(entity_instance_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -2388,7 +2380,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
 
 void doFallingObjects(bool do_animation)
 {
-    Entity* object_group_to_fall[6] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources, next_world_state.win_blocks, next_world_state.reset_blocks };
+    Entity* object_group_to_fall[6] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.glass_blocks, next_world_state.sources, next_world_state.win_blocks, next_world_state.reset_blocks };
     FOR(to_fall_index, 6)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -2567,7 +2559,7 @@ bool calculateGhosts()
     {
         current_coords = getNextCoords(current_coords, current_direction);
         TileType current_tile = getTileType(current_coords);
-        if (current_tile == MIRROR || current_tile == PERM_MIRROR)
+        if (current_tile == MIRROR)
         {
             current_direction = getNextLaserDirectionMirror(current_direction, getTileDirection(current_coords));
             continue;
@@ -2717,8 +2709,7 @@ void editorMode(TickInput *tick_input)
                     {
                         case BOX:     	   entity_group = next_world_state.boxes;    	  break;
                         case MIRROR:  	   entity_group = next_world_state.mirrors;  	  break;
-                        case CRYSTAL: 	   entity_group = next_world_state.crystals; 	  break;
-                        case PERM_MIRROR:  entity_group = next_world_state.perm_mirrors;  break;
+                        case GLASS: 	   entity_group = next_world_state.glass_blocks;  break;
                         case WIN_BLOCK:    entity_group = next_world_state.win_blocks;    break;
                         case LOCKED_BLOCK: entity_group = next_world_state.locked_blocks; break;
                         case RESET_BLOCK:  entity_group = next_world_state.reset_blocks;  break;
@@ -2750,7 +2741,7 @@ void editorMode(TickInput *tick_input)
                     if (entity != 0)
                     {
                         entity->direction = direction;
-                        if (getTileType(entity->coords) == MIRROR || getTileType(entity->coords) == PERM_MIRROR) entity->rotation_quat = directionToQuaternion(direction, true); // unclear why this is required, something to do with my sprite layout
+                        if (getTileType(entity->coords) == MIRROR) entity->rotation_quat = directionToQuaternion(direction, true); // unclear why this is required, something to do with my sprite layout
                         else entity->rotation_quat = directionToQuaternion(direction, false);
                     }
                 }
@@ -2906,9 +2897,8 @@ void gameInitialiseState()
 
     memset(next_world_state.boxes,    	   0, sizeof(next_world_state.boxes)); 
     memset(next_world_state.mirrors,  	   0, sizeof(next_world_state.mirrors));
-    memset(next_world_state.crystals, 	   0, sizeof(next_world_state.crystals));
+    memset(next_world_state.glass_blocks,  0, sizeof(next_world_state.glass_blocks));
     memset(next_world_state.sources,  	   0, sizeof(next_world_state.sources));
-    memset(next_world_state.perm_mirrors,  0, sizeof(next_world_state.perm_mirrors));
     memset(next_world_state.win_blocks,    0, sizeof(next_world_state.win_blocks));
     memset(next_world_state.locked_blocks, 0, sizeof(next_world_state.locked_blocks));
     memset(next_world_state.reset_blocks,  0, sizeof(next_world_state.reset_blocks));
@@ -2916,9 +2906,8 @@ void gameInitialiseState()
     {
         next_world_state.boxes[entity_index].id 	    = -1;
         next_world_state.mirrors[entity_index].id 	    = -1;
-        next_world_state.crystals[entity_index].id 	    = -1;
+        next_world_state.glass_blocks[entity_index].id 	= -1;
         next_world_state.sources[entity_index].id 	    = -1;
-        next_world_state.perm_mirrors[entity_index].id  = -1;
         next_world_state.win_blocks[entity_index].id    = -1;
         next_world_state.locked_blocks[entity_index].id = -1;
         next_world_state.reset_blocks[entity_index].id  = -1;
@@ -2931,8 +2920,7 @@ void gameInitialiseState()
         TileType buffer_contents = next_world_state.buffer[buffer_index];
         if 	    (buffer_contents == BOX)     	  entity_group = next_world_state.boxes;
         else if (buffer_contents == MIRROR)  	  entity_group = next_world_state.mirrors;
-        else if (buffer_contents == CRYSTAL) 	  entity_group = next_world_state.crystals;
-        else if (buffer_contents == PERM_MIRROR)  entity_group = next_world_state.perm_mirrors;
+        else if (buffer_contents == GLASS)	 	  entity_group = next_world_state.glass_blocks;
         else if (buffer_contents == WIN_BLOCK)    entity_group = next_world_state.win_blocks;
         else if (buffer_contents == LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
         else if (buffer_contents == RESET_BLOCK)  entity_group = next_world_state.reset_blocks;
@@ -3200,7 +3188,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 break;
                             }
                             case BOX:
-                            case CRYSTAL:
+                            case GLASS:
                             case PACK:
                             case MIRROR:
                             case SOURCE_RED:
@@ -3425,7 +3413,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                         break;
                                     }
                                     case BOX:
-                                    case CRYSTAL:
+                                    case GLASS:
                                     case MIRROR:
 
                                     case SOURCE_RED:
@@ -3455,7 +3443,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                         break;
                                     }
                                     case BOX:
-                                    case CRYSTAL:
+                                    case GLASS:
                                     case MIRROR:
 
                                     case SOURCE_RED:
@@ -3836,7 +3824,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // decrement in_motion / moving_direction and reset first_fall_already_done
-        Entity* falling_entity_groups[6] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.crystals, next_world_state.sources, next_world_state.win_blocks, next_world_state.reset_blocks };
+        Entity* falling_entity_groups[6] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.glass_blocks, next_world_state.sources, next_world_state.win_blocks, next_world_state.reset_blocks };
         FOR(falling_object_index, 6)
         {
             Entity* entity_group = falling_entity_groups[falling_object_index];
@@ -3950,8 +3938,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     {
                         case BOX:     	   entity_group = next_world_state.boxes;    	  break;
                         case MIRROR:  	   entity_group = next_world_state.mirrors;  	  break;
-                        case CRYSTAL: 	   entity_group = next_world_state.crystals; 	  break;
-                        case PERM_MIRROR:  entity_group = next_world_state.perm_mirrors;  break;
+                        case GLASS: 	   entity_group = next_world_state.glass_blocks;  break;
                         case WIN_BLOCK:    entity_group = next_world_state.win_blocks;    break;
                         case LOCKED_BLOCK: entity_group = next_world_state.locked_blocks; break;
                         case RESET_BLOCK:  entity_group = next_world_state.reset_blocks;  break;
