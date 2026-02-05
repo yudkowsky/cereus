@@ -268,6 +268,7 @@ typedef struct GreenHit
 }
 GreenHit;
 
+// uses id -1 as overwrite value. i think this is okay here.
 typedef struct ResetInfo
 {
     int32 id;
@@ -285,6 +286,7 @@ typedef struct Entity
     Direction direction;
     Vec4 rotation_quat;
     int32 id;
+    bool removed;
 
     int32 in_motion;
     Direction moving_direction;
@@ -418,3 +420,24 @@ typedef struct LaserBuffer
     Color color;
 }
 LaserBuffer;
+
+/*
+typedef enum DeltaType
+{
+    DELTA_NORMAL,
+    DELTA_LEVEL_CHANGE
+}
+DeltaType;
+
+typedef struct EntityDelta
+{
+    int32 id;
+    Int3 old_coords;
+    Direction old_direction;
+}
+EntityDelta;
+*/
+
+
+
+

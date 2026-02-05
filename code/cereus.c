@@ -495,7 +495,7 @@ int32 getEntityCount(Entity *entity_group)
     int32 count = 0;
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
     {
-        if (entity_group[entity_index].id == -1) continue;
+        if (entity_group[entity_index].removed) continue;
         count++;
     }
     return count;
@@ -585,7 +585,7 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
 {
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
     {
-        if (entity_group[entity_index].id != -1) continue;
+        if (!entity_group[entity_index].removed) continue;
         entity_group[entity_index].coords = coords;
         entity_group[entity_index].position_norm = intCoordsToNorm(coords); 
         entity_group[entity_index].direction = direction;
@@ -971,7 +971,7 @@ bool saveLevelRewrite(char* path, bool save_reset_block_state)
     FOR(win_block_index, MAX_ENTITY_INSTANCE_COUNT)
     {
         Entity* wb = &next_world_state.win_blocks[win_block_index];
-        if (wb->id == -1) continue;
+        if (wb->removed) continue;
         if (wb->next_level[0] == '\0') continue;
         writeWinBlockToFile(file, wb);
     }
@@ -982,7 +982,7 @@ bool saveLevelRewrite(char* path, bool save_reset_block_state)
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
             Entity* e = &entity_group[group_index][entity_index];
-            if (e->id == -1) continue;
+            if (e->removed) continue;
             if (e->unlocked_by[0] == '\0') continue;
             writeLockedInfoToFile(file, e);
         }
@@ -991,7 +991,7 @@ bool saveLevelRewrite(char* path, bool save_reset_block_state)
     FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
     {
         Entity* rb = &next_world_state.reset_blocks[entity_index];
-        if (rb->id == -1) continue;
+        if (rb->removed) continue;
         writeResetInfoToFile(file, rb, save_reset_block_state);
     }
 
@@ -1976,7 +1976,7 @@ void updateLaserBuffer(void)
     FOR(source_index, MAX_ENTITY_INSTANCE_COUNT)
     {
         Entity* s = &next_world_state.sources[source_index];
-        if (s->id == -1 || s->locked) continue;
+        if (s->removed || s->locked) continue;
 		if (s->color < MAGENTA)
         {
             sources_as_primary[primary_index++] = *s;
@@ -2322,7 +2322,7 @@ void resetStandardVisuals()
         FOR(entity_instance_index, MAX_ENTITY_INSTANCE_COUNT)
         {
             Entity* entity = &entity_group[entity_group_index][entity_instance_index];
-            if (entity->id == -1) continue;
+            if (entity->removed) continue;
             resetVisuals(entity);
         }
     }
@@ -2350,10 +2350,10 @@ void levelChangePrep(char next_level[64])
 // returns true iff object is able to fall as usual, but object collides with something instead.
 bool doFallingEntity(Entity* entity, bool do_animation)
 {
-    if (entity->id == -1) return false;
+    if (entity->removed) return false;
     Int3 next_coords = getNextCoords(entity->coords, DOWN);
     if (!intCoordsWithinLevelBounds(next_coords)) return false;
-    if (!(isPushable(getTileType(next_coords)) && getEntityPointer(next_coords)->id == -1) && getTileType(next_coords) != NONE) return true;
+    if (!(isPushable(getTileType(next_coords)) && getEntityPointer(next_coords)->removed) && getTileType(next_coords) != NONE) return true;
     TrailingHitbox _;
     if (trailingHitboxAtCoords(next_coords, &_) && entity->id != PLAYER_ID) return true;
 
@@ -2363,7 +2363,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
     FOR(stack_fall_index, stack_size)
     {
         Entity* entity_in_stack = getEntityPointer(current_start_coords);
-        if (entity_in_stack->id == -1) return false; // should never happen, shouldn't have id == -1 in the middle of a stack somewhere
+        if (entity_in_stack->removed) return false; // should never happen, shouldn't have removed entity in the middle of a stack somewhere
         if (entity_in_stack->in_motion) return false; 
         //if (entity_in_stack == &next_world_state.pack && !next_world_state.pack_detached) return false;
         if (entity_in_stack == &next_world_state.player && !next_world_state.player.hit_by_red) time_until_input = FALL_ANIMATION_TIME;
@@ -2415,14 +2415,14 @@ void doFallingObjects(bool do_animation)
         {
             Entity* entity = &object_group_to_fall[to_fall_index][entity_index];
 
-            if (entity->locked == true || entity->id == -1) continue;
+            if (entity->locked || entity->removed) continue;
             if (pack_hitbox_turning_to_timer > 0 && int3IsEqual(pack_hitbox_turning_to_coords, entity->coords)) continue; // blocks blue-not-blue turn orthogonal case from falling immediately
             doFallingEntity(entity, do_animation);
 
             if (getTileType(getNextCoords(entity->coords, DOWN)) == VOID && !entity->in_motion)
             {
                 setTileType(NONE, entity->coords);
-                entity->id = -1;
+                entity->removed = true;
             }
         }
     }
@@ -2713,7 +2713,7 @@ void editorMode(TickInput *tick_input)
                 {
                     entity->coords = (Int3){0};
                     entity->position_norm = (Vec3){0};
-                    entity->id = -1;
+                    entity->removed = true;
 
                     // TODO(spike): if deleting entity, go through reset blocks and remove from reset block
                 }
@@ -2932,13 +2932,13 @@ void gameInitialiseState()
     memset(next_world_state.reset_blocks,  0, sizeof(next_world_state.reset_blocks));
     FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
     {
-        next_world_state.boxes[entity_index].id 	    = -1;
-        next_world_state.mirrors[entity_index].id 	    = -1;
-        next_world_state.glass_blocks[entity_index].id 	= -1;
-        next_world_state.sources[entity_index].id 	    = -1;
-        next_world_state.win_blocks[entity_index].id    = -1;
-        next_world_state.locked_blocks[entity_index].id = -1;
-        next_world_state.reset_blocks[entity_index].id  = -1;
+        next_world_state.boxes[entity_index].removed 	     = true;
+        next_world_state.mirrors[entity_index].removed 	     = true;
+        next_world_state.glass_blocks[entity_index].removed  = true;
+        next_world_state.sources[entity_index].removed 	     = true;
+        next_world_state.win_blocks[entity_index].removed    = true;
+        next_world_state.locked_blocks[entity_index].removed = true;
+        next_world_state.reset_blocks[entity_index].removed  = true;
         FOR(to_reset_index, MAX_RESET_COUNT) next_world_state.reset_blocks[entity_index].reset_info[to_reset_index].id = -1;
     }
 
@@ -2962,6 +2962,7 @@ void gameInitialiseState()
             entity_group[count].rotation_quat = directionToQuaternion(entity_group[count].direction, true);
             entity_group[count].color = getEntityColor(entity_group[count].coords);
             entity_group[count].id = getEntityCount(entity_group) + entityIdOffset(entity_group);
+        	entity_group[count].removed = false;
             entity_group = 0;
         }
         else if (next_world_state.buffer[buffer_index] == PLAYER) // special case for player, since there is only one
@@ -3886,20 +3887,20 @@ void gameFrame(double delta_time, TickInput tick_input)
         // delete player / pack if above void
         if (!player->hit_by_red)
         {
-            if ((getTileType(getNextCoords(player->coords, DOWN)) == VOID || getTileType(getNextCoords(player->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PLAYER_ID)) player->id = -1;
+            if ((getTileType(getNextCoords(player->coords, DOWN)) == VOID || getTileType(getNextCoords(player->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PLAYER_ID)) player->removed = true;
         }
         if (next_world_state.pack_detached)
         {
             if (!player->hit_by_blue)
             {
-                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PACK_ID)) pack->id = -1;
+                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PACK_ID)) pack->removed = true;
             }
         }
         else
         {
             if (!player->hit_by_red)
             {
-                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PACK_ID)) pack->id = -1;
+                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PACK_ID)) pack->removed = true;
             }
         }
 
@@ -3996,7 +3997,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
                 {
                     Entity* e = &entity_group[group_index][entity_index];
-                    if (e->id == -1) continue;
+                    if (e->removed) continue;
                     if (findInSolvedLevels(e->unlocked_by) == -1) e->locked = true; 
                     else e->locked = false;
                 }
@@ -4005,12 +4006,12 @@ void gameFrame(double delta_time, TickInput tick_input)
             FOR(locked_block_index, MAX_ENTITY_INSTANCE_COUNT)
             {
                 Entity* lb = &next_world_state.locked_blocks[locked_block_index];
-                if (lb->id == -1) continue;
+                if (lb->removed) continue;
                 int32 find_result = findInSolvedLevels(lb->unlocked_by);
                 if (find_result != -1 && find_result != INT32_MAX)
                 {
 					// locked block to be unlocked
-                    lb->id = -1;
+                    lb->removed = true;
                     setTileType(NONE, lb->coords);
                     setTileDirection(NORTH, lb->coords);
                 }
@@ -4108,7 +4109,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-        if (world_state.player.id != -1)
+        if (!world_state.player.removed)
         {
             player = &world_state.player;
 
@@ -4127,12 +4128,12 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, true));
             if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, true));
         }
-		if (world_state.pack.id != -1) drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat);
+		if (!world_state.pack.removed) drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat);
 
 		// draw sources 
 		for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)
         {
-            if (world_state.sources[source_index].id == -1) continue;
+            if (world_state.sources[source_index].removed) continue;
             int32 id = 0;
             if (world_state.sources[source_index].locked) id = CUBE_3D_LOCKED_BLOCK;
             else id = getCube3DId(getTileType(world_state.sources[source_index].coords));
