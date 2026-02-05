@@ -417,6 +417,7 @@ Entity* getEntityPointer(Int3 coords)
     }
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
     {
+        if (entity_group[entity_index].removed) continue;
         if (int3IsEqual(entity_group[entity_index].coords, coords)) return &entity_group[entity_index];
     }
     return 0;
@@ -490,12 +491,13 @@ Direction getNextRotationalDirection(Direction direction, bool clockwise)
     return next_direction;
 }
 
+// gets count of currently active (not id == -1 or removed)
 int32 getEntityCount(Entity *entity_group)
 {
     int32 count = 0;
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
     {
-        if (entity_group[entity_index].removed) continue;
+        if (entity_group[entity_index].id == -1 || entity_group[entity_index].removed) continue;
         count++;
     }
     return count;
@@ -585,7 +587,7 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
 {
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
     {
-        if (!entity_group[entity_index].removed) continue;
+        if (entity_group[entity_index].id != -1) continue;
         entity_group[entity_index].coords = coords;
         entity_group[entity_index].position_norm = intCoordsToNorm(coords); 
         entity_group[entity_index].direction = direction;
@@ -2932,13 +2934,13 @@ void gameInitialiseState()
     memset(next_world_state.reset_blocks,  0, sizeof(next_world_state.reset_blocks));
     FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
     {
-        next_world_state.boxes[entity_index].removed 	     = true;
-        next_world_state.mirrors[entity_index].removed 	     = true;
-        next_world_state.glass_blocks[entity_index].removed  = true;
-        next_world_state.sources[entity_index].removed 	     = true;
-        next_world_state.win_blocks[entity_index].removed    = true;
-        next_world_state.locked_blocks[entity_index].removed = true;
-        next_world_state.reset_blocks[entity_index].removed  = true;
+        next_world_state.boxes[entity_index].id 		= -1;
+        next_world_state.mirrors[entity_index].id 		= -1;
+        next_world_state.glass_blocks[entity_index].id	= -1;
+        next_world_state.sources[entity_index].id		= -1;
+        next_world_state.win_blocks[entity_index].id	= -1;
+        next_world_state.locked_blocks[entity_index].id	= -1;
+        next_world_state.reset_blocks[entity_index].id	= -1;
         FOR(to_reset_index, MAX_RESET_COUNT) next_world_state.reset_blocks[entity_index].reset_info[to_reset_index].id = -1;
     }
 
