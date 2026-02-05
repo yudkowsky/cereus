@@ -345,37 +345,10 @@ typedef struct WorldState
     Entity locked_blocks[64];
     Entity reset_blocks[64];
 
-    bool player_will_fall_next_turn; // used for not being able to walk one extra tile after walking out of red beam
     bool pack_detached;
     char level_name[64];
-    bool in_overworld;
 
 	char solved_levels[64][64]; // TODO(spike): make this enum? after finalised level names, so don't need to change at two places? maybe this is too late for this, but need to figure something out here
-
-    TrailingHitbox trailing_hitboxes[16];
-    bool bypass_player_fall;
-
-    // handle pack turning sequence
-    int32 pack_intermediate_states_timer;
-
-    Int3 pack_intermediate_coords;
-
-    Int3 pack_hitbox_turning_to_coords;
-    int32 pack_hitbox_turning_to_timer; // used for blue-not-blue logic
-
-    Direction pack_orthogonal_push_direction;
-    bool do_diagonal_push_on_turn;
-    bool do_orthogonal_push_on_turn;
-    bool do_player_and_pack_fall_after_turn;
-    bool player_hit_by_blue_in_turn;
-    Int3 entity_to_fall_after_blue_not_blue_turn_coords;
-    int32 entity_to_fall_after_blue_not_blue_turn_timer; // why required?
-
-    // ghosts from tp
-    Int3 player_ghost_coords;
-    Int3 pack_ghost_coords;
-    Direction player_ghost_direction;
-    Direction pack_ghost_direction;
 }
 WorldState;
 

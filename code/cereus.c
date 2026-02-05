@@ -94,7 +94,7 @@ const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
-const char debug_level_name[64] = "testing";
+const char debug_level_name[64] = "overworld";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
@@ -122,6 +122,34 @@ LaserBuffer laser_buffer[64] = {0};
 const Vec2 DEBUG_TEXT_COORDS_START = { 50.0f, 1080.0f - 80.0f };
 const float DEBUG_TEXT_Y_DIFF = 40.0f;
 Vec2 debug_text_coords = {0}; 
+
+// stuff from worldstate
+bool in_overworld = false;
+
+bool player_will_fall_next_turn = false;
+
+TrailingHitbox trailing_hitboxes[16];
+bool bypass_player_fall;
+
+int32 pack_intermediate_states_timer;
+Int3 pack_intermediate_coords;
+
+Int3 pack_hitbox_turning_to_coords;
+int32 pack_hitbox_turning_to_timer; // used for blue-not-blue logic
+
+Direction pack_orthogonal_push_direction;
+bool do_diagonal_push_on_turn;
+bool do_orthogonal_push_on_turn;
+bool do_player_and_pack_fall_after_turn;
+bool player_hit_by_blue_in_turn;
+Int3 entity_to_fall_after_blue_not_blue_turn_coords;
+int32 entity_to_fall_after_blue_not_blue_turn_timer;
+
+// ghosts from tp
+Int3 player_ghost_coords;
+Int3 pack_ghost_coords;
+Direction player_ghost_direction;
+Direction pack_ghost_direction;
 
 // CAMERA STUFF
 
@@ -1352,7 +1380,7 @@ int32 findNextFreeInTrailingHitboxes()
 {
     FOR(find_hitbox_index, MAX_TRAILING_HITBOX_COUNT)
     {
-        if (next_world_state.trailing_hitboxes[find_hitbox_index].frames != 0) continue;
+        if (trailing_hitboxes[find_hitbox_index].frames != 0) continue;
         return find_hitbox_index;
     }
     return 0;
@@ -1361,18 +1389,18 @@ int32 findNextFreeInTrailingHitboxes()
 void createTrailingHitbox(Int3 coords, Direction moving_direction, Direction hit_direction, int32 frames, TileType type)
 {
     int32 hitbox_index = findNextFreeInTrailingHitboxes();
-    next_world_state.trailing_hitboxes[hitbox_index].coords = coords;
-    next_world_state.trailing_hitboxes[hitbox_index].hit_direction = hit_direction;
-    next_world_state.trailing_hitboxes[hitbox_index].moving_direction = moving_direction;
-    next_world_state.trailing_hitboxes[hitbox_index].frames = frames;
-    next_world_state.trailing_hitboxes[hitbox_index].type = type;
+    trailing_hitboxes[hitbox_index].coords = coords;
+    trailing_hitboxes[hitbox_index].hit_direction = hit_direction;
+    trailing_hitboxes[hitbox_index].moving_direction = moving_direction;
+    trailing_hitboxes[hitbox_index].frames = frames;
+    trailing_hitboxes[hitbox_index].type = type;
 }
 
 bool trailingHitboxAtCoords(Int3 coords, TrailingHitbox* trailing_hitbox)
 {
     FOR(trailing_hitbox_index, MAX_TRAILING_HITBOX_COUNT) 
     {
-        TrailingHitbox th = next_world_state.trailing_hitboxes[trailing_hitbox_index];
+        TrailingHitbox th = trailing_hitboxes[trailing_hitbox_index];
         if (int3IsEqual(coords, th.coords) && th.frames > 0) 
         {
             *trailing_hitbox = th;
@@ -2087,7 +2115,7 @@ void updateLaserBuffer(void)
                         if (mirror->in_motion)
                         {
                             int32 passthrough_comparison = 0;
-                            bool player_turning = next_world_state.pack_intermediate_states_timer > 0;
+                            bool player_turning = pack_intermediate_states_timer > 0;
                             if (player_turning) passthrough_comparison = PUSH_FROM_TURN_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH;
                             else passthrough_comparison = STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH; 
 
@@ -2304,14 +2332,14 @@ void resetStandardVisuals()
 
 void levelChangePrep(char next_level[64])
 {
-    if (!next_world_state.in_overworld && findInSolvedLevels(next_world_state.level_name) == -1)
+    if (!in_overworld && findInSolvedLevels(next_world_state.level_name) == -1)
     {
         addToSolvedLevels(next_world_state.level_name);
         writeSolvedLevelsToFile();
     }
 
-    if (strcmp(next_level, "overworld") == 0) next_world_state.in_overworld = true;
-    else next_world_state.in_overworld = false;
+    if (strcmp(next_level, "overworld") == 0) in_overworld = true;
+    else in_overworld = false;
 
     recordStateForUndo();
     memset(animations, 0, sizeof(animations));
@@ -2388,7 +2416,7 @@ void doFallingObjects(bool do_animation)
             Entity* entity = &object_group_to_fall[to_fall_index][entity_index];
 
             if (entity->locked == true || entity->id == -1) continue;
-            if (next_world_state.pack_hitbox_turning_to_timer > 0 && int3IsEqual(next_world_state.pack_hitbox_turning_to_coords, entity->coords)) continue; // blocks blue-not-blue turn orthogonal case from falling immediately
+            if (pack_hitbox_turning_to_timer > 0 && int3IsEqual(pack_hitbox_turning_to_coords, entity->coords)) continue; // blocks blue-not-blue turn orthogonal case from falling immediately
             doFallingEntity(entity, do_animation);
 
             if (getTileType(getNextCoords(entity->coords, DOWN)) == VOID && !entity->in_motion)
@@ -2566,12 +2594,12 @@ bool calculateGhosts()
         }
         if (current_tile != NONE) break;
     }
-    next_world_state.player_ghost_coords = getNextCoords(current_coords, oppositeDirection(current_direction));
-    next_world_state.player_ghost_direction = current_direction;
+    player_ghost_coords = getNextCoords(current_coords, oppositeDirection(current_direction));
+    player_ghost_direction = current_direction;
     if (!next_world_state.pack_detached) 
     {
-        next_world_state.pack_ghost_coords = getNextCoords(next_world_state.player_ghost_coords, oppositeDirection(current_direction));
-        next_world_state.pack_ghost_direction = current_direction;
+        pack_ghost_coords = getNextCoords(player_ghost_coords, oppositeDirection(current_direction));
+        pack_ghost_direction = current_direction;
     }
     return true;
 }
@@ -2876,8 +2904,8 @@ void gameInitialiseState()
     strcpy(next_world_state.level_name, persist_level_name);
     memcpy(next_world_state.solved_levels, persist_solved_levels, sizeof(persist_solved_levels));
 
-    if (strcmp(next_world_state.level_name, "overworld") == 0) next_world_state.in_overworld = true;
-    else next_world_state.in_overworld = false;
+    if (strcmp(next_world_state.level_name, "overworld") == 0) in_overworld = true;
+    else in_overworld = false;
 
     // build level_path from level_name
     char level_path[64] = {0};
@@ -3085,7 +3113,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
                 restart_last_turn = true;
             }
-			if (time_until_input == 0 && tick_input.escape_press && !next_world_state.in_overworld)
+			if (time_until_input == 0 && tick_input.escape_press && !in_overworld)
             {
                 // leave current level if not in overworld. for now get first win block and go to their next location
                 char save_solved_levels[64][64] = {0};
@@ -3115,37 +3143,37 @@ void gameFrame(double delta_time, TickInput tick_input)
                         // check if endpoint is valid before teleport (i.e, if pack can go there - if over air, teleport anyway, probably?)
 
                         bool allow_tp = false;
-                        TileType player_ghost_tile = getTileType(next_world_state.player_ghost_coords);
-                        TileType pack_ghost_tile = getTileType(next_world_state.pack_ghost_coords);
+                        TileType player_ghost_tile = getTileType(player_ghost_coords);
+                        TileType pack_ghost_tile = getTileType(pack_ghost_coords);
                         if ((player_ghost_tile == NONE || player_ghost_tile == PLAYER) && (pack_ghost_tile == NONE || pack_ghost_tile == PLAYER || pack_ghost_tile == PACK)) allow_tp = true;
 
                         if (allow_tp)
                         {
-                            if (!int3IsEqual(next_world_state.player_ghost_coords, player->coords))
+                            if (!int3IsEqual(player_ghost_coords, player->coords))
                             {
 								recordStateForUndo();
 
                                 setTileType(NONE, player->coords);
                                 setTileDirection(NORTH, player->coords);
                                 zeroAnimations(PLAYER_ID);
-                                player->coords = next_world_state.player_ghost_coords;
-                                player->position_norm = intCoordsToNorm(next_world_state.player_ghost_coords);
-                                player->direction = next_world_state.player_ghost_direction;
-                                player->rotation_quat = directionToQuaternion(next_world_state.player_ghost_direction, true);
-                                setTileType(PLAYER, next_world_state.player_ghost_coords);
-                                setTileDirection(next_world_state.player_ghost_direction, next_world_state.player_ghost_coords);
+                                player->coords = player_ghost_coords;
+                                player->position_norm = intCoordsToNorm(player_ghost_coords);
+                                player->direction = player_ghost_direction;
+                                player->rotation_quat = directionToQuaternion(player_ghost_direction, true);
+                                setTileType(PLAYER, player_ghost_coords);
+                                setTileDirection(player_ghost_direction, player_ghost_coords);
                                 if (!next_world_state.pack_detached)
                                 {
-                                    Int3 pack_coords = getNextCoords(next_world_state.player_ghost_coords, oppositeDirection(next_world_state.pack_ghost_direction));
+                                    Int3 pack_coords = getNextCoords(player_ghost_coords, oppositeDirection(pack_ghost_direction));
                                     setTileType(NONE, pack->coords);
                                     setTileDirection(NORTH, pack->coords);
                                     zeroAnimations(PACK_ID);
                                     pack->coords = pack_coords; 
                                     pack->position_norm = intCoordsToNorm(pack_coords);
-                                    pack->direction = next_world_state.pack_ghost_direction;
-                                    pack->rotation_quat = directionToQuaternion(next_world_state.pack_ghost_direction, true);
+                                    pack->direction = pack_ghost_direction;
+                                    pack->rotation_quat = directionToQuaternion(pack_ghost_direction, true);
                                     setTileType(PACK, pack_coords);
-                                    setTileDirection(next_world_state.pack_ghost_direction, pack_coords);
+                                    setTileDirection(pack_ghost_direction, pack_coords);
                                 }
                             }
                             // tp sends player ontop of themselves - should count as a successful tp, but no point changing state, and don't samve to undo buffer.
@@ -3172,7 +3200,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         else if (tick_input.s_press) next_player_coords = int3Add(player->coords, AXIS_Z);
                         else if (tick_input.d_press) next_player_coords = int3Add(player->coords, AXIS_X);
                         TileType next_tile = getTileType(next_player_coords);
-                        if (!next_world_state.player_will_fall_next_turn) switch (next_tile)
+                        if (!player_will_fall_next_turn) switch (next_tile)
                         {
                             case NONE:
                             {
@@ -3269,7 +3297,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 {
                                     if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
                                     doStandardMovement(input_direction, next_player_coords, animation_time, true);
-                                    next_world_state.bypass_player_fall = true; 
+                                    bypass_player_fall = true; 
                                     time_until_input = MOVE_OR_PUSH_ANIMATION_TIME;
                                 }
                                 else 
@@ -3489,14 +3517,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                                 oppositeDirection(input_direction), clockwise, 
                                                                 &pack->position_norm, &pack->rotation_quat, PACK_ID);
 
-                                    if (push_diagonal)   next_world_state.do_diagonal_push_on_turn = true;
-                                    if (push_orthogonal) next_world_state.do_orthogonal_push_on_turn = true;
+                                    if (push_diagonal)   do_diagonal_push_on_turn = true;
+                                    if (push_orthogonal) do_orthogonal_push_on_turn = true;
 
-                                    next_world_state.pack_intermediate_states_timer = TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN + PACK_TIME_IN_INTERMEDIATE_STATE + 1; // + 1 because we stop when timer hits 1 (and then reset to 0)
-                                    next_world_state.pack_intermediate_coords = diagonal_coords;
-                                    next_world_state.pack_orthogonal_push_direction = orthogonal_push_direction;
-                                    next_world_state.pack_hitbox_turning_to_timer = TURN_ANIMATION_TIME + TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN;
-                                    next_world_state.pack_hitbox_turning_to_coords = orthogonal_coords;
+                                    pack_intermediate_states_timer = TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN + PACK_TIME_IN_INTERMEDIATE_STATE + 1; // + 1 because we stop when timer hits 1 (and then reset to 0)
+                                    pack_intermediate_coords = diagonal_coords;
+                                    pack_orthogonal_push_direction = orthogonal_push_direction;
+                                    pack_hitbox_turning_to_timer = TURN_ANIMATION_TIME + TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN;
+                                    pack_hitbox_turning_to_coords = orthogonal_coords;
 
                                     recordStateForUndo();
                                 }
@@ -3587,44 +3615,44 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // handle pack turning sequence
-        if (next_world_state.pack_intermediate_states_timer > 0)
+        if (pack_intermediate_states_timer > 0)
         {
-            if (next_world_state.pack_intermediate_states_timer == 7)
+            if (pack_intermediate_states_timer == 7)
             {
-                createTrailingHitbox(pack->coords, next_world_state.pack_orthogonal_push_direction, NO_DIRECTION, 4, PACK); // trailing hitbox created before actually moving pack... fixes problem with fast inputs
-				if (next_world_state.do_diagonal_push_on_turn) pushAll(next_world_state.pack_intermediate_coords, oppositeDirection(player->direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false); // CHANGE THIS IF WANT PACK TO SWEEP
+                createTrailingHitbox(pack->coords, pack_orthogonal_push_direction, NO_DIRECTION, 4, PACK); // trailing hitbox created before actually moving pack... fixes problem with fast inputs
+				if (do_diagonal_push_on_turn) pushAll(pack_intermediate_coords, oppositeDirection(player->direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false); // CHANGE THIS IF WANT PACK TO SWEEP
             }
-            else if (next_world_state.pack_intermediate_states_timer == 5)
+            else if (pack_intermediate_states_timer == 5)
             {
                 setTileType(NONE, pack->coords);
                 setTileDirection(NORTH, pack->coords);
-                pack->coords = next_world_state.pack_intermediate_coords;
+                pack->coords = pack_intermediate_coords;
                 pack->direction = oppositeDirection(player->direction);
                 setTileType(PACK, pack->coords);
                 setTileDirection(pack->direction, pack->coords);
             }
-            else if (next_world_state.pack_intermediate_states_timer == 4)
+            else if (pack_intermediate_states_timer == 4)
             {
-                if (next_world_state.do_orthogonal_push_on_turn) pushAll(next_world_state.pack_hitbox_turning_to_coords, next_world_state.pack_orthogonal_push_direction, PUSH_FROM_TURN_ANIMATION_TIME, true, false); // CHANGE THIS IF WANT PACK TO SWEEP
+                if (do_orthogonal_push_on_turn) pushAll(pack_hitbox_turning_to_coords, pack_orthogonal_push_direction, PUSH_FROM_TURN_ANIMATION_TIME, true, false); // CHANGE THIS IF WANT PACK TO SWEEP
 
                 setTileType(NONE, pack->coords);
                 setTileDirection(NORTH, pack->coords);
-				pack->coords = next_world_state.pack_hitbox_turning_to_coords;
+				pack->coords = pack_hitbox_turning_to_coords;
                 setTileType(PACK, pack->coords);
                 setTileDirection(pack->direction, pack->coords);
-                createTrailingHitbox(next_world_state.pack_intermediate_coords, pack->direction, NO_DIRECTION, 3, PACK);
+                createTrailingHitbox(pack_intermediate_coords, pack->direction, NO_DIRECTION, 3, PACK);
             }
-            else if (next_world_state.pack_intermediate_states_timer == 1)
+            else if (pack_intermediate_states_timer == 1)
             { 
-                if (next_world_state.do_player_and_pack_fall_after_turn)
+                if (do_player_and_pack_fall_after_turn)
                 {
                     doFallingEntity(player, true);
                     doFallingEntity(pack, true);
-                    next_world_state.do_player_and_pack_fall_after_turn = false;
+                    do_player_and_pack_fall_after_turn = false;
                 }
-                next_world_state.player_hit_by_blue_in_turn = false;
+                player_hit_by_blue_in_turn = false;
             }
-            next_world_state.pack_intermediate_states_timer--;
+            pack_intermediate_states_timer--;
         }
 
 		updateLaserBuffer();
@@ -3632,33 +3660,33 @@ void gameFrame(double delta_time, TickInput tick_input)
         // falling logic
 		if (!player->hit_by_blue) doFallingObjects(true);
 
-        if (next_world_state.pack_intermediate_states_timer == 0)
+        if (pack_intermediate_states_timer == 0)
         {
             if (!player->hit_by_red)
             {
                 if (!next_world_state.pack_detached)
                 {
-                    if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) next_world_state.player_will_fall_next_turn = true; 
-                    else next_world_state.player_will_fall_next_turn = false;
+                    if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) player_will_fall_next_turn = true; 
+                    else player_will_fall_next_turn = false;
 
                     // not red and pack attached: player always falls, if no bypass. pack only falls if player falls
-                    if (!next_world_state.bypass_player_fall && !doFallingEntity(player, true))
+                    if (!bypass_player_fall && !doFallingEntity(player, true))
                     {
                         doFallingEntity(pack, true);
                     }
                 }
                 else
                 {
-                    if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) next_world_state.player_will_fall_next_turn = true;
-                    else next_world_state.player_will_fall_next_turn = false;
+                    if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) player_will_fall_next_turn = true;
+                    else player_will_fall_next_turn = false;
                     // not red and pack not attached, so pack and player both always fall
-                    if (!next_world_state.bypass_player_fall) doFallingEntity(player, true);
+                    if (!bypass_player_fall) doFallingEntity(player, true);
                     doFallingEntity(pack, true);
                 }
             }
             else
             {
-                next_world_state.player_will_fall_next_turn = false;
+                player_will_fall_next_turn = false;
                 // red, so pack only falls if is detached from player
                 if (next_world_state.pack_detached)
                 {
@@ -3673,19 +3701,19 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (getTileType(getNextCoords(player->coords, DOWN)) == NONE && !player->hit_by_red)
             {
                 // in middle of turn, which means was on ground or red, and now no longer on ground AND not red, so must have stopped being red in the middle of the turn.
-                next_world_state.do_player_and_pack_fall_after_turn = true;
+                do_player_and_pack_fall_after_turn = true;
             }
 
-            if (isPushable(getTileType(next_world_state.pack_hitbox_turning_to_coords)))
+            if (isPushable(getTileType(pack_hitbox_turning_to_coords)))
             {
-				if (player->hit_by_blue) next_world_state.player_hit_by_blue_in_turn = true;
-                if (!player->hit_by_blue && next_world_state.player_hit_by_blue_in_turn && next_world_state.pack_intermediate_states_timer > 0)
+				if (player->hit_by_blue) player_hit_by_blue_in_turn = true;
+                if (!player->hit_by_blue && player_hit_by_blue_in_turn && pack_intermediate_states_timer > 0)
                 {
-                    if (getTileType(getNextCoords(next_world_state.pack_hitbox_turning_to_coords, DOWN)) == NONE)
+                    if (getTileType(getNextCoords(pack_hitbox_turning_to_coords, DOWN)) == NONE)
                     {
-                        next_world_state.entity_to_fall_after_blue_not_blue_turn_timer = next_world_state.pack_intermediate_states_timer + 4; // this number is magic (sorry); it is the frame count that makes the entity fall as soon as possible, i.e., at the same time as the player (if magenta-not-magenta)
-                        next_world_state.entity_to_fall_after_blue_not_blue_turn_coords = getNextCoords(next_world_state.pack_hitbox_turning_to_coords, next_world_state.pack_orthogonal_push_direction);
-                        next_world_state.player_hit_by_blue_in_turn = false;
+                        entity_to_fall_after_blue_not_blue_turn_timer = pack_intermediate_states_timer + 4; // this number is magic (sorry); it is the frame count that makes the entity fall as soon as possible, i.e., at the same time as the player (if magenta-not-magenta)
+                        entity_to_fall_after_blue_not_blue_turn_coords = getNextCoords(pack_hitbox_turning_to_coords, pack_orthogonal_push_direction);
+                        player_hit_by_blue_in_turn = false;
                     }
                 }
             }
@@ -3793,18 +3821,18 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-        if (next_world_state.entity_to_fall_after_blue_not_blue_turn_timer > 0)
+        if (entity_to_fall_after_blue_not_blue_turn_timer > 0)
         {
-            if (next_world_state.entity_to_fall_after_blue_not_blue_turn_timer == 1) 
+            if (entity_to_fall_after_blue_not_blue_turn_timer == 1) 
             {
-                if (isPushable(getTileType(next_world_state.entity_to_fall_after_blue_not_blue_turn_coords))) doFallingEntity(getEntityPointer(next_world_state.entity_to_fall_after_blue_not_blue_turn_coords), true);
+                if (isPushable(getTileType(entity_to_fall_after_blue_not_blue_turn_coords))) doFallingEntity(getEntityPointer(entity_to_fall_after_blue_not_blue_turn_coords), true);
             }
-            next_world_state.entity_to_fall_after_blue_not_blue_turn_timer--;
+            entity_to_fall_after_blue_not_blue_turn_timer--;
         }
 
         // detach or reattach pack
         TileType tile_behind_player = getTileType(getNextCoords(player->coords, oppositeDirection(player->direction)));
-        if (!next_world_state.pack_detached && next_world_state.pack_intermediate_states_timer == 0 && tile_behind_player != PACK) next_world_state.pack_detached = true;
+        if (!next_world_state.pack_detached && pack_intermediate_states_timer == 0 && tile_behind_player != PACK) next_world_state.pack_detached = true;
         if (next_world_state.pack_detached && tile_behind_player == PACK) next_world_state.pack_detached = false;
 
         // do animations
@@ -3840,11 +3868,11 @@ void gameFrame(double delta_time, TickInput tick_input)
         resetFirstFall(pack);
 
 		// handle turning hitboxes
-        if (next_world_state.pack_hitbox_turning_to_timer > 0) next_world_state.pack_hitbox_turning_to_timer--;
+        if (pack_hitbox_turning_to_timer > 0) pack_hitbox_turning_to_timer--;
 
         // decrement trailing hitboxes 
-        FOR(i, MAX_TRAILING_HITBOX_COUNT) if (next_world_state.trailing_hitboxes[i].frames > 0) next_world_state.trailing_hitboxes[i].frames--;
-        if (next_world_state.bypass_player_fall) next_world_state.bypass_player_fall = false;
+        FOR(i, MAX_TRAILING_HITBOX_COUNT) if (trailing_hitboxes[i].frames > 0) trailing_hitboxes[i].frames--;
+        if (bypass_player_fall) bypass_player_fall = false;
 
         // decide which ghosts to render, if ghosts should be rendered
         bool do_player_ghost = false;
@@ -3883,7 +3911,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 if (wb->next_level[0] != 0)
                 {
-                    if (next_world_state.in_overworld) 
+                    if (in_overworld) 
                     {
                         char level_path[64] = {0};
                         buildLevelPathFromName(next_world_state.level_name, &level_path, false);
@@ -3993,7 +4021,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 		updateLaserBuffer();
         
 		// adjust overworld camera based on position
-        if (next_world_state.in_overworld && player->id == PLAYER_ID)
+        if (in_overworld && player->id == PLAYER_ID)
         {
             int32 screen_offset_x = 0;
             int32 dx = player->coords.x - camera_center_start.x;
@@ -4096,8 +4124,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             else if (                            		   player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
             else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
 
-            if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(world_state.player_ghost_coords), PLAYER_SCALE, directionToQuaternion(world_state.player_ghost_direction, true));
-            if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(world_state.pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(world_state.pack_ghost_direction, true));
+            if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, true));
+            if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, true));
         }
 		if (world_state.pack.id != -1) drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat);
 
@@ -4248,7 +4276,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             draw_camera_boundary = (draw_camera_boundary) ? false : true;
 			time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
         }
-        if (draw_camera_boundary && next_world_state.in_overworld)
+        if (draw_camera_boundary && in_overworld)
         {
         	int32 x_draw_offset = 0;
             int32 z_draw_offset = 0;
