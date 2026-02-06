@@ -2379,7 +2379,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
                 createTrailingHitbox(current_start_coords, DOWN, NO_DIRECTION, TRAILING_HITBOX_TIME + 4, getTileType(entity_in_stack->coords)); // it takes 4 extra frames to get to the point where it's cutting off the below laser (and thus not cutting off above, i guess)
             }
             entity_in_stack->first_fall_already_done = true;
-            entity_in_stack->in_motion = STANDARD_IN_MOTION_TIME + 4;
+            entity_in_stack->in_motion = STANDARD_IN_MOTION_TIME + 5;
             entity_in_stack->moving_direction = DOWN; 
         }
         else
@@ -2394,6 +2394,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
                 createTrailingHitbox(current_start_coords, DOWN, NO_DIRECTION, TRAILING_HITBOX_TIME, getTileType(entity_in_stack->coords));
             }
             entity_in_stack->first_fall_already_done = true;
+            entity_in_stack->in_motion = STANDARD_IN_MOTION_TIME + 1;
             entity_in_stack->moving_direction = DOWN; 
         }
 
@@ -2724,6 +2725,7 @@ void editorMode(TickInput *tick_input)
             }
             else if ((tick_input->right_mouse_press || tick_input->h_press) && raycast_output.hit) 
             {
+                if (!intCoordsWithinLevelBounds(raycast_output.place_coords)) return;
                 if (isSource(editor_state.picked_tile)) 
                 {
                     setTileType(editor_state.picked_tile, raycast_output.place_coords); 
