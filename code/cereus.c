@@ -2367,7 +2367,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         Entity* entity_in_stack = getEntityPointer(current_start_coords);
         if (entity_in_stack->removed) return false; // should never happen, shouldn't have removed entity in the middle of a stack somewhere
         if (entity_in_stack->in_motion) return false; 
-        //if (entity_in_stack == &next_world_state.pack && !next_world_state.pack_detached) return false;
+        if (entity_in_stack == &next_world_state.pack && !next_world_state.pack_detached && stack_fall_index != 0) return false;
         if (entity_in_stack == &next_world_state.player && !next_world_state.player.hit_by_red) time_until_input = FALL_ANIMATION_TIME;
 
         // switch on if this is going to be first fall
