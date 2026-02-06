@@ -4001,7 +4001,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
                 {
                     Entity* e = &entity_group[group_index][entity_index];
-                    if (e->removed) continue;
                     if (findInSolvedLevels(e->unlocked_by) == -1) e->locked = true; 
                     else e->locked = false;
                 }
@@ -4010,13 +4009,20 @@ void gameFrame(double delta_time, TickInput tick_input)
             FOR(locked_block_index, MAX_ENTITY_INSTANCE_COUNT)
             {
                 Entity* lb = &next_world_state.locked_blocks[locked_block_index];
-                if (lb->removed) continue;
+                if (lb->id == -1) continue;
                 int32 find_result = findInSolvedLevels(lb->unlocked_by);
-                if (find_result != -1 && find_result != INT32_MAX)
+                if (find_result == INT32_MAX) continue;
+                if (find_result != -1)
                 {
 					// locked block to be unlocked
                     lb->removed = true;
                     setTileType(NONE, lb->coords);
+                    setTileDirection(NORTH, lb->coords);
+                }
+                else
+                {
+                    lb->removed = false;
+                    setTileType(LOCKED_BLOCK, lb->coords);
                     setTileDirection(NORTH, lb->coords);
                 }
             }
