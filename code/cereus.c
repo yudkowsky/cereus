@@ -3835,10 +3835,10 @@ void gameFrame(double delta_time, TickInput tick_input)
             entity_to_fall_after_blue_not_blue_turn_timer--;
         }
 
-        // detach or reattach pack
+        // pack detach logic
         TileType tile_behind_player = getTileType(getNextCoords(player->coords, oppositeDirection(player->direction)));
         if (!next_world_state.pack_detached && pack_intermediate_states_timer == 0 && tile_behind_player != PACK) next_world_state.pack_detached = true;
-        if (next_world_state.pack_detached && tile_behind_player == PACK) next_world_state.pack_detached = false;
+        else if (next_world_state.pack_detached && tile_behind_player == PACK) next_world_state.pack_detached = false;
 
         // do animations
 		for (int animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
@@ -4016,8 +4016,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                 {
 					// locked block to be unlocked
                     lb->removed = true;
-                    setTileType(NONE, lb->coords);
-                    setTileDirection(NORTH, lb->coords);
+                    if (getTileType(lb->coords) == LOCKED_BLOCK)
+                    {
+                        setTileType(NONE, lb->coords);
+                        setTileDirection(NORTH, lb->coords);
+                    }
                 }
                 else
                 {
