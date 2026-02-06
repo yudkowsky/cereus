@@ -7,6 +7,10 @@
 #undef VOID
 #endif
 
+#define MAX_UNDO_DELTAS 4096
+#define MAX_UNDO_ACTIONS 512
+#define MAX_LEVEL_CHANGES 64
+
 typedef enum 
 {
 	SPRITE_2D,
@@ -347,7 +351,6 @@ typedef struct WorldState
     Entity locked_blocks[64];
     Entity reset_blocks[64];
 
-    bool pack_detached;
     char level_name[64];
 
 	char solved_levels[64][64]; // TODO(spike): make this enum? after finalised level names, so don't need to change at two places? maybe this is too late for this, but need to figure something out here
@@ -411,7 +414,7 @@ typedef struct LaserColor
 }
 LaserColor;
 
-// fill with 0 width
+// assumes 0 width
 typedef struct LaserBuffer
 {
     Vec3 start_coords;
@@ -421,23 +424,49 @@ typedef struct LaserBuffer
 }
 LaserBuffer;
 
-/*
-typedef enum DeltaType
-{
-    DELTA_NORMAL,
-    DELTA_LEVEL_CHANGE
-}
-DeltaType;
+// difference encoded undo buffer
 
-typedef struct EntityDelta
+typedef struct UndoEntityDelta
 {
     int32 id;
     Int3 old_coords;
     Direction old_direction;
+    bool was_removed;
 }
-EntityDelta;
-*/
+UndoEntityDelta;
 
+typedef struct UndoActionHeader
+{
+	uint8 entity_count;
+    uint32 delta_start_pos;
+    bool level_changed;
+}
+UndoActionHeader;
 
+typedef struct UndoLevelChange
+{
+    char from_level[64];
+    bool remove_from_solved;
+}
+UndoLevelChange;
 
+typedef struct UndoBuffer
+{
+    // entity deltas (circular)
+    UndoEntityDelta deltas[MAX_UNDO_DELTAS];
+    uint32 delta_write_pos;
+    uint32 delta_count;
 
+    // action headers (circular)
+    UndoActionHeader headers[MAX_UNDO_ACTIONS];
+    uint32 header_write_pos;
+    uint32 header_count;
+    uint32 oldest_action_index;
+
+    // level changes (sparse)
+    UndoLevelChange level_changes[MAX_LEVEL_CHANGES];
+    uint8 level_change_indices[MAX_UNDO_ACTIONS];
+    uint32 level_change_write_pos;
+    uint32 level_change_count;
+}
+UndoBuffer;

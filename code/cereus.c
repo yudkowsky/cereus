@@ -69,9 +69,9 @@ const int32 ID_OFFSET_BOX     	   = 100 * 1;
 const int32 ID_OFFSET_MIRROR  	   = 100 * 2;
 const int32 ID_OFFSET_GLASS 	   = 100 * 3;
 const int32 ID_OFFSET_SOURCE  	   = 100 * 4;
-const int32 ID_OFFSET_WIN_BLOCK    = 100 * 5;
-const int32 ID_OFFSET_LOCKED_BLOCK = 100 * 6;
-const int32 ID_OFFSET_RESET_BLOCK  = 100 * 7;
+const int32 ID_OFFSET_WIN_BLOCK    = 100 * 12;
+const int32 ID_OFFSET_LOCKED_BLOCK = 100 * 13;
+const int32 ID_OFFSET_RESET_BLOCK  = 100 * 14;
 
 const int32 FONT_FIRST_ASCII = 32;
 const int32 FONT_LAST_ASCII = 126;
@@ -125,6 +125,7 @@ Vec2 debug_text_coords = {0};
 
 // stuff from worldstate
 bool in_overworld = false;
+bool pack_detached = false;
 
 bool player_will_fall_next_turn = false;
 
@@ -373,6 +374,33 @@ TileType getTileType(Int3 coords)
     return next_world_state.buffer[coordsToBufferIndexType(coords)]; 
 }
 
+TileType getTileTypeFromId(int32 id)
+{
+    int32 check = (id / 100 * 100);
+    if (check >= ID_OFFSET_SOURCE && check < ID_OFFSET_WIN_BLOCK)
+    {
+        Color source_color = (id - ID_OFFSET_SOURCE) / 100;
+        switch (source_color)
+        {
+            case RED: return SOURCE_RED;
+            case GREEN: return SOURCE_RED;
+            case BLUE: return SOURCE_RED;
+            case MAGENTA: return SOURCE_RED;
+            case YELLOW: return SOURCE_RED;
+            case CYAN: return SOURCE_RED;
+            case WHITE: return SOURCE_RED;
+            default: return NONE;
+        }
+    }
+    else if (check == ID_OFFSET_BOX) 		  return BOX;
+    else if (check == ID_OFFSET_MIRROR) 	  return MIRROR;
+    else if (check == ID_OFFSET_GLASS) 	 	  return GLASS;
+    else if (check == ID_OFFSET_WIN_BLOCK) 	  return WIN_BLOCK;
+    else if (check == ID_OFFSET_LOCKED_BLOCK) return LOCKED_BLOCK;
+    else if (check == ID_OFFSET_RESET_BLOCK)  return RESET_BLOCK;
+    else return NONE;
+}
+
 Direction getTileDirection(Int3 coords) 
 {
     return next_world_state.buffer[coordsToBufferIndexDirection(coords)]; 
@@ -503,15 +531,30 @@ int32 getEntityCount(Entity *entity_group)
     return count;
 }
 
-int32 entityIdOffset(Entity *entity)
+int32 sourceColorIdOffset(Color color)
+{
+    switch (color)
+    {
+        case RED: 	  return RED * 100; 
+        case GREEN:   return GREEN * 100;
+        case BLUE: 	  return BLUE * 100;
+        case MAGENTA: return MAGENTA * 100;
+        case YELLOW:  return YELLOW * 100;
+        case CYAN: 	  return CYAN * 100;
+        case WHITE:   return WHITE * 100;
+        default: return 0;
+    }
+}
+
+int32 entityIdOffset(Entity *entity, Color color)
 {
     if 		(entity == next_world_state.boxes)    	   return ID_OFFSET_BOX;
     else if (entity == next_world_state.mirrors)  	   return ID_OFFSET_MIRROR;
     else if (entity == next_world_state.glass_blocks)  return ID_OFFSET_GLASS;
-    else if (entity == next_world_state.sources)  	   return ID_OFFSET_SOURCE;
     else if (entity == next_world_state.win_blocks)    return ID_OFFSET_WIN_BLOCK;
     else if (entity == next_world_state.locked_blocks) return ID_OFFSET_LOCKED_BLOCK;
     else if (entity == next_world_state.reset_blocks)  return ID_OFFSET_RESET_BLOCK;
+    else if (entity == next_world_state.sources)  	   return ID_OFFSET_SOURCE + sourceColorIdOffset(color);
     return 0;
 }
 
@@ -592,8 +635,8 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
         entity_group[entity_index].position_norm = intCoordsToNorm(coords); 
         entity_group[entity_index].direction = direction;
         entity_group[entity_index].rotation_quat = directionToQuaternion(direction, true);
-        entity_group[entity_index].id = entity_index + entityIdOffset(entity_group);
         entity_group[entity_index].color = color;
+        entity_group[entity_index].id = entity_index + entityIdOffset(entity_group, color);
         setTileDirection(direction, coords);
         return entity_group[entity_index].id;
     }
@@ -1565,7 +1608,7 @@ void doFailedWalkAnimations()
         createFailedWalkAnimation(intCoordsToNorm(current_coords), intCoordsToNorm(getNextCoords(current_coords, next_world_state.player.direction)), &getEntityPointer(current_coords)->position_norm, getEntityPointer(current_coords)->id);
         current_coords = getNextCoords(current_coords, UP);
     }
-    if (!next_world_state.pack_detached) createFailedWalkAnimation(intCoordsToNorm(next_world_state.pack.coords), intCoordsToNorm(next_world_state.player.coords), &next_world_state.pack.position_norm, PACK_ID);
+    if (!pack_detached) createFailedWalkAnimation(intCoordsToNorm(next_world_state.pack.coords), intCoordsToNorm(next_world_state.player.coords), &next_world_state.pack.position_norm, PACK_ID);
 
     next_world_state.player.moving_direction = NO_DIRECTION;
 }
@@ -2367,7 +2410,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         Entity* entity_in_stack = getEntityPointer(current_start_coords);
         if (entity_in_stack->removed) return false; // should never happen, shouldn't have removed entity in the middle of a stack somewhere
         if (entity_in_stack->in_motion) return false; 
-        if (entity_in_stack == &next_world_state.pack && !next_world_state.pack_detached && stack_fall_index != 0) return false;
+        if (entity_in_stack == &next_world_state.pack && !pack_detached && stack_fall_index != 0) return false;
         if (entity_in_stack == &next_world_state.player && !next_world_state.player.hit_by_red) time_until_input = FALL_ANIMATION_TIME;
 
         // switch on if this is going to be first fall
@@ -2527,7 +2570,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
     createTrailingHitbox(player->coords, input_direction, NO_DIRECTION, trailing_hitbox_time, PLAYER);
 
     // move pack also maybe
-    if (next_world_state.pack_detached) 
+    if (pack_detached) 
     {
         setTileType(NONE, player->coords);
         setTileDirection(NORTH, player->coords);
@@ -2599,7 +2642,7 @@ bool calculateGhosts()
     }
     player_ghost_coords = getNextCoords(current_coords, oppositeDirection(current_direction));
     player_ghost_direction = current_direction;
-    if (!next_world_state.pack_detached) 
+    if (!pack_detached) 
     {
         pack_ghost_coords = getNextCoords(player_ghost_coords, oppositeDirection(current_direction));
         pack_ghost_direction = current_direction;
@@ -2965,7 +3008,7 @@ void gameInitialiseState()
             entity_group[count].direction = next_world_state.buffer[buffer_index + 1]; 
             entity_group[count].rotation_quat = directionToQuaternion(entity_group[count].direction, true);
             entity_group[count].color = getEntityColor(entity_group[count].coords);
-            entity_group[count].id = getEntityCount(entity_group) + entityIdOffset(entity_group);
+            entity_group[count].id = getEntityCount(entity_group) + entityIdOffset(entity_group, entity_group[count].color);
         	entity_group[count].removed = false;
             entity_group = 0;
         }
@@ -3167,7 +3210,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 player->rotation_quat = directionToQuaternion(player_ghost_direction, true);
                                 setTileType(PLAYER, player_ghost_coords);
                                 setTileDirection(player_ghost_direction, player_ghost_coords);
-                                if (!next_world_state.pack_detached)
+                                if (!pack_detached)
                                 {
                                     Int3 pack_coords = getNextCoords(player_ghost_coords, oppositeDirection(pack_ghost_direction));
                                     setTileType(NONE, pack->coords);
@@ -3278,7 +3321,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 if (!player->hit_by_blue)
                                 {
                                     doFallingObjects(animations_on);
-                                    if (next_world_state.pack_detached) doFallingEntity(pack, animations_on);
+                                    if (pack_detached) doFallingEntity(pack, animations_on);
                                     doHeadMovement(input_direction, animations_on, 1);
                                 }
 
@@ -3286,7 +3329,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 player->coords = next_player_coords;
                                 setTileType(PLAYER, player->coords);	
 
-                                if (!next_world_state.pack_detached)
+                                if (!pack_detached)
                                 {
                                     setTileType(NONE, pack->coords);
                                     pack->coords = getNextCoords(next_player_coords, oppositeDirection(input_direction));
@@ -3348,7 +3391,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 player->in_motion = CLIMB_ANIMATION_TIME;
                                 player->moving_direction = UP;
 
-                                if (!next_world_state.pack_detached)
+                                if (!pack_detached)
                                 {
                                     setTileType(NONE, pack->coords);
                                     setTileDirection(NORTH, pack->coords);
@@ -3393,7 +3436,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         int32 clockwise_calculation = player->direction - input_direction;
                         if (clockwise_calculation == -1 || clockwise_calculation == 3) clockwise = true;
 
-                        if (next_world_state.pack_detached)
+                        if (pack_detached)
                         {
                             // if pack detached, always allow turn
                             if (isPushable(getTileType(getNextCoords(player->coords, UP)))) 
@@ -3548,7 +3591,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     // backwards movement: allow only when climbing down a ladder. right now just move, and let player fall (functionally the same, but animation is goofy)
                     Direction backwards_direction = oppositeDirection(player->direction);
                     Int3 coords_below = getNextCoords(player->coords, DOWN);
-					if (getTileType(coords_below) == LADDER && getTileDirection(coords_below) == input_direction && (next_world_state.pack_detached || (!next_world_state.pack_detached && getTileType(getNextCoords(pack->coords, DOWN)) == NONE)))
+					if (getTileType(coords_below) == LADDER && getTileDirection(coords_below) == input_direction && (pack_detached || (!pack_detached && getTileType(getNextCoords(pack->coords, DOWN)) == NONE)))
                     {
                         bool can_move = false;
                         bool do_push = false;
@@ -3572,7 +3615,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             }
                             if (!player->hit_by_blue) doHeadMovement(backwards_direction, true, MOVE_OR_PUSH_ANIMATION_TIME);
 		
-                            if (!next_world_state.pack_detached)
+                            if (!pack_detached)
                             {
                                 setTileType(NONE, pack->coords);
                                 setTileDirection(NORTH, pack->coords);
@@ -3605,7 +3648,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             player->moving_direction = backwards_direction;
 
                             player->first_fall_already_done = true;
-                            if (!next_world_state.pack_detached) pack->first_fall_already_done = true;
+                            if (!pack_detached) pack->first_fall_already_done = true;
 
                             recordStateForUndo();
                             time_until_input = MOVE_OR_PUSH_ANIMATION_TIME;
@@ -3669,7 +3712,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             if (!player->hit_by_red)
             {
-                if (!next_world_state.pack_detached)
+                if (!pack_detached)
                 {
                     if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) player_will_fall_next_turn = true; 
                     else player_will_fall_next_turn = false;
@@ -3693,7 +3736,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 player_will_fall_next_turn = false;
                 // red, so pack only falls if is detached from player
-                if (next_world_state.pack_detached)
+                if (pack_detached)
                 {
                     doFallingEntity(pack, true);
                 }
@@ -3794,7 +3837,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     player->in_motion = CLIMB_ANIMATION_TIME;
                     player->moving_direction = UP;
 
-                    if (!next_world_state.pack_detached)
+                    if (!pack_detached)
                     {
                         setTileType(NONE, pack->coords);
                         setTileDirection(NORTH, pack->coords);
@@ -3837,8 +3880,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // pack detach logic
         TileType tile_behind_player = getTileType(getNextCoords(player->coords, oppositeDirection(player->direction)));
-        if (!next_world_state.pack_detached && pack_intermediate_states_timer == 0 && tile_behind_player != PACK) next_world_state.pack_detached = true;
-        else if (next_world_state.pack_detached && tile_behind_player == PACK) next_world_state.pack_detached = false;
+        if (!pack_detached && pack_intermediate_states_timer == 0 && tile_behind_player != PACK) pack_detached = true;
+        else if (pack_detached && tile_behind_player == PACK) pack_detached = false;
 
         // do animations
 		for (int animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
@@ -3885,7 +3928,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 		if (calculateGhosts())
         {
             do_player_ghost = true;
-            if (!next_world_state.pack_detached) do_pack_ghost = true;
+            if (!pack_detached) do_pack_ghost = true;
         }
 
         // delete player / pack if above void
@@ -3893,7 +3936,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             if ((getTileType(getNextCoords(player->coords, DOWN)) == VOID || getTileType(getNextCoords(player->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PLAYER_ID)) player->removed = true;
         }
-        if (next_world_state.pack_detached)
+        if (pack_detached)
         {
             if (!player->hit_by_blue)
             {
@@ -3912,7 +3955,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_input == 0))
         {
             Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
-            if (!next_world_state.pack_detached && !wb->locked)
+            if (!pack_detached && !wb->locked)
             {
                 if (wb->next_level[0] != 0)
                 {
@@ -4005,14 +4048,13 @@ void gameFrame(double delta_time, TickInput tick_input)
                     else e->locked = false;
                 }
             }
-            // similar code for locked_blocks
             FOR(locked_block_index, MAX_ENTITY_INSTANCE_COUNT)
             {
                 Entity* lb = &next_world_state.locked_blocks[locked_block_index];
                 if (lb->id == -1) continue;
                 int32 find_result = findInSolvedLevels(lb->unlocked_by);
                 if (find_result == INT32_MAX) continue;
-                if (find_result != -1)
+                if (find_result != -1 && !lb->removed)
                 {
 					// locked block to be unlocked
                     lb->removed = true;
@@ -4022,7 +4064,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         setTileDirection(NORTH, lb->coords);
                     }
                 }
-                else
+                else if (find_result == -1 && lb->removed)
                 {
                     lb->removed = false;
                     setTileType(LOCKED_BLOCK, lb->coords);
