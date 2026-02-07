@@ -2664,12 +2664,6 @@ void initUndoBuffer()
     memset(undo_buffer.level_change_indices, 0xFF, sizeof(undo_buffer.level_change_indices));
 }
 
-bool checkForDelta(Entity* old_e, Entity* new_e)
-{
-    if (!int3IsEqual(old_e->coords, new_e->coords) || old_e->direction != new_e->direction || old_e->removed != new_e->removed) return true;
-    else return false;
-}
-
 // writes one delta into the circular buffer
 void recordEntityDelta(Entity* e)
 {
@@ -2715,34 +2709,25 @@ void recordActionForUndo(WorldState* old_state)
     entity_count += 2;
 
 	// other entities
-    Entity* old_groups[7] = { old_state->boxes, old_state->mirrors, old_state->glass_blocks, old_state->sources, old_state->win_blocks, old_state->locked_blocks, old_state->reset_blocks };
-    Entity* new_groups[7] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.glass_blocks, next_world_state.sources, next_world_state.win_blocks, next_world_state.locked_blocks, next_world_state.reset_blocks };
+    Entity* groups[7] = { old_state->boxes, old_state->mirrors, old_state->glass_blocks, old_state->sources, old_state->win_blocks, old_state->locked_blocks, old_state->reset_blocks };
     FOR(group_index, 7)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            Entity* old_e = &old_groups[group_index][entity_index];
-            Entity* new_e = &new_groups[group_index][entity_index];
+            Entity* e = &groups[group_index][entity_index];
+            if (e->id == -1) continue;
 
-            if (old_e->id == -1 && new_e->id == -1) continue;
-
-            if (checkForDelta(old_e, new_e))
-            {
-                recordEntityDelta(old_e);
-                entity_count++;
-            }
+            recordEntityDelta(e);
+            entity_count++;
         }
     }
 
-    if (entity_count > 0)
-    {
-        undo_buffer.headers[header_index].entity_count = (uint8)entity_count;
-        undo_buffer.headers[header_index].delta_start_pos = delta_start;
-        undo_buffer.headers[header_index].level_changed = false;
-        undo_buffer.level_change_indices[header_index] = 0xFF;
-        undo_buffer.header_write_pos = (header_index + 1) % MAX_UNDO_ACTIONS;
-        undo_buffer.header_count++;
-    }
+    undo_buffer.headers[header_index].entity_count = (uint8)entity_count;
+    undo_buffer.headers[header_index].delta_start_pos = delta_start;
+    undo_buffer.headers[header_index].level_changed = false;
+    undo_buffer.level_change_indices[header_index] = 0xFF;
+    undo_buffer.header_write_pos = (header_index + 1) % MAX_UNDO_ACTIONS;
+    undo_buffer.header_count++;
 
     restart_last_turn = false;
 }
@@ -2836,35 +2821,6 @@ void recordLevelChangeForUndo(char* current_level_name, bool level_was_just_solv
     restart_last_turn = false;
 }
 
-/*
-void applyEntityDelta(UndoEntityDelta* delta)
-{
-    Entity* e = getEntityFromId(delta->id);
-    if (!e) return;
-
-    // clear tile at current position
-    if (!e->removed)
-    {
-        setTileType(NONE, e->coords);
-        setTileDirection(NORTH, e->coords);
-    }
-
-    // restore old state
-    e->coords = delta->old_coords;
-    e->position_norm = intCoordsToNorm(e->coords);
-    e->direction = delta->old_direction;
-    e->rotation_quat = directionToQuaternion(e->direction, true);
-    e->removed = delta->was_removed;
-
-    if (!delta->was_removed)
-    {
-        TileType type = getTileTypeFromId(delta->id);
-        setTileType(type, delta->old_coords);
-        setTileDirection(delta->old_direction, delta->old_coords);
-    }
-}
-*/
-
 bool performUndo()
 {
     if (undo_buffer.header_count == 0) return false;
@@ -2955,7 +2911,6 @@ bool performUndo()
     // clear animations + trailing hitboxes
     memset(animations, 0, sizeof(animations));
     memset(trailing_hitboxes, 0, sizeof(trailing_hitboxes));
-
 	// sync worldstate
     world_state = next_world_state;
 
@@ -3109,7 +3064,11 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
     changeMoving(player);
     changeMoving(pack);
 
-    if (record_for_undo) recordActionForUndo(&world_state);
+    if (record_for_undo)
+    {
+        pending_undo_record = true;
+        pending_undo_snapshot = world_state;
+    }
 }
 
 void updatePackDetached()
@@ -3443,9 +3402,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 if (performUndo())
                 {
-                    Int3 pack_coords = next_world_state.pack.coords;
-                    Int3 behind_player = getNextCoords(next_world_state.player.coords, oppositeDirection(next_world_state.player.direction));
-
                     updatePackDetached();
                     //resetStandardVisuals();
                 }
@@ -3498,7 +3454,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                         {
                             if (!int3IsEqual(player_ghost_coords, player->coords))
                             {
-								recordActionForUndo(&world_state);
+                                pending_undo_record = true;
+                                pending_undo_snapshot = world_state;
 
                                 setTileType(NONE, player->coords);
                                 setTileDirection(NORTH, player->coords);
@@ -3708,7 +3665,9 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     pack->moving_direction = UP;
                                 }
 
-                                recordActionForUndo(&world_state);
+                                pending_undo_record = true;
+                                pending_undo_snapshot = world_state;
+
                                 time_until_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
                             }
                             else
@@ -3752,7 +3711,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             setTileDirection(player->direction, player->coords);
                             player->moving_direction = NO_DIRECTION;
 
-                            recordActionForUndo(&world_state);
+                            pending_undo_record = true;
+                            pending_undo_snapshot = world_state;
                         }
                         else
                         {
@@ -3950,7 +3910,9 @@ void gameFrame(double delta_time, TickInput tick_input)
                             player->first_fall_already_done = true;
                             if (!pack_detached) pack->first_fall_already_done = true;
 
-                            recordActionForUndo(&world_state);
+                            pending_undo_record = true;
+                            pending_undo_snapshot = world_state;
+
                             time_until_input = MOVE_OR_PUSH_ANIMATION_TIME;
                         }
                     }
@@ -4321,7 +4283,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                     setTileDirection(ri.start_direction, ri.start_coords);
                 }
             }
-            recordActionForUndo(&world_state);
+
+            pending_undo_record = true;
+            pending_undo_snapshot = world_state;
+
             time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
         }
 
@@ -4390,6 +4355,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                 camera_screen_offset.z = screen_offset_z; 
                 camera.coords.z += delta * OVERWORLD_SCREEN_SIZE_Z;
             }
+        }
+
+        if (pending_undo_record)
+        {
+            pending_undo_record = false;
+            recordActionForUndo(&pending_undo_snapshot);
         }
 
         // finished updating state
@@ -4490,6 +4461,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // display level name
 		drawDebugText(next_world_state.level_name);
 
+        /*
 		char pack_text[256] = {0};
         snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, detached: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack_detached);
         drawDebugText(pack_text);
@@ -4497,6 +4469,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         char player_text[256] = {0};
         snprintf(player_text, sizeof(player_text), "player info: coords: %d, %d, %d", player->coords.x, player->coords.y, player->coords.z);
         drawDebugText(player_text);
+        */
 
         // box in_motion info
         /*
