@@ -54,8 +54,6 @@ const int32 MAX_TRAILING_HITBOX_COUNT = 16;
 const int32 MAX_LEVEL_COUNT = 64;
 const int32 MAX_RESET_COUNT = 16;
 
-const int32 UNDO_BUFFER_SIZE = 128; // remember to modify undo_buffer
-
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
 const Int3 AXIS_Z = { 0, 0, 1 };
@@ -110,9 +108,10 @@ AssetToLoad assets_to_load[1024] = {0};
 WorldState world_state = {0};
 WorldState next_world_state = {0};
 
-WorldState undo_buffer[128] = {0};
-int32 undo_buffer_position = 0;
+UndoBuffer undo_buffer = {0};
 bool restart_last_turn = false;
+bool pending_undo_record = false;
+WorldState pending_undo_snapshot = {0};
 
 Animation animations[32];
 int32 time_until_input = 0;
@@ -376,19 +375,21 @@ TileType getTileType(Int3 coords)
 
 TileType getTileTypeFromId(int32 id)
 {
+    if (id == PLAYER_ID) return PLAYER;
+    if (id == PACK_ID) return PACK;
     int32 check = (id / 100 * 100);
     if (check >= ID_OFFSET_SOURCE && check < ID_OFFSET_WIN_BLOCK)
     {
         Color source_color = (id - ID_OFFSET_SOURCE) / 100;
         switch (source_color)
         {
-            case RED: return SOURCE_RED;
-            case GREEN: return SOURCE_RED;
-            case BLUE: return SOURCE_RED;
-            case MAGENTA: return SOURCE_RED;
-            case YELLOW: return SOURCE_RED;
-            case CYAN: return SOURCE_RED;
-            case WHITE: return SOURCE_RED;
+            case RED: 	  return SOURCE_RED;
+            case GREEN:   return SOURCE_GREEN;
+            case BLUE:    return SOURCE_BLUE;
+            case MAGENTA: return SOURCE_MAGENTA;
+            case YELLOW:  return SOURCE_YELLOW;
+            case CYAN: 	  return SOURCE_CYAN;
+            case WHITE:   return SOURCE_WHITE;
             default: return NONE;
         }
     }
@@ -468,8 +469,8 @@ Entity* getEntityFromId(int32 id)
         int32 switch_value =  ((id / 100) * 100);
         if 		(switch_value == ID_OFFSET_BOX)    		 entity_group = next_world_state.boxes; 
         else if (switch_value == ID_OFFSET_MIRROR) 		 entity_group = next_world_state.mirrors;
-        else if (switch_value == ID_OFFSET_GLASS) 	 entity_group = next_world_state.glass_blocks;
-        else if (switch_value == ID_OFFSET_SOURCE) 		 entity_group = next_world_state.sources;
+        else if (switch_value == ID_OFFSET_GLASS) 	 	 entity_group = next_world_state.glass_blocks;
+        else if (switch_value >= ID_OFFSET_SOURCE && switch_value < ID_OFFSET_WIN_BLOCK) entity_group = next_world_state.sources;
         else if (switch_value == ID_OFFSET_WIN_BLOCK) 	 entity_group = next_world_state.win_blocks;
         else if (switch_value == ID_OFFSET_LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
         else if (switch_value == ID_OFFSET_RESET_BLOCK)  entity_group = next_world_state.reset_blocks;
@@ -871,7 +872,7 @@ void loadResetBlockInfo(FILE* file)
 
                     Entity* reset_e = getEntityPointer(current_entity_coords);
                     if (reset_e != 0) rb->reset_info[reset_entity_index].id = reset_e->id;
-                    else			  rb->reset_info[reset_entity_index].id = -2;
+                    else			  rb->reset_info[reset_entity_index].id = -1;
                     rb->reset_info[reset_entity_index].start_coords = reset_start_coords;
                     rb->reset_info[reset_entity_index].start_type = reset_entity_type;
                     rb->reset_info[reset_entity_index].start_direction = reset_entity_direction;
@@ -2343,16 +2344,7 @@ void updateLaserBuffer(void)
     }
 }
 
-// UNDO / RESTART
-
-void recordStateForUndo()
-{
-    undo_buffer[undo_buffer_position] = world_state;
-    undo_buffer_position = (undo_buffer_position + 1) % UNDO_BUFFER_SIZE;
-
-    restart_last_turn = false; // if player submits something to undo buffer, she must have done something such that we no longer have restarted on last turn.
-}
-
+/*
 void resetVisuals(Entity* entity)
 {
     entity->position_norm = intCoordsToNorm(entity->coords);
@@ -2361,6 +2353,8 @@ void resetVisuals(Entity* entity)
 
 void resetStandardVisuals()
 {
+    resetVisuals(&next_world_state.player);
+    resetVisuals(&next_world_state.pack);
     Entity* entity_group[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.glass_blocks, next_world_state.sources };
     FOR(entity_group_index, 4)
     {
@@ -2371,24 +2365,8 @@ void resetStandardVisuals()
             resetVisuals(entity);
         }
     }
-    resetVisuals(&next_world_state.player);
-    resetVisuals(&next_world_state.pack);
 }
-
-void levelChangePrep(char next_level[64])
-{
-    if (!in_overworld && findInSolvedLevels(next_world_state.level_name) == -1)
-    {
-        addToSolvedLevels(next_world_state.level_name);
-        writeSolvedLevelsToFile();
-    }
-
-    if (strcmp(next_level, "overworld") == 0) in_overworld = true;
-    else in_overworld = false;
-
-    recordStateForUndo();
-    memset(animations, 0, sizeof(animations));
-}
+*/
 
 // FALLING LOGIC
 
@@ -2472,6 +2450,534 @@ void doFallingObjects(bool do_animation)
             }
         }
     }
+}
+
+// GHOSTS
+
+// returns true if player is able to try to tp (i.e. player is facing tw green beam). doesn't consider any obstructed tps.
+bool calculateGhosts()
+{
+    Entity* player = &next_world_state.player;
+
+    // render and calculate ghosts
+    bool facing_green = false;
+    switch (player->direction)
+    {
+        case NORTH: if (player->green_hit.south) facing_green = true; break;
+        case WEST:  if (player->green_hit.east)  facing_green = true; break;
+        case SOUTH: if (player->green_hit.north) facing_green = true; break;
+        case EAST:  if (player->green_hit.west)  facing_green = true; break;
+        case UP:    if (player->green_hit.down)  facing_green = true; break;
+        case DOWN:  if (player->green_hit.up)    facing_green = true; break;
+        default: break;
+    }
+    if (!facing_green) return false;
+
+    Int3 current_coords = player->coords; 
+    Direction current_direction = player->direction;
+    FOR(seek_index, MAX_LASER_TRAVEL_DISTANCE)
+    {
+        current_coords = getNextCoords(current_coords, current_direction);
+        TileType current_tile = getTileType(current_coords);
+        if (current_tile == MIRROR)
+        {
+            current_direction = getNextLaserDirectionMirror(current_direction, getTileDirection(current_coords));
+            continue;
+        }
+        if (current_tile != NONE) break;
+    }
+    player_ghost_coords = getNextCoords(current_coords, oppositeDirection(current_direction));
+    player_ghost_direction = current_direction;
+    if (!pack_detached) 
+    {
+        pack_ghost_coords = getNextCoords(player_ghost_coords, oppositeDirection(current_direction));
+        pack_ghost_direction = current_direction;
+    }
+    return true;
+}
+
+// TEXT HELPERS FOR EDIT_BUFFER
+
+void editAppendChar(char c)
+{
+    EditBuffer* buffer = &editor_state.edit_buffer; 
+    if (buffer->length >= 256 - 1) return; // keep space for null terminator
+    buffer->string[buffer->length++] = c;
+}
+
+void editBackspace()
+{
+    EditBuffer* buffer = &editor_state.edit_buffer;
+    if (buffer->length == 0) return;
+    buffer->length--;
+    buffer->string[buffer->length] = 0;
+}
+
+void updateTextInput(TickInput *input)
+{
+    for (int32 chars_typed_index = 0; chars_typed_index < input->text.count; chars_typed_index++)
+    {
+        uint32 codepoint = input->text.codepoints[chars_typed_index];
+        char c = (char)codepoint;
+        editAppendChar(c);
+    }
+    if (input->backspace_pressed_this_frame)
+    {
+        editBackspace();
+    }
+}
+
+int32 glyphSprite(char c)
+{
+    unsigned char uc = (unsigned char)c;
+    if (uc < FONT_FIRST_ASCII || uc > FONT_LAST_ASCII) uc = '?';
+    return (SpriteId)(uc - FONT_FIRST_ASCII);
+}
+
+// GAME INIT
+
+void gameInitializeState()
+{
+    Entity* player = &next_world_state.player;
+    Entity* pack = &next_world_state.pack;
+
+    // memset worldstate to 0 (with persistant level_name, and solved levels)
+    char persist_level_name[256] = {0};
+    char persist_solved_levels[64][64] = {0};
+    strcpy(persist_level_name, next_world_state.level_name);
+    memcpy(persist_solved_levels, next_world_state.solved_levels, sizeof(persist_solved_levels));
+
+    memset(&next_world_state, 0, sizeof(WorldState));
+    strcpy(next_world_state.level_name, persist_level_name);
+    memcpy(next_world_state.solved_levels, persist_solved_levels, sizeof(persist_solved_levels));
+
+    if (strcmp(next_world_state.level_name, "overworld") == 0) in_overworld = true;
+    else in_overworld = false;
+
+    // build level_path from level_name
+    char level_path[64] = {0};
+    buildLevelPathFromName(next_world_state.level_name, &level_path, false);
+    FILE* file = fopen(level_path, "rb+");
+    if (!file)
+    {
+        char msg[512];
+        char cwd[MAX_PATH];
+        GetCurrentDirectoryA(MAX_PATH, cwd);
+        sprintf(msg, "Failed to open:\n%s\n\nCWD: %s", level_path, cwd);
+        MessageBoxA(NULL, msg, "Error", MB_OK);
+        return;
+    }
+    loadBufferInfo(file);
+    fclose(file);
+
+    memset(next_world_state.boxes,    	   0, sizeof(next_world_state.boxes)); 
+    memset(next_world_state.mirrors,  	   0, sizeof(next_world_state.mirrors));
+    memset(next_world_state.glass_blocks,  0, sizeof(next_world_state.glass_blocks));
+    memset(next_world_state.sources,  	   0, sizeof(next_world_state.sources));
+    memset(next_world_state.win_blocks,    0, sizeof(next_world_state.win_blocks));
+    memset(next_world_state.locked_blocks, 0, sizeof(next_world_state.locked_blocks));
+    memset(next_world_state.reset_blocks,  0, sizeof(next_world_state.reset_blocks));
+    FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+    {
+        next_world_state.boxes[entity_index].id 		= -1;
+        next_world_state.mirrors[entity_index].id 		= -1;
+        next_world_state.glass_blocks[entity_index].id	= -1;
+        next_world_state.sources[entity_index].id		= -1;
+        next_world_state.win_blocks[entity_index].id	= -1;
+        next_world_state.locked_blocks[entity_index].id	= -1;
+        next_world_state.reset_blocks[entity_index].id	= -1;
+        FOR(to_reset_index, MAX_RESET_COUNT) next_world_state.reset_blocks[entity_index].reset_info[to_reset_index].id = -1;
+    }
+
+    Entity *entity_group = 0;
+    for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
+    {
+        TileType buffer_contents = next_world_state.buffer[buffer_index];
+        if 	    (buffer_contents == BOX)     	  entity_group = next_world_state.boxes;
+        else if (buffer_contents == MIRROR)  	  entity_group = next_world_state.mirrors;
+        else if (buffer_contents == GLASS)	 	  entity_group = next_world_state.glass_blocks;
+        else if (buffer_contents == WIN_BLOCK)    entity_group = next_world_state.win_blocks;
+        else if (buffer_contents == LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
+        else if (buffer_contents == RESET_BLOCK)  entity_group = next_world_state.reset_blocks;
+        else if (isSource(buffer_contents))  	  entity_group = next_world_state.sources;
+        if (entity_group != 0)
+        {
+            int32 count = getEntityCount(entity_group);
+            entity_group[count].coords = bufferIndexToCoords(buffer_index);
+            entity_group[count].position_norm = intCoordsToNorm(entity_group[count].coords);
+            entity_group[count].direction = next_world_state.buffer[buffer_index + 1]; 
+            entity_group[count].rotation_quat = directionToQuaternion(entity_group[count].direction, true);
+            entity_group[count].color = getEntityColor(entity_group[count].coords);
+            entity_group[count].id = getEntityCount(entity_group) + entityIdOffset(entity_group, entity_group[count].color);
+        	entity_group[count].removed = false;
+            entity_group = 0;
+        }
+        else if (next_world_state.buffer[buffer_index] == PLAYER) // special case for player, since there is only one
+        {
+            player->coords = bufferIndexToCoords(buffer_index);
+            player->position_norm = intCoordsToNorm(player->coords);
+            player->direction = next_world_state.buffer[buffer_index + 1];
+            player->rotation_quat = directionToQuaternion(player->direction, false);
+            player->id = PLAYER_ID;
+        }
+        else if (next_world_state.buffer[buffer_index] == PACK) // likewise special case for pack
+        {
+            pack->coords = bufferIndexToCoords(buffer_index);
+            pack->position_norm = intCoordsToNorm(pack->coords);
+            pack->direction = next_world_state.buffer[buffer_index + 1];
+            pack->rotation_quat = directionToQuaternion(pack->direction, false);
+            pack->id = PACK_ID;
+        }
+    }
+
+    file = fopen(level_path, "rb+");
+    camera = loadCameraInfo(file);
+    loadWinBlockPaths(file);
+    loadLockedInfoPaths(file);
+    loadResetBlockInfo(file);
+    fclose(file);
+
+    loadSolvedLevelsFromFile();
+
+    camera_screen_offset.x = (int32)(camera.coords.x / OVERWORLD_SCREEN_SIZE_X);
+    camera_screen_offset.z = (int32)(camera.coords.z / OVERWORLD_SCREEN_SIZE_Z);
+
+    Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera.yaw);
+    Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera.pitch);
+    camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
+    world_state = next_world_state;
+}
+
+void gameInitialize(char* level_name) 
+{	
+    // TODO(spike): panic if cannot open constructed level path (check if can open here before we pass on)
+    if (level_name == 0) strcpy(next_world_state.level_name, debug_level_name);
+    else strcpy(next_world_state.level_name, level_name);
+    gameInitializeState();
+}
+
+// UNDO / RESTART
+
+void initUndoBuffer()
+{
+    memset(&undo_buffer, 0, sizeof(UndoBuffer));
+    memset(undo_buffer.level_change_indices, 0xFF, sizeof(undo_buffer.level_change_indices));
+}
+
+bool checkForDelta(Entity* old_e, Entity* new_e)
+{
+    if (!int3IsEqual(old_e->coords, new_e->coords) || old_e->direction != new_e->direction || old_e->removed != new_e->removed) return true;
+    else return false;
+}
+
+// writes one delta into the circular buffer
+void recordEntityDelta(Entity* e)
+{
+    uint32 pos = undo_buffer.delta_write_pos;
+    undo_buffer.deltas[pos].id = e->id;
+    undo_buffer.deltas[pos].old_coords = e->coords;
+    undo_buffer.deltas[pos].old_direction = e->direction;
+    undo_buffer.deltas[pos].was_removed = e->removed;
+    undo_buffer.delta_write_pos = (pos + 1) % MAX_UNDO_DELTAS;
+    undo_buffer.delta_count++;
+}
+
+// called after a noraml (non-level-change) action
+// diffs world_state vs. next_world_state and stores deltas for every entity that changed
+void recordActionForUndo(WorldState* old_state)
+{
+	// evict oldest action if headers are full
+    if (undo_buffer.header_count >= MAX_UNDO_ACTIONS)
+    {
+        UndoActionHeader* oldest = &undo_buffer.headers[undo_buffer.oldest_action_index];
+        undo_buffer.delta_count -= oldest->entity_count;
+
+        // free level change slot if the oldest action had one
+        if (oldest->level_changed)
+        {
+            uint8 level_change_index = undo_buffer.level_change_indices[undo_buffer.oldest_action_index];
+            if (level_change_index != 0xFF)
+            {
+                undo_buffer.level_change_count--;
+            }
+        }
+        undo_buffer.level_change_indices[undo_buffer.oldest_action_index] = 0xFF;
+        undo_buffer.oldest_action_index = (undo_buffer.oldest_action_index + 1) % MAX_UNDO_ACTIONS;
+        undo_buffer.header_count--;
+    }
+
+    uint32 header_index = undo_buffer.header_write_pos;
+    uint32 delta_start = undo_buffer.delta_write_pos;
+    uint32 entity_count = 0;
+
+    recordEntityDelta(&old_state->player);
+    recordEntityDelta(&old_state->pack); // could potentially check on detach here, and then if detach only store if delta check is passed. if we need the deltas.
+    entity_count += 2;
+
+	// other entities
+    Entity* old_groups[7] = { old_state->boxes, old_state->mirrors, old_state->glass_blocks, old_state->sources, old_state->win_blocks, old_state->locked_blocks, old_state->reset_blocks };
+    Entity* new_groups[7] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.glass_blocks, next_world_state.sources, next_world_state.win_blocks, next_world_state.locked_blocks, next_world_state.reset_blocks };
+    FOR(group_index, 7)
+    {
+        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+        {
+            Entity* old_e = &old_groups[group_index][entity_index];
+            Entity* new_e = &new_groups[group_index][entity_index];
+
+            if (old_e->id == -1 && new_e->id == -1) continue;
+
+            if (checkForDelta(old_e, new_e))
+            {
+                recordEntityDelta(old_e);
+                entity_count++;
+            }
+        }
+    }
+
+    if (entity_count > 0)
+    {
+        undo_buffer.headers[header_index].entity_count = (uint8)entity_count;
+        undo_buffer.headers[header_index].delta_start_pos = delta_start;
+        undo_buffer.headers[header_index].level_changed = false;
+        undo_buffer.level_change_indices[header_index] = 0xFF;
+        undo_buffer.header_write_pos = (header_index + 1) % MAX_UNDO_ACTIONS;
+        undo_buffer.header_count++;
+    }
+
+    restart_last_turn = false;
+}
+
+// call before transitioning to a new level. stores a delta for every entity in the current level, plus the level change metadata
+void recordLevelChangeForUndo(char* current_level_name, bool level_was_just_solved)
+{
+	// evict oldest action if headers are full (TODO(spike): wrap into function)
+    if (undo_buffer.header_count >= MAX_UNDO_ACTIONS)
+    {
+        UndoActionHeader* oldest = &undo_buffer.headers[undo_buffer.oldest_action_index];
+        undo_buffer.delta_count -= oldest->entity_count;
+
+        // free level change slot if the oldest action had one
+        if (oldest->level_changed)
+        {
+            uint8 level_change_index = undo_buffer.level_change_indices[undo_buffer.oldest_action_index];
+            if (level_change_index != 0xFF)
+            {
+                undo_buffer.level_change_count--;
+            }
+        }
+        undo_buffer.level_change_indices[undo_buffer.oldest_action_index] = 0xFF;
+        undo_buffer.oldest_action_index = (undo_buffer.oldest_action_index + 1) % MAX_UNDO_ACTIONS;
+        undo_buffer.header_count--;
+    }
+
+    // evict oldest level change if level_changes array is full
+    if (undo_buffer.level_change_count >= MAX_LEVEL_CHANGES)
+    {
+        uint32 scan = undo_buffer.oldest_action_index;
+        for (uint32 header_index = 0; header_index < undo_buffer.header_count; header_index++)
+        {
+            uint32 index = (scan + header_index) % MAX_UNDO_ACTIONS;
+            if (undo_buffer.headers[index].level_changed)
+            {
+                for(uint32 up_to_header = 0; up_to_header < header_index; up_to_header++)
+                {
+                    uint32 evict_index = (scan + up_to_header) % MAX_UNDO_ACTIONS;
+                    undo_buffer.delta_count -= undo_buffer.headers[evict_index].entity_count;
+                    if (undo_buffer.headers[evict_index].level_changed)
+                    {
+                        undo_buffer.level_change_count--;
+                    }
+                    undo_buffer.level_change_indices[evict_index] = 0xFF;
+                    undo_buffer.header_count--;
+                }
+                undo_buffer.oldest_action_index = (scan + header_index + 1) % MAX_UNDO_ACTIONS;
+                break;
+            }
+        }
+    }
+
+    uint32 header_index = undo_buffer.header_write_pos;
+    uint32 delta_start = undo_buffer.delta_write_pos;
+    uint32 entity_count = 0;
+
+    // store all entities
+    recordEntityDelta(&next_world_state.player);
+    recordEntityDelta(&next_world_state.pack);
+    entity_count += 2;
+
+    Entity* groups[7] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.glass_blocks, next_world_state.sources, next_world_state.win_blocks, next_world_state.locked_blocks, next_world_state.reset_blocks };
+    FOR(group_index, 7)
+    {
+        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+        {
+            Entity* e = &groups[group_index][entity_index];
+            if (e->id == -1) continue;
+            recordEntityDelta(e);
+            entity_count++;
+        }
+    }
+
+    // write level change info
+    uint32 level_change_index = undo_buffer.level_change_write_pos;
+    memset(undo_buffer.level_changes[level_change_index].from_level, 0, 64);
+    strcpy(undo_buffer.level_changes[level_change_index].from_level, current_level_name);
+    undo_buffer.level_changes[level_change_index].remove_from_solved = level_was_just_solved;
+    undo_buffer.level_change_write_pos = (level_change_index + 1) % MAX_LEVEL_CHANGES;
+    undo_buffer.level_change_count++;
+
+    // write header
+    undo_buffer.headers[header_index].entity_count = (uint8)entity_count;
+    undo_buffer.headers[header_index].delta_start_pos = delta_start;
+    undo_buffer.headers[header_index].level_changed = true;
+    undo_buffer.level_change_indices[header_index] = (uint8)level_change_index;
+    undo_buffer.header_write_pos = (header_index + 1) % MAX_UNDO_ACTIONS;
+    undo_buffer.header_count++;
+
+    restart_last_turn = false;
+}
+
+/*
+void applyEntityDelta(UndoEntityDelta* delta)
+{
+    Entity* e = getEntityFromId(delta->id);
+    if (!e) return;
+
+    // clear tile at current position
+    if (!e->removed)
+    {
+        setTileType(NONE, e->coords);
+        setTileDirection(NORTH, e->coords);
+    }
+
+    // restore old state
+    e->coords = delta->old_coords;
+    e->position_norm = intCoordsToNorm(e->coords);
+    e->direction = delta->old_direction;
+    e->rotation_quat = directionToQuaternion(e->direction, true);
+    e->removed = delta->was_removed;
+
+    if (!delta->was_removed)
+    {
+        TileType type = getTileTypeFromId(delta->id);
+        setTileType(type, delta->old_coords);
+        setTileDirection(delta->old_direction, delta->old_coords);
+    }
+}
+*/
+
+bool performUndo()
+{
+    if (undo_buffer.header_count == 0) return false;
+
+	// get most recent action header
+    uint32 header_index = (undo_buffer.header_write_pos + MAX_UNDO_ACTIONS - 1) % MAX_UNDO_ACTIONS;
+    UndoActionHeader* header = &undo_buffer.headers[header_index];
+
+    /*
+    // TEMP DEBUG
+    char _dbg[64];
+    snprintf(_dbg, sizeof(_dbg), "undo: header_count=%d entity_count=%d", undo_buffer.header_count, header->entity_count);
+    drawDebugText(_dbg);
+    */
+
+    if (header->level_changed)
+    {
+        uint8 level_change_index = undo_buffer.level_change_indices[header_index];
+        UndoLevelChange* level_change = &undo_buffer.level_changes[level_change_index];
+
+        // reinitialize previous
+        gameInitialize(level_change->from_level);
+
+        // remove from solved levels if the level was just completed
+        if (level_change->remove_from_solved)
+        {
+            removeFromSolvedLevels(level_change->from_level);
+            writeSolvedLevelsToFile();
+        }
+    }
+
+    // pass 1: clear all current tiles
+    uint32 delta_pos = header->delta_start_pos;
+    FOR(entity_index, header->entity_count)
+    {
+        UndoEntityDelta* delta = &undo_buffer.deltas[delta_pos];
+        Entity* e = getEntityFromId(delta->id);
+        if (e && !e->removed)
+        {
+            setTileType(NONE, e->coords);
+            setTileDirection(NORTH, e->coords);
+        }
+        delta_pos = (delta_pos + 1) % MAX_UNDO_DELTAS;
+    }
+
+    // pass 2: restore all entities
+    delta_pos = header->delta_start_pos;
+    FOR(entity_index, header->entity_count)
+    {
+        UndoEntityDelta* delta = &undo_buffer.deltas[delta_pos];
+
+        /*
+        // TEMP DEBUG
+        char dbg[256];
+        snprintf(dbg, sizeof(dbg), "undo delta: id=%d coords=(%d,%d,%d) dir=%d removed=%d", 
+                 delta->id, delta->old_coords.x, delta->old_coords.y, delta->old_coords.z, 
+                 delta->old_direction, delta->was_removed);
+        drawDebugText(dbg);
+        // END TEMP DEBUG
+        */
+
+        Entity* e = getEntityFromId(delta->id);
+        if (e)
+        {
+            e->coords = delta->old_coords;
+            e->position_norm = intCoordsToNorm(e->coords);
+            e->direction = delta->old_direction;
+            e->rotation_quat = directionToQuaternion(e->direction, true);
+            e->removed = delta->was_removed;
+
+            if (!delta->was_removed)
+            {
+            	TileType type = getTileTypeFromId(delta->id);
+                setTileType(type, delta->old_coords);
+                setTileDirection(delta->old_direction, delta->old_coords);
+            }
+        }
+        delta_pos = (delta_pos + 1) % MAX_UNDO_DELTAS;
+    }
+
+    // rewind buffer positions
+    undo_buffer.delta_write_pos = header->delta_start_pos;
+    undo_buffer.delta_count -= header->entity_count;
+    undo_buffer.level_change_indices[header_index] = 0xFF;
+    undo_buffer.header_write_pos = header_index;
+    undo_buffer.header_count--;
+
+    // clear animations + trailing hitboxes
+    memset(animations, 0, sizeof(animations));
+    memset(trailing_hitboxes, 0, sizeof(trailing_hitboxes));
+
+	// sync worldstate
+    world_state = next_world_state;
+
+    return true;
+}
+
+void levelChangePrep(char next_level[64])
+{
+    bool level_was_just_solved = false;
+    if (!in_overworld && findInSolvedLevels(next_world_state.level_name) == -1)
+    {
+        addToSolvedLevels(next_world_state.level_name);
+        writeSolvedLevelsToFile();
+        level_was_just_solved = true;
+    }
+    
+    recordLevelChangeForUndo(next_world_state.level_name, level_was_just_solved);
+
+    if (strcmp(next_level, "overworld") == 0) in_overworld = true;
+    else in_overworld = false;
+
+    memset(animations, 0, sizeof(animations));
 }
 
 // HEAD ROTATION / MOVEMENT
@@ -2603,89 +3109,14 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
     changeMoving(player);
     changeMoving(pack);
 
-    if (record_for_undo) recordStateForUndo();
+    if (record_for_undo) recordActionForUndo(&world_state);
 }
 
-// GHOSTS
-
-// returns true if player is able to try to tp (i.e. player is facing tw green beam). doesn't consider any obstructed tps.
-bool calculateGhosts()
+void updatePackDetached()
 {
-    Entity* player = &next_world_state.player;
-
-    // render and calculate ghosts
-    bool facing_green = false;
-    switch (player->direction)
-    {
-        case NORTH: if (player->green_hit.south) facing_green = true; break;
-        case WEST:  if (player->green_hit.east)  facing_green = true; break;
-        case SOUTH: if (player->green_hit.north) facing_green = true; break;
-        case EAST:  if (player->green_hit.west)  facing_green = true; break;
-        case UP:    if (player->green_hit.down)  facing_green = true; break;
-        case DOWN:  if (player->green_hit.up)    facing_green = true; break;
-        default: break;
-    }
-    if (!facing_green) return false;
-
-    Int3 current_coords = player->coords; 
-    Direction current_direction = player->direction;
-    FOR(seek_index, MAX_LASER_TRAVEL_DISTANCE)
-    {
-        current_coords = getNextCoords(current_coords, current_direction);
-        TileType current_tile = getTileType(current_coords);
-        if (current_tile == MIRROR)
-        {
-            current_direction = getNextLaserDirectionMirror(current_direction, getTileDirection(current_coords));
-            continue;
-        }
-        if (current_tile != NONE) break;
-    }
-    player_ghost_coords = getNextCoords(current_coords, oppositeDirection(current_direction));
-    player_ghost_direction = current_direction;
-    if (!pack_detached) 
-    {
-        pack_ghost_coords = getNextCoords(player_ghost_coords, oppositeDirection(current_direction));
-        pack_ghost_direction = current_direction;
-    }
-    return true;
-}
-
-// TEXT HELPERS FOR EDIT_BUFFER
-
-void editAppendChar(char c)
-{
-    EditBuffer* buffer = &editor_state.edit_buffer; 
-    if (buffer->length >= 256 - 1) return; // keep space for null terminator
-    buffer->string[buffer->length++] = c;
-}
-
-void editBackspace()
-{
-    EditBuffer* buffer = &editor_state.edit_buffer;
-    if (buffer->length == 0) return;
-    buffer->length--;
-    buffer->string[buffer->length] = 0;
-}
-
-void updateTextInput(TickInput *input)
-{
-    for (int32 chars_typed_index = 0; chars_typed_index < input->text.count; chars_typed_index++)
-    {
-        uint32 codepoint = input->text.codepoints[chars_typed_index];
-        char c = (char)codepoint;
-        editAppendChar(c);
-    }
-    if (input->backspace_pressed_this_frame)
-    {
-        editBackspace();
-    }
-}
-
-int32 glyphSprite(char c)
-{
-    unsigned char uc = (unsigned char)c;
-    if (uc < FONT_FIRST_ASCII || uc > FONT_LAST_ASCII) uc = '?';
-    return (SpriteId)(uc - FONT_FIRST_ASCII);
+    TileType tile_behind_player = getTileType(getNextCoords(next_world_state.player.coords, oppositeDirection(next_world_state.player.direction)));
+    if (tile_behind_player == PACK) pack_detached = false;
+    else pack_detached = true;
 }
 
 // EDITOR
@@ -2926,7 +3357,7 @@ void editorMode(TickInput *tick_input)
                 {
                     levelChangePrep(wb->next_level);
                     time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
-                    gameInitialise(wb->next_level);
+                    gameInitialize(wb->next_level);
                     writeSolvedLevelsToFile();
                 }
             }
@@ -2934,127 +3365,7 @@ void editorMode(TickInput *tick_input)
     }
 }
 
-// GAME
-
-void gameInitialiseState()
-{
-    Entity* player = &next_world_state.player;
-    Entity* pack = &next_world_state.pack;
-
-    // memset worldstate to 0 (with persistant level_name, and solved levels)
-    char persist_level_name[256] = {0};
-    char persist_solved_levels[64][64] = {0};
-    strcpy(persist_level_name, next_world_state.level_name);
-    memcpy(persist_solved_levels, next_world_state.solved_levels, sizeof(persist_solved_levels));
-
-    memset(&next_world_state, 0, sizeof(WorldState));
-    strcpy(next_world_state.level_name, persist_level_name);
-    memcpy(next_world_state.solved_levels, persist_solved_levels, sizeof(persist_solved_levels));
-
-    if (strcmp(next_world_state.level_name, "overworld") == 0) in_overworld = true;
-    else in_overworld = false;
-
-    // build level_path from level_name
-    char level_path[64] = {0};
-    buildLevelPathFromName(next_world_state.level_name, &level_path, false);
-    FILE* file = fopen(level_path, "rb+");
-    if (!file)
-    {
-        char msg[512];
-        char cwd[MAX_PATH];
-        GetCurrentDirectoryA(MAX_PATH, cwd);
-        sprintf(msg, "Failed to open:\n%s\n\nCWD: %s", level_path, cwd);
-        MessageBoxA(NULL, msg, "Error", MB_OK);
-        return;
-    }
-    loadBufferInfo(file);
-    fclose(file);
-
-    memset(next_world_state.boxes,    	   0, sizeof(next_world_state.boxes)); 
-    memset(next_world_state.mirrors,  	   0, sizeof(next_world_state.mirrors));
-    memset(next_world_state.glass_blocks,  0, sizeof(next_world_state.glass_blocks));
-    memset(next_world_state.sources,  	   0, sizeof(next_world_state.sources));
-    memset(next_world_state.win_blocks,    0, sizeof(next_world_state.win_blocks));
-    memset(next_world_state.locked_blocks, 0, sizeof(next_world_state.locked_blocks));
-    memset(next_world_state.reset_blocks,  0, sizeof(next_world_state.reset_blocks));
-    FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
-    {
-        next_world_state.boxes[entity_index].id 		= -1;
-        next_world_state.mirrors[entity_index].id 		= -1;
-        next_world_state.glass_blocks[entity_index].id	= -1;
-        next_world_state.sources[entity_index].id		= -1;
-        next_world_state.win_blocks[entity_index].id	= -1;
-        next_world_state.locked_blocks[entity_index].id	= -1;
-        next_world_state.reset_blocks[entity_index].id	= -1;
-        FOR(to_reset_index, MAX_RESET_COUNT) next_world_state.reset_blocks[entity_index].reset_info[to_reset_index].id = -1;
-    }
-
-    Entity *entity_group = 0;
-    for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
-    {
-        TileType buffer_contents = next_world_state.buffer[buffer_index];
-        if 	    (buffer_contents == BOX)     	  entity_group = next_world_state.boxes;
-        else if (buffer_contents == MIRROR)  	  entity_group = next_world_state.mirrors;
-        else if (buffer_contents == GLASS)	 	  entity_group = next_world_state.glass_blocks;
-        else if (buffer_contents == WIN_BLOCK)    entity_group = next_world_state.win_blocks;
-        else if (buffer_contents == LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
-        else if (buffer_contents == RESET_BLOCK)  entity_group = next_world_state.reset_blocks;
-        else if (isSource(buffer_contents))  	  entity_group = next_world_state.sources;
-        if (entity_group != 0)
-        {
-            int32 count = getEntityCount(entity_group);
-            entity_group[count].coords = bufferIndexToCoords(buffer_index);
-            entity_group[count].position_norm = intCoordsToNorm(entity_group[count].coords);
-            entity_group[count].direction = next_world_state.buffer[buffer_index + 1]; 
-            entity_group[count].rotation_quat = directionToQuaternion(entity_group[count].direction, true);
-            entity_group[count].color = getEntityColor(entity_group[count].coords);
-            entity_group[count].id = getEntityCount(entity_group) + entityIdOffset(entity_group, entity_group[count].color);
-        	entity_group[count].removed = false;
-            entity_group = 0;
-        }
-        else if (next_world_state.buffer[buffer_index] == PLAYER) // special case for player, since there is only one
-        {
-            player->coords = bufferIndexToCoords(buffer_index);
-            player->position_norm = intCoordsToNorm(player->coords);
-            player->direction = next_world_state.buffer[buffer_index + 1];
-            player->rotation_quat = directionToQuaternion(player->direction, false);
-            player->id = PLAYER_ID;
-        }
-        else if (next_world_state.buffer[buffer_index] == PACK) // likewise special case for pack
-        {
-            pack->coords = bufferIndexToCoords(buffer_index);
-            pack->position_norm = intCoordsToNorm(pack->coords);
-            pack->direction = next_world_state.buffer[buffer_index + 1];
-            pack->rotation_quat = directionToQuaternion(pack->direction, false);
-            pack->id = PACK_ID;
-        }
-    }
-
-    file = fopen(level_path, "rb+");
-    camera = loadCameraInfo(file);
-    loadWinBlockPaths(file);
-    loadLockedInfoPaths(file);
-    loadResetBlockInfo(file);
-    fclose(file);
-
-    loadSolvedLevelsFromFile();
-
-    camera_screen_offset.x = (int32)(camera.coords.x / OVERWORLD_SCREEN_SIZE_X);
-    camera_screen_offset.z = (int32)(camera.coords.z / OVERWORLD_SCREEN_SIZE_Z);
-
-    Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera.yaw);
-    Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera.pitch);
-    camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
-    world_state = next_world_state;
-}
-
-void gameInitialise(char* level_name) 
-{	
-    // TODO(spike): panic if cannot open constructed level path (check if can open here before we pass on)
-    if (level_name == 0) strcpy(next_world_state.level_name, debug_level_name);
-    else strcpy(next_world_state.level_name, level_name);
-    gameInitialiseState();
-}
+// GAME LOGIC
 
 void gameFrame(double delta_time, TickInput tick_input)
 {	
@@ -3130,34 +3441,22 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             if (time_until_input == 0 && tick_input.z_press)
             {
-                // undo
-                int32 next_undo_buffer_position = 0;
-                if (undo_buffer_position != 0) next_undo_buffer_position = undo_buffer_position - 1;
-                else next_undo_buffer_position = UNDO_BUFFER_SIZE - 1;
-
-                if (undo_buffer[next_undo_buffer_position].player.id != 0) // check that there is anything in the buffer (using something that should never usually happen)
+                if (performUndo())
                 {
-                    char previous_level_name[256] = {0};
-                    strcpy(previous_level_name, next_world_state.level_name); 
+                    Int3 pack_coords = next_world_state.pack.coords;
+                    Int3 behind_player = getNextCoords(next_world_state.player.coords, oppositeDirection(next_world_state.player.direction));
 
-                    next_world_state = undo_buffer[next_undo_buffer_position];
-                   	memset(&undo_buffer[undo_buffer_position], 0, sizeof(WorldState));
-                    undo_buffer_position = next_undo_buffer_position;
-                    memset(animations, 0, sizeof(animations));
-
-                    if (strcmp(next_world_state.level_name, previous_level_name) != 0) gameInitialise(next_world_state.level_name);
-
-                    next_world_state = undo_buffer[next_undo_buffer_position];
-                    resetStandardVisuals();
+                    updatePackDetached();
+                    //resetStandardVisuals();
                 }
                 time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
             }
             if (time_until_input == 0 && tick_input.r_press)
             {
                 // restart
-                if (!restart_last_turn) recordStateForUndo();
+                if (!restart_last_turn) recordActionForUndo(&world_state);
                 memset(animations, 0, sizeof(animations));
-                gameInitialiseState();
+                gameInitializeState();
                 time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
                 restart_last_turn = true;
             }
@@ -3168,7 +3467,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 memcpy(save_solved_levels, next_world_state.solved_levels, sizeof(save_solved_levels));
                 levelChangePrep("overworld");
                 time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
-                gameInitialise("overworld");
+                gameInitialize("overworld");
                 memcpy(next_world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
                 writeSolvedLevelsToFile();
             }
@@ -3199,7 +3498,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         {
                             if (!int3IsEqual(player_ghost_coords, player->coords))
                             {
-								recordStateForUndo();
+								recordActionForUndo(&world_state);
 
                                 setTileType(NONE, player->coords);
                                 setTileDirection(NORTH, player->coords);
@@ -3409,7 +3708,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     pack->moving_direction = UP;
                                 }
 
-                                recordStateForUndo();
+                                recordActionForUndo(&world_state);
                                 time_until_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
                             }
                             else
@@ -3453,7 +3752,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             setTileDirection(player->direction, player->coords);
                             player->moving_direction = NO_DIRECTION;
 
-                            recordStateForUndo();
+                            recordActionForUndo(&world_state);
                         }
                         else
                         {
@@ -3543,6 +3842,9 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                                 if (allow_turn_orthogonal)
                                 {
+                                    pending_undo_record = true;
+                                    pending_undo_snapshot = world_state;
+
                                     createTrailingHitbox(pack->coords, input_direction, NO_DIRECTION, FIRST_TRAILING_PACK_TURN_HITBOX_TIME, PACK);
 
                                     if (isPushable(getTileType(getNextCoords(player->coords, UP)))) 
@@ -3573,8 +3875,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     pack_orthogonal_push_direction = orthogonal_push_direction;
                                     pack_hitbox_turning_to_timer = TURN_ANIMATION_TIME + TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN;
                                     pack_hitbox_turning_to_coords = orthogonal_coords;
-
-                                    recordStateForUndo();
                                 }
                                 else
                                 {
@@ -3650,7 +3950,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             player->first_fall_already_done = true;
                             if (!pack_detached) pack->first_fall_already_done = true;
 
-                            recordStateForUndo();
+                            recordActionForUndo(&world_state);
                             time_until_input = MOVE_OR_PUSH_ANIMATION_TIME;
                         }
                     }
@@ -3692,6 +3992,11 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             else if (pack_intermediate_states_timer == 1)
             { 
+                if (pending_undo_record)
+                {
+                    pending_undo_record = false;
+                    recordActionForUndo(&pending_undo_snapshot);
+                }
                 if (do_player_and_pack_fall_after_turn)
                 {
                     doFallingEntity(player, true);
@@ -3967,7 +4272,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     }
                     levelChangePrep(wb->next_level);
                     time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
-                    gameInitialise(wb->next_level);
+                    gameInitialize(wb->next_level);
                 }
             }
             else
@@ -3995,44 +4300,29 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 ResetInfo ri = rb->reset_info[to_reset_index];
                 if (ri.id == -1) continue;
-                if (ri.id != -2 && getEntityFromId(ri.id) != 0)
+
+                Entity* reset_e = getEntityFromId(ri.id);
+                if (reset_e != 0)
                 {
-                    Entity* reset_e = getEntityFromId(ri.id);
-                    //TileType type = getTileType(reset_e->coords);
-                    setTileType(NONE, reset_e->coords);
-                    setTileDirection(NORTH, reset_e->coords);
-                    reset_e->coords = ri.start_coords;
-                    reset_e->position_norm = intCoordsToNorm(reset_e->coords);
-                    setTileType(ri.start_type, reset_e->coords);
-                    setTileDirection(reset_e->direction, reset_e->coords);
-                }
-                else
-                {
-                    // TODO(spike): handle sources
-                    Entity* entity_group = 0;
-                    switch (ri.start_type)
+                    if (!reset_e->removed)
                     {
-                        case BOX:     	   entity_group = next_world_state.boxes;    	  break;
-                        case MIRROR:  	   entity_group = next_world_state.mirrors;  	  break;
-                        case GLASS: 	   entity_group = next_world_state.glass_blocks;  break;
-                        case WIN_BLOCK:    entity_group = next_world_state.win_blocks;    break;
-                        case LOCKED_BLOCK: entity_group = next_world_state.locked_blocks; break;
-                        case RESET_BLOCK:  entity_group = next_world_state.reset_blocks;  break;
-                        default: entity_group = 0;
-                    }
-                    if (entity_group != 0) 
-                    {
-                        ri.id = setEntityInstanceInGroup(entity_group, ri.start_coords, ri.start_direction, NO_COLOR); // overwrite old id with new
-                        Entity* reset_e = getEntityFromId(ri.id);
                         setTileType(NONE, reset_e->coords);
                         setTileDirection(NORTH, reset_e->coords);
-                        reset_e->coords = ri.start_coords;
-                        reset_e->position_norm = intCoordsToNorm(reset_e->coords);
-                        setTileType(ri.start_type, reset_e->coords);
-                        setTileDirection(reset_e->direction, reset_e->coords);
                     }
+
+                    reset_e->coords = ri.start_coords;
+                    reset_e->position_norm = intCoordsToNorm(reset_e->coords);
+                    reset_e->direction = ri.start_direction;
+                    reset_e->rotation_quat = directionToQuaternion(ri.start_direction, true);
+                    reset_e->removed = false;
+
+                    TileType type = getTileTypeFromId(ri.id);
+                    setTileType(type, ri.start_coords);
+                    setTileDirection(ri.start_direction, ri.start_coords);
                 }
             }
+            recordActionForUndo(&world_state);
+            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
         }
 
 		// figure out if entities should be locked / unlocked
@@ -4200,12 +4490,13 @@ void gameFrame(double delta_time, TickInput tick_input)
         // display level name
 		drawDebugText(next_world_state.level_name);
 
-        /*
-		// player id
-        char player_id_text[256] = {0};
-        snprintf(player_id_text, sizeof(player_id_text), "player id: %d", player->id);
-        drawDebugText(player_id_text);
-        */
+		char pack_text[256] = {0};
+        snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, detached: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack_detached);
+        drawDebugText(pack_text);
+
+        char player_text[256] = {0};
+        snprintf(player_text, sizeof(player_text), "player info: coords: %d, %d, %d", player->coords.x, player->coords.y, player->coords.z);
+        drawDebugText(player_text);
 
         // box in_motion info
         /*

@@ -878,7 +878,7 @@ void createInstanceBuffer()
     memset(renderer_state.cube_instance_mapped, 0, (size_t)buffer_size);
 }
 
-void rendererInitialise(RendererPlatformHandles platform_handles)
+void rendererInitialize(RendererPlatformHandles platform_handles)
 {
     renderer_state.platform_handles = platform_handles;
     renderer_state.vulkan_instance_handle = VK_NULL_HANDLE;

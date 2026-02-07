@@ -246,7 +246,7 @@ int CALLBACK WinMain(
 
     RendererPlatformHandles platform_handles = { .module_handle = module_handle, .window_handle = window_handle};
 
-    rendererInitialise(platform_handles);
+    rendererInitialize(platform_handles);
     //MessageBoxA(NULL, "renderer init done", "Debug", MB_OK); 
 
     LARGE_INTEGER ticks_per_second;
@@ -264,7 +264,7 @@ int CALLBACK WinMain(
         file_path = command_line;
     }
 
-    gameInitialise(file_path); 
+    gameInitialize(file_path); 
     //MessageBoxA(NULL, "game init done", "Debug", MB_OK); 
 
 	double frame_times[60] = {0};
