@@ -1,10 +1,18 @@
 #define VK_USE_PLATFORM_WIN32_KHR
 #define STB_IMAGE_IMPLEMENTATION
+#define CGLTF_IMPLEMENTATION
 
 #include <stdio.h>
 #include "win32_renderer_bridge.h"
 #include <vulkan/vulkan.h>
 #include "stb_image.h"
+#include "cgltf.h"
+
+#define LOG(text, ...) do { \
+    char log_buffer[512]; \
+    snprintf(log_buffer, sizeof(log_buffer), text, ##__VA_ARGS__); \
+    OutputDebugStringA(log_buffer); \
+} while(0)
 
 const Int2 SCREEN_RESOLUTION = { 1920, 1080 };
 
@@ -102,6 +110,17 @@ typedef struct InstancedPushConstants
 }
 InstancedPushConstants;
 
+typedef struct LoadedModel
+{
+    cgltf_data* data;
+    VkBuffer vertex_buffer;
+    VkDeviceMemory vertex_memory;
+    VkBuffer index_buffer;
+    VkDeviceMemory index_memory;
+    uint32 index_count;
+}
+LoadedModel;
+
 typedef struct RendererState
 {
     RendererPlatformHandles platform_handles;
@@ -187,9 +206,10 @@ typedef struct RendererState
 	VkDeviceMemory cube_instance_memory;
     void* cube_instance_mapped;
     uint32 cube_instance_capacity;
+
+    LoadedModel test_model;
 }
 RendererState;
-RendererState renderer_state;
 
 #define U0 (0.0f)
 #define U1 (1.0f/3.0f)
@@ -256,6 +276,8 @@ static const uint32 SPRITE_INDICES[6] =
     0, 1, 2,
     0, 2, 3
 };
+
+RendererState renderer_state;
 
 Vertex frame_vertex_stash[65536];
 uint32 frame_vertex_count = 0;
@@ -541,7 +563,6 @@ Vec4 spriteUV(SpriteId id, AssetType type, int32 atlas_width, int32 atlas_height
 
     return (Vec4){u0,v0,u1,v1};
 }
-
 
 int32 loadAsset(char* path)
 {
@@ -876,6 +897,109 @@ void createInstanceBuffer()
 
     vkMapMemory(renderer_state.logical_device_handle, renderer_state.cube_instance_memory, 0, buffer_size, 0, &renderer_state.cube_instance_mapped);
     memset(renderer_state.cube_instance_mapped, 0, (size_t)buffer_size);
+}
+
+LoadedModel loadModel(char* path)
+{
+    LoadedModel result = {0};
+
+    cgltf_options options = {0};
+    cgltf_data* data = NULL;
+    cgltf_result parse_result = cgltf_parse_file(&options, path, &data);
+    if (parse_result != cgltf_result_success)
+    {
+        LOG("failed to parse gltf file: %s\n", path);
+        return result;
+    }
+
+    cgltf_result load_result = cgltf_load_buffers(&options, data, path);
+    if (load_result != cgltf_result_success)
+    {
+        LOG("failed to load gltf buffers: %s\n", path);
+        cgltf_free(data);
+        return result;
+    }
+    if (data->meshes_count == 0 || data->meshes[0].primitives_count == 0)
+    {
+        LOG("no meshes or primitives in: %s\n", path);
+        cgltf_free(data);
+        return result;
+    }
+
+    cgltf_primitive* primitive = &data->meshes[0].primitives[0];
+
+    cgltf_accessor* pos_accessor = 0;
+    cgltf_accessor* uv_accessor = 0;
+
+    for (cgltf_size attr_index = 0; attr_index < primitive->attributes_count; attr_index++)
+    {
+        if 		(primitive->attributes[attr_index].type == cgltf_attribute_type_position) pos_accessor = primitive->attributes[attr_index].data;
+        else if (primitive->attributes[attr_index].type == cgltf_attribute_type_texcoord) uv_accessor = primitive->attributes[attr_index].data;
+    }
+
+    if (!pos_accessor)
+    {
+        LOG("no position attribute in: %s\n", path);
+        cgltf_free(data);
+        return result;
+    }
+    if (!primitive->indices)
+    {
+        LOG("no index data in: %s\n", path);
+        cgltf_free(data);
+        return result;
+    }
+
+    // build interleaved vertex array (gltf -> vulkan formats)
+    cgltf_size vert_count = pos_accessor->count;
+    Vertex* vertices = malloc(sizeof(Vertex) * vert_count);
+
+    for (cgltf_size vert_index = 0; vert_index < vert_count; vert_index++)
+    {
+        float pos[3] = {0};
+        cgltf_accessor_read_float(pos_accessor, vert_index, pos, 3);
+        vertices[vert_index].x = pos[0];
+        vertices[vert_index].y = pos[1];
+        vertices[vert_index].z = pos[2];
+
+        if (uv_accessor)
+        {
+            float uv[2] = {0};
+            cgltf_accessor_read_float(uv_accessor, vert_index, uv, 2);
+            vertices[vert_index].u = uv[0];
+            vertices[vert_index].v = uv[1];
+        }
+        else
+        {
+            vertices[vert_index].u = 0.0f;
+            vertices[vert_index].v = 0.0f;
+        }
+        vertices[vert_index].r = 1.0f;
+        vertices[vert_index].g = 1.0f;
+        vertices[vert_index].b = 1.0f;
+    }
+
+    // build index array
+    uint32 index_count = (uint32)primitive->indices->count;
+    uint32* indices = malloc(sizeof(uint32) * index_count);
+
+    for (cgltf_size index_index = 0; index_index < index_count; index_index++)
+    {
+        indices[index_index] = (uint32)cgltf_accessor_read_index(primitive->indices, index_index);
+    }
+
+    uploadBufferToLocalDevice(vertices, sizeof(Vertex) * vert_count, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &result.vertex_buffer, &result.vertex_memory);
+    uploadBufferToLocalDevice(indices, sizeof(uint32) * index_count, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, &result.index_buffer, &result.index_memory);
+
+    result.index_count = index_count;
+    result.data = data;
+
+    free(vertices);
+    free(indices);
+
+    LOG("loaded model: %s (%u verts, %u indices)\n", path, (uint32)vert_count, index_count);
+
+    return result;
 }
 
 void rendererInitialize(RendererPlatformHandles platform_handles)
@@ -2004,6 +2128,15 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
 
         createInstanceBuffer();
     }
+
+    // testing gltf import / loading
+    renderer_state.test_model = loadModel("w:/cereus/data/assets/test.glb");
+    if (renderer_state.test_model.data != 0)
+    {
+        LOG("successfully loaded model\n");
+        LOG("mesh count: %zu\n", renderer_state.test_model.data->meshes_count);
+        LOG("node count: %zu\n", renderer_state.test_model.data->nodes_count);
+    }
 }
 
 void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
@@ -2264,6 +2397,32 @@ void rendererDraw(void)
         vkCmdDrawIndexed(command_buffer, renderer_state.cube_index_count, 1, 0, 0, 0);
 
 		vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
+    }
+
+    // MODEL PIPELINE (reusing outline pipeline layout for now)
+    if (renderer_state.test_model.index_count > 0)
+    {
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.outline_pipeline_handle);
+
+        VkDeviceSize model_vb_offset = 0;
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &renderer_state.test_model.vertex_buffer, &model_vb_offset);
+        vkCmdBindIndexBuffer(command_buffer, renderer_state.test_model.index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+        float model_matrix[16];
+        Vec3 model_pos = { 32.0f, 32.0f, 32.0f };
+        Vec4 model_rot = { 0.0f, -1.0f, -1.0f, 0.0f };
+        Vec3 model_scale = { 20.0f, 20.0f, 20.0f };
+        mat4BuildTRS(model_matrix, model_pos, model_rot, model_scale);
+
+        PushConstants pc = {0};
+        memcpy(pc.model, model_matrix,      sizeof(pc.model));
+        memcpy(pc.view,  view_matrix,       sizeof(pc.view));
+        memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
+        pc.uv_rect = (Vec4){0,0,1,1};
+
+        vkCmdPushConstants(command_buffer, renderer_state.outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+
+		vkCmdDrawIndexed(command_buffer, renderer_state.test_model.index_count, 1, 0, 0, 0);
     }
 
     // LASER PIPELINE

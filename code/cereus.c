@@ -1184,8 +1184,6 @@ SpriteId getCube3DId(TileType tile)
 // TODO(spike):
 // drawAsset is slow (>1mspt by itself) likely due to cache misses on AssetToDraw (CUBE_3D_*** accessing ~9MB into array)
 // when we have actual 3D models, hopefully can cut this size hugely, because we won't have >1000 of the same entity on screen, probably? right now its basically all VOIDs 
-
-// assuming one path -> one asset type.
 void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation)
 {
     if (id <= 0) return; // should probably just not call like this
