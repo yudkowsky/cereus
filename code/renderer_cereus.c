@@ -36,7 +36,7 @@ typedef struct Vertex
 {
     float x, y, z;
     float u, v;
-    float r, g ,b;
+    float nx, ny, nz;
 }
 Vertex;
 
@@ -159,10 +159,12 @@ typedef struct RendererState
     VkShaderModule laser_fragment_shader_module_handle;
     VkShaderModule sprite_vertex_shader_module_handle;
     VkShaderModule sprite_fragment_shader_module_handle;
-
-    VkPipelineLayout graphics_pipeline_layout; // TODO(spike): rename
+    VkShaderModule model_vertex_shader_module_handle;
+    VkShaderModule model_fragment_shader_module_handle;
 
     VkPipeline sprite_pipeline_handle;
+
+    VkPipelineLayout graphics_pipeline_layout; // TODO(spike): rename
 
     VkPipeline cube_pipeline_handle;
     VkPipelineLayout cube_pipeline_layout; 
@@ -172,6 +174,9 @@ typedef struct RendererState
 
     VkPipelineLayout laser_pipeline_layout;
     VkPipeline laser_pipeline_handle;
+
+    VkPipelineLayout model_pipeline_layout;
+    VkPipeline model_pipeline_handle;
 
     VkSampler pixel_art_sampler;
     CachedAsset asset_cache[256];
@@ -930,11 +935,13 @@ LoadedModel loadModel(char* path)
 
     cgltf_accessor* pos_accessor = 0;
     cgltf_accessor* uv_accessor = 0;
+    cgltf_accessor* normal_accessor = 0;
 
     for (cgltf_size attr_index = 0; attr_index < primitive->attributes_count; attr_index++)
     {
-        if 		(primitive->attributes[attr_index].type == cgltf_attribute_type_position) pos_accessor = primitive->attributes[attr_index].data;
-        else if (primitive->attributes[attr_index].type == cgltf_attribute_type_texcoord) uv_accessor = primitive->attributes[attr_index].data;
+        if 		(primitive->attributes[attr_index].type == cgltf_attribute_type_position) pos_accessor 	  = primitive->attributes[attr_index].data;
+        else if (primitive->attributes[attr_index].type == cgltf_attribute_type_texcoord) uv_accessor 	  = primitive->attributes[attr_index].data;
+        else if (primitive->attributes[attr_index].type == cgltf_attribute_type_normal)   normal_accessor = primitive->attributes[attr_index].data;
     }
 
     if (!pos_accessor)
@@ -974,9 +981,20 @@ LoadedModel loadModel(char* path)
             vertices[vert_index].u = 0.0f;
             vertices[vert_index].v = 0.0f;
         }
-        vertices[vert_index].r = 1.0f;
-        vertices[vert_index].g = 1.0f;
-        vertices[vert_index].b = 1.0f;
+		if (normal_accessor)
+        {
+            float normals[3] = {0};
+            cgltf_accessor_read_float(normal_accessor, vert_index, normals, 3);
+            vertices[vert_index].nx = normals[0];
+            vertices[vert_index].ny = normals[1];
+            vertices[vert_index].nz = normals[2];
+        }
+		else
+        {
+            vertices[vert_index].nx = 0.0f;
+            vertices[vert_index].ny = 1.0f;
+            vertices[vert_index].nz = 0.0f;
+        }
     }
 
     // build index array
@@ -1635,7 +1653,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
     vkCreateShaderModule(renderer_state.logical_device_handle, &laser_frag_shader_module_ci, 0, &renderer_state.laser_fragment_shader_module_handle);
     free(laser_frag_bytes);
 
-    // SETTING UP SPRITE VERTEX SHADER MODULE
+    // SETTING UP SPRITE VERTEX SHADER
 
     void* sprite_vert_bytes = 0;
     size_t sprite_vert_size = 0;
@@ -1652,7 +1670,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
     vkCreateShaderModule(renderer_state.logical_device_handle, &sprite_vert_shader_module_ci, 0, &renderer_state.sprite_vertex_shader_module_handle);
     free(sprite_vert_bytes);
 
-    // SETTING UP SPRITE FRAGMENT SHADER MODULE
+    // SETTING UP SPRITE FRAGMENT SHADER
 
     void* sprite_frag_bytes = 0;
     size_t sprite_frag_size = 0;
@@ -1668,6 +1686,40 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
 
     vkCreateShaderModule(renderer_state.logical_device_handle, &sprite_frag_shader_module_ci, 0, &renderer_state.sprite_fragment_shader_module_handle);
     free(sprite_frag_bytes);
+
+    // SETTING UP MODEL VERTEX SHADER
+
+    void* model_vert_bytes = 0;
+    size_t model_vert_size = 0;
+    if (!readEntireFile("data/shaders/spirv/model.vert.spv", &model_vert_bytes, &model_vert_size))
+    {
+        return;
+    }
+
+    VkShaderModuleCreateInfo model_vert_shader_module_ci = {0};
+    model_vert_shader_module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    model_vert_shader_module_ci.codeSize = model_vert_size;
+    model_vert_shader_module_ci.pCode = (const uint32*)model_vert_bytes;
+
+    vkCreateShaderModule(renderer_state.logical_device_handle, &model_vert_shader_module_ci, 0, &renderer_state.model_vertex_shader_module_handle);
+    free(model_vert_bytes);
+
+    // SETTING UP MODEL FRAGMENT SHADER
+
+    void* model_frag_bytes = 0;
+    size_t model_frag_size = 0;
+    if (!readEntireFile("data/shaders/spirv/model.frag.spv", &model_frag_bytes, &model_frag_size))
+    {
+        return;
+    }
+
+    VkShaderModuleCreateInfo model_frag_shader_module_ci = {0};
+    model_frag_shader_module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    model_frag_shader_module_ci.codeSize = model_frag_size;
+    model_frag_shader_module_ci.pCode = (const uint32*)model_frag_bytes;
+
+    vkCreateShaderModule(renderer_state.logical_device_handle, &model_frag_shader_module_ci, 0, &renderer_state.model_fragment_shader_module_handle);
+    free(model_frag_bytes);
 
     // TODO(spike): try moving below into their respective setups later
     // vertex shader stage
@@ -1726,10 +1778,24 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
     sprite_frag_stage_ci.module = renderer_state.sprite_fragment_shader_module_handle;
     sprite_frag_stage_ci.pName = "main";
 
+    // model vertex shader
+    VkPipelineShaderStageCreateInfo model_vert_stage_ci = {0};
+    model_vert_stage_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    model_vert_stage_ci.stage = VK_SHADER_STAGE_VERTEX_BIT;
+    model_vert_stage_ci.module = renderer_state.model_vertex_shader_module_handle;
+    model_vert_stage_ci.pName = "main";
+
+    VkPipelineShaderStageCreateInfo model_frag_stage_ci = {0};
+    model_frag_stage_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    model_frag_stage_ci.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    model_frag_stage_ci.module = renderer_state.model_fragment_shader_module_handle;
+    model_frag_stage_ci.pName = "main";
+
     VkPipelineShaderStageCreateInfo shader_stages[2]  = { vertex_shader_stage_create_info, fragment_shader_stage_create_info }; // TODO(spike): rename standard_ or somelike
     VkPipelineShaderStageCreateInfo outline_stages[2] = { outline_vert_stage_ci, outline_frag_shader_stage_ci }; // TODO(spike): consistent naming in general
     VkPipelineShaderStageCreateInfo laser_stages[2]   = { laser_vert_stage_create_info, laser_frag_stage_create_info };
     VkPipelineShaderStageCreateInfo sprite_stages[2]  = { sprite_vert_stage_ci, sprite_frag_stage_ci };
+   	VkPipelineShaderStageCreateInfo model_stages[2]   = { model_vert_stage_ci, model_frag_stage_ci };
 
     // simple vertex input (sprites, outlines, lasers)
     VkVertexInputBindingDescription vertex_binding_simple = {0};
@@ -1752,7 +1818,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
     vertex_attributes_simple[2].binding = 0;
     vertex_attributes_simple[2].location = 2;
     vertex_attributes_simple[2].format = VK_FORMAT_R32G32B32_SFLOAT;
-    vertex_attributes_simple[2].offset = offsetof(Vertex, r);
+    vertex_attributes_simple[2].offset = offsetof(Vertex, nx);
 
     VkPipelineVertexInputStateCreateInfo vertex_input_simple = {0};
     vertex_input_simple.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -1786,7 +1852,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
     vertex_attributes_instanced[2].binding = 0;
     vertex_attributes_instanced[2].location = 2;
     vertex_attributes_instanced[2].format = VK_FORMAT_R32G32B32_SFLOAT;
-    vertex_attributes_instanced[2].offset = offsetof(Vertex, r);
+    vertex_attributes_instanced[2].offset = offsetof(Vertex, nx);
 
     vertex_attributes_instanced[3].binding = 1;
     vertex_attributes_instanced[3].location = 3;
@@ -2020,6 +2086,24 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
         vkCreatePipelineLayout(renderer_state.logical_device_handle, &laser_pipeline_layout_ci, 0, &renderer_state.laser_pipeline_layout);
     }
 
+    // CREATE MODEL PIPELINE LAYOUT
+
+    {
+        VkPushConstantRange push_constant_range = {0};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = (uint32)sizeof(PushConstants);
+
+        VkPipelineLayoutCreateInfo model_pipeline_layout_ci = {0};
+        model_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        model_pipeline_layout_ci.setLayoutCount = 1;
+        model_pipeline_layout_ci.pSetLayouts = &renderer_state.descriptor_set_layout;
+        model_pipeline_layout_ci.pushConstantRangeCount = 1;
+        model_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
+
+        vkCreatePipelineLayout(renderer_state.logical_device_handle, &model_pipeline_layout_ci, 0, &renderer_state.model_pipeline_layout);
+    }
+
     // base graphics pipeline info
 
    	VkGraphicsPipelineCreateInfo base_graphics_pipeline_creation_info = {0}; // struct that points to all those sub-blocks we just defined; it actually builds the pipeline object
@@ -2045,6 +2129,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
     renderer_state.atlas_3d_asset_index   = getOrLoadAsset((char*)ATLAS_3D_PATH);
 
     // define sprite pipeline: depth off, blending on
+
     {
         color_blend_attachment_state.blendEnable = VK_TRUE;
         color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
@@ -2064,6 +2149,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
     }
 
 	// define instanced cube pipeline: depth on, blending off
+
     {
         color_blend_attachment_state.blendEnable = VK_FALSE;
         
@@ -2078,6 +2164,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
     }
 
     // define outline pipeline
+
     {
         color_blend_attachment_state.blendEnable = VK_FALSE;
 
@@ -2102,6 +2189,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
     }
 
     // define laser pipeline
+
     {
         // additive blending
         color_blend_attachment_state.blendEnable = VK_TRUE;
@@ -2127,6 +2215,32 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
         vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &laser_ci, 0, &renderer_state.laser_pipeline_handle);
 
         createInstanceBuffer();
+    }
+
+    // define model pipeline: depth on, blending off, filled, backface culling
+
+    {
+        color_blend_attachment_state.blendEnable = VK_FALSE;
+        color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+        color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
+        color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
+
+        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
+
+        rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
+        rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+        VkGraphicsPipelineCreateInfo model_ci = base_graphics_pipeline_creation_info;
+        model_ci.pStages = model_stages;
+        model_ci.layout = renderer_state.model_pipeline_layout;
+
+        vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &model_ci, 0, &renderer_state.model_pipeline_handle);
     }
 
     // testing gltf import / loading
@@ -2399,18 +2513,22 @@ void rendererDraw(void)
 		vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
     }
 
-    // MODEL PIPELINE (reusing outline pipeline layout for now)
+    // MODEL PIPELINE
+
     if (renderer_state.test_model.index_count > 0)
     {
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.outline_pipeline_handle);
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.model_pipeline_handle);
+
+        // reusing 3D atlas
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.model_pipeline_layout, 0, 1, &renderer_state.descriptor_sets[renderer_state.atlas_3d_asset_index], 0, 0);
 
         VkDeviceSize model_vb_offset = 0;
         vkCmdBindVertexBuffers(command_buffer, 0, 1, &renderer_state.test_model.vertex_buffer, &model_vb_offset);
         vkCmdBindIndexBuffer(command_buffer, renderer_state.test_model.index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
         float model_matrix[16];
-        Vec3 model_pos = { 32.0f, 32.0f, 32.0f };
-        Vec4 model_rot = { 0.0f, -1.0f, -1.0f, 0.0f };
+        Vec3 model_pos = { 32.0f, 64.0f, 32.0f };
+        Vec4 model_rot = { 0.0f, 0.0f, 0.0f, 1.0f };
         Vec3 model_scale = { 20.0f, 20.0f, 20.0f };
         mat4BuildTRS(model_matrix, model_pos, model_rot, model_scale);
 
@@ -2420,7 +2538,7 @@ void rendererDraw(void)
         memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
         pc.uv_rect = (Vec4){0,0,1,1};
 
-        vkCmdPushConstants(command_buffer, renderer_state.outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+        vkCmdPushConstants(command_buffer, renderer_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
 
 		vkCmdDrawIndexed(command_buffer, renderer_state.test_model.index_count, 1, 0, 0, 0);
     }
