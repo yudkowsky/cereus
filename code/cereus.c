@@ -1600,16 +1600,16 @@ void createFailedWalkAnimation(Vec3 start_position, Vec3 next_position, Vec3* po
     animations[animation_index].position[0] = start_position;
 }
 
-void doFailedWalkAnimations()
+void doFailedWalkAnimations(Direction direction)
 {
     int32 stack_size = getPushableStackSize(next_world_state.player.coords); // counts player as member of stack
     Int3 current_coords = next_world_state.player.coords;
     FOR(stack_index, stack_size) 
     {
-        createFailedWalkAnimation(intCoordsToNorm(current_coords), intCoordsToNorm(getNextCoords(current_coords, next_world_state.player.direction)), &getEntityPointer(current_coords)->position_norm, getEntityPointer(current_coords)->id);
+        createFailedWalkAnimation(intCoordsToNorm(current_coords), intCoordsToNorm(getNextCoords(current_coords, direction)), &getEntityPointer(current_coords)->position_norm, getEntityPointer(current_coords)->id);
         current_coords = getNextCoords(current_coords, UP);
     }
-    if (!pack_detached) createFailedWalkAnimation(intCoordsToNorm(next_world_state.pack.coords), intCoordsToNorm(next_world_state.player.coords), &next_world_state.pack.position_norm, PACK_ID);
+    if (!pack_detached) createFailedWalkAnimation(intCoordsToNorm(next_world_state.pack.coords), intCoordsToNorm(getNextCoords(next_world_state.pack.coords, direction)), &next_world_state.pack.position_norm, PACK_ID);
 
     next_world_state.player.moving_direction = NO_DIRECTION;
 }
@@ -3606,7 +3606,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 }
                                 else 
                                 {
-                                    doFailedWalkAnimations();
+                                    doFailedWalkAnimations(player->direction);
                                     time_until_input = FAILED_ANIMATION_TIME;
                                     updateLaserBuffer();
                                 }
@@ -3678,7 +3678,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         }
 						else if (do_failed_animations) 
                         {
-                            doFailedWalkAnimations();
+                            doFailedWalkAnimations(player->direction);
                             time_until_input = FAILED_ANIMATION_TIME;
                         }
                     }
@@ -3830,7 +3830,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     if (push_diagonal)   do_diagonal_push_on_turn = true;
                                     if (push_orthogonal) do_orthogonal_push_on_turn = true;
 
-                                    pack_intermediate_states_timer = TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN + PACK_TIME_IN_INTERMEDIATE_STATE + 1; // + 1 because we stop when timer hits 1 (and then reset to 0)
+                                    pack_intermediate_states_timer = TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN + PACK_TIME_IN_INTERMEDIATE_STATE + 1;
                                     pack_intermediate_coords = diagonal_coords;
                                     pack_orthogonal_push_direction = orthogonal_push_direction;
                                     pack_hitbox_turning_to_timer = TURN_ANIMATION_TIME + TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN;
@@ -3915,6 +3915,16 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                             time_until_input = MOVE_OR_PUSH_ANIMATION_TIME;
                         }
+                        else
+                        {
+                            doFailedWalkAnimations(oppositeDirection(player->direction));
+                            time_until_input = FAILED_ANIMATION_TIME;
+                        }
+                    }
+					else
+                    {
+                        doFailedWalkAnimations(oppositeDirection(player->direction));
+                        time_until_input = FAILED_ANIMATION_TIME;
                     }
                 }
             }
@@ -3929,7 +3939,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             if (pack_intermediate_states_timer == 7)
             {
-                createTrailingHitbox(pack->coords, pack_orthogonal_push_direction, NO_DIRECTION, 4, PACK); // trailing hitbox created before actually moving pack... fixes problem with fast inputs
+                createTrailingHitbox(pack->coords, pack_orthogonal_push_direction, NO_DIRECTION, 4, PACK);
 				if (do_diagonal_push_on_turn) pushAll(pack_intermediate_coords, oppositeDirection(player->direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false); // CHANGE THIS IF WANT PACK TO SWEEP
             }
             else if (pack_intermediate_states_timer == 5)
@@ -4127,7 +4137,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             else
             {
                 // can't move or climb more
-                doFailedWalkAnimations();
+                doFailedWalkAnimations(player->direction);
                 player->in_motion = FAILED_ANIMATION_TIME;
                 player->moving_direction = NO_DIRECTION;
                 pack->in_motion = FAILED_ANIMATION_TIME;
@@ -4201,20 +4211,35 @@ void gameFrame(double delta_time, TickInput tick_input)
         // delete player / pack if above void
         if (!player->hit_by_red)
         {
-            if ((getTileType(getNextCoords(player->coords, DOWN)) == VOID || getTileType(getNextCoords(player->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PLAYER_ID)) player->removed = true;
+            if ((getTileType(getNextCoords(player->coords, DOWN)) == VOID || getTileType(getNextCoords(player->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PLAYER_ID)) 
+            {
+                setTileType(NONE, player->coords);
+                setTileDirection(NORTH, player->coords);
+                player->removed = true;
+            }
         }
         if (pack_detached)
         {
             if (!player->hit_by_blue)
             {
-                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PACK_ID)) pack->removed = true;
+                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PACK_ID)) 
+                {
+                    setTileType(NONE, pack->coords);
+                    setTileDirection(NORTH, pack->coords);
+                    pack->removed = true;
+                }
             }
         }
         else
         {
             if (!player->hit_by_red)
             {
-                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PACK_ID)) pack->removed = true;
+                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PACK_ID))
+                {
+                    setTileType(NONE, pack->coords);
+                    setTileDirection(NORTH, pack->coords);
+                    pack->removed = true;
+                }
             }
         }
 
