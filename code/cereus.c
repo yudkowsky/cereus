@@ -1115,7 +1115,7 @@ AssetType assetAtlas(SpriteId id)
 
 SpriteId getSprite2DId(TileType tile)
 {
-    switch(tile)
+    switch (tile)
     {
         case NONE:         return NO_ID;
         case VOID:         return SPRITE_2D_VOID;
@@ -1145,7 +1145,7 @@ SpriteId getSprite2DId(TileType tile)
 
 SpriteId getCube3DId(TileType tile)
 {
-    switch(tile)
+    switch (tile)
     {
         case NONE:         return NO_ID;
         case VOID:         return CUBE_3D_VOID;
@@ -1177,6 +1177,44 @@ SpriteId getCube3DId(TileType tile)
         case SOURCE_YELLOW:	 return CUBE_3D_SOURCE_YELLOW;
         case SOURCE_CYAN:	 return CUBE_3D_SOURCE_CYAN;
         case SOURCE_WHITE:	 return CUBE_3D_SOURCE_WHITE;
+        default: return 0;
+    }
+}
+
+SpriteId getModelId(TileType tile)
+{
+    switch (tile)
+    {
+        case NONE:         return NO_ID;
+        case VOID:         return MODEL_3D_VOID;
+        case GRID:         return MODEL_3D_GRID;
+        case WALL:         return MODEL_3D_WALL;
+        case BOX:          return MODEL_3D_BOX;
+        case PLAYER:       return MODEL_3D_PLAYER;
+        case MIRROR:       return MODEL_3D_MIRROR;
+        case GLASS:        return MODEL_3D_GLASS;
+        case PACK:    	   return MODEL_3D_PACK;
+        case NOT_VOID:     return MODEL_3D_NOT_VOID;
+        case WIN_BLOCK:    return MODEL_3D_WIN_BLOCK;
+        case LOCKED_BLOCK: return MODEL_3D_LOCKED_BLOCK;
+        case RESET_BLOCK:  return MODEL_3D_RESET_BLOCK;
+        case LADDER: 	   return MODEL_3D_LADDER;
+
+        case LASER_RED:     return MODEL_3D_LASER_RED;
+        case LASER_GREEN:	return MODEL_3D_LASER_GREEN;
+        case LASER_BLUE:	return MODEL_3D_LASER_BLUE;
+        case LASER_MAGENTA:	return MODEL_3D_LASER_MAGENTA;
+        case LASER_YELLOW:	return MODEL_3D_LASER_YELLOW;
+        case LASER_CYAN:	return MODEL_3D_LASER_CYAN;
+        case LASER_WHITE:	return MODEL_3D_LASER_WHITE;
+
+        case SOURCE_RED:	 return MODEL_3D_SOURCE_RED;
+        case SOURCE_GREEN:	 return MODEL_3D_SOURCE_GREEN;
+        case SOURCE_BLUE:	 return MODEL_3D_SOURCE_BLUE;
+        case SOURCE_MAGENTA: return MODEL_3D_SOURCE_MAGENTA;
+        case SOURCE_YELLOW:	 return MODEL_3D_SOURCE_YELLOW;
+        case SOURCE_CYAN:	 return MODEL_3D_SOURCE_CYAN;
+        case SOURCE_WHITE:	 return MODEL_3D_SOURCE_WHITE;
         default: return 0;
     }
 }
@@ -4709,6 +4747,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                 fclose(file);
             }
         }
+
+        Vec3 test_coords = { 5.0f, 5.0f, 5.0f };
+        Vec3 test_scale = { 5.0f, 5.0f, 5.0f };
+        drawAsset(MODEL_3D_MIRROR, MODEL_3D, test_coords, test_scale, IDENTITY_QUATERNION);
 
 		if (time_until_input > 0) time_until_input--;
 

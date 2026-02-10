@@ -26,9 +26,9 @@ const int32 ATLAS_FONT_HEIGHT = 180;
 const int32 ATLAS_3D_WIDTH = 480;
 const int32 ATLAS_3D_HEIGHT = 320;
 
-const char* ATLAS_2D_PATH = "w:/cereus/data/sprites/atlas-2d.png";
-const char* ATLAS_FONT_PATH = "w:/cereus/data/sprites/atlas-font.png";
-const char* ATLAS_3D_PATH = "w:/cereus/data/sprites/atlas-3d.png";
+const char* ATLAS_2D_PATH 	= "data/sprites/atlas-2d.png";
+const char* ATLAS_FONT_PATH = "data/sprites/atlas-font.png";
+const char* ATLAS_3D_PATH 	= "data/sprites/atlas-3d.png";
 
 bool first_submit_since_draw = true;
 
@@ -59,6 +59,16 @@ typedef struct Cube
 }
 Cube;
 
+typedef struct Model
+{
+    uint32 model_id;
+    Vec3 coords;
+    Vec3 scale;
+    Vec4 rotation;
+}
+Model;
+
+// for instancing of cubes
 typedef struct CubeInstanceData
 {
     float model[16];
@@ -212,7 +222,7 @@ typedef struct RendererState
     void* cube_instance_mapped;
     uint32 cube_instance_capacity;
 
-    LoadedModel test_model;
+    LoadedModel loaded_models[64];
 }
 RendererState;
 
@@ -298,6 +308,9 @@ uint32 outline_instance_count = 0;
 
 Laser laser_instances[1024];
 uint32 laser_instance_count = 0;
+
+Model model_instances[1024];
+uint32 model_instance_count = 0;
 
 Camera renderer_camera = {0};
 
@@ -1018,6 +1031,11 @@ LoadedModel loadModel(char* path)
     LOG("loaded model: %s (%u verts, %u indices)\n", path, (uint32)vert_count, index_count);
 
     return result;
+}
+
+void loadAllEntities()
+{
+	renderer_state.loaded_models[MODEL_3D_MIRROR - MODEL_3D_VOID] = loadModel("data/assets/suzanne.glb");
 }
 
 void rendererInitialize(RendererPlatformHandles platform_handles)
@@ -2243,14 +2261,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
         vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &model_ci, 0, &renderer_state.model_pipeline_handle);
     }
 
-    // testing gltf import / loading
-    renderer_state.test_model = loadModel("w:/cereus/data/assets/test.glb");
-    if (renderer_state.test_model.data != 0)
-    {
-        LOG("successfully loaded model\n");
-        LOG("mesh count: %zu\n", renderer_state.test_model.data->meshes_count);
-        LOG("node count: %zu\n", renderer_state.test_model.data->nodes_count);
-    }
+    loadAllEntities();
 }
 
 void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
@@ -2261,6 +2272,7 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
 	cube_instance_count = 0;
     outline_instance_count = 0;
     laser_instance_count = 0;
+    model_instance_count = 0;
 
     for (int asset_index = 0; asset_index < 1024; asset_index++)
     {
@@ -2319,6 +2331,17 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
                 laser->scale = batch->scale[i];
                 laser->rotation = batch->rotation[i];
                 laser->color = batch->color[i];
+            }
+        }
+        else if (type == MODEL_3D)
+        {
+            for (int32 i = 0; i < batch->instance_count; i++)
+        	{
+                Model* model = &model_instances[model_instance_count++];
+                model->model_id = (uint32)batch->sprite_id;
+                model->coords = batch->coords[i];
+                model->scale = batch->scale[i];
+                model->rotation = batch->rotation[i];
             }
         }
 
@@ -2515,32 +2538,36 @@ void rendererDraw(void)
 
     // MODEL PIPELINE
 
-    if (renderer_state.test_model.index_count > 0)
+    if (model_instance_count > 0)
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.model_pipeline_handle);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        renderer_state.model_pipeline_layout, 0, 1,
+        &renderer_state.descriptor_sets[renderer_state.atlas_3d_asset_index], 0, 0);
 
-        // reusing 3D atlas
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.model_pipeline_layout, 0, 1, &renderer_state.descriptor_sets[renderer_state.atlas_3d_asset_index], 0, 0);
+        for (uint32 i = 0; i < model_instance_count; i++)
+        {
+            Model* model = &model_instances[i];
+            LoadedModel* model_data = &renderer_state.loaded_models[model->model_id - MODEL_3D_VOID];
+            if (model_data->index_count == 0) continue;
 
-        VkDeviceSize model_vb_offset = 0;
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &renderer_state.test_model.vertex_buffer, &model_vb_offset);
-        vkCmdBindIndexBuffer(command_buffer, renderer_state.test_model.index_buffer, 0, VK_INDEX_TYPE_UINT32);
+            VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
+            vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-        float model_matrix[16];
-        Vec3 model_pos = { 32.0f, 64.0f, 32.0f };
-        Vec4 model_rot = { 0.0f, 0.0f, 0.0f, 1.0f };
-        Vec3 model_scale = { 20.0f, 20.0f, 20.0f };
-        mat4BuildTRS(model_matrix, model_pos, model_rot, model_scale);
+            float model_matrix[16];
+            mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
 
-        PushConstants pc = {0};
-        memcpy(pc.model, model_matrix,      sizeof(pc.model));
-        memcpy(pc.view,  view_matrix,       sizeof(pc.view));
-        memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
-        pc.uv_rect = (Vec4){0,0,1,1};
+            PushConstants pc = {0};
+            memcpy(pc.model, model_matrix,      sizeof(pc.model));
+            memcpy(pc.view,  view_matrix,       sizeof(pc.view));
+            memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
+            pc.uv_rect = (Vec4){0, 0, 1, 1};
 
-        vkCmdPushConstants(command_buffer, renderer_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+            vkCmdPushConstants(command_buffer, renderer_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
 
-		vkCmdDrawIndexed(command_buffer, renderer_state.test_model.index_count, 1, 0, 0, 0);
+            vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
+        }
     }
 
     // LASER PIPELINE
