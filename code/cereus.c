@@ -92,7 +92,7 @@ const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
-const char debug_level_name[64] = "overworld";
+const char debug_level_name[64] = "testing";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
@@ -3798,41 +3798,53 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     default: break;
                                 }
 
-                                if (allow_turn_orthogonal)
+                                if (allow_turn_diagonal || allow_turn_orthogonal)
                                 {
-                                    pending_undo_record = true;
-                                    pending_undo_snapshot = world_state;
-
-                                    createTrailingHitbox(pack->coords, input_direction, NO_DIRECTION, FIRST_TRAILING_PACK_TURN_HITBOX_TIME, PACK);
-
-                                    if (isPushable(getTileType(getNextCoords(player->coords, UP)))) 
+                                    if (!allow_turn_orthogonal)
                                     {
-                                        if (!player->hit_by_blue) doHeadRotation(clockwise);
+                                        if (push_diagonal) 
+                                        {
+                                            recordActionForUndo(&world_state);
+                                            pushAll(diagonal_coords, oppositeDirection(input_direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false);
+                                        }
+                                        doFailedTurnAnimations(input_direction, clockwise);
                                     }
+                                    else
+                                    {
+                                        pending_undo_record = true;
+                                        pending_undo_snapshot = world_state;
 
-                                    createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
-                                                                 directionToQuaternion(player->direction, true), 
-                                                                 directionToQuaternion(input_direction, true), 
-                                                                 &player->rotation_quat,
-                                                                 PLAYER_ID, TURN_ANIMATION_TIME); 
+                                        createTrailingHitbox(pack->coords, input_direction, NO_DIRECTION, FIRST_TRAILING_PACK_TURN_HITBOX_TIME, PACK);
 
-                                    player->direction = input_direction;
-                                    setTileDirection(player->direction, player->coords);
-                                    player->moving_direction = NO_DIRECTION;
+                                        if (isPushable(getTileType(getNextCoords(player->coords, UP)))) 
+                                        {
+                                            if (!player->hit_by_blue) doHeadRotation(clockwise);
+                                        }
 
-                                    createPackRotationAnimation(intCoordsToNorm(player->coords), 
-                                                                intCoordsToNorm(pack->coords), 
-                                                                oppositeDirection(input_direction), clockwise, 
-                                                                &pack->position_norm, &pack->rotation_quat, PACK_ID);
+                                        createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
+                                                                     directionToQuaternion(player->direction, true), 
+                                                                     directionToQuaternion(input_direction, true), 
+                                                                     &player->rotation_quat,
+                                                                     PLAYER_ID, TURN_ANIMATION_TIME); 
 
-                                    if (push_diagonal)   do_diagonal_push_on_turn = true;
-                                    if (push_orthogonal) do_orthogonal_push_on_turn = true;
+                                        player->direction = input_direction;
+                                        setTileDirection(player->direction, player->coords);
+                                        player->moving_direction = NO_DIRECTION;
 
-                                    pack_intermediate_states_timer = TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN + PACK_TIME_IN_INTERMEDIATE_STATE + 1;
-                                    pack_intermediate_coords = diagonal_coords;
-                                    pack_orthogonal_push_direction = orthogonal_push_direction;
-                                    pack_hitbox_turning_to_timer = TURN_ANIMATION_TIME + TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN;
-                                    pack_hitbox_turning_to_coords = orthogonal_coords;
+                                        createPackRotationAnimation(intCoordsToNorm(player->coords), 
+                                                                    intCoordsToNorm(pack->coords), 
+                                                                    oppositeDirection(input_direction), clockwise, 
+                                                                    &pack->position_norm, &pack->rotation_quat, PACK_ID);
+
+                                        if (push_diagonal)   do_diagonal_push_on_turn = true;
+                                        if (push_orthogonal) do_orthogonal_push_on_turn = true;
+
+                                        pack_intermediate_states_timer = TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN + PACK_TIME_IN_INTERMEDIATE_STATE + 1;
+                                        pack_intermediate_coords = diagonal_coords;
+                                        pack_orthogonal_push_direction = orthogonal_push_direction;
+                                        pack_hitbox_turning_to_timer = TURN_ANIMATION_TIME + TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN;
+                                        pack_hitbox_turning_to_coords = orthogonal_coords;
+                                    }
                                 }
                                 else
                                 {
