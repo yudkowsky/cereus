@@ -574,7 +574,6 @@ Vec3 directionToVector(Direction direction)
     }
 }
 
-// roll_z only works / is used for 6-dim. otherwise we just decide (it doesn't make sense to ask for diagonals)
 Vec4 directionToQuaternion(Direction direction, bool roll_z)
 {
     float yaw = 0.0f;
@@ -1993,7 +1992,7 @@ Direction getNextLaserDirectionMirror(Direction laser_direction, Direction mirro
         if (laser_direction == UP) 									return oppositeDirection(mirror_direction);
         if (laser_direction == DOWN) 								return mirror_direction;
     }
-    switch (mirror_direction) // N/S/W/E diagonal cases, and U/D all cases
+    switch (mirror_direction)
     {
         case UP: switch (laser_direction)
      	{
@@ -2380,30 +2379,6 @@ void updateLaserBuffer(void)
     }
 }
 
-/*
-void resetVisuals(Entity* entity)
-{
-    entity->position_norm = intCoordsToNorm(entity->coords);
-    //entity->rotation_quat = directionToQuaternion(entity->direction, true); // don't seem to need right now, and causes bug with undoing from a turn -> pack direction is flipped (if pack direction is not north after the undo)
-}
-
-void resetStandardVisuals()
-{
-    resetVisuals(&next_world_state.player);
-    resetVisuals(&next_world_state.pack);
-    Entity* entity_group[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.glass_blocks, next_world_state.sources };
-    FOR(entity_group_index, 4)
-    {
-        FOR(entity_instance_index, MAX_ENTITY_INSTANCE_COUNT)
-        {
-            Entity* entity = &entity_group[entity_group_index][entity_instance_index];
-            if (entity->removed) continue;
-            resetVisuals(entity);
-        }
-    }
-}
-*/
-
 // FALLING LOGIC
 
 // returns true iff object is able to fall as usual, but object collides with something instead.
@@ -2648,20 +2623,20 @@ void gameInitializeState()
         	entity_group[count].removed = false;
             entity_group = 0;
         }
-        else if (next_world_state.buffer[buffer_index] == PLAYER) // special case for player, since there is only one
+        else if (next_world_state.buffer[buffer_index] == PLAYER)
         {
             player->coords = bufferIndexToCoords(buffer_index);
             player->position_norm = intCoordsToNorm(player->coords);
             player->direction = next_world_state.buffer[buffer_index + 1];
-            player->rotation_quat = directionToQuaternion(player->direction, false);
+            player->rotation_quat = directionToQuaternion(player->direction, true);
             player->id = PLAYER_ID;
         }
-        else if (next_world_state.buffer[buffer_index] == PACK) // likewise special case for pack
+        else if (next_world_state.buffer[buffer_index] == PACK)
         {
             pack->coords = bufferIndexToCoords(buffer_index);
             pack->position_norm = intCoordsToNorm(pack->coords);
             pack->direction = next_world_state.buffer[buffer_index + 1];
-            pack->rotation_quat = directionToQuaternion(pack->direction, false);
+            pack->rotation_quat = directionToQuaternion(pack->direction, true);
             pack->id = PACK_ID;
         }
     }
@@ -3109,8 +3084,15 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
 
 void updatePackDetached()
 {
+    Entity* player = &next_world_state.player;
+    Entity* pack = &next_world_state.pack;
     TileType tile_behind_player = getTileType(getNextCoords(next_world_state.player.coords, oppositeDirection(next_world_state.player.direction)));
-    if (tile_behind_player == PACK) pack_detached = false;
+    if (tile_behind_player == PACK) 
+    {
+        pack_detached = false;
+        setTileDirection(player->direction, pack->coords);
+        pack->direction = player->direction;
+    }
     else pack_detached = true;
 }
 
@@ -3242,8 +3224,7 @@ void editorMode(TickInput *tick_input)
                     if (entity != 0)
                     {
                         entity->direction = direction;
-                        if (getTileType(entity->coords) == MIRROR) entity->rotation_quat = directionToQuaternion(direction, true); // unclear why this is required, something to do with my sprite layout
-                        else entity->rotation_quat = directionToQuaternion(direction, false);
+                        entity->rotation_quat = directionToQuaternion(direction, true);
                     }
                 }
                 else if (tile == LADDER)
@@ -3995,7 +3976,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 setTileType(NONE, pack->coords);
                 setTileDirection(NORTH, pack->coords);
                 pack->coords = pack_intermediate_coords;
-                pack->direction = oppositeDirection(player->direction);
+                pack->direction = player->direction;
                 setTileType(PACK, pack->coords);
                 setTileDirection(pack->direction, pack->coords);
             }
@@ -4459,7 +4440,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
 			float length = vec3Length(diff);
             Vec3 scale = { LASER_WIDTH, LASER_WIDTH, length };
-        	Vec4 rotation = directionToQuaternion(lb.direction, false);
+        	Vec4 rotation = directionToQuaternion(lb.direction, true);
 
             drawLaser(center, scale, rotation, laser_rgb);
         }
