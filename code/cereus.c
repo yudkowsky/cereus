@@ -3464,7 +3464,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 writeSolvedLevelsToFile();
             }
 
-            if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && player->in_motion == 0)
+            if (time_until_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && player->in_motion == 0 && !player->removed)
             {
 				// MOVEMENT 
                 Direction input_direction = 0;
@@ -4750,7 +4750,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         Vec3 test_coords = { 5.0f, 5.0f, 5.0f };
         Vec3 test_scale = { 5.0f, 5.0f, 5.0f };
-        drawAsset(MODEL_3D_MIRROR, MODEL_3D, test_coords, test_scale, IDENTITY_QUATERNION);
+        //drawAsset(MODEL_3D_MIRROR, MODEL_3D, test_coords, test_scale, IDENTITY_QUATERNION);
 
 		if (time_until_input > 0) time_until_input--;
 

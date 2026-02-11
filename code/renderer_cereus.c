@@ -2324,24 +2324,24 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
         }
         else if (type == LASER)
         {
-            for (int32 i = 0; i < batch->instance_count; i++)
+            for (int32 batch_index = 0; batch_index < batch->instance_count; batch_index++)
             {
 				Laser* laser = &laser_instances[laser_instance_count++];
-                laser->center = batch->coords[i];
-                laser->scale = batch->scale[i];
-                laser->rotation = batch->rotation[i];
-                laser->color = batch->color[i];
+                laser->center = batch->coords[batch_index];
+                laser->scale = batch->scale[batch_index];
+                laser->rotation = batch->rotation[batch_index];
+                laser->color = batch->color[batch_index];
             }
         }
         else if (type == MODEL_3D)
         {
-            for (int32 i = 0; i < batch->instance_count; i++)
+            for (int32 batch_index = 0; batch_index < batch->instance_count; batch_index++)
         	{
                 Model* model = &model_instances[model_instance_count++];
                 model->model_id = (uint32)batch->sprite_id;
-                model->coords = batch->coords[i];
-                model->scale = batch->scale[i];
-                model->rotation = batch->rotation[i];
+                model->coords = batch->coords[batch_index];
+                model->scale = batch->scale[batch_index];
+                model->rotation = batch->rotation[batch_index];
             }
         }
 
@@ -2376,11 +2376,11 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
     // fill instance buffer with cube data
     CubeInstanceData* gpu_instances = (CubeInstanceData*)renderer_state.cube_instance_mapped;
 
-    for (uint32 i = 0; i < cube_instance_count; i++)
+    for (uint32 cube_instance_index = 0; cube_instance_index  < cube_instance_count; cube_instance_index ++)
     {
-        Cube* cube = &cube_instances[i];
-        mat4BuildTRS(gpu_instances[i].model, cube->coords, cube->rotation, cube->scale);
-        gpu_instances[i].uv_rect = cube->uv;
+        Cube* cube = &cube_instances[cube_instance_index];
+        mat4BuildTRS(gpu_instances[cube_instance_index].model, cube->coords, cube->rotation, cube->scale);
+        gpu_instances[cube_instance_index].uv_rect = cube->uv;
     }
 
     VkMappedMemoryRange flush_range = {0};
@@ -2536,7 +2536,7 @@ void rendererDraw(void)
 		vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
     }
 
-    // MODEL PIPELINE
+    // MODEL PIPELINE (unbatched)
 
     if (model_instance_count > 0)
     {
@@ -2545,9 +2545,9 @@ void rendererDraw(void)
         renderer_state.model_pipeline_layout, 0, 1,
         &renderer_state.descriptor_sets[renderer_state.atlas_3d_asset_index], 0, 0);
 
-        for (uint32 i = 0; i < model_instance_count; i++)
+        for (uint32 model_instance_index = 0; model_instance_index < model_instance_count; model_instance_index++)
         {
-            Model* model = &model_instances[i];
+            Model* model = &model_instances[model_instance_index];
             LoadedModel* model_data = &renderer_state.loaded_models[model->model_id - MODEL_3D_VOID];
             if (model_data->index_count == 0) continue;
 
