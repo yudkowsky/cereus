@@ -3099,11 +3099,9 @@ void updatePackDetached()
 // EDITOR
 
 /*
-    contains two modes, place/break or select. is called if either one happens.
-
     WASD, SPACE, SHIFT: camera movement
 
-    J: FOV toggle (30 <-> 60)
+    J: FOV toggle (15 <-> 60)
     C: save camera
     I: save world state
 
