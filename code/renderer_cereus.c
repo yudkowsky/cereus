@@ -535,7 +535,7 @@ int32 spriteIndexInAtlas(SpriteId id, AssetType type)
     }
     else
     {
-        return (int32)id - (int32)SPRITE_2D_COUNT;
+        return (int32)id - (int32)(SPRITE_2D_COUNT);
     }
 }
 

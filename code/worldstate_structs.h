@@ -24,6 +24,7 @@ AssetType;
 typedef enum SpriteId 
 {
     NO_ID = -1,
+
     SPRITE_2D_VOID,
     SPRITE_2D_GRID,
     SPRITE_2D_WALL,
@@ -49,7 +50,6 @@ typedef enum SpriteId
 
     SPRITE_2D_FONT_SPACE,
     SPRITE_2D_FONT_LAST = SPRITE_2D_FONT_SPACE + 94,
-
     SPRITE_2D_COUNT,
 
     CUBE_3D_VOID,

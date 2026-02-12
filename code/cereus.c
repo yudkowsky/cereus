@@ -57,7 +57,7 @@ const int32 MAX_RESET_COUNT = 16;
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
 const Int3 AXIS_Z = { 0, 0, 1 };
-const Vec3 IDENTITY_TRANSLATION = { 0, 0, 0 };
+const Vec3 VEC3_0= { 0, 0, 0 };
 const Vec4 IDENTITY_QUATERNION  = { 0, 0, 0, 1 };
 
 const int32 PLAYER_ID = 1;
@@ -91,6 +91,8 @@ const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
+
+bool render_models = false;
 
 const char debug_level_name[64] = "testing";
 const char relative_start_level_path_buffer[64] = "data/levels/";
@@ -328,7 +330,7 @@ float vec3SignedLength(Vec3 v)
 Vec3 vec3Normalize(Vec3 v)
 {
     float length_squared = v.x*v.x + v.y*v.y + v.z*v.z;
-    if (length_squared <= 1e-8f) return IDENTITY_TRANSLATION; 
+    if (length_squared <= 1e-8f) return VEC3_0; 
     float inverse_length = 1.0f / sqrtf(length_squared);
     return vec3ScalarMultiply(v, inverse_length);
 }
@@ -570,7 +572,7 @@ Vec3 directionToVector(Direction direction)
         case UP:    return (Vec3){  0,  1,  0 };
         case DOWN:  return (Vec3){  0, -1,  0 };
 
-        default: return IDENTITY_TRANSLATION;
+        default: return VEC3_0;
     }
 }
 
@@ -1109,7 +1111,7 @@ void clearSolvedLevels()
 
 AssetType assetAtlas(SpriteId id)
 {
-    return (id < SPRITE_2D_COUNT) ? SPRITE_2D : CUBE_3D;
+    return (id < (ASSET_COUNT - SPRITE_2D_FONT_LAST)) ? SPRITE_2D : CUBE_3D;
 }
 
 SpriteId getSprite2DId(TileType tile)
@@ -1221,43 +1223,15 @@ SpriteId getModelId(TileType tile)
 // TODO(spike):
 // drawAsset is slow (>1mspt by itself) likely due to cache misses on AssetToDraw (CUBE_3D_*** accessing ~9MB into array)
 // when we have actual 3D models, hopefully can cut this size hugely, because we won't have >1000 of the same entity on screen, probably? right now its basically all VOIDs 
-void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation)
+void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation, Vec3 color)
 {
-    if (id <= 0) return; // should probably just not call like this
+    if (id <= 0) return;
     AssetToLoad* a = &assets_to_load[id];
     if (a->instance_count == 0)
     {
         a->type = type;
         a->sprite_id = id;
     }
-    int32 index = a->instance_count;
-    a->coords[index] = coords;
-    a->scale[index] = scale;
-    a->rotation[index] = rotation;
-    a->instance_count++;
-}
-
-// TODO(spike): maybe compact this into above function later
-void drawLaser(Vec3 coords, Vec3 scale, Vec4 rotation, Vec3 color)
-{
-    int32 asset_location = -1;
-    FOR(asset_index, 256)
-    {
-        if (assets_to_load[asset_index].instance_count == 0)
-        {
-            if (asset_location == -1) asset_location = asset_index;
-            continue;
-        }
-        if (assets_to_load[asset_index].type == LASER)
-        {
-            asset_location = asset_index;
-            break;
-        }
-    }
-
-    AssetToLoad* a = &assets_to_load[asset_location];
-    a->type = LASER;
-
     int32 index = a->instance_count;
     a->coords[index] = coords;
     a->scale[index] = scale;
@@ -1286,7 +1260,7 @@ void drawText(char* string, Vec2 coords, float scale)
         SpriteId id = (SpriteId)(SPRITE_2D_FONT_SPACE + ((unsigned char)c - 32));
         Vec3 draw_coords = { pen_x, pen_y, 0};
         Vec3 draw_scale = { scale * aspect, scale, 1};
-        drawAsset(id, SPRITE_2D, draw_coords, draw_scale, IDENTITY_QUATERNION);
+        drawAsset(id, SPRITE_2D, draw_coords, draw_scale, IDENTITY_QUATERNION, VEC3_0);
         pen_x += scale * aspect;
     }
 }
@@ -1424,7 +1398,7 @@ Int3 getNextCoords(Int3 coords, Direction direction)
 Vec3 rollingAxis(Direction direction)
 {
     Vec3 up = { 0.0f, 1.0f, 0.0f };
-    Vec3 rolling = intCoordsToNorm(getNextCoords(normCoordsToInt(IDENTITY_TRANSLATION), direction));
+    Vec3 rolling = intCoordsToNorm(getNextCoords(normCoordsToInt(VEC3_0), direction));
     return vec3CrossProduct(up, rolling);
 }
 
@@ -2016,19 +1990,47 @@ Direction getNextLaserDirectionMirror(Direction laser_direction, Direction mirro
 
 LaserColor colorToLaserColor(Color color)
 {
-    LaserColor laser_color = {0};
     switch (color)
     {
-        case RED:     laser_color.red   = true; break;
-        case GREEN:   laser_color.green = true; break;
-        case BLUE:    laser_color.blue  = true; break;
-        case MAGENTA: laser_color.red   = true; laser_color.blue  = true; break;
-        case YELLOW:  laser_color.red   = true; laser_color.green = true; break;
-        case CYAN:    laser_color.green = true; laser_color.blue  = true; break;
-        case WHITE:   laser_color.red   = true; laser_color.green = true; laser_color.blue = true; break;
-        default: break;
+        case RED:     return (LaserColor){ .red = true,  .green = false, .blue = false };
+        case GREEN:   return (LaserColor){ .red = false, .green = true,  .blue = false };
+        case BLUE:    return (LaserColor){ .red = false, .green = false, .blue = true  };
+        case MAGENTA: return (LaserColor){ .red = true,  .green = false, .blue = true  };
+        case YELLOW:  return (LaserColor){ .red = true,  .green = true,  .blue = false };
+        case CYAN:    return (LaserColor){ .red = false, .green = true,  .blue = true  };
+        case WHITE:   return (LaserColor){ .red = true,  .green = true,  .blue = true  };
+        default: return (LaserColor){0};
     }
-    return laser_color;
+}
+
+Vec3 colorToRGB(Color color)
+{
+    switch (color)
+    {
+        case RED:     return (Vec3){ 1.0f, 0.0f, 0.0f };
+        case GREEN:   return (Vec3){ 0.0f, 1.0f, 0.0f };
+        case BLUE:    return (Vec3){ 0.0f, 0.0f, 1.0f };
+        case MAGENTA: return (Vec3){ 1.0f, 0.0f, 1.0f };
+        case YELLOW:  return (Vec3){ 1.0f, 1.0f, 0.0f };
+        case CYAN:    return (Vec3){ 0.0f, 1.0f, 1.0f };
+        case WHITE:   return (Vec3){ 1.0f, 1.0f, 1.0f };
+        default: return VEC3_0;
+    }
+}
+
+TileType laserColorToType(Color color)
+{
+    switch (color)
+    {
+        case RED:     return LASER_RED;
+        case GREEN:   return LASER_GREEN;
+        case BLUE:    return LASER_BLUE;
+        case MAGENTA: return LASER_MAGENTA;
+        case YELLOW:  return LASER_YELLOW;
+        case CYAN:    return LASER_CYAN;
+        case WHITE:   return LASER_WHITE;
+        default: return NONE;
+    }
 }
 
 int32 findNextFreeInLaserBuffer()
@@ -2996,7 +2998,7 @@ void doHeadRotation(bool clockwise)
         int32 id = getEntityId(current_tile_coords);
 
         // for mirror
-        if (!up_or_down) createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
+        if (!up_or_down) createInterpolationAnimation(VEC3_0, VEC3_0, 0, 
                                                      directionToQuaternion(current_direction, true), 
                                                      directionToQuaternion(next_direction, true), 
                                                      &entity->rotation_quat,
@@ -3007,7 +3009,7 @@ void doHeadRotation(bool clockwise)
             float sign = clockwise ? 1.0f : -1.0f;
             Vec4 delta = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), sign * 0.25f * TAU);
             Vec4 end = quaternionNormalize(quaternionMultiply(delta, start));
-            createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0,
+            createInterpolationAnimation(VEC3_0, VEC3_0, 0,
                                          start, end, &entity->rotation_quat,
                                          id, TURN_ANIMATION_TIME);
         }
@@ -3717,7 +3719,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 if (!player->hit_by_blue) doHeadRotation(clockwise);
                             }
 
-                            createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
+                            createInterpolationAnimation(VEC3_0, VEC3_0, 0, 
                                                          directionToQuaternion(player->direction, true), 
                                                          directionToQuaternion(input_direction, true), 
                                                          &player->rotation_quat,
@@ -3838,7 +3840,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                             if (!player->hit_by_blue) doHeadRotation(clockwise);
                                         }
 
-                                        createInterpolationAnimation(IDENTITY_TRANSLATION, IDENTITY_TRANSLATION, 0, 
+                                        createInterpolationAnimation(VEC3_0, VEC3_0, 0, 
                                                                      directionToQuaternion(player->direction, true), 
                                                                      directionToQuaternion(input_direction, true), 
                                                                      &player->rotation_quat,
@@ -4419,93 +4421,93 @@ void gameFrame(double delta_time, TickInput tick_input)
         world_state = next_world_state;
 
 		// DRAW 3D
-
-        // draw lasers
-		FOR(laser_buffer_index, 64)
+        if (!render_models)
         {
-            LaserBuffer lb = laser_buffer[laser_buffer_index];
-            Vec3 laser_rgb = {0};
-            switch (lb.color)
+            // draw lasers
+            FOR(laser_buffer_index, 64)
             {
-                case RED:   laser_rgb = (Vec3){ 1.0f, 0.0f, 0.0f }; break;
-                case GREEN: laser_rgb = (Vec3){ 0.0f, 1.0f, 0.0f }; break;
-                case BLUE:  laser_rgb = (Vec3){ 0.0f, 0.0f, 1.0f }; break;
-                default: continue;
+                LaserBuffer lb = laser_buffer[laser_buffer_index];
+                if (lb.color == NO_COLOR) continue;
+
+                Vec3 diff = vec3Subtract(lb.end_coords, lb.start_coords);
+                Vec3 center = vec3Add(lb.start_coords, vec3ScalarMultiply(diff, 0.5));
+
+                float length = vec3Length(diff);
+                Vec3 scale = { LASER_WIDTH, LASER_WIDTH, length };
+                Vec4 rotation = directionToQuaternion(lb.direction, true);
+				
+                drawAsset(CUBE_3D_LASER_GREEN, LASER, center, scale, rotation, colorToRGB(lb.color));
             }
 
-			Vec3 diff = vec3Subtract(lb.end_coords, lb.start_coords);
-            Vec3 center = vec3Add(lb.start_coords, vec3ScalarMultiply(diff, 0.5));
-
-			float length = vec3Length(diff);
-            Vec3 scale = { LASER_WIDTH, LASER_WIDTH, length };
-        	Vec4 rotation = directionToQuaternion(lb.direction, true);
-
-            drawLaser(center, scale, rotation, laser_rgb);
-        }
-
-        /*
-        FOR(lb_index, 64)
-        {
-            LaserBuffer lb = laser_buffer[lb_index];
-            if (vec3IsEqual(lb.start_coords, IDENTITY_TRANSLATION)) continue;
-            char lb_text[256] = {0};
-            snprintf(lb_text, sizeof(lb_text), "lb start coords: %.2f, %.2f, %.2f, lb end coords: %.2f, %.2f, %.2f", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z);
-            drawDebugText(lb_text);
-        }
-        */
-
-        // clear laser buffer 
-        memset(laser_buffer, 0, sizeof(laser_buffer));
-
-        // draw most things (not player, pack, or sources)
-        for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
-        {
-			TileType draw_tile = world_state.buffer[tile_index];
-			if (draw_tile == NONE || draw_tile == PLAYER || isSource(draw_tile) || draw_tile == PACK) continue;
-			if (isEntity(draw_tile))
+            // show start points
+            /*
+            FOR(lb_index, 64)
             {
-                Entity* e = getEntityPointer(bufferIndexToCoords(tile_index));
-                if (e->locked) draw_tile = LOCKED_BLOCK;
-
-                //if (getCube3DId(draw_tile) == CUBE_3D_MIRROR) continue;
-
-                drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat); 
+                LaserBuffer lb = laser_buffer[lb_index];
+                if (vec3IsEqual(lb.start_coords, VEC3_0)) continue;
+                char lb_text[256] = {0};
+                snprintf(lb_text, sizeof(lb_text), "lb start coords: %.2f, %.2f, %.2f, lb end coords: %.2f, %.2f, %.2f", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z);
+                drawDebugText(lb_text);
             }
-			else
+            */
+
+            // clear laser buffer 
+            memset(laser_buffer, 0, sizeof(laser_buffer));
+
+            // draw most things (not player, pack, or sources)
+            for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
             {
-                drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false));
+                TileType draw_tile = world_state.buffer[tile_index];
+                if (draw_tile == NONE || draw_tile == PLAYER || isSource(draw_tile) || draw_tile == PACK) continue;
+                if (isEntity(draw_tile))
+                {
+                    Entity* e = getEntityPointer(bufferIndexToCoords(tile_index));
+                    if (e->locked) draw_tile = LOCKED_BLOCK;
+
+                    //if (getCube3DId(draw_tile) == CUBE_3D_MIRROR) continue;
+
+                    drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0); 
+                }
+                else
+                {
+                    drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false), VEC3_0);
+                }
+            }
+
+            if (!world_state.player.removed)
+            {
+                player = &world_state.player;
+
+                // TODO(spike): this is terrible (fix with shaders)
+                bool hit_by_green = false;
+                if (player->green_hit.north || player->green_hit.west || player->green_hit.south || player->green_hit.east || player->green_hit.up || player->green_hit.down) hit_by_green = true;
+                if      (player->hit_by_red && hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_WHITE,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+                else if (player->hit_by_red && hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_YELLOW,  CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+                else if (player->hit_by_red &&      	       player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+                else if (             		   hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_CYAN,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+                else if (player->hit_by_red                 	  				  ) drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+                else if (             		   hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_GREEN,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+                else if (                            		   player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+                else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+
+                if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, true), VEC3_0);
+                if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, true),   VEC3_0);
+            }
+            if (!world_state.pack.removed) drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat, VEC3_0);
+
+            // draw sources 
+            for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)
+            {
+                if (world_state.sources[source_index].removed) continue;
+                int32 id = 0;
+                if (world_state.sources[source_index].locked) id = CUBE_3D_LOCKED_BLOCK;
+                else id = getCube3DId(getTileType(world_state.sources[source_index].coords));
+                if (id > 0) drawAsset(id, CUBE_3D, world_state.sources[source_index].position_norm, DEFAULT_SCALE, world_state.sources[source_index].rotation_quat, VEC3_0);
             }
         }
-
-        if (!world_state.player.removed)
+        else
         {
-            player = &world_state.player;
 
-            // TODO(spike): this is terrible (fix with shaders)
-    		bool hit_by_green = false;
-            if (player->green_hit.north || player->green_hit.west || player->green_hit.south || player->green_hit.east || player->green_hit.up || player->green_hit.down) hit_by_green = true;
-            if      (player->hit_by_red && hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_WHITE,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (player->hit_by_red && hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_YELLOW,  CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (player->hit_by_red &&      	       player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (             		   hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_CYAN,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (player->hit_by_red                 	  				  ) drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (             		   hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_GREEN,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else if (                            		   player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-            else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat);
-
-            if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, true));
-            if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, true));
-        }
-		if (!world_state.pack.removed) drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat);
-
-		// draw sources 
-		for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)
-        {
-            if (world_state.sources[source_index].removed) continue;
-            int32 id = 0;
-            if (world_state.sources[source_index].locked) id = CUBE_3D_LOCKED_BLOCK;
-            else id = getCube3DId(getTileType(world_state.sources[source_index].coords));
-            drawAsset(id, CUBE_3D, world_state.sources[source_index].position_norm, DEFAULT_SCALE, world_state.sources[source_index].rotation_quat);
         }
 
 		// DRAW 2D
@@ -4548,16 +4550,16 @@ void gameFrame(double delta_time, TickInput tick_input)
             Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
             Vec3 center_screen = { ((float)SCREEN_WIDTH_PX / 2) - 5, ((float)SCREEN_HEIGHT_PX / 2) - 18, 0.0f }; // weird numbers are just adjustment because raycast starts slightly offset 
                                                                                                         		 // i think this is due to windowed mode, but could be issue with raycast.
-        	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION);
+        	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, VEC3_0);
 
             // picked block
             Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
             Vec3 picked_block_coords = { SCREEN_WIDTH_PX - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
-            drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION);
+            drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, VEC3_0);
 
             if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
             {
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(editor_state.selected_coords), DEFAULT_SCALE, IDENTITY_QUATERNION);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(editor_state.selected_coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0);
 
                 if ((editor_state.selected_id / ID_OFFSET_RESET_BLOCK) * ID_OFFSET_RESET_BLOCK)
                 {
@@ -4571,7 +4573,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         Vec3 draw_coords = {0};
                         if (e != 0) draw_coords = e->position_norm;
                         else draw_coords = intCoordsToNorm(ri.start_coords);
-                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, draw_coords, DEFAULT_SCALE, IDENTITY_QUATERNION);
+                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, draw_coords, DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0);
                     }
                 }
             }
@@ -4583,7 +4585,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             TrailingHitbox th = next_world_state.trailing_hitboxes[th_index];
             if (th.frames == 0 || th.hit_direction != NO_DIRECTION) continue;
-            drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION);
+            drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0);
         }
         */
 
@@ -4662,8 +4664,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                 {
                     Vec3 x_draw_coords = (Vec3){ (float)(x_draw_offset + camera_center_start.x), 3, (float)(z_draw_offset + camera_center_start.z) + ((float)OVERWORLD_SCREEN_SIZE_Z / 2) }; 
                     Vec3 z_draw_coords = (Vec3){ (float)(x_draw_offset + camera_center_start.x) - ((float)OVERWORLD_SCREEN_SIZE_X / 2), 3, (float)(z_draw_offset + camera_center_start.z) }; 
-                    drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION);
-                    drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION);
+                    drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, VEC3_0);
+                    drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, VEC3_0);
 					x_draw_offset += OVERWORLD_SCREEN_SIZE_X;
                 }
                 x_draw_offset = 0;
@@ -4727,9 +4729,11 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
+        /*
         Vec3 test_coords = { 5.0f, 5.0f, 5.0f };
         Vec3 test_scale = { 5.0f, 5.0f, 5.0f };
-        //drawAsset(MODEL_3D_MIRROR, MODEL_3D, test_coords, test_scale, IDENTITY_QUATERNION);
+        drawAsset(MODEL_3D_MIRROR, MODEL_3D, test_coords, test_scale, IDENTITY_QUATERNION, VEC3_0);
+        */
 
 		if (time_until_input > 0) time_until_input--;
 
