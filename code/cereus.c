@@ -4550,6 +4550,11 @@ void gameFrame(double delta_time, TickInput tick_input)
         drawDebugText(camera_text);
         */
 
+        // show current selected id
+        char edit_text[256] = {0};
+        snprintf(edit_text, sizeof(edit_text), "selected id: %d", editor_state.selected_id);
+        drawDebugText(edit_text);
+
 		if (editor_state.editor_mode != NO_MODE)
         {
             // crosshair
@@ -4567,8 +4572,9 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 SpriteId id = getCube3DId(MIRROR);
                 if (render_models) id = getModelId(getTileTypeFromId(editor_state.selected_id));
-                
-                drawAsset(id, OUTLINE_3D, intCoordsToNorm(editor_state.selected_coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0);
+                Entity* selected_e = 0;
+                if (editor_state.selected_id > 0) selected_e = getEntityFromId(editor_state.selected_id);
+                if (selected_e) drawAsset(id, OUTLINE_3D, selected_e->position_norm, DEFAULT_SCALE, selected_e->rotation_quat, VEC3_0);
 
                 if ((editor_state.selected_id / ID_OFFSET_RESET_BLOCK) * ID_OFFSET_RESET_BLOCK)
                 {
