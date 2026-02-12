@@ -4321,6 +4321,49 @@ void gameFrame(double delta_time, TickInput tick_input)
         if ((getTileType(getNextCoords(player->coords, DOWN)) == RESET_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_input == 0))
         {
             Entity* rb = getEntityPointer(getNextCoords(player->coords, DOWN));
+            
+            // clear current positions
+            FOR(to_reset_index, MAX_RESET_COUNT)
+            {
+                ResetInfo ri = rb->reset_info[to_reset_index];
+                if (ri.id == -1) continue;
+                Entity* reset_e = getEntityFromId(ri.id);
+                if (reset_e != 0 && !reset_e->removed)
+                {
+                    setTileType(NONE, reset_e->coords);
+                    setTileDirection(NORTH, reset_e->coords);
+                }
+            }
+
+            // place at start positions
+            FOR(to_reset_index, MAX_RESET_COUNT)
+            {
+                ResetInfo ri = rb->reset_info[to_reset_index];
+                if (ri.id == -1) continue;
+                Entity* reset_e = getEntityFromId(ri.id);
+                if (reset_e != 0)
+                {
+                    reset_e->coords = ri.start_coords;
+                    reset_e->position_norm = intCoordsToNorm(reset_e->coords);
+                    reset_e->direction = ri.start_direction;
+                    reset_e->rotation_quat = directionToQuaternion(ri.start_direction, true);
+                    reset_e->removed = false;
+
+                    TileType type = getTileTypeFromId(ri.id);
+                    setTileType(type, ri.start_coords);
+                    setTileDirection(ri.start_direction, ri.start_coords);
+                }
+            }
+
+            pending_undo_record = true;
+            pending_undo_snapshot = world_state;
+            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+        }
+        
+        /*
+        if ((getTileType(getNextCoords(player->coords, DOWN)) == RESET_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_input == 0))
+        {
+            Entity* rb = getEntityPointer(getNextCoords(player->coords, DOWN));
             FOR(to_reset_index, MAX_RESET_COUNT)
             {
                 ResetInfo ri = rb->reset_info[to_reset_index];
@@ -4352,6 +4395,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
             time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
         }
+        */
 
 		// figure out if entities should be locked / unlocked
         if (editor_state.editor_mode == NO_MODE)
