@@ -83,7 +83,7 @@ const int32 WIN_BLOCK_CHUNK_SIZE = 76;
 const char WIN_BLOCK_CHUNK_TAG[4] = "WINB";
 const int32 LOCKED_INFO_CHUNK_SIZE = 76; // TODO(spike): get rid of this (have dynamic amounts)
 const char LOCKED_INFO_CHUNK_TAG[4] = "LOKB";
-const int32 RESET_INFO_SINGLE_ENTRY_SIZE = 8;
+const int32 RESET_INFO_SINGLE_ENTRY_SIZE = 6;
 const char RESET_INFO_CHUNK_TAG[4] = "RESB";
 
 const int32 OVERWORLD_SCREEN_SIZE_X = 15;
@@ -833,6 +833,7 @@ int32 findNextFreeInResetBlock(Entity* rb)
     return -1;
 }
 
+
 void loadResetBlockInfo(FILE* file)
 {
     int32 positions[16] = {0};
@@ -844,8 +845,8 @@ void loadResetBlockInfo(FILE* file)
 
         int32 size = 0;
         fread(&size, 4, 1, file);
-		int32 reset_entity_count = (size/4 - 3) / RESET_INFO_SINGLE_ENTRY_SIZE;
-		
+        int32 reset_entity_count = (size/4 - 3) / RESET_INFO_SINGLE_ENTRY_SIZE;
+
         Int3 rb_coords = {0};
         fread(&rb_coords.x, 4, 1, file);
         fread(&rb_coords.y, 4, 1, file);
@@ -856,28 +857,63 @@ void loadResetBlockInfo(FILE* file)
             if (int3IsEqual(rb_coords, next_world_state.reset_blocks[rb_index_state].coords))
             {
                 Entity* rb = getEntityPointer(rb_coords);
-				FOR(reset_entity_index, reset_entity_count)
+                FOR(reset_entity_index, reset_entity_count)
                 {
-                    Int3 current_entity_coords = {0};
+                    int32 stored_id = -1;
                     Int3 reset_start_coords = {0};
-                    TileType reset_entity_type = 0;
+                    TileType reset_entity_type = NONE;
                     Direction reset_entity_direction = NO_DIRECTION;
-                    fread(&current_entity_coords.x, 4, 1, file);
-                    fread(&current_entity_coords.y, 4, 1, file);
-                    fread(&current_entity_coords.z, 4, 1, file);
+                    fread(&stored_id, 4, 1, file);
                     fread(&reset_start_coords.x, 4, 1, file);
                     fread(&reset_start_coords.y, 4, 1, file);
                     fread(&reset_start_coords.z, 4, 1, file);
                     fread(&reset_entity_type, 4, 1, file);
                     fread(&reset_entity_direction, 4, 1, file);
 
-                    Entity* reset_e = getEntityPointer(current_entity_coords);
-                    if (reset_e != 0) rb->reset_info[reset_entity_index].id = reset_e->id;
-                    else			  rb->reset_info[reset_entity_index].id = -1;
+                    Entity* reset_e = getEntityFromId(stored_id);
+                    if (reset_e == 0 && stored_id >= 0)
+                    {
+                        // entity was removed, recreate it as removed
+                        Entity* entity_group = 0;
+                        Color color = NO_COLOR;
+                        int32 switch_value = (stored_id / 100) * 100;
+                        if      (switch_value == ID_OFFSET_BOX)          entity_group = next_world_state.boxes;
+                        else if (switch_value == ID_OFFSET_MIRROR)       entity_group = next_world_state.mirrors;
+                        else if (switch_value == ID_OFFSET_GLASS)        entity_group = next_world_state.glass_blocks;
+                        else if (switch_value >= ID_OFFSET_SOURCE && switch_value < ID_OFFSET_WIN_BLOCK)
+                        {
+                            entity_group = next_world_state.sources;
+                            color = (stored_id - ID_OFFSET_SOURCE) / 100;
+                        }
+                        else if (switch_value == ID_OFFSET_WIN_BLOCK)    entity_group = next_world_state.win_blocks;
+                        else if (switch_value == ID_OFFSET_LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
+                        else if (switch_value == ID_OFFSET_RESET_BLOCK)  entity_group = next_world_state.reset_blocks;
+
+                        if (entity_group)
+                        {
+                            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+                            {
+                                if (entity_group[entity_index].id != -1) continue;
+                                entity_group[entity_index].id = stored_id;
+                                entity_group[entity_index].coords = reset_start_coords;
+                                entity_group[entity_index].position_norm = intCoordsToNorm(reset_start_coords);
+                                entity_group[entity_index].direction = reset_entity_direction;
+                                entity_group[entity_index].rotation_quat = directionToQuaternion(reset_entity_direction, true);
+                                entity_group[entity_index].color = color;
+                                entity_group[entity_index].removed = true;
+                                entity_group[entity_index].unlocked_by[0] = '\0';
+                                reset_e = &entity_group[entity_index];
+                                break;
+                            }
+                        }
+                    }
+
+                    rb->reset_info[reset_entity_index].id = (reset_e != 0) ? reset_e->id : -1;
                     rb->reset_info[reset_entity_index].start_coords = reset_start_coords;
                     rb->reset_info[reset_entity_index].start_type = reset_entity_type;
                     rb->reset_info[reset_entity_index].start_direction = reset_entity_direction;
                 }
+                break;
             }
         }
     }
@@ -947,19 +983,16 @@ void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
     FOR(to_reset_index, MAX_RESET_COUNT)
     {
         if (rb->reset_info[to_reset_index].id == -1) continue;
-        Entity* e = getEntityFromId(rb->reset_info[to_reset_index].id);
-        if (e != 0)
-        {
-            // where obj is right now
-            fwrite(&e->coords.x, 4, 1, file);
-            fwrite(&e->coords.y, 4, 1, file);
-            fwrite(&e->coords.z, 4, 1, file);
 
-            if (save_reset_block_state)
+        int32 id_to_write = rb->reset_info[to_reset_index].id;
+        fwrite(&id_to_write, 4, 1, file);
+
+        if (save_reset_block_state)
+        {
+            Entity* e = getEntityFromId(id_to_write);
+            if (e)
             {
                 TileType type = getTileType(e->coords);
-     
-                // where i want obj to be + direction (in this case same because saving this as new reset position)
                 fwrite(&e->coords.x, 4, 1, file);
                 fwrite(&e->coords.y, 4, 1, file);
                 fwrite(&e->coords.z, 4, 1, file);
@@ -968,7 +1001,6 @@ void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
             }
             else
             {
-                // where i want obj to be + direction
                 fwrite(&rb->reset_info[to_reset_index].start_coords.x, 4, 1, file);
                 fwrite(&rb->reset_info[to_reset_index].start_coords.y, 4, 1, file);
                 fwrite(&rb->reset_info[to_reset_index].start_coords.z, 4, 1, file);
@@ -978,10 +1010,7 @@ void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
         }
         else
         {
-            Vec3 null_coords = (Vec3){ 0, 1, 0 };
-            fwrite(&null_coords.x, 4, 1, file);
-            fwrite(&null_coords.y, 4, 1, file);
-            fwrite(&null_coords.z, 4, 1, file);
+            // TODO(spike): maybe collapse
             fwrite(&rb->reset_info[to_reset_index].start_coords.x, 4, 1, file);
             fwrite(&rb->reset_info[to_reset_index].start_coords.y, 4, 1, file);
             fwrite(&rb->reset_info[to_reset_index].start_coords.z, 4, 1, file);
@@ -4333,6 +4362,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
                 {
                     Entity* e = &entity_group[group_index][entity_index];
+                    if (e->unlocked_by[0] == '\0') e->locked = false;
                     if (findInSolvedLevels(e->unlocked_by) == -1) e->locked = true; 
                     else e->locked = false;
                 }
