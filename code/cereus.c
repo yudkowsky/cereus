@@ -24,7 +24,7 @@ const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 const float LASER_WIDTH = 0.25;
 const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
 
-const int32 META_INPUT_TIME_UNTIL_ALLOW = 9;
+const int32 META_TIME_UNTIL_ALLOW_INPUT= 9;
 const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9;
 const int32 TURN_ANIMATION_TIME = 9; // somewhat hard coded, tied to PUSH_FROM_TURN...
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
@@ -2139,7 +2139,7 @@ void updateLaserBuffer(void)
         Int3 current_tile_coords = source->coords;
         if (source->in_motion)
         {
-			
+
         }
 
         int32 skip_mirror_id = 0;
@@ -3251,24 +3251,24 @@ void editorMode(TickInput *tick_input)
             }
             else if ((tick_input->middle_mouse_press || tick_input->g_press) && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
 
-            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+            time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
         if (tick_input->l_press)
         {
             editor_state.picked_tile++;
             if (editor_state.picked_tile == LADDER + 1) editor_state.picked_tile = VOID;
-            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+            time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
         if (tick_input->j_press)
         {
             if (editor_state.do_wide_camera) editor_state.do_wide_camera = false;
             else editor_state.do_wide_camera = true;
-            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+            time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
         if (tick_input->m_press)
         {
             clearSolvedLevels();
-            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+            time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
     }
 
@@ -3322,7 +3322,7 @@ void editorMode(TickInput *tick_input)
                     {
                         rb->reset_info[present_in_rb].id = -1;
                     }
-                    time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+                    time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
                 }
                 // did not click on entity
             }
@@ -3346,7 +3346,7 @@ void editorMode(TickInput *tick_input)
                 if (wb->next_level[0] != 0)
                 {
                     levelChangePrep(wb->next_level);
-                    time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+                    time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
                     gameInitialize(wb->next_level);
                     writeSolvedLevelsToFile();
                 }
@@ -3436,7 +3436,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     updatePackDetached();
                     //resetStandardVisuals();
                 }
-                time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+                time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
             }
             if (time_until_input == 0 && tick_input.r_press)
             {
@@ -3444,7 +3444,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (!restart_last_turn) recordActionForUndo(&world_state);
                 memset(animations, 0, sizeof(animations));
                 gameInitializeState();
-                time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+                time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
                 restart_last_turn = true;
             }
 			if (time_until_input == 0 && tick_input.escape_press && !in_overworld)
@@ -3453,7 +3453,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 char save_solved_levels[64][64] = {0};
                 memcpy(save_solved_levels, next_world_state.solved_levels, sizeof(save_solved_levels));
                 levelChangePrep("overworld");
-                time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+                time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
                 gameInitialize("overworld");
                 memcpy(next_world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
                 writeSolvedLevelsToFile();
@@ -4301,7 +4301,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         saveLevelRewrite(level_path, false);
                     }
                     levelChangePrep(wb->next_level);
-                    time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+                    time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
                     gameInitialize(wb->next_level);
                 }
             }
@@ -4319,7 +4319,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 strcpy(next_world_state.solved_levels[next_free], wb->next_level);
             }
             writeSolvedLevelsToFile();
-            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+            time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
 
         // reset block logic
@@ -4362,7 +4362,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
             pending_undo_record = true;
             pending_undo_snapshot = world_state;
-            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+            time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
 
 		// figure out if entities should be locked / unlocked
@@ -4434,17 +4434,17 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // adjust camera fov (TODO(spike): and location for tab)
-        if (tick_input.n_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+        if (tick_input.n_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE && editor_state.editor_mode != NO_MODE)
         {
             camera.fov--;
-            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+            time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
-        else if (tick_input.b_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+        else if (tick_input.b_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE && editor_state.editor_mode != NO_MODE)
         {
             camera.fov++;
-            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+            time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
-        else if (tick_input.tab_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+        if (tick_input.tab_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE)
         {
             switch (camera_zoom)
             {
@@ -4461,7 +4461,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     break;
                 }
             }
-            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+            time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
 
         if (pending_undo_record)
@@ -4474,7 +4474,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (tick_input.e_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE)
         {
             render_models = !render_models;
-            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+            time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
 
         // finished updating state
@@ -4523,7 +4523,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                     Entity* e = getEntityPointer(bufferIndexToCoords(tile_index));
 
                     if (e->locked) draw_tile = LOCKED_BLOCK;
-					if (draw_tile == WIN_BLOCK && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
+					if (draw_tile == WIN_BLOCK)
+                    {
+                        if (in_overworld && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
+                        else if (!in_overworld && findInSolvedLevels(next_world_state.level_name) != -1) draw_tile = WON_BLOCK;
+                    }
+                        
 
                     if (render_models)
                     {
@@ -4707,7 +4712,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 		if (time_until_input == 0 && tick_input.t_press && !(editor_state.editor_mode == SELECT_WRITE))
         {
             draw_camera_boundary = (draw_camera_boundary) ? false : true;
-			time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+			time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
         if (draw_camera_boundary && in_overworld)
         {
