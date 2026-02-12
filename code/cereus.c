@@ -4417,11 +4417,17 @@ void gameFrame(double delta_time, TickInput tick_input)
             recordActionForUndo(&pending_undo_snapshot);
         }
 
+        // toggle drawing 
+        if (tick_input.e_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+        {
+            render_models = !render_models;
+            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+        }
+
         // finished updating state
         world_state = next_world_state;
 
 		// DRAW 3D
-        if (!render_models)
         {
             // draw lasers
             FOR(laser_buffer_index, 64)
@@ -4463,10 +4469,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                 {
                     Entity* e = getEntityPointer(bufferIndexToCoords(tile_index));
                     if (e->locked) draw_tile = LOCKED_BLOCK;
-
-                    //if (getCube3DId(draw_tile) == CUBE_3D_MIRROR) continue;
-
-                    drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0); 
+                    if (render_models)
+                    {
+                        drawAsset(getModelId(draw_tile), MODEL_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0);
+                    }
+                    else
+                    {
+                        drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0); 
+                    }
                 }
                 else
                 {
@@ -4504,10 +4514,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 else id = getCube3DId(getTileType(world_state.sources[source_index].coords));
                 if (id > 0) drawAsset(id, CUBE_3D, world_state.sources[source_index].position_norm, DEFAULT_SCALE, world_state.sources[source_index].rotation_quat, VEC3_0);
             }
-        }
-        else
-        {
-
         }
 
 		// DRAW 2D

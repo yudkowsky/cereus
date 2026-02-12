@@ -1035,7 +1035,8 @@ LoadedModel loadModel(char* path)
 
 void loadAllEntities()
 {
-	renderer_state.loaded_models[MODEL_3D_MIRROR - MODEL_3D_VOID] = loadModel("data/assets/suzanne.glb");
+	renderer_state.loaded_models[MODEL_3D_MIRROR 	- MODEL_3D_VOID] = loadModel("data/assets/suzanne.glb");
+    renderer_state.loaded_models[MODEL_3D_WIN_BLOCK - MODEL_3D_VOID] = loadModel("data/assets/suzanne.glb");
 }
 
 void rendererInitialize(RendererPlatformHandles platform_handles)
