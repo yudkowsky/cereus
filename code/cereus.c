@@ -4570,11 +4570,11 @@ void gameFrame(double delta_time, TickInput tick_input)
 
             if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
             {
-                SpriteId id = getCube3DId(MIRROR);
-                if (render_models) id = getModelId(getTileTypeFromId(editor_state.selected_id));
+                SpriteId selected_id = getCube3DId(MIRROR);
+                if (render_models) selected_id = getModelId(getTileTypeFromId(editor_state.selected_id));
                 Entity* selected_e = 0;
                 if (editor_state.selected_id > 0) selected_e = getEntityFromId(editor_state.selected_id);
-                if (selected_e) drawAsset(id, OUTLINE_3D, selected_e->position_norm, DEFAULT_SCALE, selected_e->rotation_quat, VEC3_0);
+                if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position_norm, DEFAULT_SCALE, selected_e->rotation_quat, VEC3_0);
 
                 if ((editor_state.selected_id / ID_OFFSET_RESET_BLOCK) * ID_OFFSET_RESET_BLOCK)
                 {
@@ -4583,12 +4583,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                 	{
                         ResetInfo ri = rb->reset_info[to_reset_index];
                         if (ri.id == -1) continue;
-                        Entity* e = 0; 
-                        if (ri.id != -2) e = getEntityFromId(ri.id);
-                        Vec3 draw_coords = {0};
-                        if (e != 0) draw_coords = e->position_norm;
-                        else draw_coords = intCoordsToNorm(ri.start_coords);
-                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, draw_coords, DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0);
+                        Entity* to_reset_e = getEntityFromId(ri.id);
+                        SpriteId to_reset_id = getCube3DId(MIRROR);
+                        if (render_models) to_reset_id = getModelId(getTileTypeFromId(to_reset_e->id));
+                        drawAsset(to_reset_id, OUTLINE_3D, to_reset_e->position_norm, DEFAULT_SCALE, to_reset_e->rotation_quat, VEC3_0);
                     }
                 }
             }
