@@ -89,6 +89,7 @@ typedef enum SpriteId
     CUBE_3D_LOCKED_BLOCK,
     CUBE_3D_RESET_BLOCK,
     CUBE_3D_LADDER,
+    CUBE_3D_WON_BLOCK,
 
     MODEL_3D_VOID,
     MODEL_3D_GRID,
@@ -127,6 +128,7 @@ typedef enum SpriteId
     MODEL_3D_LOCKED_BLOCK,
     MODEL_3D_RESET_BLOCK,
     MODEL_3D_LADDER,
+    MODEL_3D_WON_BLOCK,
 
     ASSET_COUNT
 }
@@ -267,6 +269,7 @@ typedef enum TileType
     LOCKED_BLOCK,
     RESET_BLOCK,
     LADDER,
+    WON_BLOCK,
 
     LASER_RED,
     LASER_GREEN,

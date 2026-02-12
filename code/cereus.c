@@ -1191,6 +1191,7 @@ SpriteId getCube3DId(TileType tile)
         case LOCKED_BLOCK: return CUBE_3D_LOCKED_BLOCK;
         case RESET_BLOCK:  return CUBE_3D_RESET_BLOCK;
         case LADDER: 	   return CUBE_3D_LADDER;
+        case WON_BLOCK:    return CUBE_3D_WON_BLOCK;
 
         case LASER_RED:     return CUBE_3D_LASER_RED;
         case LASER_GREEN:	return CUBE_3D_LASER_GREEN;
@@ -1229,6 +1230,7 @@ SpriteId getModelId(TileType tile)
         case LOCKED_BLOCK: return MODEL_3D_LOCKED_BLOCK;
         case RESET_BLOCK:  return MODEL_3D_RESET_BLOCK;
         case LADDER: 	   return MODEL_3D_LADDER;
+        case WON_BLOCK:    return MODEL_3D_WON_BLOCK;
 
         case LASER_RED:     return MODEL_3D_LASER_RED;
         case LASER_GREEN:	return MODEL_3D_LASER_GREEN;
@@ -4485,7 +4487,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (isEntity(draw_tile))
                 {
                     Entity* e = getEntityPointer(bufferIndexToCoords(tile_index));
+
                     if (e->locked) draw_tile = LOCKED_BLOCK;
+					if (draw_tile == WIN_BLOCK && findInSolvedLevels(e->unlocked_by)) draw_tile = WON_BLOCK;
+
                     if (render_models)
                     {
                         drawAsset(getModelId(draw_tile), MODEL_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0);
