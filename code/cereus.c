@@ -25,7 +25,7 @@ const float LASER_WIDTH = 0.25;
 const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
 
 const int32 META_INPUT_TIME_UNTIL_ALLOW = 9;
-const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9; // TODO(spike): make this freely editable (want to up this by a few frames to emphasise pushing stacked box mechanics)
+const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9;
 const int32 TURN_ANIMATION_TIME = 9; // somewhat hard coded, tied to PUSH_FROM_TURN...
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
 const int32 CLIMB_ANIMATION_TIME = 10;
@@ -2663,7 +2663,6 @@ void gameInitializeState()
 
 void gameInitialize(char* level_name) 
 {	
-    // TODO(spike): panic if cannot open constructed level path (check if can open here before we pass on)
     if (level_name == 0) strcpy(next_world_state.level_name, debug_level_name);
     else strcpy(next_world_state.level_name, level_name);
     gameInitializeState();
@@ -2689,29 +2688,28 @@ void recordEntityDelta(Entity* e)
     undo_buffer.delta_count++;
 }
 
+void evictOldestUndoAction()
+{
+    UndoActionHeader* oldest = &undo_buffer.headers[undo_buffer.oldest_action_index];
+    undo_buffer.delta_count -= oldest->entity_count;
+    if (oldest->level_changed)
+    {
+        uint8 level_change_index = undo_buffer.level_change_indices[undo_buffer.oldest_action_index];
+        if (level_change_index != 0xFF)
+        {
+            undo_buffer.level_change_count--;
+        }
+    }
+    undo_buffer.level_change_indices[undo_buffer.oldest_action_index] = 0xFF;
+    undo_buffer.oldest_action_index = (undo_buffer.oldest_action_index + 1) % MAX_UNDO_ACTIONS;
+    undo_buffer.header_count--;
+}
+
 // called after a noraml (non-level-change) action
 // diffs world_state vs. next_world_state and stores deltas for every entity that changed
 void recordActionForUndo(WorldState* old_state)
 {
-	// evict oldest action if headers are full
-    if (undo_buffer.header_count >= MAX_UNDO_ACTIONS)
-    {
-        UndoActionHeader* oldest = &undo_buffer.headers[undo_buffer.oldest_action_index];
-        undo_buffer.delta_count -= oldest->entity_count;
-
-        // free level change slot if the oldest action had one
-        if (oldest->level_changed)
-        {
-            uint8 level_change_index = undo_buffer.level_change_indices[undo_buffer.oldest_action_index];
-            if (level_change_index != 0xFF)
-            {
-                undo_buffer.level_change_count--;
-            }
-        }
-        undo_buffer.level_change_indices[undo_buffer.oldest_action_index] = 0xFF;
-        undo_buffer.oldest_action_index = (undo_buffer.oldest_action_index + 1) % MAX_UNDO_ACTIONS;
-        undo_buffer.header_count--;
-    }
+    if (undo_buffer.header_count >= MAX_UNDO_ACTIONS) evictOldestUndoAction();
 
     uint32 header_index = undo_buffer.header_write_pos;
     uint32 delta_start = undo_buffer.delta_write_pos;
@@ -2748,25 +2746,7 @@ void recordActionForUndo(WorldState* old_state)
 // call before transitioning to a new level. stores a delta for every entity in the current level, plus the level change metadata
 void recordLevelChangeForUndo(char* current_level_name, bool level_was_just_solved)
 {
-	// evict oldest action if headers are full (TODO(spike): wrap into function)
-    if (undo_buffer.header_count >= MAX_UNDO_ACTIONS)
-    {
-        UndoActionHeader* oldest = &undo_buffer.headers[undo_buffer.oldest_action_index];
-        undo_buffer.delta_count -= oldest->entity_count;
-
-        // free level change slot if the oldest action had one
-        if (oldest->level_changed)
-        {
-            uint8 level_change_index = undo_buffer.level_change_indices[undo_buffer.oldest_action_index];
-            if (level_change_index != 0xFF)
-            {
-                undo_buffer.level_change_count--;
-            }
-        }
-        undo_buffer.level_change_indices[undo_buffer.oldest_action_index] = 0xFF;
-        undo_buffer.oldest_action_index = (undo_buffer.oldest_action_index + 1) % MAX_UNDO_ACTIONS;
-        undo_buffer.header_count--;
-    }
+    if (undo_buffer.header_count >= MAX_UNDO_ACTIONS) evictOldestUndoAction();
 
     // evict oldest level change if level_changes array is full
     if (undo_buffer.level_change_count >= MAX_LEVEL_CHANGES)
@@ -4460,11 +4440,11 @@ void gameFrame(double delta_time, TickInput tick_input)
             // clear laser buffer 
             memset(laser_buffer, 0, sizeof(laser_buffer));
 
-            // draw most things (not player, pack, or sources)
+            // draw most things (not player or pack) TODO(spike): after models can include pack here because can be DEFAULT_SCALE
             for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
             {
                 TileType draw_tile = world_state.buffer[tile_index];
-                if (draw_tile == NONE || draw_tile == PLAYER || isSource(draw_tile) || draw_tile == PACK) continue;
+                if (draw_tile == NONE || draw_tile == PLAYER || draw_tile == PACK) continue;
                 if (isEntity(draw_tile))
                 {
                     Entity* e = getEntityPointer(bufferIndexToCoords(tile_index));
@@ -4504,16 +4484,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, true),   VEC3_0);
             }
             if (!world_state.pack.removed) drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat, VEC3_0);
-
-            // draw sources 
-            for (int source_index = 0; source_index < MAX_ENTITY_INSTANCE_COUNT; source_index++)
-            {
-                if (world_state.sources[source_index].removed) continue;
-                int32 id = 0;
-                if (world_state.sources[source_index].locked) id = CUBE_3D_LOCKED_BLOCK;
-                else id = getCube3DId(getTileType(world_state.sources[source_index].coords));
-                if (id > 0) drawAsset(id, CUBE_3D, world_state.sources[source_index].position_norm, DEFAULT_SCALE, world_state.sources[source_index].rotation_quat, VEC3_0);
-            }
         }
 
 		// DRAW 2D
