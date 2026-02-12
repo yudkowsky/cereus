@@ -143,6 +143,7 @@ LRESULT CALLBACK windowMessageProcessor(
                 case VK_SPACE: 	tick_input.space_press = true;  break;
                 case VK_SHIFT: 	tick_input.shift_press = true;  break;
                 case VK_ESCAPE: tick_input.escape_press = true; break;
+            	case VK_TAB:	tick_input.tab_press = true;	break;
             }
             break;
         case WM_KEYUP:
@@ -189,6 +190,7 @@ LRESULT CALLBACK windowMessageProcessor(
                 case VK_SPACE: 	tick_input.space_press = false;  break;
                 case VK_SHIFT: 	tick_input.shift_press = false;  break;
                 case VK_ESCAPE: tick_input.escape_press = false; break;
+            	case VK_TAB:	tick_input.tab_press = false; 	 break;
             }
             break;
     }

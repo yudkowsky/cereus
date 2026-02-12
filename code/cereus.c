@@ -102,8 +102,11 @@ Int3 level_dim = {0};
 
 Camera camera = {0};
 Int3 camera_screen_offset = {0};
-const Int3 camera_center_start = { 7, 0, -17 };
+const Int3 camera_center_start = { 7, 0, -2 };
 bool draw_camera_boundary = false;
+CameraZoom camera_zoom = ZOOM_CLOSE;
+const float OVERWORLD_CAMERA_FOV_CLOSE = 15.0f; 
+const float OVERWORLD_CAMERA_FOV_FAR = 35.0f;
 
 AssetToLoad assets_to_load[1024] = {0};
 
@@ -4430,6 +4433,37 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
+        // adjust camera fov (TODO(spike): and location for tab)
+        if (tick_input.n_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+        {
+            camera.fov--;
+            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+        }
+        else if (tick_input.b_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+        {
+            camera.fov++;
+            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+        }
+        else if (tick_input.tab_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+        {
+            switch (camera_zoom)
+            {
+                case ZOOM_CLOSE:
+                {
+                    camera.fov = OVERWORLD_CAMERA_FOV_FAR;
+                    camera_zoom = ZOOM_FAR;
+                    break;
+                }
+                case ZOOM_FAR:
+                {
+                    camera.fov = OVERWORLD_CAMERA_FOV_CLOSE;
+                    camera_zoom = ZOOM_CLOSE;
+                    break;
+                }
+            }
+            time_until_input = META_INPUT_TIME_UNTIL_ALLOW;
+        }
+
         if (pending_undo_record)
         {
             pending_undo_record = false;
@@ -4489,7 +4523,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     Entity* e = getEntityPointer(bufferIndexToCoords(tile_index));
 
                     if (e->locked) draw_tile = LOCKED_BLOCK;
-					if (draw_tile == WIN_BLOCK && findInSolvedLevels(e->unlocked_by)) draw_tile = WON_BLOCK;
+					if (draw_tile == WIN_BLOCK && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
 
                     if (render_models)
                     {
@@ -4697,10 +4731,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 z_draw_offset += OVERWORLD_SCREEN_SIZE_Z;
             }
         }
-
-        // decide which camera to use
-        if (editor_state.do_wide_camera) camera.fov = 60.0f;
-        else camera.fov = CAMERA_FOV;
 
         // write level to file on i press
         char level_path[64];
