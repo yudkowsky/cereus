@@ -1229,10 +1229,10 @@ void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotati
     AssetToLoad* a = &assets_to_load[id];
     if (a->instance_count == 0)
     {
-        a->type = type;
         a->sprite_id = id;
     }
     int32 index = a->instance_count;
+    a->type[index] = type;
     a->coords[index] = coords;
     a->scale[index] = scale;
     a->rotation[index] = rotation;
@@ -4565,13 +4565,16 @@ void gameFrame(double delta_time, TickInput tick_input)
 
             if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
             {
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(editor_state.selected_coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0);
+                SpriteId id = getCube3DId(MIRROR);
+                if (render_models) id = getModelId(getTileTypeFromId(editor_state.selected_id));
+                
+                drawAsset(id, OUTLINE_3D, intCoordsToNorm(editor_state.selected_coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0);
 
                 if ((editor_state.selected_id / ID_OFFSET_RESET_BLOCK) * ID_OFFSET_RESET_BLOCK)
                 {
                     Entity* rb = getEntityFromId(editor_state.selected_id);
                     FOR(to_reset_index, MAX_RESET_COUNT)
-                    {
+                	{
                         ResetInfo ri = rb->reset_info[to_reset_index];
                         if (ri.id == -1) continue;
                         Entity* e = 0; 

@@ -135,7 +135,7 @@ SpriteId;
 typedef struct AssetToLoad 
 {
     SpriteId sprite_id;
-    AssetType type;
+    AssetType type[2048];
     Vec3 coords[2048];
     Vec3 scale[2048];
     Vec4 rotation[2048];

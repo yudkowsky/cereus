@@ -300,7 +300,7 @@ uint32 frame_vertex_count = 0;
 Sprite sprite_instances[8192];
 uint32 sprite_instance_count = 0;
 
-Cube cube_instances[8192];
+Cube cube_instances[8192]; // TODO(spike): remove this and below when have full model support
 uint32 cube_instance_count = 0;
 
 Cube outline_instances[1024];
@@ -311,6 +311,9 @@ uint32 laser_instance_count = 0;
 
 Model model_instances[1024];
 uint32 model_instance_count = 0;
+
+Model model_outline_instances[1024];
+uint32 model_outline_instance_count = 0;
 
 Camera renderer_camera = {0};
 
@@ -2267,6 +2270,123 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
 
 void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
 {  
+    renderer_camera = game_camera;
+
+    sprite_instance_count = 0;
+    cube_instance_count = 0;
+    outline_instance_count = 0;
+    laser_instance_count = 0;
+    model_instance_count = 0;
+    model_outline_instance_count = 0;
+
+    for (int asset_index = 0; asset_index < 1024; asset_index++)
+    {
+        AssetToLoad* batch = &assets_to_load[asset_index];
+        if (batch->instance_count == 0) continue;
+
+        SpriteId sprite_id = batch->sprite_id;
+
+        for (int32 i = 0; i < batch->instance_count; i++)
+        {
+            AssetType type = batch->type[i];
+
+            if (type == OUTLINE_3D)
+            {
+                if (sprite_id >= MODEL_3D_VOID && sprite_id <= MODEL_3D_SOURCE_WHITE
+                    && renderer_state.loaded_models[sprite_id - MODEL_3D_VOID].index_count > 0)
+                {
+                    Model* m = &model_outline_instances[model_outline_instance_count++];
+                    m->model_id = (uint32)sprite_id;
+                    m->coords   = batch->coords[i];
+                    m->scale    = batch->scale[i];
+                    m->rotation = batch->rotation[i];
+                }
+                else
+                {
+                    Cube* cube = &outline_instances[outline_instance_count++];
+                    cube->coords      = batch->coords[i];
+                    cube->scale       = batch->scale[i];
+                    cube->rotation    = batch->rotation[i];
+                    cube->uv          = (Vec4){ 0, 0, 1, 1 };
+                    cube->asset_index = 0;
+                }
+            }
+            else if (type == LASER)
+            {
+                Laser* laser = &laser_instances[laser_instance_count++];
+                laser->center   = batch->coords[i];
+                laser->scale    = batch->scale[i];
+                laser->rotation = batch->rotation[i];
+                laser->color    = batch->color[i];
+            }
+            else if (type == MODEL_3D)
+            {
+                Model* model = &model_instances[model_instance_count++];
+                model->model_id = (uint32)sprite_id;
+                model->coords   = batch->coords[i];
+                model->scale    = batch->scale[i];
+                model->rotation = batch->rotation[i];
+            }
+            else if (type == SPRITE_2D)
+            {
+                int32 atlas_asset_index;
+                int32 atlas_width;
+                int32 atlas_height;
+
+                if (spriteIsFont(sprite_id))
+                {
+                    atlas_asset_index = renderer_state.atlas_font_asset_index;
+                    atlas_width  = ATLAS_FONT_WIDTH;
+                    atlas_height = ATLAS_FONT_HEIGHT;
+                }
+                else
+                {
+                    atlas_asset_index = renderer_state.atlas_2d_asset_index;
+                    atlas_width  = ATLAS_2D_WIDTH;
+                    atlas_height = ATLAS_2D_HEIGHT;
+                }
+
+                Sprite* sprite = &sprite_instances[sprite_instance_count++];
+                sprite->asset_index = (uint32)atlas_asset_index;
+                sprite->coords      = batch->coords[i];
+                sprite->size        = batch->scale[i];
+                sprite->uv          = spriteUV(sprite_id, type, atlas_width, atlas_height);
+            }
+            else if (type == CUBE_3D)
+            {
+                Vec4 uv_rect = spriteUV(sprite_id, type, ATLAS_3D_WIDTH, ATLAS_3D_HEIGHT);
+
+                Cube* cube = &cube_instances[cube_instance_count++];
+                cube->asset_index = (uint32)renderer_state.atlas_3d_asset_index;
+                cube->coords      = batch->coords[i];
+                cube->scale       = batch->scale[i];
+                cube->rotation    = batch->rotation[i];
+                cube->uv          = uv_rect;
+            }
+        }
+    }
+
+    // fill instance buffer with cube data
+    CubeInstanceData* gpu_instances = (CubeInstanceData*)renderer_state.cube_instance_mapped;
+
+    for (uint32 cube_instance_index = 0; cube_instance_index < cube_instance_count; cube_instance_index++)
+    {
+        Cube* cube = &cube_instances[cube_instance_index];
+        mat4BuildTRS(gpu_instances[cube_instance_index].model, cube->coords, cube->rotation, cube->scale);
+        gpu_instances[cube_instance_index].uv_rect = cube->uv;
+    }
+
+    VkMappedMemoryRange flush_range = {0};
+    flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    flush_range.memory = renderer_state.cube_instance_memory;
+    flush_range.offset = 0;
+    flush_range.size = VK_WHOLE_SIZE;
+    vkFlushMappedMemoryRanges(renderer_state.logical_device_handle, 1, &flush_range);
+}
+
+/*
+void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
+{  
 	renderer_camera = game_camera;
 
     sprite_instance_count = 0;
@@ -2274,21 +2394,24 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
     outline_instance_count = 0;
     laser_instance_count = 0;
     model_instance_count = 0;
+    model_outline_instance_count = 0;
 
     for (int asset_index = 0; asset_index < 1024; asset_index++)
     {
 		AssetToLoad* batch = &assets_to_load[asset_index];
         if (batch->instance_count == 0) continue;
 
-        AssetType type = batch->type;
         SpriteId sprite_id = batch->sprite_id;
 
 		int32 atlas_asset_index = -1;
         int32 atlas_width = 0;
         int32 atlas_height = 0;
 
+        //AssetType type = batch->type[asset_index];
+
         if (type == SPRITE_2D)
         {
+
             if (spriteIsFont(sprite_id))
             {
                 atlas_asset_index = renderer_state.atlas_font_asset_index;
@@ -2310,16 +2433,25 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
         }
         else if (type == OUTLINE_3D) 
         {
+            // could be CUBE or MODEL right now. later will just be the model outline.
             // for loop in here because we continue past the atlas logic
             for (int32 outline_instance_index = 0; outline_instance_index < batch->instance_count; outline_instance_index++)
             {
-                // for now, all outlines are cubes, so just model onto a cube.
-                Cube* cube = &outline_instances[outline_instance_count++];
-                cube->coords      = batch->coords[outline_instance_index];
-				cube->scale       = batch->scale[outline_instance_index];
-                cube->rotation    = batch->rotation[outline_instance_index];
-                cube->uv 	   	  = (Vec4){ 0, 0, 1, 1 }; // unused by shader
-                cube->asset_index = 0; // unused by shader
+                if (sprite_id >= MODEL_3D_VOID && sprite_id <= MODEL_3D_SOURCE_WHITE && renderer_state.loaded_models[sprite_id - MODEL_3D_VOID].index_count > 0)
+                {
+                    Model* model = &model_outline_instances[model_outline_instance_count++];
+                    model->model_id = (uint32)sprite_id;
+                    model->coords   = batch->coords[outline_instance_index];
+                    model->scale    = batch->scale[outline_instance_index];
+                	model->rotation = batch->rotation[outline_instance_index];
+            	}
+                else
+                {
+                    Cube* cube = &outline_instances[outline_instance_count++];
+                    cube->coords      = batch->coords[outline_instance_index];
+                    cube->scale       = batch->scale[outline_instance_index];
+                    cube->rotation    = batch->rotation[outline_instance_index];
+                }
             }
             continue;
         }
@@ -2350,7 +2482,7 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
 
         Vec4 uv_rect = spriteUV(sprite_id, type, atlas_width, atlas_height);
 
-        if (assets_to_load[asset_index].type == SPRITE_2D)
+        if (assets_to_load[asset_index].type[asset_index] == SPRITE_2D)
         {
 			for (int32 sprite_instance_index = 0; sprite_instance_index < assets_to_load[asset_index].instance_count; sprite_instance_index++)
             {
@@ -2361,7 +2493,7 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
                 sprite->uv          = uv_rect;
             }
         }
-        else if (assets_to_load[asset_index].type == CUBE_3D)
+        else if (assets_to_load[asset_index].type[asset_index] == CUBE_3D)
         {
             for (int32 cube_instance_index = 0; cube_instance_index < assets_to_load[asset_index].instance_count; cube_instance_index++)
             {
@@ -2391,6 +2523,7 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
     flush_range.size = VK_WHOLE_SIZE;
     vkFlushMappedMemoryRanges(renderer_state.logical_device_handle, 1, &flush_range);
 }
+*/
 
 void rendererDraw(void)
 {
@@ -2531,9 +2664,7 @@ void rendererDraw(void)
         vkCmdPushConstants(command_buffer, renderer_state.outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
 
 		vkCmdSetDepthBias(command_buffer, -0.1f, 0.0f, -0.1f);
-
         vkCmdDrawIndexed(command_buffer, renderer_state.cube_index_count, 1, 0, 0, 0);
-
 		vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
     }
 
@@ -2569,6 +2700,36 @@ void rendererDraw(void)
 
             vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
         }
+    }
+
+    // MODEL OUTLINES
+
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, renderer_state.outline_pipeline_handle);
+
+    for (uint32 outline_index = 0; outline_index < model_outline_instance_count; outline_index++)
+    {
+        Model* model = &model_outline_instances[outline_index];
+        LoadedModel* model_data = &renderer_state.loaded_models[model->model_id - MODEL_3D_VOID];
+        if (model_data->index_count == 0) continue;
+
+        VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
+        vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+        float model_matrix[16];
+        mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
+
+        PushConstants pc = {0};
+        memcpy(pc.model, model_matrix,      sizeof(pc.model));
+        memcpy(pc.view,  view_matrix,       sizeof(pc.view));
+        memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
+        pc.uv_rect = (Vec4){0, 0, 1, 1};
+
+        vkCmdPushConstants(command_buffer, renderer_state.outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+
+		vkCmdSetDepthBias(command_buffer, -0.1f, 0.0f, -0.1f);
+        vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
+		vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
     }
 
     // LASER PIPELINE
