@@ -7,9 +7,9 @@
 #undef VOID
 #endif
 
-#define MAX_UNDO_DELTAS 200000
-#define MAX_UNDO_ACTIONS 50000 // assumes a ratio of deltas:actions of 4:1 (maybe optimistic)
-#define MAX_LEVEL_CHANGES 2
+#define MAX_UNDO_DELTAS 2000000
+#define MAX_UNDO_ACTIONS 500000 // assumes a ratio of deltas:actions of 4:1 (maybe optimistic)
+#define MAX_LEVEL_CHANGES 50000
 
 typedef enum 
 {

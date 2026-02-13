@@ -117,6 +117,8 @@ UndoBuffer undo_buffer = {0};
 bool restart_last_turn = false;
 bool pending_undo_record = false;
 WorldState pending_undo_snapshot = {0};
+int32 undos_performed = 0;
+const int32 UNDO_MODE_TIME_UNTIL_ALLOW_INPUT = 3;
 
 Animation animations[32];
 int32 time_until_input = 0;
@@ -3434,9 +3436,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (performUndo())
                 {
                     updatePackDetached();
-                    //resetStandardVisuals();
+                    undos_performed++;
                 }
-                time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
+				if (undos_performed <= 2) time_until_input = 8;
+				else if (undos_performed <= 4) time_until_input = 7;
+				else if (undos_performed <= 8) time_until_input = 6;
+				else time_until_input = 5;
             }
             if (time_until_input == 0 && tick_input.r_press)
             {
@@ -4026,62 +4031,65 @@ void gameFrame(double delta_time, TickInput tick_input)
 		updateLaserBuffer();
 
         // falling logic
-		if (!player->hit_by_blue) doFallingObjects(true);
-
-        if (pack_intermediate_states_timer == 0)
+        if (undos_performed == 0) // only do gravity if not currently holding the undo button.
         {
-            if (!player->hit_by_red)
-            {
-                if (!pack_detached)
-                {
-                    if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) player_will_fall_next_turn = true; 
-                    else player_will_fall_next_turn = false;
+            if (!player->hit_by_blue) doFallingObjects(true);
 
-                    // not red and pack attached: player always falls, if no bypass. pack only falls if player falls
-                    if (!bypass_player_fall && !doFallingEntity(player, true))
+            if (pack_intermediate_states_timer == 0)
+            {
+                if (!player->hit_by_red)
+                {
+                    if (!pack_detached)
                     {
+                        if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) player_will_fall_next_turn = true; 
+                        else player_will_fall_next_turn = false;
+
+                        // not red and pack attached: player always falls, if no bypass. pack only falls if player falls
+                        if (!bypass_player_fall && !doFallingEntity(player, true))
+                        {
+                            doFallingEntity(pack, true);
+                        }
+                    }
+                    else
+                    {
+                        if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) player_will_fall_next_turn = true;
+                        else player_will_fall_next_turn = false;
+                        // not red and pack not attached, so pack and player both always fall
+                        if (!bypass_player_fall) doFallingEntity(player, true);
                         doFallingEntity(pack, true);
                     }
                 }
                 else
                 {
-                    if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) player_will_fall_next_turn = true;
-                    else player_will_fall_next_turn = false;
-                    // not red and pack not attached, so pack and player both always fall
-                    if (!bypass_player_fall) doFallingEntity(player, true);
-                    doFallingEntity(pack, true);
+                    player_will_fall_next_turn = false;
+                    // red, so pack only falls if is detached from player
+                    if (pack_detached)
+                    {
+                        doFallingEntity(pack, true);
+                    }
                 }
             }
             else
             {
-                player_will_fall_next_turn = false;
-                // red, so pack only falls if is detached from player
-                if (pack_detached)
+                // in the middle of a turn (where pack is attached)
+
+                if (getTileType(getNextCoords(player->coords, DOWN)) == NONE && !player->hit_by_red)
                 {
-                    doFallingEntity(pack, true);
+                    // in middle of turn, which means was on ground or red, and now no longer on ground AND not red, so must have stopped being red in the middle of the turn.
+                    do_player_and_pack_fall_after_turn = true;
                 }
-            }
-        }
-        else
-        {
-            // in the middle of a turn (where pack is attached)
 
-            if (getTileType(getNextCoords(player->coords, DOWN)) == NONE && !player->hit_by_red)
-            {
-                // in middle of turn, which means was on ground or red, and now no longer on ground AND not red, so must have stopped being red in the middle of the turn.
-                do_player_and_pack_fall_after_turn = true;
-            }
-
-            if (isPushable(getTileType(pack_hitbox_turning_to_coords)))
-            {
-				if (player->hit_by_blue) player_hit_by_blue_in_turn = true;
-                if (!player->hit_by_blue && player_hit_by_blue_in_turn && pack_intermediate_states_timer > 0)
+                if (isPushable(getTileType(pack_hitbox_turning_to_coords)))
                 {
-                    if (getTileType(getNextCoords(pack_hitbox_turning_to_coords, DOWN)) == NONE)
+                    if (player->hit_by_blue) player_hit_by_blue_in_turn = true;
+                    if (!player->hit_by_blue && player_hit_by_blue_in_turn && pack_intermediate_states_timer > 0)
                     {
-                        entity_to_fall_after_blue_not_blue_turn_timer = pack_intermediate_states_timer + 4; // this number is magic (sorry); it is the frame count that makes the entity fall as soon as possible, i.e., at the same time as the player (if magenta-not-magenta)
-                        entity_to_fall_after_blue_not_blue_turn_coords = getNextCoords(pack_hitbox_turning_to_coords, pack_orthogonal_push_direction);
-                        player_hit_by_blue_in_turn = false;
+                        if (getTileType(getNextCoords(pack_hitbox_turning_to_coords, DOWN)) == NONE)
+                        {
+                            entity_to_fall_after_blue_not_blue_turn_timer = pack_intermediate_states_timer + 4; // this number is magic (sorry); it is the frame count that makes the entity fall as soon as possible, i.e., at the same time as the player (if magenta-not-magenta)
+                            entity_to_fall_after_blue_not_blue_turn_coords = getNextCoords(pack_hitbox_turning_to_coords, pack_orthogonal_push_direction);
+                            player_hit_by_blue_in_turn = false;
+                        }
                     }
                 }
             }
@@ -4241,6 +4249,9 @@ void gameFrame(double delta_time, TickInput tick_input)
         // decrement trailing hitboxes 
         FOR(i, MAX_TRAILING_HITBOX_COUNT) if (trailing_hitboxes[i].frames > 0) trailing_hitboxes[i].frames--;
         if (bypass_player_fall) bypass_player_fall = false;
+
+        // reset undos performed if no longer holding z undos
+        if (undos_performed > 0 && !tick_input.z_press) undos_performed = 0;
 
         // decide which ghosts to render, if ghosts should be rendered
         bool do_player_ghost = false;
@@ -4528,7 +4539,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                         if (in_overworld && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
                         else if (!in_overworld && findInSolvedLevels(next_world_state.level_name) != -1) draw_tile = WON_BLOCK;
                     }
-                        
 
                     if (render_models)
                     {
@@ -4601,10 +4611,17 @@ void gameFrame(double delta_time, TickInput tick_input)
         drawDebugText(camera_text);
         */
 
+        // show undos performed
+        char undo_text[256] = {0};
+        snprintf(undo_text, sizeof(undo_text), "undos performed: %d", undos_performed);
+        drawDebugText(undo_text);
+
+        /*
         // show current selected id
         char edit_text[256] = {0};
         snprintf(edit_text, sizeof(edit_text), "selected id: %d", editor_state.selected_id);
         drawDebugText(edit_text);
+        */
 
 		if (editor_state.editor_mode != NO_MODE)
         {
