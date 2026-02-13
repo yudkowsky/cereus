@@ -117,8 +117,8 @@ UndoBuffer undo_buffer = {0};
 bool restart_last_turn = false;
 bool pending_undo_record = false;
 WorldState pending_undo_snapshot = {0};
+bool pending_undo_was_teleport = false;
 int32 undos_performed = 0;
-const int32 UNDO_MODE_TIME_UNTIL_ALLOW_INPUT = 3;
 
 Animation animations[32];
 int32 time_until_input = 0;
@@ -2772,6 +2772,8 @@ void recordActionForUndo(WorldState* old_state)
     undo_buffer.headers[header_index].entity_count = (uint8)entity_count;
     undo_buffer.headers[header_index].delta_start_pos = delta_start;
     undo_buffer.headers[header_index].level_changed = false;
+    undo_buffer.headers[header_index].was_teleport = pending_undo_was_teleport;
+    pending_undo_was_teleport = false;
     undo_buffer.level_change_indices[header_index] = 0xFF;
     undo_buffer.header_write_pos = (header_index + 1) % MAX_UNDO_ACTIONS;
     undo_buffer.header_count++;
@@ -2854,16 +2856,13 @@ bool performUndo()
 {
     if (undo_buffer.header_count == 0) return false;
 
+    // clear animations + trailing hitboxes
+    memset(animations, 0, sizeof(animations));
+    memset(trailing_hitboxes, 0, sizeof(trailing_hitboxes));
+
 	// get most recent action header
     uint32 header_index = (undo_buffer.header_write_pos + MAX_UNDO_ACTIONS - 1) % MAX_UNDO_ACTIONS;
     UndoActionHeader* header = &undo_buffer.headers[header_index];
-
-    /*
-    // TEMP DEBUG
-    char _dbg[64];
-    snprintf(_dbg, sizeof(_dbg), "undo: header_count=%d entity_count=%d", undo_buffer.header_count, header->entity_count);
-    drawDebugText(_dbg);
-    */
 
     if (header->level_changed)
     {
@@ -2901,19 +2900,14 @@ bool performUndo()
     {
         UndoEntityDelta* delta = &undo_buffer.deltas[delta_pos];
 
-        /*
-        // TEMP DEBUG
-        char dbg[256];
-        snprintf(dbg, sizeof(dbg), "undo delta: id=%d coords=(%d,%d,%d) dir=%d removed=%d", 
-                 delta->id, delta->old_coords.x, delta->old_coords.y, delta->old_coords.z, 
-                 delta->old_direction, delta->was_removed);
-        drawDebugText(dbg);
-        // END TEMP DEBUG
-        */
-
         Entity* e = getEntityFromId(delta->id);
         if (e)
         {
+            Vec3 old_position = e->position_norm;
+            Vec4 old_rotation = e->rotation_quat;
+            bool was_at_different_coords = !int3IsEqual(e->coords, delta->old_coords);
+            bool was_at_different_direction = (e->direction != delta->old_direction);
+
             e->coords = delta->old_coords;
             e->position_norm = intCoordsToNorm(e->coords);
             e->direction = delta->old_direction;
@@ -2925,6 +2919,13 @@ bool performUndo()
             	TileType type = getTileTypeFromId(delta->id);
                 setTileType(type, delta->old_coords);
                 setTileDirection(delta->old_direction, delta->old_coords);
+
+                if (!header->level_changed && !header->was_teleport && (was_at_different_coords || was_at_different_direction))
+                {
+                    createInterpolationAnimation(old_position, e->position_norm, &e->position_norm,
+                            					 old_rotation, e->rotation_quat, &e->rotation_quat,
+                                                 e->id, 5);
+                }
             }
         }
         delta_pos = (delta_pos + 1) % MAX_UNDO_DELTAS;
@@ -2937,9 +2938,6 @@ bool performUndo()
     undo_buffer.header_write_pos = header_index;
     undo_buffer.header_count--;
 
-    // clear animations + trailing hitboxes
-    memset(animations, 0, sizeof(animations));
-    memset(trailing_hitboxes, 0, sizeof(trailing_hitboxes));
 	// sync worldstate
     world_state = next_world_state;
 
@@ -3492,6 +3490,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             {
                                 pending_undo_record = true;
                                 pending_undo_snapshot = world_state;
+                                pending_undo_was_teleport = true;
 
                                 setTileType(NONE, player->coords);
                                 setTileDirection(NORTH, player->coords);

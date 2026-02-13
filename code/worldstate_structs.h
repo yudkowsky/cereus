@@ -8,7 +8,7 @@
 #endif
 
 #define MAX_UNDO_DELTAS 2000000
-#define MAX_UNDO_ACTIONS 500000 // assumes a ratio of deltas:actions of 4:1 (maybe optimistic)
+#define MAX_UNDO_ACTIONS 200000 // assumes a ratio of deltas:actions of 10:1
 #define MAX_LEVEL_CHANGES 50000
 
 typedef enum 
@@ -489,6 +489,7 @@ typedef struct UndoActionHeader
 	uint8 entity_count;
     uint32 delta_start_pos;
     bool level_changed;
+    bool was_teleport;
 }
 UndoActionHeader;
 
