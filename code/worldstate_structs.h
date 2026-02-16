@@ -389,7 +389,7 @@ TrailingHitbox;
 
 typedef struct WorldState
 {
-    uint8 buffer[32768]; // 2 bytes info per tile 
+    uint8 buffer[2000000]; // 2 bytes info per tile 
     Entity player;
     Entity pack;
     Entity boxes[64];

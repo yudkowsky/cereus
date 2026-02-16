@@ -94,7 +94,7 @@ double accumulator = 0;
 
 bool render_models = false;
 
-const char debug_level_name[64] = "testing";
+const char debug_level_name[64] = "overworld";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
@@ -110,13 +110,14 @@ const float OVERWORLD_CAMERA_FOV_FAR = 35.0f;
 
 AssetToLoad assets_to_load[1024] = {0};
 
-WorldState world_state = {0};
-WorldState next_world_state = {0};
+static WorldState world_state = {0};
+static WorldState next_world_state = {0};
+static WorldState pending_undo_snapshot = {0};
+static WorldState leap_of_faith_snapshot = {0};
 
 UndoBuffer undo_buffer = {0};
 bool restart_last_turn = false;
 bool pending_undo_record = false;
-WorldState pending_undo_snapshot = {0};
 bool pending_undo_was_teleport = false;
 int32 undos_performed = 0;
 
@@ -654,7 +655,7 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
 
 // .level file structure: 
 // first 4 bytes:    -,x,y,z of level dimensions
-// next x*y*z * 2 (32768 by default) bytes: actual level buffer
+// next x*y*z * 2 bytes: actual level buffer
 
 // then chunking starts: 4 bytes for tag, 4 bytes for size (not including tag or size), and then data
 // camera: 	 		tag: CMRA, 	size: 24 (6 * 4b), 			data: x, y, z, fov, yaw, pitch (as floats)
@@ -719,10 +720,7 @@ void loadBufferInfo(FILE* file)
     level_dim.y = y;
     level_dim.z = z;
 
-    uint8 buffer[65536]; // just some max level size - not all of this is necessarily copied.
-    fread(&buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
-
-    memcpy(next_world_state.buffer, buffer, level_dim.x*level_dim.y*level_dim.z * 2);
+    fread(&next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
 }
 
 Camera loadCameraInfo(FILE* file)
@@ -3094,7 +3092,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
     if (record_for_undo)
     {
         pending_undo_record = true;
-        pending_undo_snapshot = world_state;
+        memcpy(&pending_undo_snapshot, &world_state, sizeof(WorldState));
     }
 }
 
@@ -3117,9 +3115,10 @@ void updatePackDetached()
 /*
     WASD, SPACE, SHIFT: camera movement
 
-    J: FOV toggle (15 <-> 60)
     C: save camera
     I: save world state
+
+    0: normal mode
 
     1: place/break mode
     LMB: break
@@ -3489,7 +3488,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             if (!int3IsEqual(player_ghost_coords, player->coords))
                             {
                                 pending_undo_record = true;
-                                pending_undo_snapshot = world_state;
+                                memcpy(&pending_undo_snapshot, &world_state, sizeof(WorldState));
                                 pending_undo_was_teleport = true;
 
                                 setTileType(NONE, player->coords);
@@ -3603,7 +3602,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             else
                             {
                                 // leap of faith logic
-                                WorldState world_state_savestate = next_world_state;
+                                memcpy(&leap_of_faith_snapshot, &world_state, sizeof(WorldState));
 
                                 if (do_push) pushAll(next_player_coords, input_direction, 0, false, false);
 
@@ -3631,7 +3630,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                                 bool leap_of_faith_worked = false;
                                 if (player->hit_by_red) leap_of_faith_worked = true;
-                                next_world_state = world_state_savestate;
+                                //next_world_state = world_state_savestate;
+                                memcpy(&next_world_state, &leap_of_faith_snapshot, sizeof(WorldState));
                                 if (leap_of_faith_worked)
                                 {
                                     if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
@@ -3701,7 +3701,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 }
 
                                 pending_undo_record = true;
-                                pending_undo_snapshot = world_state;
+                                memcpy(&pending_undo_snapshot, &world_state, sizeof(WorldState));
 
                                 time_until_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
                             }
@@ -4603,17 +4603,22 @@ void gameFrame(double delta_time, TickInput tick_input)
 		drawDebugText(box_dir_text);
         */
 
-        /*
         // camera pos info
         char camera_text[256] = {0};
         snprintf(camera_text, sizeof(camera_text), "camera pos: %f, %f, %f", camera.coords.x, camera.coords.y, camera.coords.z);
         drawDebugText(camera_text);
-        */
 
+        // level dim info
+        char level_text[256] = {0};
+        snprintf(level_text, sizeof(level_text), "level dim: %d, %d, %d", level_dim.x, level_dim.y, level_dim.z);
+        drawDebugText(level_text);
+
+        /*
         // show undos performed
         char undo_text[256] = {0};
         snprintf(undo_text, sizeof(undo_text), "undos performed: %d", undos_performed);
         drawDebugText(undo_text);
+        */
 
         /*
         // show current selected id
