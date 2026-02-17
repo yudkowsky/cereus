@@ -84,7 +84,7 @@ const char LOCKED_INFO_CHUNK_TAG[4] = "LOKB";
 const int32 RESET_INFO_SINGLE_ENTRY_SIZE = 6;
 const char RESET_INFO_CHUNK_TAG[4] = "RESB";
 
-const int32 OVERWORLD_SCREEN_SIZE_X = 23;
+const int32 OVERWORLD_SCREEN_SIZE_X = 21;
 const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 
 const double PHYSICS_INCREMENT = 1.0/60.0;
@@ -104,7 +104,7 @@ const float CAMERA_FOV = 15.0f;
 
 Camera camera = {0};
 Int3 camera_screen_offset = {0};
-const Int3 CAMERA_CENTER_START = { 14, 0, -13 };
+const Int3 CAMERA_CENTER_START = { 16, 0, -13 };
 bool draw_camera_boundary = false;
 CameraZoom camera_zoom = ZOOM_CLOSE;
 const float OVERWORLD_CAMERA_FOV_CLOSE = 15.0f; 
