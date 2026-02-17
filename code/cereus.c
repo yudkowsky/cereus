@@ -84,7 +84,7 @@ const char LOCKED_INFO_CHUNK_TAG[4] = "LOKB";
 const int32 RESET_INFO_SINGLE_ENTRY_SIZE = 6;
 const char RESET_INFO_CHUNK_TAG[4] = "RESB";
 
-const int32 OVERWORLD_SCREEN_SIZE_X = 15;
+const int32 OVERWORLD_SCREEN_SIZE_X = 23;
 const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 
 const double PHYSICS_INCREMENT = 1.0/60.0;
@@ -104,7 +104,7 @@ const float CAMERA_FOV = 15.0f;
 
 Camera camera = {0};
 Int3 camera_screen_offset = {0};
-const Int3 CAMERA_CENTER_START = { 7, 0, -13 };
+const Int3 CAMERA_CENTER_START = { 14, 0, -13 };
 bool draw_camera_boundary = false;
 CameraZoom camera_zoom = ZOOM_CLOSE;
 const float OVERWORLD_CAMERA_FOV_CLOSE = 15.0f; 
@@ -4601,7 +4601,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
             FOR(z_index, 18)
             {
-				FOR(x_index, 18)
+				FOR(x_index, 12)
                 {
                     Vec3 x_draw_coords = (Vec3){ (float)(x_draw_offset + CAMERA_CENTER_START.x), 3, (float)(z_draw_offset + CAMERA_CENTER_START.z) + ((float)OVERWORLD_SCREEN_SIZE_Z / 2) }; 
                     Vec3 z_draw_coords = (Vec3){ (float)(x_draw_offset + CAMERA_CENTER_START.x) - ((float)OVERWORLD_SCREEN_SIZE_X / 2), 3, (float)(z_draw_offset + CAMERA_CENTER_START.z) }; 
@@ -4641,15 +4641,19 @@ void gameFrame(double delta_time, TickInput tick_input)
 		drawDebugText(box_dir_text);
         */
 
+        /*
         // camera pos info
         char camera_text[256] = {0};
         snprintf(camera_text, sizeof(camera_text), "camera pos: %f, %f, %f", camera.coords.x, camera.coords.y, camera.coords.z);
         drawDebugText(camera_text);
+        */
 
+        /*
         // level dim info
         char level_text[256] = {0};
         snprintf(level_text, sizeof(level_text), "level dim: %d, %d, %d", level_dim.x, level_dim.y, level_dim.z);
         drawDebugText(level_text);
+        */
 
         /*
         // show undos performed
