@@ -16,15 +16,13 @@ const int32	SCREEN_HEIGHT_PX = 1080;
 
 const float TAU = 6.2831853071f;
 
-const float CAMERA_SENSITIVITY = 0.005f;
-const float CAMERA_MOVE_STEP = 0.1f;
-const float CAMERA_FOV = 15.0f;
 const Vec3 DEFAULT_SCALE = { 1.0f,  1.0f,  1.0f  };
 const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 const float LASER_WIDTH = 0.25;
 const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
 
 const int32 META_TIME_UNTIL_ALLOW_INPUT= 9;
+const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
 const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9;
 const int32 TURN_ANIMATION_TIME = 9; // somewhat hard coded, tied to PUSH_FROM_TURN...
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
@@ -100,13 +98,17 @@ const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
 Int3 level_dim = {0};
 
+const float CAMERA_SENSITIVITY = 0.005f;
+const float CAMERA_MOVE_STEP = 0.2f;
+const float CAMERA_FOV = 15.0f;
+
 Camera camera = {0};
 Int3 camera_screen_offset = {0};
-const Int3 camera_center_start = { 7, 0, -2 };
+const Int3 CAMERA_CENTER_START = { 7, 0, -13 };
 bool draw_camera_boundary = false;
 CameraZoom camera_zoom = ZOOM_CLOSE;
 const float OVERWORLD_CAMERA_FOV_CLOSE = 15.0f; 
-const float OVERWORLD_CAMERA_FOV_FAR = 35.0f;
+float OVERWORLD_CAMERA_FOV_FAR = 35.0f; // is actually edited with J press for editing; not fully constant
 
 AssetToLoad assets_to_load[1024] = {0};
 
@@ -1259,7 +1261,7 @@ SpriteId getModelId(TileType tile)
 // when we have actual 3D models, hopefully can cut this size hugely, because we won't have >1000 of the same entity on screen, probably? right now its basically all VOIDs 
 void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation, Vec3 color)
 {
-    if (id <= 0) return;
+    if (id < 0) return;
     AssetToLoad* a = &assets_to_load[id];
     if (a->instance_count == 0)
     {
@@ -3166,6 +3168,13 @@ void editorMode(TickInput *tick_input)
 
     if (time_until_input != 0) return; 
 
+    if (time_until_input == 0 && tick_input->j_press)
+    {
+        if (OVERWORLD_CAMERA_FOV_FAR == 35.0f) OVERWORLD_CAMERA_FOV_FAR = 60.0f;
+        else OVERWORLD_CAMERA_FOV_FAR = 35.0f;
+        time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
+    }
+
     if (editor_state.editor_mode == PLACE_BREAK)
     {
         if (tick_input->left_mouse_press || tick_input->right_mouse_press || tick_input->middle_mouse_press || tick_input->r_press || tick_input->f_press || tick_input->h_press || tick_input->g_press)
@@ -3250,7 +3259,7 @@ void editorMode(TickInput *tick_input)
             }
             else if ((tick_input->middle_mouse_press || tick_input->g_press) && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
 
-            time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
+            time_until_input = PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT;
         }
         if (tick_input->l_press)
         {
@@ -4421,7 +4430,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (in_overworld && player->id == PLAYER_ID)
         {
             int32 screen_offset_x = 0;
-            int32 dx = player->coords.x - camera_center_start.x;
+            int32 dx = player->coords.x - CAMERA_CENTER_START.x;
             if 		(dx > 0) screen_offset_x = (dx + (int32)(OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
             else if (dx < 0) screen_offset_x = (dx - (int32)(OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
             if (screen_offset_x != camera_screen_offset.x) 
@@ -4432,7 +4441,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
 
             int32 screen_offset_z = 0;
-            int32 dz = player->coords.z - camera_center_start.z;
+            int32 dz = player->coords.z - CAMERA_CENTER_START.z;
             if 		(dz > 0) screen_offset_z = (dz + (int32)(OVERWORLD_SCREEN_SIZE_Z / 2)) / OVERWORLD_SCREEN_SIZE_Z;
             else if (dz < 0) screen_offset_z = (dz - (int32)(OVERWORLD_SCREEN_SIZE_Z / 2)) / OVERWORLD_SCREEN_SIZE_Z;
             if (screen_offset_z != camera_screen_offset.z) 
@@ -4574,6 +4583,35 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, true),   VEC3_0);
             }
             if (!world_state.pack.removed) drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat, VEC3_0);
+        }
+
+        // draw camera boundary lines
+		if (time_until_input == 0 && tick_input.t_press && !(editor_state.editor_mode == SELECT_WRITE))
+        {
+            draw_camera_boundary = (draw_camera_boundary) ? false : true;
+			time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
+        }
+        if (draw_camera_boundary && in_overworld)
+        {
+        	int32 x_draw_offset = 0;
+            int32 z_draw_offset = 0;
+
+            Vec3 x_wall_scale = { (float)OVERWORLD_SCREEN_SIZE_X, 5, 0.01f };
+            Vec3 z_wall_scale = { 0.01f, 5, (float)OVERWORLD_SCREEN_SIZE_Z };
+
+            FOR(z_index, 18)
+            {
+				FOR(x_index, 18)
+                {
+                    Vec3 x_draw_coords = (Vec3){ (float)(x_draw_offset + CAMERA_CENTER_START.x), 3, (float)(z_draw_offset + CAMERA_CENTER_START.z) + ((float)OVERWORLD_SCREEN_SIZE_Z / 2) }; 
+                    Vec3 z_draw_coords = (Vec3){ (float)(x_draw_offset + CAMERA_CENTER_START.x) - ((float)OVERWORLD_SCREEN_SIZE_X / 2), 3, (float)(z_draw_offset + CAMERA_CENTER_START.z) }; 
+                    drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, VEC3_0);
+                    drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, VEC3_0);
+					x_draw_offset += OVERWORLD_SCREEN_SIZE_X;
+                }
+                x_draw_offset = 0;
+                z_draw_offset += OVERWORLD_SCREEN_SIZE_Z;
+            }
         }
 
 		// DRAW 2D
@@ -4726,35 +4764,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             else
             {
                 drawDebugText("no entity selected");
-            }
-        }
-
-        // draw camera boundary lines
-		if (time_until_input == 0 && tick_input.t_press && !(editor_state.editor_mode == SELECT_WRITE))
-        {
-            draw_camera_boundary = (draw_camera_boundary) ? false : true;
-			time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
-        }
-        if (draw_camera_boundary && in_overworld)
-        {
-        	int32 x_draw_offset = 0;
-            int32 z_draw_offset = 0;
-
-            Vec3 x_wall_scale = { (float)OVERWORLD_SCREEN_SIZE_X, 5, 0.01f };
-            Vec3 z_wall_scale = { 0.01f, 5, (float)OVERWORLD_SCREEN_SIZE_Z };
-
-            FOR(z_index, 5)
-            {
-				FOR(x_index, 5)
-                {
-                    Vec3 x_draw_coords = (Vec3){ (float)(x_draw_offset + camera_center_start.x), 3, (float)(z_draw_offset + camera_center_start.z) + ((float)OVERWORLD_SCREEN_SIZE_Z / 2) }; 
-                    Vec3 z_draw_coords = (Vec3){ (float)(x_draw_offset + camera_center_start.x) - ((float)OVERWORLD_SCREEN_SIZE_X / 2), 3, (float)(z_draw_offset + camera_center_start.z) }; 
-                    drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, VEC3_0);
-                    drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, VEC3_0);
-					x_draw_offset += OVERWORLD_SCREEN_SIZE_X;
-                }
-                x_draw_offset = 0;
-                z_draw_offset += OVERWORLD_SCREEN_SIZE_Z;
             }
         }
 
