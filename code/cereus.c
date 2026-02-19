@@ -98,7 +98,7 @@ const char debug_level_name[64] = "overworld";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
-Int3 level_dim = {0};
+const char undo_meta_path[64] = "data/meta/undo-buffer.meta";
 
 const float CAMERA_SENSITIVITY = 0.005f;
 const float CAMERA_MOVE_STEP = 0.2f;
@@ -114,6 +114,8 @@ const float OVERWORLD_CAMERA_FOV_CLOSE = 15.0f;
 float OVERWORLD_CAMERA_FOV_FAR = 35.0f; // is actually edited with J press for editing; not fully constant
 
 AssetToLoad assets_to_load[1024] = {0};
+
+Int3 level_dim = {0};
 
 static WorldState world_state = {0};
 static WorldState next_world_state = {0};
@@ -2619,10 +2621,42 @@ int32 glyphSprite(char c)
     return (SpriteId)(uc - FONT_FIRST_ASCII);
 }
 
+void initUndoBuffer()
+{
+    memset(&undo_buffer, 0, sizeof(UndoBuffer));
+    memset(undo_buffer.level_change_indices, 0xFF, sizeof(undo_buffer.level_change_indices));
+}
+
+void writeUndoBufferToFile()
+{
+    FILE* file = fopen(undo_meta_path, "wb");
+    if (!file) return;
+    fwrite(&undo_buffer, sizeof(UndoBuffer), 1, file);
+    fclose(file);
+}
+
+void loadUndoBufferFromFile()
+{
+    FILE* file = fopen(undo_meta_path, "rb");
+    if (!file)
+    {
+        initUndoBuffer();
+        return;
+    }
+    if (fread(&undo_buffer, sizeof(UndoBuffer), 1, file) != 1)
+    {
+        initUndoBuffer();
+    }
+    fclose(file);
+}
+
 // GAME INIT
 
-void gameInitializeState()
+void gameInitializeState(char* level_name)
 {
+    if (level_name == 0) strcpy(next_world_state.level_name, debug_level_name);
+    else strcpy(next_world_state.level_name, level_name);
+
     Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
 
@@ -2736,18 +2770,11 @@ void gameInitializeState()
 
 void gameInitialize(char* level_name) 
 {	
-    if (level_name == 0) strcpy(next_world_state.level_name, debug_level_name);
-    else strcpy(next_world_state.level_name, level_name);
-    gameInitializeState();
+    loadUndoBufferFromFile();
+    gameInitializeState(level_name);
 }
 
 // UNDO / RESTART
-
-void initUndoBuffer()
-{
-    memset(&undo_buffer, 0, sizeof(UndoBuffer));
-    memset(undo_buffer.level_change_indices, 0xFF, sizeof(undo_buffer.level_change_indices));
-}
 
 // writes one delta into the circular buffer
 void recordEntityDelta(Entity* e)
@@ -2816,6 +2843,8 @@ void recordActionForUndo(WorldState* old_state)
     undo_buffer.header_count++;
 
     restart_last_turn = false;
+
+    writeUndoBufferToFile();
 }
 
 // call before transitioning to a new level. stores a delta for every entity in the current level, plus the level change metadata
@@ -2887,6 +2916,8 @@ void recordLevelChangeForUndo(char* current_level_name, bool level_was_just_solv
     undo_buffer.header_count++;
 
     restart_last_turn = false;
+
+    writeUndoBufferToFile();
 }
 
 bool performUndo()
@@ -2907,7 +2938,7 @@ bool performUndo()
         UndoLevelChange* level_change = &undo_buffer.level_changes[level_change_index];
 
         // reinitialize previous
-        gameInitialize(level_change->from_level);
+        gameInitializeState(level_change->from_level);
 
         // remove from solved levels if the level was just completed
         if (level_change->remove_from_solved)
@@ -2977,6 +3008,8 @@ bool performUndo()
 
 	// sync worldstate
     world_state = next_world_state;
+
+    writeUndoBufferToFile();
 
     return true;
 }
@@ -3392,7 +3425,7 @@ void editorMode(TickInput *tick_input)
                 {
                     levelChangePrep(wb->next_level);
                     time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
-                    gameInitialize(wb->next_level);
+                    gameInitializeState(wb->next_level);
                     writeSolvedLevelsToFile();
                 }
             }
@@ -3491,7 +3524,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 // restart
                 if (!restart_last_turn) recordActionForUndo(&world_state);
                 memset(animations, 0, sizeof(animations));
-                gameInitializeState();
+                gameInitializeState(next_world_state.level_name);
                 time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
                 restart_last_turn = true;
             }
@@ -3502,7 +3535,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 memcpy(save_solved_levels, next_world_state.solved_levels, sizeof(save_solved_levels));
                 levelChangePrep("overworld");
                 time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
-                gameInitialize("overworld");
+                gameInitializeState("overworld");
                 memcpy(next_world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
                 writeSolvedLevelsToFile();
             }
@@ -4358,7 +4391,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     }
                     levelChangePrep(wb->next_level);
                     time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
-                    gameInitialize(wb->next_level);
+                    gameInitializeState(wb->next_level);
                 }
             }
             else
