@@ -105,6 +105,7 @@ const float CAMERA_MOVE_STEP = 0.2f;
 const float CAMERA_FOV = 15.0f;
 
 Camera camera = {0};
+Camera saved_level_camera = {0};
 Int3 camera_screen_offset = {0};
 const Int3 CAMERA_CENTER_START = { 16, 0, -13 };
 bool draw_camera_boundary = false;
@@ -1085,14 +1086,8 @@ void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
 // doesn't change the camera
 bool saveLevelRewrite(char* path, bool save_reset_block_state)
 {
-    FILE* old_file = fopen(path, "rb+");
-    Camera saved_camera = loadCameraInfo(old_file);
-    fclose(old_file);
-
-    char temp_path[256] = {0};
-    snprintf(temp_path, sizeof(temp_path), "%s.temp", path);
-
-    FILE* file = fopen(temp_path, "wb");
+    FILE* file = fopen(path, "wb");
+    if (!file) return false;
 
     fwrite(&SAVE_WRITE_VERSION, 1, 1, file);
     uint8 x, y, z;
@@ -1104,7 +1099,7 @@ bool saveLevelRewrite(char* path, bool save_reset_block_state)
     fwrite(&z, 1, 1, file);
 
     writeBufferToFile(file, SAVE_WRITE_VERSION);
-    writeCameraToFile(file, &saved_camera);
+    writeCameraToFile(file, &saved_level_camera);
 
     FOR(win_block_index, MAX_ENTITY_INSTANCE_COUNT)
     {
@@ -1134,9 +1129,6 @@ bool saveLevelRewrite(char* path, bool save_reset_block_state)
     }
 
     fclose(file);
-
-    remove(path);
-    if (rename(temp_path, path) != 0) return false;
     return true;
 }
 
@@ -2725,6 +2717,7 @@ void gameInitializeState()
 
     file = fopen(level_path, "rb+");
     camera = loadCameraInfo(file);
+    saved_level_camera = camera;
     loadWinBlockPaths(file);
     loadLockedInfoPaths(file);
     loadResetBlockInfo(file);
@@ -4729,6 +4722,11 @@ void gameFrame(double delta_time, TickInput tick_input)
         drawDebugText(edit_text);
         */
 
+        // show undo deltas in buffer
+        char undo_buffer_text[256] = {0};
+        snprintf(undo_buffer_text, sizeof(undo_buffer_text), "undo deltas in buffer: %d", undo_buffer.delta_count);
+        drawDebugText(undo_buffer_text);
+
 		if (editor_state.editor_mode != NO_MODE)
         {
             // crosshair
@@ -4841,38 +4839,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             saveLevelRewrite(level_path, true);
             saveLevelRewrite(relative_level_path, true);
             writeSolvedLevelsToFile();
-        }
-
-        // change level size to 100*100*16
-        if (level_dim.x == 32)
-        {
-            memcpy(&leap_of_faith_snapshot, &world_state, sizeof(WorldState));
-            memset(&leap_of_faith_snapshot.buffer, 0, sizeof(leap_of_faith_snapshot.buffer));
-            for(int32 buffer_index = 0; buffer_index < level_dim.x*level_dim.y*level_dim.z * 2; buffer_index += 2)
-            {
-                if (world_state.buffer[buffer_index] == 0) continue;
-
-                Int3 temp_coords = bufferIndexToCoords(buffer_index);
-                TileType type = world_state.buffer[buffer_index];
-                Direction direction = world_state.buffer[buffer_index + 1];
-
-                level_dim.x = 100;
-                level_dim.y = 16;
-                level_dim.z = 100;
-
-                int32 new_index = coordsToBufferIndexType(temp_coords);
-                leap_of_faith_snapshot.buffer[new_index] = type;
-                leap_of_faith_snapshot.buffer[new_index + 1] = direction;
-
-                level_dim.x = 32;
-                level_dim.y = 6;
-                level_dim.z = 32;
-            }
-            level_dim.x = 100;
-            level_dim.y = 16;
-            level_dim.z = 100;
-
-            memcpy(&world_state, &leap_of_faith_snapshot, sizeof(WorldState));
         }
 
         // write camera to file on c press
