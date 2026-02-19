@@ -1785,7 +1785,7 @@ void changeMoving(Entity* e)
 
 void resetFirstFall(Entity* e)
 {
-    if (!e->in_motion && getTileType(getNextCoords(e->coords, DOWN)) != NONE) e->first_fall_already_done = false;
+    if ((!e->in_motion && getTileType(getNextCoords(e->coords, DOWN)) != NONE) || next_world_state.player.hit_by_blue) e->first_fall_already_done = false;
 }
 
 PushResult canPush(Int3 coords, Direction direction)
