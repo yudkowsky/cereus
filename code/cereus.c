@@ -75,7 +75,7 @@ const int32 FONT_CELL_WIDTH_PX = 6;
 const int32 FONT_CELL_HEIGHT_PX = 10;
 const float DEFAULT_TEXT_SCALE = 30.0f;
 
-const int32 SAVE_WRITE_VERSION = 0;
+const int32 SAVE_WRITE_VERSION = 1;
 
 const int32 CAMERA_CHUNK_SIZE = 24;
 const char CAMERA_CHUNK_TAG[4] = "CMRA";
@@ -94,7 +94,7 @@ double accumulator = 0;
 
 bool render_models = false;
 
-const char debug_level_name[64] = "staying-red";
+const char debug_level_name[64] = "blue-mirror-weird";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
@@ -385,6 +385,24 @@ TileType getTileType(Int3 coords)
     return next_world_state.buffer[coordsToBufferIndexType(coords)]; 
 }
 
+bool isSource(TileType tile) 
+{
+    return (tile == SOURCE_RED || tile == SOURCE_GREEN || tile == SOURCE_BLUE || tile == SOURCE_MAGENTA || tile == SOURCE_YELLOW || tile == SOURCE_CYAN|| tile == SOURCE_WHITE);
+}
+
+// only checks tile types - doesn't do what canPush does
+bool isPushable(TileType tile)
+{
+    if (tile == BOX || tile == GLASS || tile == MIRROR || tile == PACK || isSource(tile)) return true;
+    else return false;
+}
+
+bool isEntity(TileType tile)
+{
+    if (tile == BOX || tile == GLASS || tile == MIRROR || tile == PACK || tile == PLAYER || tile == WIN_BLOCK || tile == LOCKED_BLOCK || tile == RESET_BLOCK || isSource(tile)) return true;
+    else return false;
+}
+
 TileType getTileTypeFromId(int32 id)
 {
     if (id == PLAYER_ID) return PLAYER;
@@ -417,11 +435,6 @@ TileType getTileTypeFromId(int32 id)
 Direction getTileDirection(Int3 coords) 
 {
     return next_world_state.buffer[coordsToBufferIndexDirection(coords)]; 
-}
-
-bool isSource(TileType tile) 
-{
-    return (tile == SOURCE_RED || tile == SOURCE_GREEN || tile == SOURCE_BLUE || tile == SOURCE_MAGENTA || tile == SOURCE_YELLOW || tile == SOURCE_CYAN|| tile == SOURCE_WHITE);
 }
 
 Color getEntityColor(Int3 coords)
@@ -691,7 +704,23 @@ int32 getCountAndPositionOfChunk(FILE* file, char tag[3], int32 positions[16])
     int32 tag_pos = 0;
     int32 count = 0;
 
-    fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
+    // go to start of chunking
+    fseek(file, 0, SEEK_SET);
+    uint8 version = 0;
+    fread(&version, 1, 1, file);
+    int32 chunk_start = 0;
+    if (version == 0)
+    {
+        chunk_start = 4 + (level_dim.x*level_dim.y*level_dim.z * 2);
+    }
+    else if (version == 1)
+    {
+        fseek(file, 4, SEEK_SET);
+        int32 tile_count = 0;
+        fread(&tile_count, 4, 1, file);
+        chunk_start = 8 + (tile_count * 6);
+    }
+	fseek(file, chunk_start, SEEK_SET);
 
     while (true)
     {
@@ -716,25 +745,41 @@ int32 getCountAndPositionOfChunk(FILE* file, char tag[3], int32 positions[16])
 // reads version nr directly from file
 void loadBufferInfo(FILE* file)
 {
-    fseek(file, 0, SEEK_SET);
+    fseek(file, 0, SEEK_SET); // seek to start of file
+
+    // get version
     int32 version = 0;
     fread(&version, 1, 1, file);
+
+    // get level dimensions
+    uint8 x, y, z;
+    fread(&x, 1, 1, file);
+    fread(&y, 1, 1, file);
+    fread(&z, 1, 1, file);
+    level_dim.x = x;
+    level_dim.y = y;
+    level_dim.z = z;
+
     if (version == 0)
     {
-        // get level dimensions
-        uint8 x, y, z;
-        fread(&x, 1, 1, file);
-        fread(&y, 1, 1, file);
-        fread(&z, 1, 1, file);
-        level_dim.x = x;
-        level_dim.y = y;
-        level_dim.z = z;
-
         fread(&next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
     }
     else if (version == 1)
     {
+        int32 tile_count = 0;
+        fread(&tile_count, 4, 1, file);
+        FOR(tile_index, tile_count)
+        {
+            int32 buffer_index = 0;
+            TileType type = NONE;
+            Direction direction = NO_DIRECTION;
+            fread(&buffer_index, 4, 1, file);
+            fread(&type, 1, 1, file);
+            fread(&direction, 1, 1, file);
 
+            next_world_state.buffer[buffer_index] = (uint8)type;
+            next_world_state.buffer[buffer_index + 1] = (uint8)direction;
+        }
     }
 }
 
@@ -757,90 +802,64 @@ Camera loadCameraInfo(FILE* file)
     return out_camera;
 }
 
-// TODO(spike): use getCountAndPositionOfChunk
 void loadWinBlockPaths(FILE* file)
 {
-    fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
+    int32 positions[16] = {0};
+    int32 count = getCountAndPositionOfChunk(file, WIN_BLOCK_CHUNK_TAG, positions);
 
-    char tag[4] = {0};
-    int32 size = 0;
-
-    while (readChunkHeader(file, tag, &size))
+    FOR(wb_index_file, count)
     {
-        int32 pos = ftell(file);
+        fseek(file, positions[wb_index_file] + 8, SEEK_SET); // skip tag + size
 
-        if (memcmp(tag, WIN_BLOCK_CHUNK_TAG, 4) == 0 && size == WIN_BLOCK_CHUNK_SIZE)
+        int32 x, y, z;
+        char path[64];
+        if (fread(&x, 4, 1, file) != 1) return;
+        if (fread(&y, 4, 1, file) != 1) return;
+        if (fread(&z, 4, 1, file) != 1) return;
+        if (fread(&path, 1, 64, file) != 64) return;
+        path[63] = '\0';
+
+        FOR(wb_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            int32 x, y, z;
-            char path[64];
-            if (fread(&x, 4, 1, file) != 1) return;
-            if (fread(&y, 4, 1, file) != 1) return;
-            if (fread(&z, 4, 1, file) != 1) return;
-            if (fread(&path, 1, 64, file) != 64) return;
-            path[63] = '\0';
-
-            FOR(wb_index, MAX_ENTITY_INSTANCE_COUNT)
+            Entity* wb = &next_world_state.win_blocks[wb_index];
+            if (wb->coords.x == x && wb->coords.y == y && wb->coords.z == z)
             {
-                Entity* wb = &next_world_state.win_blocks[wb_index];
-                if (wb->coords.x == x && wb->coords.y == y && wb->coords.z == z)
-                {
-                    memcpy(wb->next_level, path, sizeof(wb->next_level));
-                    break;
-                }
+                memcpy(wb->next_level, path, sizeof(wb->next_level));
+                break;
             }
-            // continue from end of chunk
-            fseek(file, pos + size, SEEK_SET);
-        }
-        else
-        {
-            // skip payload of some other chunk
-            fseek(file, pos + size, SEEK_SET);
         }
     }
 }
 
-// TODO(spike): use getCountAndPositionOfChunk
 void loadLockedInfoPaths(FILE* file)
 {
-    fseek(file, 4 + (level_dim.x*level_dim.y*level_dim.z * 2), SEEK_SET); // go to start of chunking
+    int32 positions[16] = {0};
+    int32 count = getCountAndPositionOfChunk(file, LOCKED_INFO_CHUNK_TAG, positions);
 
-    char tag[4] = {0};
-    int32 size = 0;
-
-    while (readChunkHeader(file, tag, &size))
+    FOR(locked_index_file, count)
     {
-        int32 pos = ftell(file);
+        fseek(file, positions[locked_index_file] + 8, SEEK_SET); // skip tag + size
 
-        if (memcmp(tag, LOCKED_INFO_CHUNK_TAG, 4) == 0 && size == LOCKED_INFO_CHUNK_SIZE)
+        int32 x, y, z;
+        char path[64];
+        if (fread(&x, 4, 1, file) != 1) return;
+        if (fread(&y, 4, 1, file) != 1) return;
+        if (fread(&z, 4, 1, file) != 1) return;
+        if (fread(&path, 1, 64, file) != 64) return;
+        path[63] = '\0';
+
+        Entity* entity_group[5] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, next_world_state.glass_blocks, next_world_state.sources};
+        FOR(group_index, 5)
         {
-            int32 x, y, z;
-            char path[64];
-            if (fread(&x, 4, 1, file) != 1) return;
-            if (fread(&y, 4, 1, file) != 1) return;
-            if (fread(&z, 4, 1, file) != 1) return;
-            if (fread(&path, 1, 64, file) != 64) return;
-            path[63] = '\0';
-
-            Entity* entity_group[5] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, next_world_state.glass_blocks, next_world_state.sources};
-            FOR(group_index, 5)
+            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
             {
-                FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+                Entity* e = &entity_group[group_index][entity_index];
+                if (e->coords.x == x && e->coords.y == y && e->coords.z == z)
                 {
-                    Entity* e = &entity_group[group_index][entity_index];
-                    if (e->coords.x == x && e->coords.y == y && e->coords.z == z)
-                    {
-                        memcpy(e->unlocked_by, path, sizeof(e->unlocked_by));
-                        break;
-                    }
+                    memcpy(e->unlocked_by, path, sizeof(e->unlocked_by));
+                    break;
                 }
             }
-            // continue from end of chunk
-            fseek(file, pos + size, SEEK_SET);
-        }
-        else
-        {
-            // skip payload of some other chunk
-            fseek(file, pos + size, SEEK_SET);
         }
     }
 }
@@ -950,20 +969,20 @@ void writeBufferToFile(FILE* file, int32 version)
 
 		fseek(file, 8, SEEK_SET); // leave space for tile_count
 
-        for (int32 buffer_index = 0; buffer_index < level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
+        for (int32 buffer_index = 0; buffer_index < level_dim.x*level_dim.y*level_dim.z * 2; buffer_index += 2)
         {
             if (next_world_state.buffer[buffer_index] == NONE) continue;
-            TileType type = next_world_state.buffer[buffer_index];
-            Direction direction = next_world_state.buffer[buffer_index + 1];
+            TileType type = (int8)next_world_state.buffer[buffer_index];
+            Direction direction = (int8)next_world_state.buffer[buffer_index + 1];
             fwrite(&buffer_index, 4, 1, file); // write buffer_index, backsolve coords from level dims on decompression
-            fwrite(&type, 4, 1, file);
-            fwrite(&direction, 4, 1, file);
+            fwrite(&type, 1, 1, file);
+            fwrite(&direction, 1, 1, file);
             tile_count++;
         }
 
 		fseek(file, 4, SEEK_SET); // seek back to after level_dims
         fwrite(&tile_count, 4, 1, file);
-        fseek(file, (8 + (tile_count * 12)), SEEK_SET); // set seek to end of tiles
+        fseek(file, (8 + (tile_count * 6)), SEEK_SET); // set seek to end of tiles
     }
 }
 
@@ -1075,7 +1094,7 @@ bool saveLevelRewrite(char* path, bool save_reset_block_state)
 
     FILE* file = fopen(temp_path, "wb");
 
-    fseek(file, 1, SEEK_SET);
+    fwrite(&SAVE_WRITE_VERSION, 1, 1, file);
     uint8 x, y, z;
     x = (uint8)level_dim.x;
     y = (uint8)level_dim.y;
@@ -1469,26 +1488,6 @@ Int3 getNextCoords(Int3 coords, Direction direction)
     }
 }
 
-Vec3 rollingAxis(Direction direction)
-{
-    Vec3 up = { 0.0f, 1.0f, 0.0f };
-    Vec3 rolling = intCoordsToNorm(getNextCoords(normCoordsToInt(VEC3_0), direction));
-    return vec3CrossProduct(up, rolling);
-}
-
-// only checks tile types - doesn't do what canPush does
-bool isPushable(TileType tile)
-{
-    if (tile == BOX || tile == GLASS || tile == MIRROR || tile == PACK || isSource(tile)) return true;
-    else return false;
-}
-
-bool isEntity(TileType tile)
-{
-    if (tile == BOX || tile == GLASS || tile == MIRROR || tile == PACK || tile == PLAYER || tile == WIN_BLOCK || tile == LOCKED_BLOCK || tile == RESET_BLOCK || isSource(tile)) return true;
-    else return false;
-}
-
 int32 getPushableStackSize(Int3 first_entity_coords)
 {
     Int3 current_stack_coords = first_entity_coords;
@@ -1501,6 +1500,13 @@ int32 getPushableStackSize(Int3 first_entity_coords)
         stack_size++;
     }
     return stack_size;
+}
+
+Vec3 rollingAxis(Direction direction)
+{
+    Vec3 up = { 0.0f, 1.0f, 0.0f };
+    Vec3 rolling = intCoordsToNorm(getNextCoords(normCoordsToInt(VEC3_0), direction));
+    return vec3CrossProduct(up, rolling);
 }
 
 // TRAILING HITBOXES
@@ -4697,12 +4703,10 @@ void gameFrame(double delta_time, TickInput tick_input)
 		drawDebugText(box_dir_text);
         */
 
-        /*
         // camera pos info
         char camera_text[256] = {0};
         snprintf(camera_text, sizeof(camera_text), "camera pos: %f, %f, %f", camera.coords.x, camera.coords.y, camera.coords.z);
         drawDebugText(camera_text);
-        */
 
         /*
         // level dim info
