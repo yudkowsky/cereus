@@ -75,6 +75,8 @@ const int32 FONT_CELL_WIDTH_PX = 6;
 const int32 FONT_CELL_HEIGHT_PX = 10;
 const float DEFAULT_TEXT_SCALE = 30.0f;
 
+const int32 SAVE_WRITE_VERSION = 0;
+
 const int32 CAMERA_CHUNK_SIZE = 24;
 const char CAMERA_CHUNK_TAG[4] = "CMRA";
 const int32 WIN_BLOCK_CHUNK_SIZE = 76;
@@ -681,6 +683,7 @@ bool readChunkHeader(FILE* file, char out_tag[4], int32 *out_size)
 }
 
 // gets position and count of some chunk tag. cursor placed right before chunk tag
+// TODO(spike): should this be tag[3] or tag[4]? this fixes bug with CMRAL tag passed, but not sure i fully understand why
 int32 getCountAndPositionOfChunk(FILE* file, char tag[3], int32 positions[16])
 {
 	char chunk[4] = {0};
@@ -710,19 +713,29 @@ int32 getCountAndPositionOfChunk(FILE* file, char tag[3], int32 positions[16])
     }
 }
 
+// reads version nr directly from file
 void loadBufferInfo(FILE* file)
 {
-    // get level dimensions
-    fseek(file, 1, SEEK_SET); // skip the first byte
-    uint8 x, y, z;
-    fread(&x, 1, 1, file);
-    fread(&y, 1, 1, file);
-    fread(&z, 1, 1, file);
-    level_dim.x = x;
-    level_dim.y = y;
-    level_dim.z = z;
+    fseek(file, 0, SEEK_SET);
+    int32 version = 0;
+    fread(&version, 1, 1, file);
+    if (version == 0)
+    {
+        // get level dimensions
+        uint8 x, y, z;
+        fread(&x, 1, 1, file);
+        fread(&y, 1, 1, file);
+        fread(&z, 1, 1, file);
+        level_dim.x = x;
+        level_dim.y = y;
+        level_dim.z = z;
 
-    fread(&next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
+        fread(&next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
+    }
+    else if (version == 1)
+    {
+
+    }
 }
 
 Camera loadCameraInfo(FILE* file)
@@ -924,9 +937,34 @@ void loadResetBlockInfo(FILE* file)
     }
 }
 
-void writeBufferToFile(FILE* file)
+// deciding to still keep level_dim in later versions also. can then just write buffer_index rather than the full coords and backsolve on load.
+void writeBufferToFile(FILE* file, int32 version)
 {
-    fwrite(next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
+    if (version == 0)
+    {
+        fwrite(next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
+    }
+    else if (version == 1)
+    {
+        int32 tile_count = 0;
+
+		fseek(file, 8, SEEK_SET); // leave space for tile_count
+
+        for (int32 buffer_index = 0; buffer_index < level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
+        {
+            if (next_world_state.buffer[buffer_index] == NONE) continue;
+            TileType type = next_world_state.buffer[buffer_index];
+            Direction direction = next_world_state.buffer[buffer_index + 1];
+            fwrite(&buffer_index, 4, 1, file); // write buffer_index, backsolve coords from level dims on decompression
+            fwrite(&type, 4, 1, file);
+            fwrite(&direction, 4, 1, file);
+            tile_count++;
+        }
+
+		fseek(file, 4, SEEK_SET); // seek back to after level_dims
+        fwrite(&tile_count, 4, 1, file);
+        fseek(file, (8 + (tile_count * 12)), SEEK_SET); // set seek to end of tiles
+    }
 }
 
 void writeCameraToFile(FILE* file, Camera* in_camera)
@@ -1025,7 +1063,7 @@ void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
     }
 }
 
-// doesn't change the camera or reset blocks
+// doesn't change the camera
 bool saveLevelRewrite(char* path, bool save_reset_block_state)
 {
     FILE* old_file = fopen(path, "rb+");
@@ -1046,7 +1084,7 @@ bool saveLevelRewrite(char* path, bool save_reset_block_state)
     fwrite(&y, 1, 1, file);
     fwrite(&z, 1, 1, file);
 
-    writeBufferToFile(file);
+    writeBufferToFile(file, SAVE_WRITE_VERSION);
     writeCameraToFile(file, &saved_camera);
 
     FOR(win_block_index, MAX_ENTITY_INSTANCE_COUNT)
