@@ -94,7 +94,7 @@ double accumulator = 0;
 
 bool render_models = false;
 
-const char debug_level_name[64] = "blue-mirror-weird";
+const char debug_level_name[64] = "overworld";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
@@ -697,7 +697,7 @@ bool readChunkHeader(FILE* file, char out_tag[4], int32 *out_size)
 
 // gets position and count of some chunk tag. cursor placed right before chunk tag
 // TODO(spike): should this be tag[3] or tag[4]? this fixes bug with CMRAL tag passed, but not sure i fully understand why
-int32 getCountAndPositionOfChunk(FILE* file, char tag[3], int32 positions[16])
+int32 getCountAndPositionOfChunk(FILE* file, char tag[3], int32 positions[64])
 {
 	char chunk[4] = {0};
     int32 chunk_size = 0;
@@ -787,7 +787,7 @@ Camera loadCameraInfo(FILE* file)
 {
     Camera out_camera = {0};
 
-    int32 positions[16] = {0};
+    int32 positions[64] = {0};
     int32 count = getCountAndPositionOfChunk(file, CAMERA_CHUNK_TAG, positions);
     if (count != 1) return out_camera;
 
@@ -804,7 +804,7 @@ Camera loadCameraInfo(FILE* file)
 
 void loadWinBlockPaths(FILE* file)
 {
-    int32 positions[16] = {0};
+    int32 positions[64] = {0};
     int32 count = getCountAndPositionOfChunk(file, WIN_BLOCK_CHUNK_TAG, positions);
 
     FOR(wb_index_file, count)
@@ -833,7 +833,7 @@ void loadWinBlockPaths(FILE* file)
 
 void loadLockedInfoPaths(FILE* file)
 {
-    int32 positions[16] = {0};
+    int32 positions[64] = {0};
     int32 count = getCountAndPositionOfChunk(file, LOCKED_INFO_CHUNK_TAG, positions);
 
     FOR(locked_index_file, count)
@@ -873,7 +873,7 @@ int32 findNextFreeInResetBlock(Entity* rb)
 
 void loadResetBlockInfo(FILE* file)
 {
-    int32 positions[16] = {0};
+    int32 positions[64] = {0};
     int32 rb_count = getCountAndPositionOfChunk(file, RESET_INFO_CHUNK_TAG, positions);
 
     FOR(rb_index_file, rb_count)
@@ -4843,12 +4843,44 @@ void gameFrame(double delta_time, TickInput tick_input)
             writeSolvedLevelsToFile();
         }
 
+        // change level size to 100*100*16
+        if (level_dim.x == 32)
+        {
+            memcpy(&leap_of_faith_snapshot, &world_state, sizeof(WorldState));
+            memset(&leap_of_faith_snapshot.buffer, 0, sizeof(leap_of_faith_snapshot.buffer));
+            for(int32 buffer_index = 0; buffer_index < level_dim.x*level_dim.y*level_dim.z * 2; buffer_index += 2)
+            {
+                if (world_state.buffer[buffer_index] == 0) continue;
+
+                Int3 temp_coords = bufferIndexToCoords(buffer_index);
+                TileType type = world_state.buffer[buffer_index];
+                Direction direction = world_state.buffer[buffer_index + 1];
+
+                level_dim.x = 100;
+                level_dim.y = 16;
+                level_dim.z = 100;
+
+                int32 new_index = coordsToBufferIndexType(temp_coords);
+                leap_of_faith_snapshot.buffer[new_index] = type;
+                leap_of_faith_snapshot.buffer[new_index + 1] = direction;
+
+                level_dim.x = 32;
+                level_dim.y = 6;
+                level_dim.z = 32;
+            }
+            level_dim.x = 100;
+            level_dim.y = 16;
+            level_dim.z = 100;
+
+            memcpy(&world_state, &leap_of_faith_snapshot, sizeof(WorldState));
+        }
+
         // write camera to file on c press
         if (time_until_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.c_press) 
         {
             {
                 FILE* file = fopen(level_path, "rb+");
-                int32 positions[16] = {0};
+                int32 positions[64] = {0};
                 int32 count = getCountAndPositionOfChunk(file, CAMERA_CHUNK_TAG, positions);
 
                 if (count > 0)
@@ -4866,7 +4898,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
             {
                 FILE* file = fopen(relative_level_path, "rb+");
-                int32 positions[16] = {0};
+                int32 positions[64] = {0};
                 int32 count = getCountAndPositionOfChunk(file, CAMERA_CHUNK_TAG, positions);
 
                 if (count > 0)
