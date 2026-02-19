@@ -92,7 +92,7 @@ double accumulator = 0;
 
 bool render_models = false;
 
-const char debug_level_name[64] = "overworld";
+const char debug_level_name[64] = "staying-red";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
@@ -681,7 +681,7 @@ bool readChunkHeader(FILE* file, char out_tag[4], int32 *out_size)
 }
 
 // gets position and count of some chunk tag. cursor placed right before chunk tag
-int32 getCountAndPositionOfChunk(FILE* file, char tag[4], int32 positions[16])
+int32 getCountAndPositionOfChunk(FILE* file, char tag[3], int32 positions[16])
 {
 	char chunk[4] = {0};
     int32 chunk_size = 0;
@@ -4591,26 +4591,44 @@ void gameFrame(double delta_time, TickInput tick_input)
             draw_camera_boundary = (draw_camera_boundary) ? false : true;
 			time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
-        if (draw_camera_boundary && in_overworld)
+        if (draw_camera_boundary)
         {
-        	int32 x_draw_offset = 0;
-            int32 z_draw_offset = 0;
-
-            Vec3 x_wall_scale = { (float)OVERWORLD_SCREEN_SIZE_X, 5, 0.01f };
-            Vec3 z_wall_scale = { 0.01f, 5, (float)OVERWORLD_SCREEN_SIZE_Z };
-
-            FOR(z_index, 18)
+			if (in_overworld)
             {
-				FOR(x_index, 12)
+            	// draw camera screen lines
+                int32 x_draw_offset = 0;
+                int32 z_draw_offset = 0;
+
+                Vec3 x_wall_scale = { (float)OVERWORLD_SCREEN_SIZE_X, 5, 0.01f };
+                Vec3 z_wall_scale = { 0.01f, 5, (float)OVERWORLD_SCREEN_SIZE_Z };
+
+                FOR(z_index, 18)
                 {
-                    Vec3 x_draw_coords = (Vec3){ (float)(x_draw_offset + CAMERA_CENTER_START.x), 3, (float)(z_draw_offset + CAMERA_CENTER_START.z) + ((float)OVERWORLD_SCREEN_SIZE_Z / 2) }; 
-                    Vec3 z_draw_coords = (Vec3){ (float)(x_draw_offset + CAMERA_CENTER_START.x) - ((float)OVERWORLD_SCREEN_SIZE_X / 2), 3, (float)(z_draw_offset + CAMERA_CENTER_START.z) }; 
-                    drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, VEC3_0);
-                    drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, VEC3_0);
-					x_draw_offset += OVERWORLD_SCREEN_SIZE_X;
+                    FOR(x_index, 12)
+                    {
+                        Vec3 x_draw_coords = (Vec3){ (float)(x_draw_offset + CAMERA_CENTER_START.x), 3, (float)(z_draw_offset + CAMERA_CENTER_START.z) + ((float)OVERWORLD_SCREEN_SIZE_Z / 2) }; 
+                        Vec3 z_draw_coords = (Vec3){ (float)(x_draw_offset + CAMERA_CENTER_START.x) - ((float)OVERWORLD_SCREEN_SIZE_X / 2), 3, (float)(z_draw_offset + CAMERA_CENTER_START.z) }; 
+                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, VEC3_0);
+                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, VEC3_0);
+                        x_draw_offset += OVERWORLD_SCREEN_SIZE_X;
+                    }
+                    x_draw_offset = 0;
+                    z_draw_offset += OVERWORLD_SCREEN_SIZE_Z;
                 }
-                x_draw_offset = 0;
-                z_draw_offset += OVERWORLD_SCREEN_SIZE_Z;
+            }
+			else
+            {
+            	// draw level boundary
+                Vec3 x_draw_coords_near = (Vec3){ -0.5f, 				     (float)level_dim.y / 2.0f, ((float)level_dim.z / 2.0f) };
+                Vec3 z_draw_coords_near = (Vec3){ (float)level_dim.x / 2.0f, (float)level_dim.y / 2.0f, -0.5f};
+                Vec3 x_draw_coords_far  = (Vec3){ (float)level_dim.x + 0.5f, (float)level_dim.y / 2.0f, (float)level_dim.z / 2.0f };
+                Vec3 z_draw_coords_far  = (Vec3){ (float)level_dim.x / 2.0f, (float)level_dim.y / 2.0f, (float)level_dim.z + 0.5f };
+                Vec3 x_draw_scale = (Vec3){ 0, 						   (float)level_dim.y, (float)level_dim.z + 1.0f };
+                Vec3 z_draw_scale = (Vec3){ (float)level_dim.x + 1.0f, (float)level_dim.y, 0 };
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_near, x_draw_scale, IDENTITY_QUATERNION, VEC3_0);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_near, z_draw_scale, IDENTITY_QUATERNION, VEC3_0);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_far,  x_draw_scale, IDENTITY_QUATERNION, VEC3_0);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_far,  z_draw_scale, IDENTITY_QUATERNION, VEC3_0);
             }
         }
 
