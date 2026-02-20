@@ -111,7 +111,7 @@ Camera saved_level_camera = {0};
 Camera alt_camera = {0};
 
 Int3 camera_screen_offset = {0};
-const Int3 CAMERA_CENTER_START = { 16, 0, -13 };
+const Int3 OVERWORLD_CAMERA_CENTER_START = { 58, 2, 197 };
 bool draw_level_boundary = false;
 const float OVERWORLD_CAMERA_FOV_CLOSE = 15.0f; 
 float OVERWORLD_CAMERA_FOV_FAR = 35.0f; // is actually edited with J press for editing; not fully constant
@@ -321,6 +321,11 @@ Vec3 vec3Subtract(Vec3 a, Vec3 b)
     return (Vec3){ a.x-b.x, a.y-b.y, a.z-b.z }; 
 }
 
+Int3 int3Subtract(Int3 a, Int3 b) 
+{
+    return (Int3){ a.x-b.x, a.y-b.y, a.z-b.z }; 
+}
+
 Vec3 vec3Abs(Vec3 a) 
 {
     return (Vec3){ (float)fabs(a.x), (float)fabs(a.y), (float)fabs(a.z) }; 
@@ -329,6 +334,11 @@ Vec3 vec3Abs(Vec3 a)
 Vec3 vec3ScalarMultiply(Vec3 position, float scalar) 
 {
     return (Vec3){ position.x*scalar, position.y*scalar, position.z*scalar }; 
+}
+
+Int3 int3ScalarMultiply(Int3 position, int32 scalar) 
+{
+    return (Int3){ position.x*scalar, position.y*scalar, position.z*scalar }; 
 }
 
 float vec3Inner(Vec3 a, Vec3 b)
@@ -4546,7 +4556,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             char tag[4] = {0};
             bool write_alt_camera = false;
-            if (tick_input.c_press || in_overworld) 
+            if (tick_input.c_press) 
             {
                 memcpy(&tag, &MAIN_CAMERA_CHUNK_TAG, sizeof(tag));
             }
@@ -4592,11 +4602,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                 fclose(file);
             }
 
-            if (tick_input.c_press || in_overworld) saved_level_camera = camera;
+            if (tick_input.c_press) saved_level_camera = camera;
             else alt_camera = camera;
         }
 
-        if (time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE && tick_input.x_press && !in_overworld) 
+        if (time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE && tick_input.x_press) 
         {
             memset(&alt_camera, 0, sizeof(Camera));
             if (camera_mode != MAIN_WAITING)
@@ -4605,32 +4615,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                 setCameraRotation();
             }
         }
-        
-		// adjust overworld camera based on position
-        if (in_overworld && player->id == PLAYER_ID)
-        {
-            int32 screen_offset_x = 0;
-            int32 dx = player->coords.x - CAMERA_CENTER_START.x;
-            if 		(dx > 0) screen_offset_x = (dx + (int32)(OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
-            else if (dx < 0) screen_offset_x = (dx - (int32)(OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
-            if (screen_offset_x != camera_screen_offset.x) 
-            {
-                int32 delta = screen_offset_x - camera_screen_offset.x;
-                camera_screen_offset.x = screen_offset_x; 
-                camera.coords.x += delta * OVERWORLD_SCREEN_SIZE_X;
-            }
 
-            int32 screen_offset_z = 0;
-            int32 dz = player->coords.z - CAMERA_CENTER_START.z;
-            if 		(dz > 0) screen_offset_z = (dz + (int32)(OVERWORLD_SCREEN_SIZE_Z / 2)) / OVERWORLD_SCREEN_SIZE_Z;
-            else if (dz < 0) screen_offset_z = (dz - (int32)(OVERWORLD_SCREEN_SIZE_Z / 2)) / OVERWORLD_SCREEN_SIZE_Z;
-            if (screen_offset_z != camera_screen_offset.z) 
-            {
-                int32 delta = screen_offset_z - camera_screen_offset.z;
-                camera_screen_offset.z = screen_offset_z; 
-                camera.coords.z += delta * OVERWORLD_SCREEN_SIZE_Z;
-            }
-        }
+        // set up overworld alternative camera relative to current camera
 
         // change camera fov for editor
         if (tick_input.n_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE && editor_state.editor_mode != NO_MODE)
@@ -4644,55 +4630,18 @@ void gameFrame(double delta_time, TickInput tick_input)
             time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
 
-        // handle alternative camera
+        // alternative camera: switch modes on tab
         if (tick_input.tab_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE)
         {
-            if (in_overworld)
+            if (alt_camera.fov != 0)
             {
-                /*
-                if (!alt_camera_mode)
-                {
-                    camera.fov = OVERWORLD_CAMERA_FOV_FAR;
-                    alt_camera_mode = true;
-                }
-                else
-                {
-                    camera.fov = OVERWORLD_CAMERA_FOV_CLOSE;
-                    alt_camera_mode = false;
-                }
-                */
-            }
-            else
-            {
-                if (alt_camera.fov != 0)
-                {
-                    if (camera_mode == MAIN_WAITING || camera_mode == ALT_TO_MAIN)
-                    {
-                        camera_mode = MAIN_TO_ALT;
-                    }
-                    else
-                    {
-                        camera_mode = ALT_TO_MAIN;
-                    }
-
-                    /*
-                    if (!alt_camera_mode)
-                    {
-                        camera = alt_camera;
-                        alt_camera_mode = true;
-                    }
-                    else
-                    {
-                        camera = saved_level_camera;
-                        alt_camera_mode = false;
-                    }
-                    setCameraRotation();
-                    */
-                }
+                if (camera_mode == MAIN_WAITING || camera_mode == ALT_TO_MAIN) camera_mode = MAIN_TO_ALT;
+                else camera_mode = ALT_TO_MAIN;
             }
             time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
 
+        // perform alt <-> main camera interpolation
         if (camera_mode == MAIN_TO_ALT)
         {
             camera_lerp_t += CAMERA_T_TIMESTEP;
@@ -4715,6 +4664,24 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             camera = lerpCamera(&saved_level_camera, &alt_camera, camera_lerp_t);
     		setCameraRotation();
+        }
+
+        Camera camera_with_ow_offset = camera;
+        
+		// adjust overworld camera based on position
+		if (in_overworld && !player->removed)
+        {
+            Int3 player_delta = int3Subtract(player->coords, OVERWORLD_CAMERA_CENTER_START);
+            int32 screen_offset_x = player_delta.x / (OVERWORLD_SCREEN_SIZE_X - (OVERWORLD_SCREEN_SIZE_X / 2));
+            int32 screen_offset_z = player_delta.z / (OVERWORLD_SCREEN_SIZE_Z - (OVERWORLD_SCREEN_SIZE_Z / 2));
+            camera_with_ow_offset.coords.x = camera.coords.x + (screen_offset_x * OVERWORLD_SCREEN_SIZE_X);
+            camera_with_ow_offset.coords.z = camera.coords.z + (screen_offset_z * OVERWORLD_SCREEN_SIZE_Z);
+
+            // camera delta info
+            char delta_text[256];
+            snprintf(delta_text, sizeof(delta_text), "player delta from origin: %.1d, %.1d --- %.1d, %.1d", player_delta.x, player_delta.z, screen_offset_x, screen_offset_z);
+            drawDebugText(delta_text);
+
         }
 
         if (pending_undo_record)
@@ -4840,10 +4807,23 @@ void gameFrame(double delta_time, TickInput tick_input)
                 {
                     FOR(x_index, 12)
                     {
-                        Vec3 x_draw_coords = (Vec3){ (float)(x_draw_offset + CAMERA_CENTER_START.x), 3, (float)(z_draw_offset + CAMERA_CENTER_START.z) + ((float)OVERWORLD_SCREEN_SIZE_Z / 2) }; 
-                        Vec3 z_draw_coords = (Vec3){ (float)(x_draw_offset + CAMERA_CENTER_START.x) - ((float)OVERWORLD_SCREEN_SIZE_X / 2), 3, (float)(z_draw_offset + CAMERA_CENTER_START.z) }; 
+                        Vec3 x_draw_coords = (Vec3)
+                        { 
+                            (float)(x_draw_offset + OVERWORLD_CAMERA_CENTER_START.x), 3,
+                            (float)(z_draw_offset + OVERWORLD_CAMERA_CENTER_START.z) + ((float)OVERWORLD_SCREEN_SIZE_Z / 2)
+                        }; 
+                        Vec3 z_draw_coords = (Vec3)
+                        { 
+                            (float)(x_draw_offset + OVERWORLD_CAMERA_CENTER_START.x) - ((float)OVERWORLD_SCREEN_SIZE_X / 2), 3,
+                            (float)(z_draw_offset + OVERWORLD_CAMERA_CENTER_START.z)
+                        }; 
+
+                        Vec3 outline_offset = (Vec3){ (float)(-2 * OVERWORLD_SCREEN_SIZE_X), 0, (float)(-14 * OVERWORLD_SCREEN_SIZE_Z) };
+                        x_draw_coords = vec3Add(x_draw_coords, outline_offset);
+                        z_draw_coords = vec3Add(z_draw_coords, outline_offset);
+
                         drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, VEC3_0);
-                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, VEC3_0);
+                    	drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, VEC3_0);
                         x_draw_offset += OVERWORLD_SCREEN_SIZE_X;
                     }
                     x_draw_offset = 0;
@@ -4880,9 +4860,10 @@ void gameFrame(double delta_time, TickInput tick_input)
         /*
 		char pack_text[256] = {0};
         snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, detached: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack_detached);
-        drawDebugText(pack_text);
+        DrawDebugText(pack_text);
         */
 
+        /*
         // camera pos info
         char camera_text[256] = {0};
         snprintf(camera_text, sizeof(camera_text), "current camera info:    %.1f, %.1f, %.1f, fov: %.1f", camera.coords.x, camera.coords.y, camera.coords.z, camera.fov);
@@ -4902,6 +4883,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         char t_text[256] = {0};
         snprintf(t_text, sizeof(t_text), "t value: %.2f", camera_lerp_t);
         drawDebugText(t_text);
+        */
 
         /*
         // show undos performed
@@ -4911,9 +4893,9 @@ void gameFrame(double delta_time, TickInput tick_input)
         */
 
         /*
-        // show current selected id
+        // show current selected id + coords
         char edit_text[256] = {0};
-        snprintf(edit_text, sizeof(edit_text), "selected id: %d", editor_state.selected_id);
+        snprintf(edit_text, sizeof(edit_text), "selected id: %d; coords: %d, %d, %d", editor_state.selected_id, editor_state.selected_coords.x, editor_state.selected_coords.y, editor_state.selected_coords.z);
         drawDebugText(edit_text);
         */
 
@@ -4922,6 +4904,16 @@ void gameFrame(double delta_time, TickInput tick_input)
         char undo_buffer_text[256] = {0};
         snprintf(undo_buffer_text, sizeof(undo_buffer_text), "undo deltas in buffer: %d", undo_buffer.delta_count);
         drawDebugText(undo_buffer_text);
+        */
+
+        /*
+        // temp draw outline around trailing hitboxes
+        FOR(th_index, MAX_TRAILING_HITBOX_COUNT)
+        {
+            TrailingHitbox th = next_world_state.trailing_hitboxes[th_index];
+            if (th.frames == 0 || th.hit_direction != NO_DIRECTION) continue;
+            drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0);
+        }
         */
 
 		if (editor_state.editor_mode != NO_MODE)
@@ -4960,16 +4952,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 }
             }
         }
-
-        /*
-        // temp draw outline around trailing hitboxes
-        FOR(th_index, MAX_TRAILING_HITBOX_COUNT)
-        {
-            TrailingHitbox th = next_world_state.trailing_hitboxes[th_index];
-            if (th.frames == 0 || th.hit_direction != NO_DIRECTION) continue;
-            drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0);
-        }
-        */
 
 		// draw selected id info
         if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
@@ -5044,7 +5026,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         accumulator -= PHYSICS_INCREMENT;
 
-        rendererSubmitFrame(assets_to_load, camera);
+        rendererSubmitFrame(assets_to_load, camera_with_ow_offset);
         FOR(i, 1024) assets_to_load[i].instance_count = 0;
 	}
 
