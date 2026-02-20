@@ -108,7 +108,6 @@ const float CAMERA_FOV = 15.0f;
 
 Camera camera = {0};
 Camera saved_level_camera = {0};
-bool alt_camera_mode = false;
 Camera alt_camera = {0};
 
 Int3 camera_screen_offset = {0};
@@ -116,6 +115,11 @@ const Int3 CAMERA_CENTER_START = { 16, 0, -13 };
 bool draw_level_boundary = false;
 const float OVERWORLD_CAMERA_FOV_CLOSE = 15.0f; 
 float OVERWORLD_CAMERA_FOV_FAR = 35.0f; // is actually edited with J press for editing; not fully constant
+
+float camera_lerp_t = 0.0f;
+//const float CAMERA_LERP_TIME = 10;
+const float CAMERA_T_TIMESTEP = 0.05f;
+CameraMode camera_mode = MAIN_WAITING;
 
 AssetToLoad assets_to_load[1024] = {0};
 
@@ -1371,7 +1375,7 @@ void drawDebugText(char* string)
     debug_text_coords.y -= DEBUG_TEXT_Y_DIFF;
 }
 
-// CAMERA STUFF?
+// CAMERA STUFF 
 
 void setCameraRotation()
 {
@@ -1379,6 +1383,19 @@ void setCameraRotation()
     Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera.pitch);
     camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
 }
+
+Camera lerpCamera(Camera* a, Camera* b, float t)
+{
+    Camera result = {0};
+    result.coords.x = a->coords.x + (b->coords.x - a->coords.x) * t;
+    result.coords.y = a->coords.y + (b->coords.y - a->coords.y) * t;
+    result.coords.z = a->coords.z + (b->coords.z - a->coords.z) * t;
+    result.fov 		= a->fov 	  + (b->fov 	 - a->fov) 		* t;
+    result.yaw 		= a->yaw 	  + (b->yaw 	 - a->yaw) 		* t;
+    result.pitch 	= a->pitch	  + (b->pitch 	 - a->pitch) 	* t;
+    return result;
+}
+
 // RAYCAST ALGORITHM FOR EDITOR
 
 RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance)
@@ -4528,7 +4545,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (time_until_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && (tick_input.c_press || tick_input.v_press))
         {
             char tag[4] = {0};
-            bool use_alt_camera = false;
+            bool write_alt_camera = false;
             if (tick_input.c_press || in_overworld) 
             {
                 memcpy(&tag, &MAIN_CAMERA_CHUNK_TAG, sizeof(tag));
@@ -4536,7 +4553,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             else 					
             {
                 memcpy(&tag, &ALT_CAMERA_CHUNK_TAG, sizeof(tag));
-                use_alt_camera = true;
+                write_alt_camera = true;
             }
 
             {
@@ -4547,12 +4564,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (count > 0)
                 {
                     fseek(file, positions[0], SEEK_SET);
-                    writeCameraToFile(file, &camera, use_alt_camera);
+                    writeCameraToFile(file, &camera, write_alt_camera);
                 }
                 else
                 {
                     fseek(file, 0, SEEK_END);
-                    writeCameraToFile(file, &camera, use_alt_camera);
+                    writeCameraToFile(file, &camera, write_alt_camera);
                 }
                 fclose(file);
             }
@@ -4565,12 +4582,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (count > 0)
                 {
                     fseek(file, positions[0], SEEK_SET);
-                    writeCameraToFile(file, &camera, use_alt_camera);
+                    writeCameraToFile(file, &camera, write_alt_camera);
                 }
                 else
                 {
                     fseek(file, 0, SEEK_END);
-                    writeCameraToFile(file, &camera, use_alt_camera);
+                    writeCameraToFile(file, &camera, write_alt_camera);
                 }
                 fclose(file);
             }
@@ -4582,7 +4599,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE && tick_input.x_press && !in_overworld) 
         {
             memset(&alt_camera, 0, sizeof(Camera));
-            if (alt_camera_mode) 
+            if (camera_mode != MAIN_WAITING)
             {
                 camera = saved_level_camera;
                 setCameraRotation();
@@ -4615,7 +4632,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-        // change camera fov
+        // change camera fov for editor
         if (tick_input.n_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE && editor_state.editor_mode != NO_MODE)
         {
             camera.fov--;
@@ -4632,6 +4649,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             if (in_overworld)
             {
+                /*
                 if (!alt_camera_mode)
                 {
                     camera.fov = OVERWORLD_CAMERA_FOV_FAR;
@@ -4642,11 +4660,22 @@ void gameFrame(double delta_time, TickInput tick_input)
                     camera.fov = OVERWORLD_CAMERA_FOV_CLOSE;
                     alt_camera_mode = false;
                 }
+                */
             }
             else
             {
                 if (alt_camera.fov != 0)
                 {
+                    if (camera_mode == MAIN_WAITING || camera_mode == ALT_TO_MAIN)
+                    {
+                        camera_mode = MAIN_TO_ALT;
+                    }
+                    else
+                    {
+                        camera_mode = ALT_TO_MAIN;
+                    }
+
+                    /*
                     if (!alt_camera_mode)
                     {
                         camera = alt_camera;
@@ -4658,9 +4687,34 @@ void gameFrame(double delta_time, TickInput tick_input)
                         alt_camera_mode = false;
                     }
                     setCameraRotation();
+                    */
                 }
             }
             time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        if (camera_mode == MAIN_TO_ALT)
+        {
+            camera_lerp_t += CAMERA_T_TIMESTEP;
+            if (camera_lerp_t >= 1) 
+            {
+                camera_lerp_t = 1.0f;
+                camera_mode = ALT_WAITING;
+            }
+        }
+        if (camera_mode == ALT_TO_MAIN)
+        {
+            camera_lerp_t -= CAMERA_T_TIMESTEP;
+            if (camera_lerp_t <= 0)
+            {
+                camera_lerp_t = 0.0f;
+                camera_mode = MAIN_WAITING;
+            }
+        }
+        if (camera_lerp_t != 0 && camera_lerp_t != 1)
+        {
+            camera = lerpCamera(&saved_level_camera, &alt_camera, camera_lerp_t);
+    		setCameraRotation();
         }
 
         if (pending_undo_record)
@@ -4818,25 +4872,15 @@ void gameFrame(double delta_time, TickInput tick_input)
 		drawDebugText(next_world_state.level_name);
 
         /*
-		char pack_text[256] = {0};
-        snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, detached: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack_detached);
-        drawDebugText(pack_text);
-
         char player_text[256] = {0};
         snprintf(player_text, sizeof(player_text), "player info: coords: %d, %d, %d", player->coords.x, player->coords.y, player->coords.z);
         drawDebugText(player_text);
         */
 
-        // box in_motion info
         /*
-        Entity box = next_world_state.boxes[0];
-		char box_moving_text[256] = {0};
-        snprintf(box_moving_text, sizeof(box_moving_text), "box moving: %d", box.in_motion);
-		drawDebugText(box_moving_text);
-
-		char box_dir_text[256] = {0};
-        snprintf(box_dir_text, sizeof(box_dir_text), "box moving: %d", box.moving_direction);
-		drawDebugText(box_dir_text);
+		char pack_text[256] = {0};
+        snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, detached: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack_detached);
+        drawDebugText(pack_text);
         */
 
         // camera pos info
@@ -4854,12 +4898,10 @@ void gameFrame(double delta_time, TickInput tick_input)
         snprintf(alt_camera_text, sizeof(alt_camera_text), "alt saved camera info:  %.1f, %.1f, %.1f, fov: %.1f", alt_camera.coords.x, alt_camera.coords.y, alt_camera.coords.z, alt_camera.fov);
         drawDebugText(alt_camera_text);
 
-        /*
-        // level dim info
-        char level_text[256] = {0};
-        snprintf(level_text, sizeof(level_text), "level dim: %d, %d, %d", level_dim.x, level_dim.y, level_dim.z);
-        drawDebugText(level_text);
-        */
+        // camera_t info
+        char t_text[256] = {0};
+        snprintf(t_text, sizeof(t_text), "t value: %.2f", camera_lerp_t);
+        drawDebugText(t_text);
 
         /*
         // show undos performed

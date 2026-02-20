@@ -158,6 +158,15 @@ Camera;
 
 typedef enum
 {
+    MAIN_WAITING,
+    MAIN_TO_ALT,
+    ALT_WAITING,
+    ALT_TO_MAIN
+}
+CameraMode;
+
+typedef enum
+{
     NO_DIRECTION = -1,
     NORTH = 0,
     WEST  = 1,
