@@ -1418,11 +1418,16 @@ Vec4 slerp(Vec4 a, Vec4 b, float t)
 */
 
 // assumes looking toward plane (otherwise negative t value)
+// some of the double conversions here probably aren't required
 Vec3 cameraLookingAtPointOnPlane(Camera input_camera, float plane_y)
 {
     Vec3 forward = vec3RotateByQuaternion((intCoordsToNorm(int3Negate(AXIS_Z))), buildCameraQuaternion(input_camera));
-    float t = (plane_y - input_camera.coords.y) / forward.y;
-    return vec3Add(input_camera.coords, vec3ScalarMultiply(forward, t));
+    double t = ((double)plane_y - (double)input_camera.coords.y) / (double)forward.y;
+    return (Vec3){
+        (float)((double)input_camera.coords.x + (double)forward.x * t),
+        (float)((double)input_camera.coords.y + (double)forward.y * t),
+        (float)((double)input_camera.coords.z + (double)forward.z * t)
+    };
 }
 
 Camera lerpCamera(Camera a, Camera b, float t, float target_plane_y)
@@ -1437,10 +1442,10 @@ Camera lerpCamera(Camera a, Camera b, float t, float target_plane_y)
     Vec3 target_b = cameraLookingAtPointOnPlane(b, target_plane_y);
     Vec3 target = vec3Add(target_a, vec3ScalarMultiply(vec3Subtract(target_b, target_a), t));
 
-    // build rotation from point to look at
+    // build rotation from looked at point
     Vec3 forward = vec3Normalize(vec3Subtract(target, result.coords));
-    result.yaw   = atan2f(-forward.x, -forward.z);
-    result.pitch = asinf(forward.y);
+    result.yaw   = (float)atan2((double)-forward.x, (double)-forward.z);
+    result.pitch = (float)asin((double)forward.y);
     result.rotation = buildCameraQuaternion(result);
 
     return result;
@@ -4641,10 +4646,25 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE && tick_input.x_press) 
         {
             memset(&alt_camera, 0, sizeof(Camera));
-            if (camera_mode != MAIN_WAITING)
+            camera = saved_level_camera;
+            camera.rotation = buildCameraQuaternion(camera);
+
+            Camera empty_camera = {0};
             {
-                camera = saved_level_camera;
-                camera.rotation = buildCameraQuaternion(camera);
+                FILE* file = fopen(relative_level_path, "rb+");
+                int32 positions[64] = {0};
+                getCountAndPositionOfChunk(file, ALT_CAMERA_CHUNK_TAG, positions);
+                fseek(file, positions[0], SEEK_SET);
+                writeCameraToFile(file, &empty_camera, true);
+                fclose(file);
+            }
+            {
+                FILE* file = fopen(level_path, "rb+");
+                int32 positions[64] = {0};
+                getCountAndPositionOfChunk(file, ALT_CAMERA_CHUNK_TAG, positions);
+                fseek(file, positions[0], SEEK_SET);
+                writeCameraToFile(file, &empty_camera, true);
+                fclose(file);
             }
         }
 
