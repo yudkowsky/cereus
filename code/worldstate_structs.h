@@ -158,13 +158,6 @@ Camera;
 
 typedef enum
 {
-    ZOOM_CLOSE,
-    ZOOM_FAR
-}
-CameraZoom;
-
-typedef enum
-{
     NO_DIRECTION = -1,
     NORTH = 0,
     WEST  = 1,

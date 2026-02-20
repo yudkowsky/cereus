@@ -78,10 +78,11 @@ const float DEFAULT_TEXT_SCALE = 30.0f;
 const int32 SAVE_WRITE_VERSION = 1;
 
 const int32 CAMERA_CHUNK_SIZE = 24;
-const char CAMERA_CHUNK_TAG[4] = "CMRA";
+const char MAIN_CAMERA_CHUNK_TAG[4] = "CMRA";
+const char ALT_CAMERA_CHUNK_TAG[4] = "CAM2";
 const int32 WIN_BLOCK_CHUNK_SIZE = 76;
 const char WIN_BLOCK_CHUNK_TAG[4] = "WINB";
-const int32 LOCKED_INFO_CHUNK_SIZE = 76; // TODO(spike): get rid of this (have dynamic amounts)
+const int32 LOCKED_INFO_CHUNK_SIZE = 76;
 const char LOCKED_INFO_CHUNK_TAG[4] = "LOKB";
 const int32 RESET_INFO_SINGLE_ENTRY_SIZE = 6;
 const char RESET_INFO_CHUNK_TAG[4] = "RESB";
@@ -100,16 +101,19 @@ const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
 const char undo_meta_path[64] = "data/meta/undo-buffer.meta";
 
+// CAMERA
 const float CAMERA_SENSITIVITY = 0.005f;
 const float CAMERA_MOVE_STEP = 0.2f;
 const float CAMERA_FOV = 15.0f;
 
 Camera camera = {0};
 Camera saved_level_camera = {0};
+bool alt_camera_mode = false;
+Camera alt_camera = {0};
+
 Int3 camera_screen_offset = {0};
 const Int3 CAMERA_CENTER_START = { 16, 0, -13 };
-bool draw_camera_boundary = false;
-CameraZoom camera_zoom = ZOOM_CLOSE;
+bool draw_level_boundary = false;
 const float OVERWORLD_CAMERA_FOV_CLOSE = 15.0f; 
 float OVERWORLD_CAMERA_FOV_FAR = 35.0f; // is actually edited with J press for editing; not fully constant
 
@@ -786,12 +790,16 @@ void loadBufferInfo(FILE* file)
     }
 }
 
-Camera loadCameraInfo(FILE* file)
+Camera loadCameraInfo(FILE* file, bool use_alt_camera)
 {
     Camera out_camera = {0};
 
     int32 positions[64] = {0};
-    int32 count = getCountAndPositionOfChunk(file, CAMERA_CHUNK_TAG, positions);
+    char tag[4] = {0}; 
+    if (use_alt_camera) memcpy(&tag, &ALT_CAMERA_CHUNK_TAG, sizeof(tag));
+    else		    memcpy(&tag, &MAIN_CAMERA_CHUNK_TAG, sizeof(tag));
+
+    int32 count = getCountAndPositionOfChunk(file, tag, positions);
     if (count != 1) return out_camera;
 
     fseek(file, positions[0] + 8, SEEK_SET);
@@ -989,9 +997,13 @@ void writeBufferToFile(FILE* file, int32 version)
     }
 }
 
-void writeCameraToFile(FILE* file, Camera* in_camera)
+void writeCameraToFile(FILE* file, Camera* in_camera, bool write_alt_camera)
 {
-    fwrite(CAMERA_CHUNK_TAG, 4, 1, file);
+    char tag[4] = {0};
+    if (write_alt_camera) memcpy(&tag, ALT_CAMERA_CHUNK_TAG, sizeof(tag));
+    else 				  memcpy(&tag, MAIN_CAMERA_CHUNK_TAG, sizeof(tag));
+
+    fwrite(tag, 4, 1, file);
     fwrite(&CAMERA_CHUNK_SIZE, 4, 1, file);
     fwrite(&in_camera->coords.x, 4, 1, file);
     fwrite(&in_camera->coords.y, 4, 1, file);
@@ -1101,7 +1113,8 @@ bool saveLevelRewrite(char* path, bool save_reset_block_state)
     fwrite(&z, 1, 1, file);
 
     writeBufferToFile(file, SAVE_WRITE_VERSION);
-    writeCameraToFile(file, &saved_level_camera);
+    writeCameraToFile(file, &saved_level_camera, false);
+    if (alt_camera.fov != 0) writeCameraToFile(file, &alt_camera, true);
 
     FOR(win_block_index, MAX_ENTITY_INSTANCE_COUNT)
     {
@@ -1358,6 +1371,14 @@ void drawDebugText(char* string)
     debug_text_coords.y -= DEBUG_TEXT_Y_DIFF;
 }
 
+// CAMERA STUFF?
+
+void setCameraRotation()
+{
+    Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera.yaw);
+    Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera.pitch);
+    camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
+}
 // RAYCAST ALGORITHM FOR EDITOR
 
 RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance)
@@ -2627,6 +2648,8 @@ void initUndoBuffer()
     memset(undo_buffer.level_change_indices, 0xFF, sizeof(undo_buffer.level_change_indices));
 }
 
+// these functions are functional, but unusable. probably fwrite can't handle such a large buffer, or fwrite is just really slow? maybe i can just thread it?
+/*
 void writeUndoBufferToFile()
 {
     FILE* file = fopen(undo_meta_path, "wb");
@@ -2634,7 +2657,9 @@ void writeUndoBufferToFile()
     fwrite(&undo_buffer, sizeof(UndoBuffer), 1, file);
     fclose(file);
 }
+*/
 
+/*
 void loadUndoBufferFromFile()
 {
     FILE* file = fopen(undo_meta_path, "rb");
@@ -2649,6 +2674,7 @@ void loadUndoBufferFromFile()
     }
     fclose(file);
 }
+*/
 
 // GAME INIT
 
@@ -2750,7 +2776,8 @@ void gameInitializeState(char* level_name)
     }
 
     file = fopen(level_path, "rb+");
-    camera = loadCameraInfo(file);
+    camera = loadCameraInfo(file, false);
+    alt_camera = loadCameraInfo(file, true);
     saved_level_camera = camera;
     loadWinBlockPaths(file);
     loadLockedInfoPaths(file);
@@ -2762,15 +2789,13 @@ void gameInitializeState(char* level_name)
     camera_screen_offset.x = (int32)(camera.coords.x / OVERWORLD_SCREEN_SIZE_X);
     camera_screen_offset.z = (int32)(camera.coords.z / OVERWORLD_SCREEN_SIZE_Z);
 
-    Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera.yaw);
-    Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera.pitch);
-    camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
+    setCameraRotation();
     world_state = next_world_state;
 }
 
 void gameInitialize(char* level_name) 
 {	
-    loadUndoBufferFromFile();
+    //loadUndoBufferFromFile();
     gameInitializeState(level_name);
 }
 
@@ -2844,7 +2869,7 @@ void recordActionForUndo(WorldState* old_state)
 
     restart_last_turn = false;
 
-    writeUndoBufferToFile();
+    //writeUndoBufferToFile();
 }
 
 // call before transitioning to a new level. stores a delta for every entity in the current level, plus the level change metadata
@@ -2917,7 +2942,7 @@ void recordLevelChangeForUndo(char* current_level_name, bool level_was_just_solv
 
     restart_last_turn = false;
 
-    writeUndoBufferToFile();
+    //writeUndoBufferToFile();
 }
 
 bool performUndo()
@@ -3009,7 +3034,7 @@ bool performUndo()
 	// sync worldstate
     world_state = next_world_state;
 
-    writeUndoBufferToFile();
+    //writeUndoBufferToFile();
 
     return true;
 }
@@ -3450,10 +3475,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         float pitch_limit = 0.25f * TAU;
         if (camera.pitch >  pitch_limit) camera.pitch =  pitch_limit; 
         if (camera.pitch < -pitch_limit) camera.pitch = -pitch_limit; 
-
-        Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera.yaw);
-        Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera.pitch);
-        camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
+        setCameraRotation();
     }
     // handle writing once per present frame
 
@@ -4495,6 +4517,77 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // final redo of laser buffer, after all logic is complete, for drawing
 		updateLaserBuffer();
+
+        // CAMERA SHENANIGANS
+        char level_path[64];
+        buildLevelPathFromName(world_state.level_name, &level_path, true);
+        char relative_level_path[64];
+        buildLevelPathFromName(world_state.level_name, &relative_level_path, false);
+
+        // write camera to file on c press, alternative camera on v press
+        if (time_until_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && (tick_input.c_press || tick_input.v_press))
+        {
+            char tag[4] = {0};
+            bool use_alt_camera = false;
+            if (tick_input.c_press || in_overworld) 
+            {
+                memcpy(&tag, &MAIN_CAMERA_CHUNK_TAG, sizeof(tag));
+            }
+            else 					
+            {
+                memcpy(&tag, &ALT_CAMERA_CHUNK_TAG, sizeof(tag));
+                use_alt_camera = true;
+            }
+
+            {
+                FILE* file = fopen(level_path, "rb+");
+                int32 positions[64] = {0};
+                int32 count = getCountAndPositionOfChunk(file, tag, positions);
+
+                if (count > 0)
+                {
+                    fseek(file, positions[0], SEEK_SET);
+                    writeCameraToFile(file, &camera, use_alt_camera);
+                }
+                else
+                {
+                    fseek(file, 0, SEEK_END);
+                    writeCameraToFile(file, &camera, use_alt_camera);
+                }
+                fclose(file);
+            }
+
+            {
+                FILE* file = fopen(relative_level_path, "rb+");
+                int32 positions[64] = {0};
+                int32 count = getCountAndPositionOfChunk(file, tag, positions);
+
+                if (count > 0)
+                {
+                    fseek(file, positions[0], SEEK_SET);
+                    writeCameraToFile(file, &camera, use_alt_camera);
+                }
+                else
+                {
+                    fseek(file, 0, SEEK_END);
+                    writeCameraToFile(file, &camera, use_alt_camera);
+                }
+                fclose(file);
+            }
+
+            if (tick_input.c_press || in_overworld) saved_level_camera = camera;
+            else alt_camera = camera;
+        }
+
+        if (time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE && tick_input.x_press && !in_overworld) 
+        {
+            memset(&alt_camera, 0, sizeof(Camera));
+            if (alt_camera_mode) 
+            {
+                camera = saved_level_camera;
+                setCameraRotation();
+            }
+        }
         
 		// adjust overworld camera based on position
         if (in_overworld && player->id == PLAYER_ID)
@@ -4522,7 +4615,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-        // adjust camera fov (TODO(spike): and location for tab)
+        // change camera fov
         if (tick_input.n_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE && editor_state.editor_mode != NO_MODE)
         {
             camera.fov--;
@@ -4533,21 +4626,38 @@ void gameFrame(double delta_time, TickInput tick_input)
             camera.fov++;
             time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
+
+        // handle alternative camera
         if (tick_input.tab_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE)
         {
-            switch (camera_zoom)
+            if (in_overworld)
             {
-                case ZOOM_CLOSE:
+                if (!alt_camera_mode)
                 {
                     camera.fov = OVERWORLD_CAMERA_FOV_FAR;
-                    camera_zoom = ZOOM_FAR;
-                    break;
+                    alt_camera_mode = true;
                 }
-                case ZOOM_FAR:
+                else
                 {
                     camera.fov = OVERWORLD_CAMERA_FOV_CLOSE;
-                    camera_zoom = ZOOM_CLOSE;
-                    break;
+                    alt_camera_mode = false;
+                }
+            }
+            else
+            {
+                if (alt_camera.fov != 0)
+                {
+                    if (!alt_camera_mode)
+                    {
+                        camera = alt_camera;
+                        alt_camera_mode = true;
+                    }
+                    else
+                    {
+                        camera = saved_level_camera;
+                        alt_camera_mode = false;
+                    }
+                    setCameraRotation();
                 }
             }
             time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
@@ -4559,7 +4669,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             recordActionForUndo(&pending_undo_snapshot);
         }
 
-        // toggle drawing 
+        // toggle drawing (TODO(spike): TEMP)
         if (tick_input.e_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE)
         {
             render_models = !render_models;
@@ -4658,10 +4768,10 @@ void gameFrame(double delta_time, TickInput tick_input)
         // draw camera boundary lines
 		if (time_until_input == 0 && tick_input.t_press && !(editor_state.editor_mode == SELECT_WRITE))
         {
-            draw_camera_boundary = (draw_camera_boundary) ? false : true;
+            draw_level_boundary = (draw_level_boundary) ? false : true;
 			time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
-        if (draw_camera_boundary)
+        if (draw_level_boundary)
         {
 			if (in_overworld)
             {
@@ -4731,8 +4841,18 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // camera pos info
         char camera_text[256] = {0};
-        snprintf(camera_text, sizeof(camera_text), "camera pos: %f, %f, %f", camera.coords.x, camera.coords.y, camera.coords.z);
+        snprintf(camera_text, sizeof(camera_text), "current camera info:    %.1f, %.1f, %.1f, fov: %.1f", camera.coords.x, camera.coords.y, camera.coords.z, camera.fov);
         drawDebugText(camera_text);
+
+        // saved camera info
+        char saved_camera_text[256] = {0};
+        snprintf(saved_camera_text, sizeof(saved_camera_text), "main saved camera info: %.1f, %.1f, %.1f, fov: %.1f", saved_level_camera.coords.x, saved_level_camera.coords.y, saved_level_camera.coords.z, saved_level_camera.fov);
+        drawDebugText(saved_camera_text);
+
+        // saved alt camera info
+        char alt_camera_text[256] = {0};
+        snprintf(alt_camera_text, sizeof(alt_camera_text), "alt saved camera info:  %.1f, %.1f, %.1f, fov: %.1f", alt_camera.coords.x, alt_camera.coords.y, alt_camera.coords.z, alt_camera.fov);
+        drawDebugText(alt_camera_text);
 
         /*
         // level dim info
@@ -4756,9 +4876,11 @@ void gameFrame(double delta_time, TickInput tick_input)
         */
 
         // show undo deltas in buffer
+        /*
         char undo_buffer_text[256] = {0};
         snprintf(undo_buffer_text, sizeof(undo_buffer_text), "undo deltas in buffer: %d", undo_buffer.delta_count);
         drawDebugText(undo_buffer_text);
+        */
 
 		if (editor_state.editor_mode != NO_MODE)
         {
@@ -4863,55 +4985,11 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // write level to file on i press
-        char level_path[64];
-        buildLevelPathFromName(world_state.level_name, &level_path, true);
-        char relative_level_path[64];
-        buildLevelPathFromName(world_state.level_name, &relative_level_path, false);
         if (time_until_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.i_press) 
         {
             saveLevelRewrite(level_path, true);
             saveLevelRewrite(relative_level_path, true);
             writeSolvedLevelsToFile();
-        }
-
-        // write camera to file on c press
-        if (time_until_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.c_press) 
-        {
-            {
-                FILE* file = fopen(level_path, "rb+");
-                int32 positions[64] = {0};
-                int32 count = getCountAndPositionOfChunk(file, CAMERA_CHUNK_TAG, positions);
-
-                if (count > 0)
-                {
-                    fseek(file, positions[0], SEEK_SET);
-                    writeCameraToFile(file, &camera);
-                }
-                else
-                {
-                    fseek(file, 0, SEEK_END);
-                    writeCameraToFile(file, &camera);
-                }
-                fclose(file);
-            }
-
-            {
-                FILE* file = fopen(relative_level_path, "rb+");
-                int32 positions[64] = {0};
-                int32 count = getCountAndPositionOfChunk(file, CAMERA_CHUNK_TAG, positions);
-
-                if (count > 0)
-                {
-                    fseek(file, positions[0], SEEK_SET);
-                    writeCameraToFile(file, &camera);
-                }
-                else
-                {
-                    fseek(file, 0, SEEK_END);
-                    writeCameraToFile(file, &camera);
-                }
-                fclose(file);
-            }
         }
 
         /*
