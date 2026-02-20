@@ -4648,6 +4648,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (camera_lerp_t >= 1) 
             {
                 camera_lerp_t = 1.0f;
+                camera = alt_camera;
+                setCameraRotation();
                 camera_mode = ALT_WAITING;
             }
         }
@@ -4657,6 +4659,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (camera_lerp_t <= 0)
             {
                 camera_lerp_t = 0.0f;
+                camera = saved_level_camera;
+                setCameraRotation();
                 camera_mode = MAIN_WAITING;
             }
         }
@@ -4863,7 +4867,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         DrawDebugText(pack_text);
         */
 
-        /*
         // camera pos info
         char camera_text[256] = {0};
         snprintf(camera_text, sizeof(camera_text), "current camera info:    %.1f, %.1f, %.1f, fov: %.1f", camera.coords.x, camera.coords.y, camera.coords.z, camera.fov);
@@ -4883,7 +4886,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         char t_text[256] = {0};
         snprintf(t_text, sizeof(t_text), "t value: %.2f", camera_lerp_t);
         drawDebugText(t_text);
-        */
 
         /*
         // show undos performed
