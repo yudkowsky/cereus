@@ -121,6 +121,8 @@ float camera_lerp_t = 0.0f;
 const float CAMERA_T_TIMESTEP = 0.05f;
 CameraMode camera_mode = MAIN_WAITING;
 
+int32 camera_target_plane = 0; // plane that camera wants to target TODO(spike): should probably be something defined by level, not just player coords at startup
+
 AssetToLoad assets_to_load[1024] = {0};
 
 Int3 level_dim = {0};
@@ -1387,22 +1389,60 @@ void drawDebugText(char* string)
 
 // CAMERA STUFF 
 
-void setCameraRotation()
+Vec4 buildCameraQuaternion(Camera input_camera)
 {
-    Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), camera.yaw);
-    Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), camera.pitch);
-    camera.rotation  = quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
+    Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), input_camera.yaw);
+    Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), input_camera.pitch);
+    return quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
 }
 
-Camera lerpCamera(Camera* a, Camera* b, float t)
+/*
+Vec4 slerp(Vec4 a, Vec4 b, float t)
+{
+    float dot = quaternionDot(a, b);
+    if (dot < 0.0f) 
+    { 
+        b = quaternionNegate(b); 
+        dot = -dot; 
+    }
+    if (dot > 0.9995f)
+    {
+        return quaternionNormalize(quaternionAdd( quaternionScalarMultiply(a, 1.0f - t), quaternionScalarMultiply(b, t)));
+    }
+    float theta = acosf(dot);
+    float sin_theta = sinf(theta);
+    float wa = sinf((1.0f - t) * theta) / sin_theta;
+    float wb = sinf(t * theta) / sin_theta;
+    return quaternionAdd(quaternionScalarMultiply(a, wa), quaternionScalarMultiply(b, wb));
+}
+*/
+
+// assumes looking toward plane (otherwise negative t value)
+Vec3 cameraLookingAtPointOnPlane(Camera input_camera, float plane_y)
+{
+    Vec3 forward = vec3RotateByQuaternion((intCoordsToNorm(int3Negate(AXIS_Z))), buildCameraQuaternion(input_camera));
+    float t = (plane_y - input_camera.coords.y) / forward.y;
+    return vec3Add(input_camera.coords, vec3ScalarMultiply(forward, t));
+}
+
+Camera lerpCamera(Camera a, Camera b, float t, float target_plane_y)
 {
     Camera result = {0};
-    result.coords.x = a->coords.x + (b->coords.x - a->coords.x) * t;
-    result.coords.y = a->coords.y + (b->coords.y - a->coords.y) * t;
-    result.coords.z = a->coords.z + (b->coords.z - a->coords.z) * t;
-    result.fov 		= a->fov 	  + (b->fov 	 - a->fov) 		* t;
-    result.yaw 		= a->yaw 	  + (b->yaw 	 - a->yaw) 		* t;
-    result.pitch 	= a->pitch	  + (b->pitch 	 - a->pitch) 	* t;
+    result.coords.x = a.coords.x + (b.coords.x - a.coords.x) * t;
+    result.coords.y = a.coords.y + (b.coords.y - a.coords.y) * t;
+    result.coords.z = a.coords.z + (b.coords.z - a.coords.z) * t;
+    result.fov      = a.fov      + (b.fov      - a.fov)      * t;
+
+    Vec3 target_a = cameraLookingAtPointOnPlane(a, target_plane_y);
+    Vec3 target_b = cameraLookingAtPointOnPlane(b, target_plane_y);
+    Vec3 target = vec3Add(target_a, vec3ScalarMultiply(vec3Subtract(target_b, target_a), t));
+
+    // build rotation from point to look at
+    Vec3 forward = vec3Normalize(vec3Subtract(target, result.coords));
+    result.yaw   = atan2f(-forward.x, -forward.z);
+    result.pitch = asinf(forward.y);
+    result.rotation = buildCameraQuaternion(result);
+
     return result;
 }
 
@@ -2730,15 +2770,6 @@ void gameInitializeState(char* level_name)
     char level_path[64] = {0};
     buildLevelPathFromName(next_world_state.level_name, &level_path, false);
     FILE* file = fopen(level_path, "rb+");
-    if (!file)
-    {
-        char msg[512];
-        char cwd[MAX_PATH];
-        GetCurrentDirectoryA(MAX_PATH, cwd);
-        sprintf(msg, "Failed to open:\n%s\n\nCWD: %s", level_path, cwd);
-        MessageBoxA(NULL, msg, "Error", MB_OK);
-        return;
-    }
     loadBufferInfo(file);
     fclose(file);
 
@@ -2815,8 +2846,9 @@ void gameInitializeState(char* level_name)
 
     camera_screen_offset.x = (int32)(camera.coords.x / OVERWORLD_SCREEN_SIZE_X);
     camera_screen_offset.z = (int32)(camera.coords.z / OVERWORLD_SCREEN_SIZE_Z);
+    camera.rotation = buildCameraQuaternion(camera);
+    camera_target_plane = player->coords.y;
 
-    setCameraRotation();
     world_state = next_world_state;
 }
 
@@ -3502,7 +3534,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         float pitch_limit = 0.25f * TAU;
         if (camera.pitch >  pitch_limit) camera.pitch =  pitch_limit; 
         if (camera.pitch < -pitch_limit) camera.pitch = -pitch_limit; 
-        setCameraRotation();
+        camera.rotation = buildCameraQuaternion(camera);
     }
     // handle writing once per present frame
 
@@ -4612,7 +4644,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (camera_mode != MAIN_WAITING)
             {
                 camera = saved_level_camera;
-                setCameraRotation();
+                camera.rotation = buildCameraQuaternion(camera);
             }
         }
 
@@ -4649,7 +4681,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 camera_lerp_t = 1.0f;
                 camera = alt_camera;
-                setCameraRotation();
+                camera.rotation = buildCameraQuaternion(camera);
                 camera_mode = ALT_WAITING;
             }
         }
@@ -4660,14 +4692,13 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 camera_lerp_t = 0.0f;
                 camera = saved_level_camera;
-                setCameraRotation();
+                camera.rotation = buildCameraQuaternion(camera);
                 camera_mode = MAIN_WAITING;
             }
         }
         if (camera_lerp_t != 0 && camera_lerp_t != 1)
         {
-            camera = lerpCamera(&saved_level_camera, &alt_camera, camera_lerp_t);
-    		setCameraRotation();
+            camera = lerpCamera(saved_level_camera, alt_camera, camera_lerp_t, (float)camera_target_plane);
         }
 
         Camera camera_with_ow_offset = camera;
