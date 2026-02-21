@@ -3275,21 +3275,36 @@ void updatePackDetached()
 // EDITOR
 
 /*
-    WASD, SPACE, SHIFT: camera movement
+	- T press: draw camera boundary lines
+    - Y press: get rid of debug text in top left
 
-    C: save camera
-    I: save world state
+	- F, G, H are used as mouse buttons
 
-    0: normal mode
+	0: normal mode:
+    - WASD movement TODO(spike): add arrow keys
+    - Z undo
+    - R restart
+    - Q interact TODO(spike): think about removing this
 
-    1: place/break mode
-    LMB: break
-    RMB: place
-    MMB: select block
-    R: rotate block
+	1: place/break mode
+    - WASD, SPACE, SHIFT: camera movement
+    - E: toggle rendering of models TODO(spike): remove this when have 3d models for everything
+    - LMB: break block
+    - RMB: place selected on normal totarget block
+    - MMB: select targeted block as picked block
+    - L: increment picked block by 1
+    - R: rotate target block
+    - I: save world state
+    - C: save camera
+    - V: save alt camera
+    - X: remove alt camera
+    - J: change wide camera TODO(spike): is this working?
+    - B: fov up
+    - N: fov down
+    - M: clear solved levels
 
     2: select mode
-    LMB: selet block instance
+    - LMB / RMB to select block, to set win blocks / locked blocks / reset blocks
 */
 
 void editorMode(TickInput *tick_input)
@@ -3327,13 +3342,6 @@ void editorMode(TickInput *tick_input)
     }
 
     if (time_until_input != 0) return; 
-
-    if (time_until_input == 0 && tick_input->j_press)
-    {
-        if (OVERWORLD_CAMERA_FOV_FAR == 35.0f) OVERWORLD_CAMERA_FOV_FAR = 60.0f;
-        else OVERWORLD_CAMERA_FOV_FAR = 35.0f;
-        time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
-    }
 
     if (editor_state.editor_mode == PLACE_BREAK)
     {
@@ -3425,12 +3433,6 @@ void editorMode(TickInput *tick_input)
         {
             editor_state.picked_tile++;
             if (editor_state.picked_tile == LADDER + 1) editor_state.picked_tile = VOID;
-            time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
-        }
-        if (tick_input->j_press)
-        {
-            if (editor_state.do_wide_camera) editor_state.do_wide_camera = false;
-            else editor_state.do_wide_camera = true;
             time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
         if (tick_input->m_press)
@@ -4692,7 +4694,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // alternative camera: switch modes on tab
-        if (tick_input.tab_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+        if (tick_input.tab_press && time_until_input == 0 && editor_state.editor_mode == NO_MODE) 
         {
             if (alt_camera.fov != 0)
             {
@@ -4730,6 +4732,32 @@ void gameFrame(double delta_time, TickInput tick_input)
             camera = lerpCamera(saved_level_camera, alt_camera, camera_lerp_t, (float)camera_target_plane);
         }
 
+        // handle wide camera
+        if (tick_input.j_press && time_until_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+        {
+            editor_state.do_wide_camera = !editor_state.do_wide_camera;
+            time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
+            if (editor_state.do_wide_camera)
+            {
+                if (editor_state.editor_mode == NO_MODE)
+                {
+                    editor_state.do_wide_camera = false;
+                    if (camera_mode == MAIN_WAITING) camera.fov = saved_level_camera.fov;
+                    else if (camera_mode == ALT_WAITING) camera.fov = alt_camera.fov;
+                    else camera.fov = 15.0f;
+                }
+                else
+                {
+                    camera.fov = 60.0f;
+                }
+            }
+            else
+            {
+                camera.fov = saved_level_camera.fov;
+            }
+            time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
+        }
+
         Camera camera_with_ow_offset = camera;
         
 		// adjust overworld camera based on position
@@ -4745,9 +4773,9 @@ void gameFrame(double delta_time, TickInput tick_input)
             char delta_text[256];
             snprintf(delta_text, sizeof(delta_text), "player delta from origin: %.1d, %.1d --- %.1d, %.1d", player_delta.x, player_delta.z, screen_offset_x, screen_offset_z);
             if (do_debug_text) drawDebugText(delta_text);
-
         }
 
+        // record undo if this is pushed to later, most likely due to pack turn
         if (pending_undo_record)
         {
             pending_undo_record = false;
