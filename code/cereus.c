@@ -146,6 +146,7 @@ LaserBuffer laser_buffer[64] = {0};
 const Vec2 DEBUG_TEXT_COORDS_START = { 50.0f, 1080.0f - 80.0f };
 const float DEBUG_TEXT_Y_DIFF = 40.0f;
 Vec2 debug_text_coords = {0}; 
+bool do_debug_text = true;
 
 // stuff from worldstate
 bool in_overworld = false;
@@ -3603,6 +3604,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 				if (undos_performed <= 2) time_until_input = 8;
 				else if (undos_performed <= 4) time_until_input = 7;
 				else if (undos_performed <= 8) time_until_input = 6;
+				else if (undos_performed <= 12) time_until_input = 5;
 				else time_until_input = 5;
             }
             if (time_until_input == 0 && tick_input.r_press)
@@ -4582,6 +4584,13 @@ void gameFrame(double delta_time, TickInput tick_input)
         // final redo of laser buffer, after all logic is complete, for drawing
 		updateLaserBuffer();
 
+        // get rid of debug text on press
+		if (time_until_input == 0 && tick_input.y_press && !(editor_state.editor_mode == SELECT_WRITE)) 
+        {
+            do_debug_text = !do_debug_text;
+            time_until_input = META_TIME_UNTIL_ALLOW_INPUT;
+        }
+
         // CAMERA SHENANIGANS
         char level_path[64];
         buildLevelPathFromName(world_state.level_name, &level_path, true);
@@ -4735,7 +4744,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             // camera delta info
             char delta_text[256];
             snprintf(delta_text, sizeof(delta_text), "player delta from origin: %.1d, %.1d --- %.1d, %.1d", player_delta.x, player_delta.z, screen_offset_x, screen_offset_z);
-            drawDebugText(delta_text);
+            if (do_debug_text) drawDebugText(delta_text);
 
         }
 
@@ -4774,16 +4783,14 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
 
             // show start points
-            /*
             FOR(lb_index, 64)
             {
                 LaserBuffer lb = laser_buffer[lb_index];
                 if (vec3IsEqual(lb.start_coords, VEC3_0)) continue;
                 char lb_text[256] = {0};
                 snprintf(lb_text, sizeof(lb_text), "lb start coords: %.2f, %.2f, %.2f, lb end coords: %.2f, %.2f, %.2f", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z);
-                drawDebugText(lb_text);
+                if (do_debug_text) drawDebugText(lb_text);
             }
-            */
 
             // clear laser buffer 
             memset(laser_buffer, 0, sizeof(laser_buffer));
@@ -4903,61 +4910,64 @@ void gameFrame(double delta_time, TickInput tick_input)
 
 		// DRAW 2D
         
-        // display level name
-		drawDebugText(next_world_state.level_name);
+        if (do_debug_text)
+        {
+            // display level name
+            drawDebugText(next_world_state.level_name);
 
-        /*
-        char player_text[256] = {0};
-        snprintf(player_text, sizeof(player_text), "player info: coords: %d, %d, %d", player->coords.x, player->coords.y, player->coords.z);
-        drawDebugText(player_text);
-        */
+            /*
+            char player_text[256] = {0};
+            snprintf(player_text, sizeof(player_text), "player info: coords: %d, %d, %d", player->coords.x, player->coords.y, player->coords.z);
+            drawDebugText(player_text);
+            */
 
-        /*
-		char pack_text[256] = {0};
-        snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, detached: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack_detached);
-        DrawDebugText(pack_text);
-        */
+            /*
+            char pack_text[256] = {0};
+            snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, detached: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack_detached);
+            DrawDebugText(pack_text);
+            */
 
-        // camera pos info
-        char camera_text[256] = {0};
-        snprintf(camera_text, sizeof(camera_text), "current camera info:    %.1f, %.1f, %.1f, fov: %.1f", camera.coords.x, camera.coords.y, camera.coords.z, camera.fov);
-        drawDebugText(camera_text);
+            // camera pos info
+            char camera_text[256] = {0};
+            snprintf(camera_text, sizeof(camera_text), "current camera info:    %.1f, %.1f, %.1f, fov: %.1f", camera.coords.x, camera.coords.y, camera.coords.z, camera.fov);
+            drawDebugText(camera_text);
 
-        // saved camera info
-        char saved_camera_text[256] = {0};
-        snprintf(saved_camera_text, sizeof(saved_camera_text), "main saved camera info: %.1f, %.1f, %.1f, fov: %.1f", saved_level_camera.coords.x, saved_level_camera.coords.y, saved_level_camera.coords.z, saved_level_camera.fov);
-        drawDebugText(saved_camera_text);
+            // saved camera info
+            char saved_camera_text[256] = {0};
+            snprintf(saved_camera_text, sizeof(saved_camera_text), "main saved camera info: %.1f, %.1f, %.1f, fov: %.1f", saved_level_camera.coords.x, saved_level_camera.coords.y, saved_level_camera.coords.z, saved_level_camera.fov);
+            drawDebugText(saved_camera_text);
 
-        // saved alt camera info
-        char alt_camera_text[256] = {0};
-        snprintf(alt_camera_text, sizeof(alt_camera_text), "alt saved camera info:  %.1f, %.1f, %.1f, fov: %.1f", alt_camera.coords.x, alt_camera.coords.y, alt_camera.coords.z, alt_camera.fov);
-        drawDebugText(alt_camera_text);
+            // saved alt camera info
+            char alt_camera_text[256] = {0};
+            snprintf(alt_camera_text, sizeof(alt_camera_text), "alt saved camera info:  %.1f, %.1f, %.1f, fov: %.1f", alt_camera.coords.x, alt_camera.coords.y, alt_camera.coords.z, alt_camera.fov);
+            drawDebugText(alt_camera_text);
 
-        // camera_t info
-        char t_text[256] = {0};
-        snprintf(t_text, sizeof(t_text), "t value: %.2f", camera_lerp_t);
-        drawDebugText(t_text);
+            // camera_t info
+            char t_text[256] = {0};
+            snprintf(t_text, sizeof(t_text), "t value: %.2f", camera_lerp_t);
+            drawDebugText(t_text);
 
-        /*
-        // show undos performed
-        char undo_text[256] = {0};
-        snprintf(undo_text, sizeof(undo_text), "undos performed: %d", undos_performed);
-        drawDebugText(undo_text);
-        */
+            /*
+            // show undos performed
+            char undo_text[256] = {0};
+            snprintf(undo_text, sizeof(undo_text), "undos performed: %d", undos_performed);
+            drawDebugText(undo_text);
+            */
 
-        /*
-        // show current selected id + coords
-        char edit_text[256] = {0};
-        snprintf(edit_text, sizeof(edit_text), "selected id: %d; coords: %d, %d, %d", editor_state.selected_id, editor_state.selected_coords.x, editor_state.selected_coords.y, editor_state.selected_coords.z);
-        drawDebugText(edit_text);
-        */
+            /*
+            // show current selected id + coords
+            char edit_text[256] = {0};
+            snprintf(edit_text, sizeof(edit_text), "selected id: %d; coords: %d, %d, %d", editor_state.selected_id, editor_state.selected_coords.x, editor_state.selected_coords.y, editor_state.selected_coords.z);
+            drawDebugText(edit_text);
+            */
 
-        // show undo deltas in buffer
-        /*
-        char undo_buffer_text[256] = {0};
-        snprintf(undo_buffer_text, sizeof(undo_buffer_text), "undo deltas in buffer: %d", undo_buffer.delta_count);
-        drawDebugText(undo_buffer_text);
-        */
+            // show undo deltas in buffer
+            /*
+            char undo_buffer_text[256] = {0};
+            snprintf(undo_buffer_text, sizeof(undo_buffer_text), "undo deltas in buffer: %d", undo_buffer.delta_count);
+            drawDebugText(undo_buffer_text);
+            */
+        }
 
         /*
         // temp draw outline around trailing hitboxes
