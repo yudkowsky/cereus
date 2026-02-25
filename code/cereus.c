@@ -109,6 +109,7 @@ const float CAMERA_FOV = 15.0f;
 Camera camera = {0};
 Camera saved_level_camera = {0};
 Camera alt_camera = {0};
+Camera camera_with_ow_offset = {0};
 
 Int3 camera_screen_offset = {0};
 const Int3 OVERWORLD_CAMERA_CENTER_START = { 58, 2, 197 };
@@ -3349,7 +3350,7 @@ void editorMode(TickInput *tick_input)
         if (tick_input->left_mouse_press || tick_input->right_mouse_press || tick_input->middle_mouse_press || tick_input->r_press || tick_input->f_press || tick_input->h_press || tick_input->g_press)
         {
             Vec3 neg_z_basis = {0, 0, -1};
-            RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), MAX_RAYCAST_SEEK_LENGTH);
+            RaycastHit raycast_output = raycastHitCube(camera_with_ow_offset.coords, vec3RotateByQuaternion(neg_z_basis, camera_with_ow_offset.rotation), MAX_RAYCAST_SEEK_LENGTH);
 
             if ((tick_input->left_mouse_press || tick_input->f_press) && raycast_output.hit) 
             {
@@ -3448,7 +3449,7 @@ void editorMode(TickInput *tick_input)
         if (tick_input->left_mouse_press)
         {
             Vec3 neg_z_basis = {0, 0, -1};
-            RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), MAX_RAYCAST_SEEK_LENGTH);
+            RaycastHit raycast_output = raycastHitCube(camera_with_ow_offset.coords, vec3RotateByQuaternion(neg_z_basis, camera_with_ow_offset.rotation), MAX_RAYCAST_SEEK_LENGTH);
 
             if (isEntity(getTileType(raycast_output.hit_coords)))
             {
@@ -3464,7 +3465,7 @@ void editorMode(TickInput *tick_input)
         else if (tick_input->right_mouse_press)
         {
             Vec3 neg_z_basis = {0, 0, -1};
-            RaycastHit raycast_output = raycastHitCube(camera.coords, vec3RotateByQuaternion(neg_z_basis, camera.rotation), MAX_RAYCAST_SEEK_LENGTH);
+            RaycastHit raycast_output = raycastHitCube(camera_with_ow_offset.coords, vec3RotateByQuaternion(neg_z_basis, camera_with_ow_offset.rotation), MAX_RAYCAST_SEEK_LENGTH);
             Entity* rb = 0;
             if (editor_state.selected_id > 0) rb = getEntityFromId(editor_state.selected_id);
             if (rb != 0 && getTileType(rb->coords) == RESET_BLOCK)
@@ -3814,7 +3815,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 else 
                                 {
                                     doFailedWalkAnimations(player->direction);
-                                    time_until_meta_input = FAILED_ANIMATION_TIME;
+                                    time_until_game_input = FAILED_ANIMATION_TIME;
                                     updateLaserBuffer();
                                 }
                             }
@@ -4762,14 +4763,21 @@ void gameFrame(double delta_time, TickInput tick_input)
             time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
 
-        Camera camera_with_ow_offset = camera;
+        camera_with_ow_offset = camera;
         
 		// adjust overworld camera based on position
 		if (in_overworld && !player->removed)
         {
             Int3 player_delta = int3Subtract(player->coords, OVERWORLD_CAMERA_CENTER_START);
-            int32 screen_offset_x = player_delta.x / (OVERWORLD_SCREEN_SIZE_X - (OVERWORLD_SCREEN_SIZE_X / 2));
-            int32 screen_offset_z = player_delta.z / (OVERWORLD_SCREEN_SIZE_Z - (OVERWORLD_SCREEN_SIZE_Z / 2));
+            //int32 screen_offset_x = player_delta.x / (OVERWORLD_SCREEN_SIZE_X - (OVERWORLD_SCREEN_SIZE_X / 2));
+            //int32 screen_offset_z = player_delta.z / (OVERWORLD_SCREEN_SIZE_Z - (OVERWORLD_SCREEN_SIZE_Z / 2));
+            int32 screen_offset_x = 0;
+        	int32 screen_offset_z = 0;
+			if (player_delta.x > 0) screen_offset_x = (player_delta.x + (OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
+			else					screen_offset_x = (player_delta.x - (OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X; 
+			if (player_delta.z > 0) screen_offset_z = (player_delta.z + (OVERWORLD_SCREEN_SIZE_Z / 2)) / OVERWORLD_SCREEN_SIZE_Z;
+			else 					screen_offset_z = (player_delta.z - (OVERWORLD_SCREEN_SIZE_Z / 2)) / OVERWORLD_SCREEN_SIZE_Z;
+
             camera_with_ow_offset.coords.x = camera.coords.x + (screen_offset_x * OVERWORLD_SCREEN_SIZE_X);
             camera_with_ow_offset.coords.z = camera.coords.z + (screen_offset_z * OVERWORLD_SCREEN_SIZE_Z);
 
