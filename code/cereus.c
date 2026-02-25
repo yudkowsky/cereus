@@ -55,7 +55,7 @@ const int32 MAX_RESET_COUNT = 16;
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
 const Int3 AXIS_Z = { 0, 0, 1 };
-const Vec3 VEC3_0= { 0, 0, 0 };
+const Vec3 VEC3_0 = { 0, 0, 0 };
 const Vec4 IDENTITY_QUATERNION  = { 0, 0, 0, 1 };
 
 const int32 PLAYER_ID = 1;
@@ -1579,6 +1579,19 @@ Int3 getNextCoords(Int3 coords, Direction direction)
     }
 }
 
+// assumes only one difference (will prioritise unpredictably)
+Direction getDirectionFromCoordDiff(Int3 to_coords, Int3 from_coords)
+{
+    Int3 diff = int3Subtract(from_coords, to_coords);
+    if 		(diff.x ==  1) return EAST;
+    else if (diff.x == -1) return WEST;
+    else if (diff.y ==  1) return UP;
+    else if (diff.y == -1) return DOWN;
+    else if (diff.z ==  1) return SOUTH;
+    else if (diff.z == -1) return NORTH;
+    return NO_DIRECTION;
+}
+
 int32 getPushableStackSize(Int3 first_entity_coords)
 {
     Int3 current_stack_coords = first_entity_coords;
@@ -1711,7 +1724,7 @@ void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* positi
     }
 }
 
-void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direction pack_direction, bool clockwise, Vec3* position_to_change, Vec4* rotation_to_change, int32 entity_id)
+void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direction pack_direction, bool clockwise, Vec3* position_to_change, Vec4* rotation_to_change, int32 entity_id, int32 animation_frames)
 {
     int32 next_free_array[2] = {0};
     int32* next_free_output = findNextFreeInAnimations(next_free_array, entity_id);
@@ -1719,13 +1732,13 @@ void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direc
     int32 queue_time = next_free_output[1];
 
     animations[animation_index].id = entity_id;
-    animations[animation_index].frames_left = TURN_ANIMATION_TIME + queue_time; 
+    animations[animation_index].frames_left = animation_frames + queue_time; 
     animations[animation_index].rotation_to_change = rotation_to_change;
     animations[animation_index].position_to_change = position_to_change;
 
     Vec3 pivot_point = player_position;
     Vec3 pivot_to_pack_start = vec3Subtract(pack_position, player_position);
-    float d_theta_per_frame = (TAU*0.25f)/(float)TURN_ANIMATION_TIME;
+    float d_theta_per_frame = (TAU*0.25f)/(float)animation_frames;
     float angle_sign = clockwise ? 1.0f : -1.0f;
     Direction previous_pack_direction = NO_DIRECTION;
 
@@ -1740,21 +1753,21 @@ void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direc
         if (previous_pack_direction == UP) previous_pack_direction = NORTH;
     }
 
-    for (int frame_index = 0; frame_index < TURN_ANIMATION_TIME; frame_index++)
+    for (int frame_index = 0; frame_index < animation_frames; frame_index++)
     {
         // rotation
         Vec4 quat_prev = directionToQuaternion(oppositeDirection(previous_pack_direction), true);
         Vec4 quat_next = directionToQuaternion(oppositeDirection(pack_direction), true);
         if (quaternionDot(quat_prev, quat_next) < 0.0f) quat_next = quaternionNegate(quat_next); // resolve quat sign issue 
-        float param = (float)(frame_index + 1) / (float)(TURN_ANIMATION_TIME);
-        animations[animation_index].rotation[TURN_ANIMATION_TIME-(1+frame_index)] 
+        float param = (float)(frame_index + 1) / (float)(animation_frames);
+        animations[animation_index].rotation[animation_frames-(1+frame_index)] 
             = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(quat_prev, 1.0f - param), quaternionScalarMultiply(quat_next, param)));
 
         // translation
         float theta = angle_sign * (frame_index+1) * d_theta_per_frame;
         Vec4 roll = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), theta);
         Vec3 relative_rotation = vec3RotateByQuaternion(pivot_to_pack_start, roll);
-        animations[animation_index].position[TURN_ANIMATION_TIME-(1+frame_index)] = vec3Add(pivot_point, relative_rotation);
+        animations[animation_index].position[animation_frames-(1+frame_index)] = vec3Add(pivot_point, relative_rotation);
     }
 }
 
@@ -3015,7 +3028,7 @@ void recordLevelChangeForUndo(char* current_level_name, bool level_was_just_solv
     //writeUndoBufferToFile();
 }
 
-bool performUndo()
+bool performUndo(int32 undo_animation_time)
 {
     if (undo_buffer.header_count == 0) return false;
 
@@ -3083,11 +3096,42 @@ bool performUndo()
                 setTileType(type, delta->old_coords);
                 setTileDirection(delta->old_direction, delta->old_coords);
 
+
                 if (!header->level_changed && !header->was_teleport && !header->was_reset && (was_at_different_coords || was_at_different_direction))
                 {
-                    createInterpolationAnimation(old_position, e->position_norm, &e->position_norm,
-                            					 old_rotation, e->rotation_quat, &e->rotation_quat,
-                                                 e->id, 5);
+                    int32 dx = (int32)roundf(e->position_norm.x - old_position.x);
+                    int32 dy = (int32)roundf(e->position_norm.y - old_position.y);
+                    int32 dz = (int32)roundf(e->position_norm.z - old_position.z);
+
+                    if (e->id == PACK_ID && dy == 0 && dx != 0 && dz != 0)
+                    {
+                        Int3 old_player_coords = {0};
+                        uint32 scan_pos = header->delta_start_pos;
+                        FOR(scan_index, header->entity_count)
+                        {
+                            UndoEntityDelta* d = &undo_buffer.deltas[scan_pos];
+                            if (d->id == PLAYER_ID)
+                            {
+                                old_player_coords = d->old_coords;
+                                break;
+                            }
+                            scan_pos = (scan_pos + 1) % MAX_UNDO_DELTAS;
+                        }
+
+                        Direction player_to_old_pack_dir = getDirectionFromCoordDiff(delta->old_coords, old_player_coords);
+                        Direction player_to_new_pack_dir = getDirectionFromCoordDiff(normCoordsToInt(old_position), old_player_coords);
+
+                        int32 clockwise_calculation = player_to_new_pack_dir - player_to_old_pack_dir;
+                        bool clockwise = (clockwise_calculation == -1 || clockwise_calculation == 3);
+
+                        createPackRotationAnimation(intCoordsToNorm(old_player_coords), old_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, undo_animation_time);
+                    }
+                    else
+                    {
+                        createInterpolationAnimation(old_position, e->position_norm, &e->position_norm,
+                                                     old_rotation, e->rotation_quat, &e->rotation_quat,
+                                                     e->id, undo_animation_time);
+                    }
                 }
             }
         }
@@ -3606,17 +3650,20 @@ void gameFrame(double delta_time, TickInput tick_input)
             // assuming game undo and restart (still no undo in editor)
             if (time_until_game_input == 0 && tick_input.z_press)
             {
-                if (performUndo())
+                int32 undo_animation_time = 0;
+                if (undos_performed == 0) undo_animation_time = 10;
+                else if (undos_performed <= 2) undo_animation_time = 8;
+                else if (undos_performed <= 4) undo_animation_time = 7;
+                else if (undos_performed <= 8) undo_animation_time = 6;
+                else if (undos_performed <= 12) undo_animation_time = 5;
+                else undo_animation_time = 5;
+                int32 real_undo_animation_time = undo_animation_time > 8 ? 5 : undo_animation_time; // clamp at 7 frames to perform undo, and allow stand still before undo next; want slower at start, but too slow undo looks awkward.
+                if (performUndo(real_undo_animation_time))
                 {
                     updatePackDetached();
                     undos_performed++;
                 }
-                // speed up undo if held down for a while
-				if (undos_performed <= 2) time_until_game_input = 8;
-				else if (undos_performed <= 4) time_until_game_input = 7;
-				else if (undos_performed <= 8) time_until_game_input = 6;
-				else if (undos_performed <= 12) time_until_game_input = 5;
-				else time_until_game_input = 5;
+                time_until_game_input = undo_animation_time;
             }
             if (time_until_game_input == 0 && tick_input.r_press)
             {
@@ -4053,7 +4100,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                         createPackRotationAnimation(intCoordsToNorm(player->coords), 
                                                                     intCoordsToNorm(pack->coords), 
                                                                     oppositeDirection(input_direction), clockwise, 
-                                                                    &pack->position_norm, &pack->rotation_quat, PACK_ID);
+                                                                    &pack->position_norm, &pack->rotation_quat, PACK_ID, TURN_ANIMATION_TIME);
 
                                         if (push_diagonal)   do_diagonal_push_on_turn = true;
                                         if (push_orthogonal) do_orthogonal_push_on_turn = true;
