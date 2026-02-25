@@ -492,6 +492,7 @@ typedef struct UndoActionHeader
     uint32 delta_start_pos;
     bool level_changed;
     bool was_teleport;
+    bool was_reset;
 }
 UndoActionHeader;
 

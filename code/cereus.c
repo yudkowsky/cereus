@@ -137,6 +137,7 @@ UndoBuffer undo_buffer = {0};
 bool restart_last_turn = false;
 bool pending_undo_record = false;
 bool pending_undo_was_teleport = false;
+bool pending_undo_was_reset = false;
 int32 undos_performed = 0;
 
 Animation animations[32];
@@ -2929,7 +2930,9 @@ void recordActionForUndo(WorldState* old_state)
     undo_buffer.headers[header_index].delta_start_pos = delta_start;
     undo_buffer.headers[header_index].level_changed = false;
     undo_buffer.headers[header_index].was_teleport = pending_undo_was_teleport;
+    undo_buffer.headers[header_index].was_reset = pending_undo_was_reset;
     pending_undo_was_teleport = false;
+    pending_undo_was_reset = false;
     undo_buffer.level_change_indices[header_index] = 0xFF;
     undo_buffer.header_write_pos = (header_index + 1) % MAX_UNDO_ACTIONS;
     undo_buffer.header_count++;
@@ -3080,7 +3083,7 @@ bool performUndo()
                 setTileType(type, delta->old_coords);
                 setTileDirection(delta->old_direction, delta->old_coords);
 
-                if (!header->level_changed && !header->was_teleport && (was_at_different_coords || was_at_different_direction))
+                if (!header->level_changed && !header->was_teleport && !header->was_reset && (was_at_different_coords || was_at_different_direction))
                 {
                     createInterpolationAnimation(old_position, e->position_norm, &e->position_norm,
                             					 old_rotation, e->rotation_quat, &e->rotation_quat,
@@ -3097,6 +3100,8 @@ bool performUndo()
     undo_buffer.level_change_indices[header_index] = 0xFF;
     undo_buffer.header_write_pos = header_index;
     undo_buffer.header_count--;
+
+    restart_last_turn = false;
 
 	// sync worldstate
     world_state = next_world_state;
@@ -3616,7 +3621,11 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (time_until_game_input == 0 && tick_input.r_press)
             {
                 // restart
-                if (!restart_last_turn) recordActionForUndo(&world_state);
+                if (!restart_last_turn) 
+                {
+                    pending_undo_was_reset = true; // disables interpolation
+                    recordActionForUndo(&world_state);
+                }
                 memset(animations, 0, sizeof(animations));
                 gameInitializeState(next_world_state.level_name);
                 time_until_game_input = META_TIME_UNTIL_ALLOW_INPUT;
@@ -3660,9 +3669,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                         {
                             if (!int3IsEqual(player_ghost_coords, player->coords))
                             {
-                                pending_undo_record = true;
-                                memcpy(&pending_undo_snapshot, &world_state, sizeof(WorldState));
                                 pending_undo_was_teleport = true;
+                                recordActionForUndo(&world_state);
 
                                 setTileType(NONE, player->coords);
                                 setTileDirection(NORTH, player->coords);
@@ -4519,6 +4527,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 Entity* reset_e = getEntityFromId(ri.id);
                 if (reset_e != 0 && !reset_e->removed)
                 {
+                    //zeroAnimations(reset_e->id);
                     setTileType(NONE, reset_e->coords);
                     setTileDirection(NORTH, reset_e->coords);
                 }
@@ -4543,9 +4552,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                     setTileDirection(ri.start_direction, ri.start_coords);
                 }
             }
-
-            pending_undo_record = true;
-            pending_undo_snapshot = world_state;
+            pending_undo_was_reset = true; // disables interpolation
+            recordActionForUndo(&world_state);
             time_until_game_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
 
@@ -5002,11 +5010,9 @@ void gameFrame(double delta_time, TickInput tick_input)
             */
 
             // show undo deltas in buffer
-            /*
             char undo_buffer_text[256] = {0};
             snprintf(undo_buffer_text, sizeof(undo_buffer_text), "undo deltas in buffer: %d", undo_buffer.delta_count);
             drawDebugText(undo_buffer_text);
-            */
         }
 
         /*
@@ -5118,12 +5124,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             saveLevelRewrite(relative_level_path, true);
             writeSolvedLevelsToFile();
         }
-
-        /*
-        Vec3 test_coords = { 5.0f, 5.0f, 5.0f };
-        Vec3 test_scale = { 5.0f, 5.0f, 5.0f };
-        drawAsset(MODEL_3D_MIRROR, MODEL_3D, test_coords, test_scale, IDENTITY_QUATERNION, VEC3_0);
-        */
 
 		if (time_until_game_input > 0) time_until_game_input--;
 		if (time_until_meta_input > 0) time_until_meta_input--;
