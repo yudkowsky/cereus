@@ -3121,11 +3121,21 @@ bool performUndo(int32 undo_animation_time)
                     {
                         if (dy != 0 && was_at_different_direction)
                         {
-                            Vec3 mid_position = { e->position_norm.x, old_position.y, e->position_norm.z };
+                            // player turn and fall
+                            Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
                             int32 first_animation_time = undo_animation_time / 2;
                             int32 second_animation_time = undo_animation_time - first_animation_time;
                             createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, first_animation_time);
                             createInterpolationAnimation(VEC3_0, VEC3_0, 0, old_rotation, e->rotation_quat, &e->rotation_quat, PLAYER_ID, second_animation_time);
+                        }
+                        else if (dy != 0 && (dx != 0 || dz != 0))
+                        {
+                            // player move and fall
+                            Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
+                            int32 first_animation_time = undo_animation_time / 2;
+                            int32 second_animation_time = undo_animation_time - first_animation_time;
+                            createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, first_animation_time);
+                            createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, second_animation_time);
                         }
                         else
                         {
@@ -3165,10 +3175,28 @@ bool performUndo(int32 undo_animation_time)
                             createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, first_animation_time);
                             createPackRotationAnimation(intCoordsToNorm(old_player_coords), mid_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, second_animation_time);
                         }
+                        else if (dy != 0 && (dx != 0 || dz != 0))
+                        {
+                            // pack move and fall
+                            Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
+                            int32 first_animation_time = undo_animation_time / 2;
+                            int32 second_animation_time = undo_animation_time - first_animation_time;
+                            createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, first_animation_time);
+                            createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, second_animation_time);
+                        }
                         else // pack, but just moving normally, or being pushed / falling normally, so interpolate normally
                         {
                             createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, PACK_ID, undo_animation_time);
                         }
+                    }
+                    else if (dy != 0 && (dx != 0 || dz != 0))
+                    {
+                        // object move and fall
+                        Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
+                        int32 first_animation_time = undo_animation_time / 2;
+                        int32 second_animation_time = undo_animation_time - first_animation_time;
+                        createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, first_animation_time);
+                        createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, second_animation_time);
                     }
                     else
                     {
@@ -3749,7 +3777,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (calculateGhosts())
                     {
                         // seek towards start of laser to get endpoint, and then go to the endpoint
-                        // check if endpoint is valid before teleport (i.e, if pack can go there - if over air, teleport anyway, probably?)
+                        // check if endpoint is valid before teleport (i.e, if pack can go there. if over air, teleport anyway)
 
                         bool allow_tp = false;
                         TileType player_ghost_tile = getTileType(player_ghost_coords);
