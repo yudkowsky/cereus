@@ -1931,6 +1931,17 @@ void changeMoving(Entity* e)
     else e->moving_direction = NO_DIRECTION;
 }
 
+void resetPlayerAndPackMotion()
+{
+    next_world_state.player.in_motion = 0;
+    next_world_state.player.moving_direction = NO_DIRECTION;
+    if (!pack_detached)
+    {
+        next_world_state.pack.in_motion = 0;
+        next_world_state.pack.moving_direction = NO_DIRECTION;
+    }
+}
+
 void resetFirstFall(Entity* e)
 {
     if ((!e->in_motion && getTileType(getNextCoords(e->coords, DOWN)) != NONE) || next_world_state.player.hit_by_blue) e->first_fall_already_done = false;
@@ -3096,14 +3107,17 @@ bool performUndo(int32 undo_animation_time)
                 setTileType(type, delta->old_coords);
                 setTileDirection(delta->old_direction, delta->old_coords);
 
-
                 if (!header->level_changed && !header->was_teleport && !header->was_reset && (was_at_different_coords || was_at_different_direction))
                 {
                     int32 dx = (int32)roundf(e->position_norm.x - old_position.x);
                     int32 dy = (int32)roundf(e->position_norm.y - old_position.y);
                     int32 dz = (int32)roundf(e->position_norm.z - old_position.z);
 
-                    if (e->id == PACK_ID && dy == 0 && dx != 0 && dz != 0)
+                    if (e->id == PLAYER_ID)
+                    {
+
+                    }
+                    else if (e->id == PACK_ID)
                     {
                         Int3 old_player_coords = {0};
                         uint32 scan_pos = header->delta_start_pos;
@@ -3124,7 +3138,22 @@ bool performUndo(int32 undo_animation_time)
                         int32 clockwise_calculation = player_to_new_pack_dir - player_to_old_pack_dir;
                         bool clockwise = (clockwise_calculation == -1 || clockwise_calculation == 3);
 
-                        createPackRotationAnimation(intCoordsToNorm(old_player_coords), old_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, undo_animation_time);
+                        if (dy == 0 && dx != 0 && dz != 0) // if dx and dz != 0 this must be a turn
+                        {
+                            createPackRotationAnimation(intCoordsToNorm(old_player_coords), old_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, undo_animation_time);
+                        }
+                        else if (dy != 0 && dx != 0 && dz != 0) // if dx and dz != 0 this must be a turn
+                        {
+                            Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
+                            int32 first_animation_time = undo_animation_time / 2;
+                            int32 second_animation_time = undo_animation_time - first_animation_time;
+                            createInterpolationAnimation(old_position, mid_position, &e->position_norm, old_rotation, old_rotation, &e->rotation_quat, e->id, first_animation_time);
+                            createPackRotationAnimation(intCoordsToNorm(old_player_coords), mid_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, second_animation_time);
+                        }
+                        else // pack, but just moving normally, or being pushed / falling normally, so interpolate normally
+                        {
+                            createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, e->id, undo_animation_time);
+                        }
                     }
                     else
                     {
@@ -3869,6 +3898,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 }
                                 else 
                                 {
+                                    resetPlayerAndPackMotion();
                                     doFailedWalkAnimations(player->direction);
                                     time_until_game_input = FAILED_ANIMATION_TIME;
                                     updateLaserBuffer();
@@ -3942,6 +3972,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         }
 						else if (do_failed_animations) 
                         {
+                            resetPlayerAndPackMotion();
                             doFailedWalkAnimations(player->direction);
                             time_until_game_input = FAILED_ANIMATION_TIME;
                         }
@@ -4193,12 +4224,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                         }
                         else
                         {
+                            resetPlayerAndPackMotion();
                             doFailedWalkAnimations(oppositeDirection(player->direction));
                             time_until_game_input = FAILED_ANIMATION_TIME;
                         }
                     }
 					else
                     {
+                        resetPlayerAndPackMotion();
                         doFailedWalkAnimations(oppositeDirection(player->direction));
                         time_until_game_input = FAILED_ANIMATION_TIME;
                     }
@@ -4416,11 +4449,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             else
             {
                 // can't move or climb more
+                resetPlayerAndPackMotion();
                 doFailedWalkAnimations(player->direction);
-                player->in_motion = FAILED_ANIMATION_TIME;
-                player->moving_direction = NO_DIRECTION;
-                pack->in_motion = FAILED_ANIMATION_TIME;
-                pack->moving_direction = NO_DIRECTION;
                 time_until_game_input = FAILED_ANIMATION_TIME;
             }
         }
@@ -5010,18 +5040,15 @@ void gameFrame(double delta_time, TickInput tick_input)
             // display level name
             drawDebugText(next_world_state.level_name);
 
-            /*
             char player_text[256] = {0};
-            snprintf(player_text, sizeof(player_text), "player info: coords: %d, %d, %d", player->coords.x, player->coords.y, player->coords.z);
+            snprintf(player_text, sizeof(player_text), "player info: coords: %d, %d, %d, moving time: %d, moving direction: %d", player->coords.x, player->coords.y, player->coords.z, player->in_motion, player->moving_direction);
             drawDebugText(player_text);
-            */
+
+            char pack_text[256] = {0};
+            snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, moving_time: %d, moving_direciton: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack->in_motion, pack->moving_direction);
+            drawDebugText(pack_text);
 
             /*
-            char pack_text[256] = {0};
-            snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, detached: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack_detached);
-            DrawDebugText(pack_text);
-            */
-
             // camera pos info
             char camera_text[256] = {0};
             snprintf(camera_text, sizeof(camera_text), "current camera info:    %.1f, %.1f, %.1f, fov: %.1f", camera.coords.x, camera.coords.y, camera.coords.z, camera.fov);
@@ -5041,6 +5068,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             char t_text[256] = {0};
             snprintf(t_text, sizeof(t_text), "t value: %.2f", camera_lerp_t);
             drawDebugText(t_text);
+            */
 
             /*
             // show undos performed
@@ -5056,10 +5084,12 @@ void gameFrame(double delta_time, TickInput tick_input)
             drawDebugText(edit_text);
             */
 
+			/*
             // show undo deltas in buffer
             char undo_buffer_text[256] = {0};
             snprintf(undo_buffer_text, sizeof(undo_buffer_text), "undo deltas in buffer: %d", undo_buffer.delta_count);
             drawDebugText(undo_buffer_text);
+            */
         }
 
         /*
