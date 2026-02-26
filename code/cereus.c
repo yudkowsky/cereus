@@ -18,6 +18,7 @@ const float TAU = 6.2831853071f;
 
 const Vec3 DEFAULT_SCALE = { 1.0f,  1.0f,  1.0f  };
 const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
+
 const float LASER_WIDTH = 0.25;
 const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
 
@@ -33,7 +34,6 @@ const int32 STANDARD_IN_MOTION_TIME = 7;
 const int32 STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH = 4;
 const int32 PUSH_FROM_TURN_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH = 2;
 const int32 SUCCESSFUL_TP_TIME = 8;
-
 const int32 FAILED_TP_TIME = 8;
 
 const int32 TRAILING_HITBOX_TIME = 5;
@@ -3100,6 +3100,8 @@ bool performUndo(int32 undo_animation_time)
             e->direction = delta->old_direction;
             e->rotation_quat = directionToQuaternion(e->direction, true);
             e->removed = delta->was_removed;
+            e->in_motion = undo_animation_time;
+            e->moving_direction = NO_DIRECTION; // TODO(spike): maybe should be doing something else here? double check with laser buffer logic. regardless will be somewhat difficult to calculate because of first/second animation cases
 
             if (!delta->was_removed)
             {
@@ -3113,9 +3115,22 @@ bool performUndo(int32 undo_animation_time)
                     int32 dy = (int32)roundf(e->position_norm.y - old_position.y);
                     int32 dz = (int32)roundf(e->position_norm.z - old_position.z);
 
+                    // a lot of edge case handling for how to interpolate undos
+
                     if (e->id == PLAYER_ID)
                     {
-
+                        if (dy != 0 && was_at_different_direction)
+                        {
+                            Vec3 mid_position = { e->position_norm.x, old_position.y, e->position_norm.z };
+                            int32 first_animation_time = undo_animation_time / 2;
+                            int32 second_animation_time = undo_animation_time - first_animation_time;
+                            createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, first_animation_time);
+                            createInterpolationAnimation(VEC3_0, VEC3_0, 0, old_rotation, e->rotation_quat, &e->rotation_quat, PLAYER_ID, second_animation_time);
+                        }
+                        else
+                        {
+                            createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, PLAYER_ID, undo_animation_time);
+                        }
                     }
                     else if (e->id == PACK_ID)
                     {
@@ -3147,12 +3162,12 @@ bool performUndo(int32 undo_animation_time)
                             Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
                             int32 first_animation_time = undo_animation_time / 2;
                             int32 second_animation_time = undo_animation_time - first_animation_time;
-                            createInterpolationAnimation(old_position, mid_position, &e->position_norm, old_rotation, old_rotation, &e->rotation_quat, e->id, first_animation_time);
+                            createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, first_animation_time);
                             createPackRotationAnimation(intCoordsToNorm(old_player_coords), mid_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, second_animation_time);
                         }
                         else // pack, but just moving normally, or being pushed / falling normally, so interpolate normally
                         {
-                            createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, e->id, undo_animation_time);
+                            createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, PACK_ID, undo_animation_time);
                         }
                     }
                     else
@@ -3719,7 +3734,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 writeSolvedLevelsToFile();
             }
 
-            if (time_until_game_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && player->in_motion == 0 && !player->removed)
+            if (time_until_game_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && player->in_motion == 0 && player->moving_direction == NO_DIRECTION && !player->removed)
             {
 				// MOVEMENT 
                 Direction input_direction = 0;
@@ -4158,7 +4173,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     // backwards movement: allow only when climbing down a ladder. right now just move, and let player fall (functionally the same, but animation is goofy)
                     Direction backwards_direction = oppositeDirection(player->direction);
                     Int3 coords_below = getNextCoords(player->coords, DOWN);
-					if (getTileType(coords_below) == LADDER && getTileDirection(coords_below) == input_direction && (pack_detached || (!pack_detached && getTileType(getNextCoords(pack->coords, DOWN)) == NONE)))
+					if (player->moving_direction == NO_DIRECTION && getTileType(coords_below) == LADDER && getTileDirection(coords_below) == input_direction && (pack_detached || (!pack_detached && getTileType(getNextCoords(pack->coords, DOWN)) == NONE)))
                     {
                         bool can_move = false;
                         bool do_push = false;
