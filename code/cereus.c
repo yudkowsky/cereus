@@ -884,8 +884,8 @@ void loadLockedInfoPaths(FILE* file)
         if (fread(&path, 1, 64, file) != 64) return;
         path[63] = '\0';
 
-        Entity* entity_group[5] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, next_world_state.glass_blocks, next_world_state.sources};
-        FOR(group_index, 5)
+        Entity* entity_group[6] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, next_world_state.glass_blocks, next_world_state.sources, next_world_state.win_blocks};
+        FOR(group_index, 6)
         {
             FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
             {
@@ -1149,8 +1149,8 @@ bool saveLevelRewrite(char* path, bool save_reset_block_state)
         writeWinBlockToFile(file, wb);
     }
 
-    Entity* entity_group[5] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, next_world_state.glass_blocks, next_world_state.sources};
-    FOR(group_index, 5)
+    Entity* entity_group[6] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, next_world_state.glass_blocks, next_world_state.sources, next_world_state.win_blocks};
+    FOR(group_index, 6)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
