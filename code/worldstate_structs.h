@@ -379,6 +379,14 @@ typedef struct Animation
 }
 Animation;
 
+typedef struct DebugPopup
+{
+	int32 frames_left;
+    Vec2 coords;
+    char text[64];
+}
+DebugPopup;
+
 typedef struct TrailingHitbox
 {
 	Int3 coords;

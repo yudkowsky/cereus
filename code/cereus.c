@@ -51,6 +51,7 @@ const int32 MAX_PUSHABLE_STACK_SIZE = 32;
 const int32 MAX_TRAILING_HITBOX_COUNT = 16;
 const int32 MAX_LEVEL_COUNT = 64;
 const int32 MAX_RESET_COUNT = 16;
+const int32 MAX_DEBUG_POPUP_COUNT = 32;
 
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
@@ -149,6 +150,10 @@ LaserBuffer laser_buffer[64] = {0};
 const Vec2 DEBUG_TEXT_COORDS_START = { 50.0f, 1080.0f - 80.0f };
 const float DEBUG_TEXT_Y_DIFF = 40.0f;
 Vec2 debug_text_coords = {0}; 
+DebugPopup debug_popups[32];
+const Vec2 DEBUG_POPUP_START_COORDS = { 960.0f, 30.0f };
+const float DEBUG_POPUP_STEP_SIZE = 30.0f;
+const int32 DEFAULT_POPUP_TIME = 150;
 bool do_debug_text = true;
 
 // stuff from worldstate
@@ -1360,6 +1365,7 @@ void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotati
     a->instance_count++;
 }
 
+// TODO(spike): this code was meant to be temporary but i don't seem to have changed it. maybe do! or at least clean it up a bit if decide to keep
 void drawText(char* string, Vec2 coords, float scale)
 {
     float pen_x = coords.x;
@@ -1391,6 +1397,31 @@ void drawDebugText(char* string)
     debug_text_coords.y -= DEBUG_TEXT_Y_DIFF;
 }
 
+void createDebugPopup(char* string, int32 animation_time)
+{
+    int32 next_free_in_popups = 0;
+    FOR(popup_index, MAX_DEBUG_POPUP_COUNT)
+    {
+        if (debug_popups[popup_index].frames_left == 0)
+        {
+            next_free_in_popups = popup_index;
+            break;
+        }
+    }
+
+    FOR(string_index, 64) 
+    {
+        if (string[string_index] == '\0') 
+        {
+            debug_popups[next_free_in_popups].coords.x = DEBUG_POPUP_START_COORDS.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
+            break;
+        }
+    }
+    debug_popups[next_free_in_popups].coords.y = DEBUG_POPUP_START_COORDS.y + (next_free_in_popups * DEBUG_POPUP_STEP_SIZE);
+    debug_popups[next_free_in_popups].frames_left = animation_time;
+    memcpy(debug_popups[next_free_in_popups].text, string, 64 * sizeof(char));
+}
+
 // CAMERA STUFF 
 
 Vec4 buildCameraQuaternion(Camera input_camera)
@@ -1399,27 +1430,6 @@ Vec4 buildCameraQuaternion(Camera input_camera)
     Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), input_camera.pitch);
     return quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
 }
-
-/*
-Vec4 slerp(Vec4 a, Vec4 b, float t)
-{
-    float dot = quaternionDot(a, b);
-    if (dot < 0.0f) 
-    { 
-        b = quaternionNegate(b); 
-        dot = -dot; 
-    }
-    if (dot > 0.9995f)
-    {
-        return quaternionNormalize(quaternionAdd( quaternionScalarMultiply(a, 1.0f - t), quaternionScalarMultiply(b, t)));
-    }
-    float theta = acosf(dot);
-    float sin_theta = sinf(theta);
-    float wa = sinf((1.0f - t) * theta) / sin_theta;
-    float wb = sinf(t * theta) / sin_theta;
-    return quaternionAdd(quaternionScalarMultiply(a, wa), quaternionScalarMultiply(b, wb));
-}
-*/
 
 // assumes looking toward plane (otherwise negative t value)
 // some of the double conversions here probably aren't required
@@ -5234,6 +5244,25 @@ void gameFrame(double delta_time, TickInput tick_input)
             else
             {
                 drawDebugText("no entity selected");
+            }
+        }
+
+        // test assign some popup text to draw
+        static bool thing = false;
+        if (!thing)
+        {
+            char test_text[64] = "debug! test test test test test";
+            createDebugPopup(test_text, DEFAULT_POPUP_TIME);
+            thing = true;
+        }
+
+        // draw debug popup texts
+        FOR(popup_index, MAX_DEBUG_POPUP_COUNT)
+        {
+            if (debug_popups[popup_index].frames_left > 0)
+            {
+                drawText(debug_popups[popup_index].text, debug_popups[popup_index].coords, DEFAULT_TEXT_SCALE);
+                debug_popups[popup_index].frames_left--;
             }
         }
 
