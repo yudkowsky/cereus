@@ -4929,7 +4929,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             else
             {
-                camera.fov = saved_level_camera.fov;
+                if (saved_level_camera.fov == camera.fov) camera.fov = 15.0f; // if working on a new level, and have saved camera as 60fov, then default to 15
+                else camera.fov = saved_level_camera.fov;
             }
             time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
