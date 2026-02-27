@@ -3800,7 +3800,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 writeSolvedLevelsToFile();
             }
 
-            if (time_until_game_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && player->in_motion == 0 && player->moving_direction == NO_DIRECTION && !player->removed)
+            if (time_until_game_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && player->in_motion == 0 && player->in_motion == 0 && !player->removed)
             {
 				// MOVEMENT 
                 Direction input_direction = 0;
@@ -4236,72 +4236,81 @@ void gameFrame(double delta_time, TickInput tick_input)
         		}
                 else if (input_direction == oppositeDirection(player->direction)) // TODO(spike): CONTINUE (don't allow climb on all sides) 
                 {
-                    // backwards movement: allow only when climbing down a ladder. right now just move, and let player fall (functionally the same, but animation is goofy)
-                    Direction backwards_direction = oppositeDirection(player->direction);
-                    Int3 coords_below = getNextCoords(player->coords, DOWN);
-					if (player->moving_direction == NO_DIRECTION && getTileType(coords_below) == LADDER && getTileDirection(coords_below) == input_direction && (pack_detached || (!pack_detached && getTileType(getNextCoords(pack->coords, DOWN)) == NONE)))
+                    if (!player_will_fall_next_turn)
                     {
-                        bool can_move = false;
-                        bool do_push = false;
-                        Int3 coords_behind_pack = getNextCoords(pack->coords, backwards_direction);
-                        TileType tile_behind = getTileType(coords_behind_pack);
-                        if (tile_behind == NONE)
+                        // backwards movement: allow only when climbing down a ladder. right now just move, and let player fall (functionally the same, but animation is goofy)
+                        Direction backwards_direction = oppositeDirection(player->direction);
+                        Int3 coords_below = getNextCoords(player->coords, DOWN);
+                        if (player->moving_direction == NO_DIRECTION && getTileType(coords_below) == LADDER && getTileDirection(coords_below) == input_direction && (pack_detached || (!pack_detached && getTileType(getNextCoords(pack->coords, DOWN)) == NONE)))
                         {
-                            can_move = true;
-                        }
-                        else if (isPushable(tile_behind))
-                        {
-                            can_move = true;
-                            do_push = true;
-                        }
-
-                        if (can_move)
-                        {
-                            if (do_push)
+                            bool can_move = false;
+                            bool do_push = false;
+                            Int3 coords_behind_pack = getNextCoords(pack->coords, backwards_direction);
+                            TileType tile_behind = getTileType(coords_behind_pack);
+                            if (tile_behind == NONE)
                             {
-                                if (canPushStack(coords_behind_pack, backwards_direction) == CAN_PUSH) pushAll(coords_behind_pack, backwards_direction, MOVE_OR_PUSH_ANIMATION_TIME, true, false);
+                                can_move = true;
                             }
-                            if (!player->hit_by_blue) doHeadMovement(backwards_direction, true, MOVE_OR_PUSH_ANIMATION_TIME);
-		
-                            if (!pack_detached)
+                            else if (isPushable(tile_behind))
                             {
-                                setTileType(NONE, pack->coords);
-                                setTileDirection(NORTH, pack->coords);
-                                pack->coords = getNextCoords(pack->coords, backwards_direction);
-                                setTileType(PACK, pack->coords);
-                                setTileDirection(pack->direction, pack->coords);
+                                can_move = true;
+                                do_push = true;
+                            }
 
-                                createInterpolationAnimation(intCoordsToNorm(getNextCoords(pack->coords, player->direction)),
-                                                             intCoordsToNorm(pack->coords),
-                                                             &pack->position_norm,
+                            if (can_move)
+                            {
+                                if (do_push)
+                                {
+                                    if (canPushStack(coords_behind_pack, backwards_direction) == CAN_PUSH) pushAll(coords_behind_pack, backwards_direction, MOVE_OR_PUSH_ANIMATION_TIME, true, false);
+                                }
+                                if (!player->hit_by_blue) doHeadMovement(backwards_direction, true, MOVE_OR_PUSH_ANIMATION_TIME);
+            
+                                if (!pack_detached)
+                                {
+                                    setTileType(NONE, pack->coords);
+                                    setTileDirection(NORTH, pack->coords);
+                                    pack->coords = getNextCoords(pack->coords, backwards_direction);
+                                    setTileType(PACK, pack->coords);
+                                    setTileDirection(pack->direction, pack->coords);
+
+                                    createInterpolationAnimation(intCoordsToNorm(getNextCoords(pack->coords, player->direction)),
+                                                                 intCoordsToNorm(pack->coords),
+                                                                 &pack->position_norm,
+                                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                                 PACK_ID, MOVE_OR_PUSH_ANIMATION_TIME);
+
+                                    pack->in_motion = MOVE_OR_PUSH_ANIMATION_TIME;
+                                    pack->moving_direction = backwards_direction;
+                                }
+                                setTileType(NONE, player->coords);
+                                setTileDirection(NORTH, player->coords);
+                                player->coords = getNextCoords(player->coords, backwards_direction);
+                                setTileType(PLAYER, player->coords);
+                                setTileDirection(player->direction, player->coords);
+
+                                createInterpolationAnimation(intCoordsToNorm(getNextCoords(player->coords, player->direction)),
+                                                             intCoordsToNorm(player->coords),
+                                                             &player->position_norm,
                                                              IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                             PACK_ID, MOVE_OR_PUSH_ANIMATION_TIME);
+                                                             PLAYER_ID, MOVE_OR_PUSH_ANIMATION_TIME);
 
-                                pack->in_motion = MOVE_OR_PUSH_ANIMATION_TIME;
-                                pack->moving_direction = backwards_direction;
+                                player->in_motion = MOVE_OR_PUSH_ANIMATION_TIME;
+                                player->moving_direction = backwards_direction;
+
+                                player->first_fall_already_done = true;
+                                if (!pack_detached) pack->first_fall_already_done = true;
+
+                                pending_undo_record = true;
+                                pending_undo_snapshot = world_state;
+
+                                time_until_game_input = MOVE_OR_PUSH_ANIMATION_TIME;
                             }
-                            setTileType(NONE, player->coords);
-                            setTileDirection(NORTH, player->coords);
-                            player->coords = getNextCoords(player->coords, backwards_direction);
-                            setTileType(PLAYER, player->coords);
-                            setTileDirection(player->direction, player->coords);
-
-                            createInterpolationAnimation(intCoordsToNorm(getNextCoords(player->coords, player->direction)),
-                                                         intCoordsToNorm(player->coords),
-                                                         &player->position_norm,
-                                                         IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                         PLAYER_ID, MOVE_OR_PUSH_ANIMATION_TIME);
-
-                            player->in_motion = MOVE_OR_PUSH_ANIMATION_TIME;
-                            player->moving_direction = backwards_direction;
-
-                            player->first_fall_already_done = true;
-                            if (!pack_detached) pack->first_fall_already_done = true;
-
-                            pending_undo_record = true;
-                            pending_undo_snapshot = world_state;
-
-                            time_until_game_input = MOVE_OR_PUSH_ANIMATION_TIME;
+                            else
+                            {
+                                resetPlayerAndPackMotion();
+                                doFailedWalkAnimations(oppositeDirection(player->direction));
+                                time_until_game_input = FAILED_ANIMATION_TIME;
+                            }
                         }
                         else
                         {
@@ -4309,12 +4318,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                             doFailedWalkAnimations(oppositeDirection(player->direction));
                             time_until_game_input = FAILED_ANIMATION_TIME;
                         }
-                    }
-					else
-                    {
-                        resetPlayerAndPackMotion();
-                        doFailedWalkAnimations(oppositeDirection(player->direction));
-                        time_until_game_input = FAILED_ANIMATION_TIME;
                     }
                 }
             }
