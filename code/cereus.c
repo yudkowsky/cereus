@@ -94,8 +94,6 @@ const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 const double PHYSICS_INCREMENT = 1.0/60.0;
 double accumulator = 0;
 
-bool render_models = false;
-
 const char debug_level_name[64] = "overworld";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
@@ -129,6 +127,8 @@ AssetToLoad assets_to_load[1024] = {0};
 
 Int3 level_dim = {0};
 
+bool render_models = false;
+
 static WorldState world_state = {0};
 static WorldState next_world_state = {0};
 static WorldState pending_undo_snapshot = {0};
@@ -153,7 +153,7 @@ Vec2 debug_text_coords = {0};
 DebugPopup debug_popups[32];
 const Vec2 DEBUG_POPUP_START_COORDS = { 960.0f, 30.0f };
 const float DEBUG_POPUP_STEP_SIZE = 30.0f;
-const int32 DEFAULT_POPUP_TIME = 150;
+const int32 DEFAULT_POPUP_TIME = 100;
 bool do_debug_text = true;
 
 // stuff from worldstate
@@ -1397,28 +1397,44 @@ void drawDebugText(char* string)
     debug_text_coords.y -= DEBUG_TEXT_Y_DIFF;
 }
 
-void createDebugPopup(char* string, int32 animation_time)
+void createDebugPopup(char* string, PopupType popup_type)
 {
-    int32 next_free_in_popups = 0;
-    FOR(popup_index, MAX_DEBUG_POPUP_COUNT)
+    // check if such a type already exists, and if so just overwrite it with renewed timer. recalculate x coord but not y
+    if (popup_type != NO_TYPE)
     {
-        if (debug_popups[popup_index].frames_left == 0)
+        FOR(popup_index, MAX_DEBUG_POPUP_COUNT)
         {
-            next_free_in_popups = popup_index;
-            break;
+            if (debug_popups[popup_index].frames_left == 0) continue;
+            if (debug_popups[popup_index].type == popup_type)
+            {
+                FOR(string_index, 64) if (string[string_index] == '\0') 
+                {
+                    debug_popups[popup_index].coords.x = DEBUG_POPUP_START_COORDS.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
+                    break;
+                }
+                debug_popups[popup_index].frames_left = DEFAULT_POPUP_TIME;
+                memcpy(debug_popups[popup_index].text, string, 64 * sizeof(char));
+                return;
+            }
         }
     }
 
-    FOR(string_index, 64) 
+    // no such type exists, or it has no type, so proceed with looking up into next free
+    int32 next_free_in_popups = 0;
+    FOR(popup_index, MAX_DEBUG_POPUP_COUNT) if (debug_popups[popup_index].frames_left == 0)
     {
-        if (string[string_index] == '\0') 
-        {
-            debug_popups[next_free_in_popups].coords.x = DEBUG_POPUP_START_COORDS.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
-            break;
-        }
+        next_free_in_popups = popup_index;
+        break;
+    }
+
+    FOR(string_index, 64) if (string[string_index] == '\0') 
+    {
+        debug_popups[next_free_in_popups].coords.x = DEBUG_POPUP_START_COORDS.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
+        break;
     }
     debug_popups[next_free_in_popups].coords.y = DEBUG_POPUP_START_COORDS.y + (next_free_in_popups * DEBUG_POPUP_STEP_SIZE);
-    debug_popups[next_free_in_popups].frames_left = animation_time;
+    debug_popups[next_free_in_popups].frames_left = DEFAULT_POPUP_TIME;
+    debug_popups[next_free_in_popups].type = popup_type;
     memcpy(debug_popups[next_free_in_popups].text, string, 64 * sizeof(char));
 }
 
@@ -3722,9 +3738,21 @@ void gameFrame(double delta_time, TickInput tick_input)
         // mode toggle
         if (editor_state.editor_mode != SELECT_WRITE)
     	{
-            if (tick_input.zero_press) editor_state.editor_mode = NO_MODE;
-            if (tick_input.one_press)  editor_state.editor_mode = PLACE_BREAK;
-            if (tick_input.two_press)  editor_state.editor_mode = SELECT;
+            if (tick_input.zero_press) 
+            {
+                editor_state.editor_mode = NO_MODE;
+                createDebugPopup("game mode", GAMEPLAY_MODE_CHANGE);
+            }
+            if (tick_input.one_press) 
+            {
+                editor_state.editor_mode = PLACE_BREAK;
+                createDebugPopup("place / break mode", GAMEPLAY_MODE_CHANGE);
+            }
+            if (tick_input.two_press) 
+            {
+                editor_state.editor_mode = SELECT;
+                createDebugPopup("select mode", GAMEPLAY_MODE_CHANGE);
+            }
         }
 
         if (editor_state.editor_mode == NO_MODE)
@@ -4733,6 +4761,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 		if (time_until_meta_input == 0 && tick_input.y_press && !(editor_state.editor_mode == SELECT_WRITE)) 
         {
             do_debug_text = !do_debug_text;
+            if (do_debug_text) createDebugPopup("debug state visibility on", DEBUG_STATE_VISIBILITY_CHANGE);
+            else			   createDebugPopup("debug state visibility off", DEBUG_STATE_VISIBILITY_CHANGE);
             time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
 
@@ -5029,7 +5059,9 @@ void gameFrame(double delta_time, TickInput tick_input)
         // draw camera boundary lines
 		if (time_until_meta_input == 0 && tick_input.t_press && !(editor_state.editor_mode == SELECT_WRITE))
         {
-            draw_level_boundary = (draw_level_boundary) ? false : true;
+            draw_level_boundary = !draw_level_boundary;
+            if (draw_level_boundary) createDebugPopup("level / camera boundary visibility on", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
+            else			   		 createDebugPopup("level / camera boundary visibility off", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
 			time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
         if (draw_level_boundary)
@@ -5245,15 +5277,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 drawDebugText("no entity selected");
             }
-        }
-
-        // test assign some popup text to draw
-        static bool thing = false;
-        if (!thing)
-        {
-            char test_text[64] = "debug! test test test test test";
-            createDebugPopup(test_text, DEFAULT_POPUP_TIME);
-            thing = true;
         }
 
         // draw debug popup texts

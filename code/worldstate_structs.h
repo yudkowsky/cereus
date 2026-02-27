@@ -379,11 +379,22 @@ typedef struct Animation
 }
 Animation;
 
+typedef enum PopupType
+{
+    NO_TYPE = 0,
+    GAMEPLAY_MODE_CHANGE,
+    GAMEPLAY_SPEED_CHANGE,
+    DEBUG_STATE_VISIBILITY_CHANGE,
+	LEVEL_BOUNDARY_VISIBILITY_CHANGE
+}
+PopupType;
+
 typedef struct DebugPopup
 {
 	int32 frames_left;
-    Vec2 coords;
     char text[64];
+    Vec2 coords;
+    PopupType type;
 }
 DebugPopup;
 
