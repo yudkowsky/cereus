@@ -46,6 +46,7 @@ typedef struct Sprite
     Vec3 coords;
 	Vec3 size;
     Vec4 uv;
+    float alpha;
 }
 Sprite;
 
@@ -101,6 +102,7 @@ typedef struct PushConstants // TODO(spike): rename
     float view[16];
     float proj[16];
     Vec4 uv_rect;
+    float alpha; // used for text at the moment (2/28)
 }
 PushConstants;
 
@@ -2040,7 +2042,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
 
     {
         VkPushConstantRange push_constant_range = {0};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         push_constant_range.offset     = 0;
         push_constant_range.size       = (uint32)sizeof(PushConstants); 
 
@@ -2350,6 +2352,7 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
                 sprite->asset_index = (uint32)atlas_asset_index;
                 sprite->coords      = batch->coords[instance_index];
                 sprite->size        = batch->scale[instance_index];
+                sprite->alpha       = batch->color[instance_index].x;
                 sprite->uv          = spriteUV(sprite_id, type, atlas_width, atlas_height);
             }
             else if (type == CUBE_3D)
@@ -2653,8 +2656,9 @@ void rendererDraw(void)
         memcpy(push_constants.view,  view2d, 	   sizeof(push_constants.view));
         memcpy(push_constants.proj,  ortho, 	   sizeof(push_constants.proj));
         push_constants.uv_rect = sprite->uv;
+        push_constants.alpha = sprite->alpha;
 
-        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &push_constants);
+        vkCmdPushConstants(command_buffer, renderer_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &push_constants);
 
         vkCmdDrawIndexed(command_buffer, renderer_state.sprite_index_count, 1, 0, 0, 0);
     }

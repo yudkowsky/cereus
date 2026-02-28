@@ -1352,10 +1352,7 @@ void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotati
 {
     if (id < 0) return;
     AssetToLoad* a = &assets_to_load[id];
-    if (a->instance_count == 0)
-    {
-        a->sprite_id = id;
-    }
+    if (a->instance_count == 0) a->sprite_id = id;
     int32 index = a->instance_count;
     a->type[index] = type;
     a->coords[index] = coords;
@@ -1366,7 +1363,8 @@ void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotati
 }
 
 // TODO(spike): this code was meant to be temporary but i don't seem to have changed it. maybe do! or at least clean it up a bit if decide to keep
-void drawText(char* string, Vec2 coords, float scale)
+// uses color as alpha channel.
+void drawText(char* string, Vec2 coords, float scale, float alpha)
 {
     float pen_x = coords.x;
     float pen_y = coords.y;
@@ -1386,14 +1384,15 @@ void drawText(char* string, Vec2 coords, float scale)
         SpriteId id = (SpriteId)(SPRITE_2D_FONT_SPACE + ((unsigned char)c - 32));
         Vec3 draw_coords = { pen_x, pen_y, 0};
         Vec3 draw_scale = { scale * aspect, scale, 1};
-        drawAsset(id, SPRITE_2D, draw_coords, draw_scale, IDENTITY_QUATERNION, VEC3_0);
+        Vec3 color = { alpha, 0.0f, 0.0f };
+        drawAsset(id, SPRITE_2D, draw_coords, draw_scale, IDENTITY_QUATERNION, color);
         pen_x += scale * aspect;
     }
 }
 
 void drawDebugText(char* string)
 {
-    drawText(string, debug_text_coords, DEFAULT_TEXT_SCALE);
+    drawText(string, debug_text_coords, DEFAULT_TEXT_SCALE, 1.0f);
     debug_text_coords.y -= DEBUG_TEXT_Y_DIFF;
 }
 
@@ -5232,7 +5231,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
         {
             Vec2 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2 };
-            drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE);
+            drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE, 1.0f);
 
             if (editor_state.selected_id > 0)
             {
@@ -5286,10 +5285,13 @@ void gameFrame(double delta_time, TickInput tick_input)
         // draw debug popup texts
         FOR(popup_index, MAX_DEBUG_POPUP_COUNT)
         {
-            if (debug_popups[popup_index].frames_left > 0)
+            DebugPopup* popup = &debug_popups[popup_index];
+            if (popup->frames_left > 0)
             {
-                drawText(debug_popups[popup_index].text, debug_popups[popup_index].coords, DEFAULT_TEXT_SCALE);
-                debug_popups[popup_index].frames_left--;
+                float alpha = 1.0f;
+                if (popup->frames_left < 30) alpha = (float)popup->frames_left / 30.0f;
+                drawText(popup->text, popup->coords, DEFAULT_TEXT_SCALE, alpha);
+                popup->frames_left--;
             }
         }
 
