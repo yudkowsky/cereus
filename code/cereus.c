@@ -4812,7 +4812,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 }
                 fclose(file);
             }
-
             {
                 FILE* file = fopen(relative_level_path, "rb+");
                 int32 positions[64] = {0};
@@ -4967,22 +4966,27 @@ void gameFrame(double delta_time, TickInput tick_input)
         // speed up / slow down physics tick
         if (tick_input.dot_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
         {
+            char timestep_text[256] = {0};
             if (physics_timestep > DEFAULT_PHYSICS_TIMESTEP)
             {
                 physics_timestep /= 2;
                 time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                snprintf(timestep_text, sizeof(timestep_text), "physics timestep increased (%f)", physics_timestep);
+                createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
+            }
+            else
+            {
+                createDebugPopup("physics timestep already at minimum!", PHYSICS_TIMESTEP_CHANGE);
             }
         }
         else if (tick_input.comma_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
         {
             physics_timestep *= 2;
             time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+            char timestep_text[256] = {0};
+            snprintf(timestep_text, sizeof(timestep_text), "physics timestep decreased (%f)", physics_timestep);
+            createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
         }
-		
-        // TEMP DEBUG
-        char speed_text[64] = {0};
-        snprintf(speed_text, sizeof(speed_text), "physics timestep: %f", physics_timestep);
-        drawDebugText(speed_text);
 
         // record undo if this is pushed to later, most likely due to pack turn
         if (pending_undo_record)
@@ -5148,6 +5152,8 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
 		// DRAW 2D
+
+        Vec3 color_2d = { 1, 0, 0 }; // using alpha as first channel. 2d assets just use sprite atlas, so not using color.
         
         if (do_debug_text)
         {
@@ -5222,12 +5228,12 @@ void gameFrame(double delta_time, TickInput tick_input)
             Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
             Vec3 center_screen = { ((float)SCREEN_WIDTH_PX / 2) - 5, ((float)SCREEN_HEIGHT_PX / 2) - 18, 0.0f }; // weird numbers are just adjustment because raycast starts slightly offset 
                                                                                                         		 // i think this is due to windowed mode, but could be issue with raycast.
-        	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, VEC3_0);
+        	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, color_2d);
 
             // picked block
             Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
             Vec3 picked_block_coords = { SCREEN_WIDTH_PX - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
-            drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, VEC3_0);
+            drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, color_2d);
 
             if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
             {
