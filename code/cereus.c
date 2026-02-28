@@ -4672,6 +4672,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 strcpy(next_world_state.solved_levels[next_free], wb->next_level);
             }
             writeSolvedLevelsToFile();
+            createDebugPopup("level solved!", NO_TYPE);
             time_until_game_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
 
@@ -4719,41 +4720,38 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
 		// figure out if entities should be locked / unlocked
-        if (editor_state.editor_mode == NO_MODE)
+        Entity* entity_group[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.win_blocks, next_world_state.sources };
+        FOR(group_index, 4)
         {
-            Entity* entity_group[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.win_blocks, next_world_state.sources };
-            FOR(group_index, 4)
+            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
             {
-                FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
-                {
-                    Entity* e = &entity_group[group_index][entity_index];
-                    if (e->unlocked_by[0] == '\0') e->locked = false;
-                    if (findInSolvedLevels(e->unlocked_by) == -1) e->locked = true; 
-                    else e->locked = false;
-                }
+                Entity* e = &entity_group[group_index][entity_index];
+                if (e->unlocked_by[0] == '\0') e->locked = false;
+                if (findInSolvedLevels(e->unlocked_by) == -1) e->locked = true; 
+                else e->locked = false;
             }
-            FOR(locked_block_index, MAX_ENTITY_INSTANCE_COUNT)
+        }
+        FOR(locked_block_index, MAX_ENTITY_INSTANCE_COUNT)
+        {
+            Entity* lb = &next_world_state.locked_blocks[locked_block_index];
+            if (lb->id == -1) continue;
+            int32 find_result = findInSolvedLevels(lb->unlocked_by);
+            if (find_result == INT32_MAX) continue;
+            if (find_result != -1 && !lb->removed)
             {
-                Entity* lb = &next_world_state.locked_blocks[locked_block_index];
-                if (lb->id == -1) continue;
-                int32 find_result = findInSolvedLevels(lb->unlocked_by);
-                if (find_result == INT32_MAX) continue;
-                if (find_result != -1 && !lb->removed)
+                // locked block to be unlocked
+                lb->removed = true;
+                if (getTileType(lb->coords) == LOCKED_BLOCK)
                 {
-					// locked block to be unlocked
-                    lb->removed = true;
-                    if (getTileType(lb->coords) == LOCKED_BLOCK)
-                    {
-                        setTileType(NONE, lb->coords);
-                        setTileDirection(NORTH, lb->coords);
-                    }
-                }
-                else if (find_result == -1 && lb->removed)
-                {
-                    lb->removed = false;
-                    setTileType(LOCKED_BLOCK, lb->coords);
+                    setTileType(NONE, lb->coords);
                     setTileDirection(NORTH, lb->coords);
                 }
+            }
+            else if (find_result == -1 && lb->removed)
+            {
+                lb->removed = false;
+                setTileType(LOCKED_BLOCK, lb->coords);
+                setTileDirection(NORTH, lb->coords);
             }
         }
 
@@ -4783,10 +4781,12 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (tick_input.c_press) 
             {
                 memcpy(&tag, &MAIN_CAMERA_CHUNK_TAG, sizeof(tag));
+                createDebugPopup("main camera saved", MAIN_CAMERA_SAVE);
             }
             else 					
             {
                 memcpy(&tag, &ALT_CAMERA_CHUNK_TAG, sizeof(tag));
+                createDebugPopup("alt camera saved", ALT_CAMERA_SAVE);
                 write_alt_camera = true;
             }
 
@@ -5298,6 +5298,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             saveLevelRewrite(level_path, true);
             saveLevelRewrite(relative_level_path, true);
+            createDebugPopup("level saved", LEVEL_SAVE);
             writeSolvedLevelsToFile();
         }
 
