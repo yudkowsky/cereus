@@ -235,7 +235,8 @@ typedef struct TickInput
     bool shift_press;
     bool tab_press;
 
-    bool dash_press;
+    bool dot_press;
+    bool comma_press;
 
     bool backspace_pressed_this_frame;
     bool enter_pressed_this_frame;

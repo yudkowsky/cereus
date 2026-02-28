@@ -91,7 +91,8 @@ const char RESET_INFO_CHUNK_TAG[4] = "RESB";
 const int32 OVERWORLD_SCREEN_SIZE_X = 21;
 const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 
-const double PHYSICS_INCREMENT = 1.0/60.0;
+const double DEFAULT_PHYSICS_TIMESTEP = 1.0/60.0;
+double physics_timestep = 1.0/60.0;
 double accumulator = 0;
 
 const char debug_level_name[64] = "overworld";
@@ -1435,6 +1436,11 @@ void createDebugPopup(char* string, PopupType popup_type)
     debug_popups[next_free_in_popups].frames_left = DEFAULT_POPUP_TIME;
     debug_popups[next_free_in_popups].type = popup_type;
     memcpy(debug_popups[next_free_in_popups].text, string, 64 * sizeof(char));
+}
+
+void createTutorialPopup()
+{
+
 }
 
 // CAMERA STUFF 
@@ -3726,7 +3732,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         memset(&editor_state.edit_buffer, 0, sizeof(editor_state.edit_buffer));
     }
 
-    while (accumulator >= PHYSICS_INCREMENT)
+    while (accumulator >= physics_timestep)
    	{
 		next_world_state = world_state;
         Entity* player = &next_world_state.player;
@@ -4958,6 +4964,26 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (do_debug_text) drawDebugText(delta_text);
         }
 
+        // speed up / slow down physics tick
+        if (tick_input.dot_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+        {
+            if (physics_timestep > DEFAULT_PHYSICS_TIMESTEP)
+            {
+                physics_timestep /= 2;
+                time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+            }
+        }
+        else if (tick_input.comma_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+        {
+            physics_timestep *= 2;
+            time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+        }
+		
+        // TEMP DEBUG
+        char speed_text[64] = {0};
+        snprintf(speed_text, sizeof(speed_text), "physics timestep: %f", physics_timestep);
+        drawDebugText(speed_text);
+
         // record undo if this is pushed to later, most likely due to pack turn
         if (pending_undo_record)
         {
@@ -5307,7 +5333,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 		if (time_until_game_input > 0) time_until_game_input--;
 		if (time_until_meta_input > 0) time_until_meta_input--;
 
-        accumulator -= PHYSICS_INCREMENT;
+        accumulator -= physics_timestep;
 
         rendererSubmitFrame(assets_to_load, camera_with_ow_offset);
         FOR(i, 1024) assets_to_load[i].instance_count = 0;
