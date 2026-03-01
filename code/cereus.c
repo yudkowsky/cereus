@@ -4135,6 +4135,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             if (time_until_game_input == 0 && tick_input.r_press)
             {
+                // TODO: fix overworld case here
                 // restart
                 if (!restart_last_turn) 
                 {
@@ -4142,7 +4143,9 @@ void gameFrame(double delta_time, TickInput tick_input)
                     recordActionForUndo(&world_state);
                 }
                 memset(animations, 0, sizeof(animations));
+                Camera save_camera = camera;
                 gameInitializeState(next_world_state.level_name);
+                camera = save_camera;
                 time_until_game_input = META_TIME_UNTIL_ALLOW_INPUT;
                 restart_last_turn = true;
             }
