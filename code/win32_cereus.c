@@ -1,7 +1,7 @@
 #include <windows.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include "win32_renderer_bridge.h"
+#include "win32_vulkan_bridge.h"
 #include "win32_cereus_bridge.h"
 
 #define local_persist static
@@ -254,8 +254,7 @@ int CALLBACK WinMain(
 
     RendererPlatformHandles platform_handles = { .module_handle = module_handle, .window_handle = window_handle};
 
-    rendererInitialize(platform_handles);
-    //MessageBoxA(NULL, "renderer init done", "Debug", MB_OK); 
+    vulkanInitialize(platform_handles);
 
     LARGE_INTEGER ticks_per_second;
     LARGE_INTEGER last_tick;
@@ -267,13 +266,9 @@ int CALLBACK WinMain(
     bool running = true;
 	
     char* file_path = 0;
-    if (command_line[0] != '\0')
-    {
-        file_path = command_line;
-    }
+    if (command_line[0] != '\0') file_path = command_line;
 
     gameInitialize(file_path); 
-    //MessageBoxA(NULL, "game init done", "Debug", MB_OK); 
 
 	double frame_times[60] = {0};
 	int32 frame_time_index = 0;

@@ -5693,9 +5693,9 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         accumulator -= physics_timestep;
 
-        rendererSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset);
+        vulkanSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset);
         draw_command_count = 0;
 	}
 
-    rendererDraw();
+    vulkanDraw();
 }
