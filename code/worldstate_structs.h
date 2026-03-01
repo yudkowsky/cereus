@@ -21,6 +21,13 @@ typedef enum
 }
 AssetType;
 
+typedef struct
+{
+    void* module_handle;
+    void* window_handle;
+}
+RendererPlatformHandles;
+
 typedef enum SpriteId 
 {
     NO_ID = -1,
@@ -134,20 +141,6 @@ typedef enum SpriteId
 }
 SpriteId;
 
-/*
-typedef struct AssetToLoad 
-{
-    SpriteId sprite_id;
-    AssetType type[4096];
-    Vec3 coords[4096];
-    Vec3 scale[4096];
-    Vec4 rotation[4096];
-    Vec3 color[4096];
-    int32 instance_count;
-}
-AssetToLoad;
-*/
-
 typedef struct DrawCommand
 {
     SpriteId sprite_id;
@@ -168,15 +161,6 @@ typedef struct Camera
     float pitch;
 }
 Camera;
-
-typedef enum
-{
-    MAIN_WAITING,
-    MAIN_TO_ALT,
-    ALT_WAITING,
-    ALT_TO_MAIN
-}
-CameraMode;
 
 typedef enum
 {

@@ -11,6 +11,15 @@
 
 #define FOR(i, n) for (int i = 0; i < n; i++)
 
+typedef enum
+{
+    MAIN_WAITING,
+    MAIN_TO_ALT,
+    ALT_WAITING,
+    ALT_TO_MAIN
+}
+CameraMode;
+
 const int32 SCREEN_WIDTH_PX = 1920; // TODO: get from platform layer
 const int32	SCREEN_HEIGHT_PX = 1080;
 
@@ -5185,7 +5194,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             drawDebugText(player_text);
 
             char pack_text[256] = {0};
-            snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, moving_time: %d, moving_direciton: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack->in_motion, pack->moving_direction);
+            snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, moving_time: %d, moving_direction: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack->in_motion, pack->moving_direction);
             drawDebugText(pack_text);
 
             /*

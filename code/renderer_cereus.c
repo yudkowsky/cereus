@@ -148,7 +148,7 @@ typedef struct RendererState
 
 	VkSwapchainKHR swapchain_handle;
     uint32 swapchain_image_count;
-    VkImageView* swapchain_image_views; // VkImageView is a view that tells vulkan how we intend to access that image: type, format, array layers, some other stuff.
+    VkImageView* swapchain_image_views;
 	VkFormat swapchain_format;
     VkExtent2D swapchain_extent;
     VkRenderPass render_pass_handle;
@@ -162,7 +162,7 @@ typedef struct RendererState
     VkSemaphore* image_available_semaphores; // semaphore(s) that handle WSI -> graphics. wsi produces swapchain image, graphics queue renders into that image.
     VkSemaphore* render_finished_semaphores; // semaphore(s) that handle graphics -> present. once graphics finishes rendering, graphics sends renders to be presented.
     VkFence* in_flight_fences; 
-    VkFence* images_in_flight; // for each swapchain image, when GPU finishes that submission, the fence signals; we store the fence to check if image is still in flight.
+    VkFence* images_in_flight;
 
     VkShaderModule vertex_shader_module_handle; // TODO: rename
     VkShaderModule fragment_shader_module_handle; // TODO: rename
