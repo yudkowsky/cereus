@@ -5,5 +5,5 @@
 
 void gameInitialize(char* command_line);
 void gameFrame(double, TickInput);
-void rendererSubmitFrame(AssetToLoad assets_to_load[256], Camera camera);
+void rendererSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Camera camera);
 void rendererDraw();

@@ -14,7 +14,7 @@ typedef struct
 RendererPlatformHandles;
 
 void rendererInitialize(RendererPlatformHandles handles);
-void rendererSubmitFrame(AssetToLoad assets_to_load[256], Camera camera); // are these two needed?
+void rendererSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Camera camera); // are these two needed?
 void rendererDraw(void);
 void rendererResize(uint32 width, uint32 height);
 void rendererShutdown(void);

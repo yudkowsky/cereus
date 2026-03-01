@@ -118,13 +118,12 @@ const float OVERWORLD_CAMERA_FOV_CLOSE = 15.0f;
 float OVERWORLD_CAMERA_FOV_FAR = 35.0f; // is actually edited with J press for editing; not fully constant
 
 float camera_lerp_t = 0.0f;
-//const float CAMERA_LERP_TIME = 10;
 const float CAMERA_T_TIMESTEP = 0.05f;
 CameraMode camera_mode = MAIN_WAITING;
-
 int32 camera_target_plane = 0; // plane that camera wants to target TODO: should probably be something defined by level, not just player coords at startup
 
-AssetToLoad assets_to_load[1024] = {0};
+DrawCommand draw_commands[8192] = {0};
+int32 draw_command_count = 0;
 
 Int3 level_dim = {0};
 
@@ -1352,15 +1351,13 @@ SpriteId getModelId(TileType tile)
 void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation, Vec3 color)
 {
     if (id < 0) return;
-    AssetToLoad* a = &assets_to_load[id];
-    if (a->instance_count == 0) a->sprite_id = id;
-    int32 index = a->instance_count;
-    a->type[index] = type;
-    a->coords[index] = coords;
-    a->scale[index] = scale;
-    a->rotation[index] = rotation;
-    a->color[index] = color;
-    a->instance_count++;
+    DrawCommand* command = &draw_commands[draw_command_count++];
+    command->sprite_id = id;
+    command->type = type;
+    command->coords = coords;
+    command->scale = scale;
+    command->rotation = rotation;
+    command->color = color;
 }
 
 // TODO: this code was meant to be temporary but i don't seem to have changed it. maybe do! or at least clean it up a bit if decide to keep
@@ -5291,7 +5288,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (editor_state.selected_id > 0)
             {
                 Entity* e = getEntityFromId(editor_state.selected_id);
-                if (e != 0) // TODO: this guard is somewhat bad solution; i still persist selected_id even if that id doesn't exist anymore. this prevents crash, but later: on entity delete check if matches against id, and if so remove from editor_state.
+                if (e) // TODO: this guard is somewhat bad solution; i still persist selected_id even if that id doesn't exist anymore. this prevents crash, but later: on entity delete check if matches against id, and if so remove from editor_state.
                 {
                     char selected_id_text[256] = {0};
                     snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d", editor_state.selected_id);
@@ -5364,8 +5361,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         accumulator -= physics_timestep;
 
-        rendererSubmitFrame(assets_to_load, camera_with_ow_offset);
-        FOR(i, 1024) assets_to_load[i].instance_count = 0;
+        rendererSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset);
+        draw_command_count = 0;
 	}
 
     rendererDraw();

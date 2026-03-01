@@ -2270,7 +2270,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
     loadAllEntities();
 }
 
-void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
+void rendererSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Camera game_camera)
 {  
     renderer_camera = game_camera;
 
@@ -2281,102 +2281,99 @@ void rendererSubmitFrame(AssetToLoad assets_to_load[1024], Camera game_camera)
     model_instance_count = 0;
     model_outline_instance_count = 0;
 
-    for (int asset_index = 0; asset_index < 1024; asset_index++)
+    for (int asset_index = 0; asset_index < draw_command_count; asset_index++)
     {
-        AssetToLoad* batch = &assets_to_load[asset_index];
-        if (batch->instance_count == 0) continue;
+        DrawCommand* command = &draw_commands[asset_index];
+        SpriteId sprite_id = command->sprite_id;
+        AssetType type = command->type;
 
-        SpriteId sprite_id = batch->sprite_id;
-
-        for (int32 instance_index = 0; instance_index < batch->instance_count; instance_index++)
+        if (type == OUTLINE_3D)
         {
-            AssetType type = batch->type[instance_index];
-
-            if (type == OUTLINE_3D)
+            bool render_model = true;
+            if (sprite_id >= MODEL_3D_VOID && sprite_id <= MODEL_3D_SOURCE_WHITE) render_model = false;
+            if (renderer_state.loaded_models[sprite_id - MODEL_3D_VOID].index_count <= 0) render_model = false;
+            if (render_model)
             {
-                if (sprite_id >= MODEL_3D_VOID && sprite_id <= MODEL_3D_SOURCE_WHITE
-                    && renderer_state.loaded_models[sprite_id - MODEL_3D_VOID].index_count > 0)
-                {
-                    Model* model = &model_outline_instances[model_outline_instance_count++];
-                    model->model_id = (uint32)sprite_id;
-                    model->coords   = batch->coords[instance_index];
-                    model->scale    = batch->scale[instance_index];
-                    model->rotation = batch->rotation[instance_index];
-                }
-                else
-                {
-                    Cube* cube = &outline_instances[outline_instance_count++];
-                    cube->coords      = batch->coords[instance_index];
-                    cube->scale       = batch->scale[instance_index];
-                    cube->rotation    = batch->rotation[instance_index];
-                    cube->uv          = (Vec4){ 0, 0, 1, 1 };
-                    cube->asset_index = 0;
-                }
-            }
-            else if (type == LASER)
-            {
-                Laser* laser = &laser_instances[laser_instance_count++];
-                laser->center   = batch->coords[instance_index];
-                laser->scale    = batch->scale[instance_index];
-                laser->rotation = batch->rotation[instance_index];
-                laser->color    = batch->color[instance_index];
-            }
-            else if (type == MODEL_3D)
-            {
-                Model* model = &model_instances[model_instance_count++];
+                Model* model = &model_outline_instances[model_outline_instance_count++];
                 model->model_id = (uint32)sprite_id;
-                model->coords   = batch->coords[instance_index];
-                model->scale    = batch->scale[instance_index];
-                model->rotation = batch->rotation[instance_index];
+                model->coords   = command->coords;
+                model->scale    = command->scale;
+                model->rotation = command->rotation;
             }
-            else if (type == SPRITE_2D)
+            else
             {
-                int32 atlas_asset_index;
-                int32 atlas_width;
-                int32 atlas_height;
-
-                if (spriteIsFont(sprite_id))
-                {
-                    atlas_asset_index = renderer_state.atlas_font_asset_index;
-                    atlas_width  = ATLAS_FONT_WIDTH;
-                    atlas_height = ATLAS_FONT_HEIGHT;
-                }
-                else
-                {
-                    atlas_asset_index = renderer_state.atlas_2d_asset_index;
-                    atlas_width  = ATLAS_2D_WIDTH;
-                    atlas_height = ATLAS_2D_HEIGHT;
-                }
-
-                Sprite* sprite = &sprite_instances[sprite_instance_count++];
-                sprite->asset_index = (uint32)atlas_asset_index;
-                sprite->coords      = batch->coords[instance_index];
-                sprite->size        = batch->scale[instance_index];
-                sprite->alpha       = batch->color[instance_index].x;
-                sprite->uv          = spriteUV(sprite_id, type, atlas_width, atlas_height);
+                // outline 3d called with cube id, so render cube
+                Cube* cube = &outline_instances[outline_instance_count++];
+                cube->coords      = command->coords;
+                cube->scale       = command->scale;
+                cube->rotation    = command->rotation;
+                cube->uv          = (Vec4){ 0, 0, 1, 1 };
+                cube->asset_index = 0;
             }
-            else if (type == CUBE_3D)
+        }
+        else if (type == LASER)
+        {
+            Laser* laser = &laser_instances[laser_instance_count++];
+            laser->center   = command->coords;
+            laser->scale    = command->scale;
+            laser->rotation = command->rotation;
+            laser->color    = command->color;
+        }
+        else if (type == MODEL_3D)
+        {
+            Model* model = &model_instances[model_instance_count++];
+            model->model_id = (uint32)sprite_id;
+            model->coords   = command->coords;
+            model->scale    = command->scale;
+            model->rotation = command->rotation;
+        }
+        else if (type == SPRITE_2D)
+        {
+            int32 atlas_asset_index;
+            int32 atlas_width;
+            int32 atlas_height;
+
+            if (spriteIsFont(sprite_id))
             {
-                Vec4 uv_rect = spriteUV(sprite_id, type, ATLAS_3D_WIDTH, ATLAS_3D_HEIGHT);
-
-                Cube* cube = &cube_instances[cube_instance_count++];
-                cube->asset_index = (uint32)renderer_state.atlas_3d_asset_index;
-                cube->coords      = batch->coords[instance_index];
-                cube->scale       = batch->scale[instance_index];
-                cube->rotation    = batch->rotation[instance_index];
-                cube->uv          = uv_rect;
+                atlas_asset_index = renderer_state.atlas_font_asset_index;
+                atlas_width  = ATLAS_FONT_WIDTH;
+                atlas_height = ATLAS_FONT_HEIGHT;
             }
+            else
+            {
+                atlas_asset_index = renderer_state.atlas_2d_asset_index;
+                atlas_width  = ATLAS_2D_WIDTH;
+                atlas_height = ATLAS_2D_HEIGHT;
+            }
+
+            Sprite* sprite = &sprite_instances[sprite_instance_count++];
+            sprite->asset_index = (uint32)atlas_asset_index;
+            sprite->coords      = command->coords;
+            sprite->size        = command->scale;
+            sprite->alpha       = command->color.x;
+            sprite->uv          = spriteUV(sprite_id, type, atlas_width, atlas_height);
+        }
+        else if (type == CUBE_3D)
+        {
+            Vec4 uv_rect = spriteUV(sprite_id, type, ATLAS_3D_WIDTH, ATLAS_3D_HEIGHT);
+
+            Cube* cube = &cube_instances[cube_instance_count++];
+            cube->asset_index = (uint32)renderer_state.atlas_3d_asset_index;
+            cube->coords      = command->coords;
+            cube->scale       = command->scale;
+            cube->rotation    = command->rotation;
+            cube->uv          = uv_rect;
         }
     }
 
-    // fill instance buffer with cube data
+    // fill instance buffer
     CubeInstanceData* gpu_instances = (CubeInstanceData*)renderer_state.cube_instance_mapped;
 
-    for (uint32 cube_instance_index = 0; cube_instance_index < cube_instance_count; cube_instance_index++)
+    for (uint32 instance_index = 0; instance_index < cube_instance_count; instance_index++)
     {
-        Cube* cube = &cube_instances[cube_instance_index];
-        mat4BuildTRS(gpu_instances[cube_instance_index].model, cube->coords, cube->rotation, cube->scale);
-        gpu_instances[cube_instance_index].uv_rect = cube->uv;
+        Cube* cube = &cube_instances[instance_index];
+        mat4BuildTRS(gpu_instances[instance_index].model, cube->coords, cube->rotation, cube->scale);
+        gpu_instances[instance_index].uv_rect = cube->uv;
     }
 
     VkMappedMemoryRange flush_range = {0};

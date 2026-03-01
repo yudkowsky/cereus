@@ -134,6 +134,7 @@ typedef enum SpriteId
 }
 SpriteId;
 
+/*
 typedef struct AssetToLoad 
 {
     SpriteId sprite_id;
@@ -145,6 +146,18 @@ typedef struct AssetToLoad
     int32 instance_count;
 }
 AssetToLoad;
+*/
+
+typedef struct DrawCommand
+{
+    SpriteId sprite_id;
+    AssetType type;
+    Vec3 coords;
+    Vec3 scale;
+    Vec4 rotation;
+    Vec3 color;
+}
+DrawCommand;
 
 typedef struct Camera 
 {
