@@ -191,6 +191,22 @@ typedef struct Push
 }
 Push;
 
+typedef struct PackTurnState
+{
+    int32 pack_intermediate_states_timer;
+    Int3 pack_intermediate_coords;
+    Int3 pack_hitbox_turning_to_coords;
+    int32 pack_hitbox_turning_to_timer; // used for blue-not-blue logic
+    Direction pack_orthogonal_push_direction;
+    bool do_diagonal_push_on_turn;
+    bool do_orthogonal_push_on_turn;
+    bool do_player_and_pack_fall_after_turn;
+    bool player_hit_by_blue_in_turn;
+    Int3 entity_to_fall_after_blue_not_blue_turn_coords;
+    int32 entity_to_fall_after_blue_not_blue_turn_timer;
+}
+PackTurnState;
+
 // EDITOR STRUCTS
 
 typedef struct EditBuffer
@@ -450,8 +466,6 @@ Camera camera_with_ow_offset = {0};
 Int3 camera_screen_offset = {0};
 const Int3 OVERWORLD_CAMERA_CENTER_START = { 58, 2, 197 };
 bool draw_level_boundary = false;
-const float OVERWORLD_CAMERA_FOV_CLOSE = 15.0f; 
-float OVERWORLD_CAMERA_FOV_FAR = 35.0f; // is actually edited with J press for editing; not fully constant
 
 float camera_lerp_t = 0.0f;
 const float CAMERA_T_TIMESTEP = 0.05f;
@@ -501,25 +515,13 @@ bool player_will_fall_next_turn = false;
 TrailingHitbox trailing_hitboxes[16];
 bool bypass_player_fall;
 
-int32 pack_intermediate_states_timer;
-Int3 pack_intermediate_coords;
-
-Int3 pack_hitbox_turning_to_coords;
-int32 pack_hitbox_turning_to_timer; // used for blue-not-blue logic
-
-Direction pack_orthogonal_push_direction;
-bool do_diagonal_push_on_turn;
-bool do_orthogonal_push_on_turn;
-bool do_player_and_pack_fall_after_turn;
-bool player_hit_by_blue_in_turn;
-Int3 entity_to_fall_after_blue_not_blue_turn_coords;
-int32 entity_to_fall_after_blue_not_blue_turn_timer;
+PackTurnState pack_turn_state = {0};
 
 // ghosts from tp
-Int3 player_ghost_coords;
-Int3 pack_ghost_coords;
-Direction player_ghost_direction;
-Direction pack_ghost_direction;
+Int3 player_ghost_coords = {0};
+Int3 pack_ghost_coords = {0};
+Direction player_ghost_direction = {0};
+Direction pack_ghost_direction = {0};
 
 // CAMERA HELPERS
 
@@ -2757,7 +2759,7 @@ void updateLaserBuffer(void)
                         if (mirror->in_motion)
                         {
                             int32 passthrough_comparison = 0;
-                            bool player_turning = pack_intermediate_states_timer > 0;
+                            bool player_turning = pack_turn_state.pack_intermediate_states_timer > 0;
                             if (player_turning) passthrough_comparison = PUSH_FROM_TURN_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH;
                             else passthrough_comparison = STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH; 
 
@@ -3022,7 +3024,7 @@ void doFallingObjects(bool do_animation)
             Entity* entity = &object_group_to_fall[to_fall_index][entity_index];
 
             if (entity->locked || entity->removed) continue;
-            if (pack_hitbox_turning_to_timer > 0 && int3IsEqual(pack_hitbox_turning_to_coords, entity->coords)) continue; // blocks blue-not-blue turn orthogonal case from falling immediately
+            if (pack_turn_state.pack_hitbox_turning_to_timer > 0 && int3IsEqual(pack_turn_state.pack_hitbox_turning_to_coords, entity->coords)) continue; // blocks blue-not-blue turn orthogonal case from falling immediately
             doFallingEntity(entity, do_animation);
 
             if (getTileType(getNextCoords(entity->coords, DOWN)) == VOID && !entity->in_motion)
@@ -3819,37 +3821,6 @@ void editorMode(TickInput *tick_input)
     Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
 
-    Vec3 right_camera_basis, forward_camera_basis;
-    cameraBasisFromYaw(camera.yaw, &right_camera_basis, &forward_camera_basis);
-
-    if (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT)
-    {
-        if (tick_input->w_press) 
-        {
-            camera.coords.x += forward_camera_basis.x * CAMERA_MOVE_STEP;
-            camera.coords.z += forward_camera_basis.z * CAMERA_MOVE_STEP;
-        }
-        if (tick_input->a_press) 
-        {
-            camera.coords.x -= right_camera_basis.x * CAMERA_MOVE_STEP;
-            camera.coords.z -= right_camera_basis.z * CAMERA_MOVE_STEP;
-        }
-        if (tick_input->s_press) 
-        {
-            camera.coords.x -= forward_camera_basis.x * CAMERA_MOVE_STEP;
-            camera.coords.z -= forward_camera_basis.z * CAMERA_MOVE_STEP;
-        }
-        if (tick_input->d_press) 
-        {
-            camera.coords.x += right_camera_basis.x * CAMERA_MOVE_STEP;
-            camera.coords.z += right_camera_basis.z * CAMERA_MOVE_STEP;
-        }
-        if (tick_input->space_press) camera.coords.y += CAMERA_MOVE_STEP;
-        if (tick_input->shift_press) camera.coords.y -= CAMERA_MOVE_STEP;
-    }
-
-    if (time_until_meta_input != 0) return; 
-
     if (editor_state.editor_mode == PLACE_BREAK)
     {
         if (tick_input->left_mouse_press || tick_input->right_mouse_press || tick_input->middle_mouse_press || tick_input->r_press || tick_input->f_press || tick_input->h_press || tick_input->g_press)
@@ -4039,7 +4010,7 @@ void gameFrame(double delta_time, TickInput tick_input)
     if (delta_time > 0.1) delta_time = 0.1;
     accumulator += delta_time;
 
-    // fix camera once per present frame
+    // camera input (always at 60hz)
     if (editor_state.editor_mode != NO_MODE)
     {
         camera.yaw += tick_input.mouse_dx * CAMERA_SENSITIVITY;
@@ -4050,6 +4021,37 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (camera.pitch >  pitch_limit) camera.pitch =  pitch_limit; 
         if (camera.pitch < -pitch_limit) camera.pitch = -pitch_limit; 
         camera.rotation = buildCameraQuaternion(camera);
+    }
+    if (editor_state.editor_mode != NO_MODE && editor_state.editor_mode != SELECT_WRITE)
+    {
+        Vec3 right_camera_basis, forward_camera_basis;
+        cameraBasisFromYaw(camera.yaw, &right_camera_basis, &forward_camera_basis);
+
+        if (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT)
+        {
+            if (tick_input.w_press) 
+            {
+                camera.coords.x += forward_camera_basis.x * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+                camera.coords.z += forward_camera_basis.z * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+            }
+            if (tick_input.a_press) 
+            {
+                camera.coords.x -= right_camera_basis.x * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+                camera.coords.z -= right_camera_basis.z * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+            }
+            if (tick_input.s_press) 
+            {
+                camera.coords.x -= forward_camera_basis.x * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+                camera.coords.z -= forward_camera_basis.z * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+            }
+            if (tick_input.d_press) 
+            {
+                camera.coords.x += right_camera_basis.x * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+                camera.coords.z += right_camera_basis.z * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+            }
+            if (tick_input.space_press) camera.coords.y += CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+            if (tick_input.shift_press) camera.coords.y -= CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+        }
     }
     // handle writing once per present frame
 
@@ -4574,14 +4576,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                                     oppositeDirection(input_direction), clockwise, 
                                                                     &pack->position_norm, &pack->rotation_quat, PACK_ID, TURN_ANIMATION_TIME);
 
-                                        if (push_diagonal)   do_diagonal_push_on_turn = true;
-                                        if (push_orthogonal) do_orthogonal_push_on_turn = true;
+                                        if (push_diagonal)   pack_turn_state.do_diagonal_push_on_turn = true;
+                                        if (push_orthogonal) pack_turn_state.do_orthogonal_push_on_turn = true;
 
-                                        pack_intermediate_states_timer = TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN + PACK_TIME_IN_INTERMEDIATE_STATE + 1;
-                                        pack_intermediate_coords = diagonal_coords;
-                                        pack_orthogonal_push_direction = orthogonal_push_direction;
-                                        pack_hitbox_turning_to_timer = TURN_ANIMATION_TIME + TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN;
-                                        pack_hitbox_turning_to_coords = orthogonal_coords;
+                                        pack_turn_state.pack_intermediate_states_timer = TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN + PACK_TIME_IN_INTERMEDIATE_STATE + 1;
+                                        pack_turn_state.pack_intermediate_coords = diagonal_coords;
+                                        pack_turn_state.pack_orthogonal_push_direction = orthogonal_push_direction;
+                                        pack_turn_state.pack_hitbox_turning_to_timer = TURN_ANIMATION_TIME + TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN;
+                                        pack_turn_state.pack_hitbox_turning_to_coords = orthogonal_coords;
                                     }
                                 }
                                 else
@@ -4684,53 +4686,53 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
         else
         {
-            editorMode(&tick_input);
+            if (time_until_meta_input == 0) editorMode(&tick_input);
         }
 
         // handle pack turning sequence
-        if (pack_intermediate_states_timer > 0)
+        if (pack_turn_state.pack_intermediate_states_timer > 0)
         {
-            if (pack_intermediate_states_timer == 7)
+            if (pack_turn_state.pack_intermediate_states_timer == 7)
             {
-                createTrailingHitbox(pack->coords, pack_orthogonal_push_direction, NO_DIRECTION, 4, PACK);
-				if (do_diagonal_push_on_turn) pushAll(pack_intermediate_coords, oppositeDirection(player->direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false); // CHANGE THIS IF WANT PACK TO SWEEP
+                createTrailingHitbox(pack->coords, pack_turn_state.pack_orthogonal_push_direction, NO_DIRECTION, 4, PACK);
+				if (pack_turn_state.do_diagonal_push_on_turn) pushAll(pack_turn_state.pack_intermediate_coords, oppositeDirection(player->direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false); // CHANGE THIS IF WANT PACK TO SWEEP
             }
-            else if (pack_intermediate_states_timer == 5)
+            else if (pack_turn_state.pack_intermediate_states_timer == 5)
             {
                 setTileType(NONE, pack->coords);
                 setTileDirection(NORTH, pack->coords);
-                pack->coords = pack_intermediate_coords;
+                pack->coords = pack_turn_state.pack_intermediate_coords;
                 pack->direction = player->direction;
                 setTileType(PACK, pack->coords);
                 setTileDirection(pack->direction, pack->coords);
             }
-            else if (pack_intermediate_states_timer == 4)
+            else if (pack_turn_state.pack_intermediate_states_timer == 4)
             {
-                if (do_orthogonal_push_on_turn) pushAll(pack_hitbox_turning_to_coords, pack_orthogonal_push_direction, PUSH_FROM_TURN_ANIMATION_TIME, true, false); // CHANGE THIS IF WANT PACK TO SWEEP
+                if (pack_turn_state.do_orthogonal_push_on_turn) pushAll(pack_turn_state.pack_hitbox_turning_to_coords, pack_turn_state.pack_orthogonal_push_direction, PUSH_FROM_TURN_ANIMATION_TIME, true, false); // CHANGE THIS IF WANT PACK TO SWEEP
 
                 setTileType(NONE, pack->coords);
                 setTileDirection(NORTH, pack->coords);
-				pack->coords = pack_hitbox_turning_to_coords;
+				pack->coords = pack_turn_state.pack_hitbox_turning_to_coords;
                 setTileType(PACK, pack->coords);
                 setTileDirection(pack->direction, pack->coords);
-                createTrailingHitbox(pack_intermediate_coords, pack->direction, NO_DIRECTION, 3, PACK);
+                createTrailingHitbox(pack_turn_state.pack_intermediate_coords, pack->direction, NO_DIRECTION, 3, PACK);
             }
-            else if (pack_intermediate_states_timer == 1)
+            else if (pack_turn_state.pack_intermediate_states_timer == 1)
             { 
                 if (pending_undo_record)
                 {
                     pending_undo_record = false;
                     recordActionForUndo(&pending_undo_snapshot);
                 }
-                if (do_player_and_pack_fall_after_turn)
+                if (pack_turn_state.do_player_and_pack_fall_after_turn)
                 {
                     doFallingEntity(player, true);
                     doFallingEntity(pack, true);
-                    do_player_and_pack_fall_after_turn = false;
+                    pack_turn_state.do_player_and_pack_fall_after_turn = false;
                 }
-                player_hit_by_blue_in_turn = false;
+                pack_turn_state.player_hit_by_blue_in_turn = false;
             }
-            pack_intermediate_states_timer--;
+            pack_turn_state.pack_intermediate_states_timer--;
         }
 
 		updateLaserBuffer();
@@ -4740,7 +4742,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             if (!player->hit_by_blue) doFallingObjects(true);
 
-            if (pack_intermediate_states_timer == 0)
+            if (pack_turn_state.pack_intermediate_states_timer == 0)
             {
                 if (!player->hit_by_red)
                 {
@@ -4781,19 +4783,19 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (getTileType(getNextCoords(player->coords, DOWN)) == NONE && !player->hit_by_red)
                 {
                     // in middle of turn, which means was on ground or red, and now no longer on ground AND not red, so must have stopped being red in the middle of the turn.
-                    do_player_and_pack_fall_after_turn = true;
+                    pack_turn_state.do_player_and_pack_fall_after_turn = true;
                 }
 
-                if (isPushable(getTileType(pack_hitbox_turning_to_coords)))
+                if (isPushable(getTileType(pack_turn_state.pack_hitbox_turning_to_coords)))
                 {
-                    if (player->hit_by_blue) player_hit_by_blue_in_turn = true;
-                    if (!player->hit_by_blue && player_hit_by_blue_in_turn && pack_intermediate_states_timer > 0)
+                    if (player->hit_by_blue) pack_turn_state.player_hit_by_blue_in_turn = true;
+                    if (!player->hit_by_blue && pack_turn_state.player_hit_by_blue_in_turn && pack_turn_state.pack_intermediate_states_timer > 0)
                     {
-                        if (getTileType(getNextCoords(pack_hitbox_turning_to_coords, DOWN)) == NONE)
+                        if (getTileType(getNextCoords(pack_turn_state.pack_hitbox_turning_to_coords, DOWN)) == NONE)
                         {
-                            entity_to_fall_after_blue_not_blue_turn_timer = pack_intermediate_states_timer + 4; // this number is magic (sorry); it is the frame count that makes the entity fall as soon as possible, i.e., at the same time as the player (if magenta-not-magenta)
-                            entity_to_fall_after_blue_not_blue_turn_coords = getNextCoords(pack_hitbox_turning_to_coords, pack_orthogonal_push_direction);
-                            player_hit_by_blue_in_turn = false;
+                            pack_turn_state.entity_to_fall_after_blue_not_blue_turn_timer = pack_turn_state.pack_intermediate_states_timer + 4; // this number is magic (sorry); it is the frame count that makes the entity fall as soon as possible, i.e., at the same time as the player (if magenta-not-magenta)
+                            pack_turn_state.entity_to_fall_after_blue_not_blue_turn_coords = getNextCoords(pack_turn_state.pack_hitbox_turning_to_coords, pack_turn_state.pack_orthogonal_push_direction);
+                            pack_turn_state.player_hit_by_blue_in_turn = false;
                         }
                     }
                 }
@@ -4899,18 +4901,18 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-        if (entity_to_fall_after_blue_not_blue_turn_timer > 0)
+        if (pack_turn_state.entity_to_fall_after_blue_not_blue_turn_timer > 0)
         {
-            if (entity_to_fall_after_blue_not_blue_turn_timer == 1) 
+            if (pack_turn_state.entity_to_fall_after_blue_not_blue_turn_timer == 1) 
             {
-                if (isPushable(getTileType(entity_to_fall_after_blue_not_blue_turn_coords))) doFallingEntity(getEntityPointer(entity_to_fall_after_blue_not_blue_turn_coords), true);
+                if (isPushable(getTileType(pack_turn_state.entity_to_fall_after_blue_not_blue_turn_coords))) doFallingEntity(getEntityPointer(pack_turn_state.entity_to_fall_after_blue_not_blue_turn_coords), true);
             }
-            entity_to_fall_after_blue_not_blue_turn_timer--;
+            pack_turn_state.entity_to_fall_after_blue_not_blue_turn_timer--;
         }
 
         // pack detach logic
         TileType tile_behind_player = getTileType(getNextCoords(player->coords, oppositeDirection(player->direction)));
-        if (!pack_detached && pack_intermediate_states_timer == 0 && tile_behind_player != PACK) pack_detached = true;
+        if (!pack_detached && pack_turn_state.pack_intermediate_states_timer == 0 && tile_behind_player != PACK) pack_detached = true;
         else if (pack_detached && tile_behind_player == PACK) pack_detached = false;
 
         // do animations
@@ -4946,7 +4948,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         resetFirstFall(pack);
 
 		// handle turning hitboxes
-        if (pack_hitbox_turning_to_timer > 0) pack_hitbox_turning_to_timer--;
+        if (pack_turn_state.pack_hitbox_turning_to_timer > 0) pack_turn_state.pack_hitbox_turning_to_timer--;
 
         // decrement trailing hitboxes 
         FOR(i, MAX_TRAILING_HITBOX_COUNT) if (trailing_hitboxes[i].frames > 0) trailing_hitboxes[i].frames--;

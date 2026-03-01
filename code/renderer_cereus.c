@@ -164,7 +164,8 @@ typedef struct VulkanState
     VkFence* in_flight_fences; 
     VkFence* images_in_flight;
 
-    VkPipelineLayout sprite_pipeline_layout;
+    VkPipelineLayout graphics_pipeline_layout;
+
     VkPipeline sprite_pipeline_handle;
 
     VkPipelineLayout cube_pipeline_layout; 
@@ -1828,7 +1829,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles)
 
     vkCreateDescriptorPool(vulkan_state.logical_device_handle, &descriptor_pool_creation_info, 0, &vulkan_state.descriptor_pool);
 
-	// CREATE TRIANGLE GRAPHICS PIPELINE LAYOUT
+	// MAIN GRAPHICS PIPELINE LAYOUT
 
     {
         VkPushConstantRange push_constant_range = {0};
