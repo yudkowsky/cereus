@@ -18,7 +18,7 @@ const Int2 SCREEN_RESOLUTION = { 1920, 1080 };
 
 const uint32 CUBE_INSTANCE_CAPACITY = 8192;
 
-// TODO(spike): set these in loadAsset where stb_image gives me width / height. store in CachedAsset.
+// TODO: set these in loadAsset where stb_image gives me width / height. store in CachedAsset.
 const int32 ATLAS_2D_WIDTH = 128;
 const int32 ATLAS_2D_HEIGHT = 128;
 const int32 ATLAS_FONT_WIDTH = 120;
@@ -96,7 +96,7 @@ typedef struct CachedAsset
 }
 CachedAsset;
 
-typedef struct PushConstants // TODO(spike): rename
+typedef struct PushConstants // TODO: rename
 {
     float model[16];
     float view[16];
@@ -164,8 +164,8 @@ typedef struct RendererState
     VkFence* in_flight_fences; 
     VkFence* images_in_flight; // for each swapchain image, when GPU finishes that submission, the fence signals; we store the fence to check if image is still in flight.
 
-    VkShaderModule vertex_shader_module_handle; // TODO(spike): rename
-    VkShaderModule fragment_shader_module_handle; // TODO(spike): rename
+    VkShaderModule vertex_shader_module_handle; // TODO: rename
+    VkShaderModule fragment_shader_module_handle; // TODO: rename
     VkShaderModule outline_fragment_shader_module_handle;
     VkShaderModule laser_vertex_shader_module_handle;
     VkShaderModule laser_fragment_shader_module_handle;
@@ -176,7 +176,7 @@ typedef struct RendererState
 
     VkPipeline sprite_pipeline_handle;
 
-    VkPipelineLayout graphics_pipeline_layout; // TODO(spike): rename
+    VkPipelineLayout graphics_pipeline_layout; // TODO: rename
 
     VkPipeline cube_pipeline_handle;
     VkPipelineLayout cube_pipeline_layout; 
@@ -302,7 +302,7 @@ uint32 frame_vertex_count = 0;
 Sprite sprite_instances[8192];
 uint32 sprite_instance_count = 0;
 
-Cube cube_instances[8192]; // TODO(spike): remove this and below when have full model support
+Cube cube_instances[8192]; // TODO: remove this and below when have full model support
 uint32 cube_instance_count = 0;
 
 Cube outline_instances[1024];
@@ -1114,13 +1114,13 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
 
             if (local_present_family_index == -1 && can_present) local_present_family_index = (int)family_increment;
 
-            // NOTE(spike): some inconsistencies with where properties are checked, but this is
-            // 				still safe, just a bit less readable. also avoids redoing some checks.
+            // NOTE: some inconsistencies with where properties are checked, but this is
+            // 		 still safe, just a bit less readable. also avoids redoing some checks.
             if (local_graphics_family_index != -1 && local_present_family_index != -1)
             {
                 uint32 device_extension_count = 0;
                 vkEnumerateDeviceExtensionProperties(physical_devices[device_increment], 0, &device_extension_count, 0);
-                VkExtensionProperties* extensions = malloc(sizeof(*extensions) * device_extension_count); // NOTE(spike): may be malloc(0)
+                VkExtensionProperties* extensions = malloc(sizeof(*extensions) * device_extension_count); // NOTE: may be malloc(0)
                 vkEnumerateDeviceExtensionProperties(physical_devices[device_increment], 0, &device_extension_count, extensions);
 
                 bool has_swapchain = false;
@@ -1184,7 +1184,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
 
     VkSurfaceFormatKHR chosen_surface_format = surface_formats[0]; // some random guaranteed - will now overwrite if possible
 
-	// TODO(spike): handle edge case where only one surface format, equal to VK_FORMAT_UNDEFINED
+	// TODO: handle edge case where only one surface format, equal to VK_FORMAT_UNDEFINED
     for (uint32 surface_format_increment = 0; surface_format_increment < surface_format_count; surface_format_increment++)
     {
 		if (surface_formats[surface_format_increment].format == VK_FORMAT_B8G8R8A8_SRGB && surface_formats[surface_format_increment].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
@@ -1264,7 +1264,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
     if (chosen_extent.width == UINT32_MAX) // if UINT32_MAX here, no size is set, so we have to grab window dimensions ourselves
     {
 		RECT window_rect = {0};
-        GetClientRect(renderer_state.platform_handles.window_handle, &window_rect); // TODO(spike): why does this function call work?? secret <windows.h> hiding somewhere?
+        GetClientRect(renderer_state.platform_handles.window_handle, &window_rect); // TODO: why does this function call work?? secret <windows.h> hiding somewhere?
 		uint32 window_width = (uint32)(window_rect.right - window_rect.left);
 		uint32 window_height = (uint32)(window_rect.bottom - window_rect.top);
 
@@ -1346,7 +1346,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
 	swapchain_creation_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     swapchain_creation_info.presentMode = chosen_present_mode;
     swapchain_creation_info.preTransform = surface_capabilities.currentTransform;
-    swapchain_creation_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; // TODO(spike): should set this as something available from my surface_capabilities.supportedCompositeAlpha
+    swapchain_creation_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; // TODO: should set this as something available from my surface_capabilities.supportedCompositeAlpha
    	swapchain_creation_info.clipped = VK_TRUE;
     swapchain_creation_info.oldSwapchain = VK_NULL_HANDLE;
 
@@ -1553,7 +1553,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
         vkCreateSemaphore(renderer_state.logical_device_handle, &semaphore_info, 0, &renderer_state.render_finished_semaphores[frames_in_flight_increment]);
         vkCreateFence(renderer_state.logical_device_handle, &fence_info, 0, &renderer_state.in_flight_fences[frames_in_flight_increment]);
 
-        // TODO(spike): should do some bailouts here
+        // TODO: should do some bailouts here
 	}
 
     // used in the draw loop:
@@ -1745,7 +1745,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
     vkCreateShaderModule(renderer_state.logical_device_handle, &model_frag_shader_module_ci, 0, &renderer_state.model_fragment_shader_module_handle);
     free(model_frag_bytes);
 
-    // TODO(spike): try moving below into their respective setups later
+    // TODO: try moving below into their respective setups later
     // vertex shader stage
     VkPipelineShaderStageCreateInfo vertex_shader_stage_create_info = {0};
     vertex_shader_stage_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -1815,8 +1815,8 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
     model_frag_stage_ci.module = renderer_state.model_fragment_shader_module_handle;
     model_frag_stage_ci.pName = "main";
 
-    VkPipelineShaderStageCreateInfo shader_stages[2]  = { vertex_shader_stage_create_info, fragment_shader_stage_create_info }; // TODO(spike): rename standard_ or somelike
-    VkPipelineShaderStageCreateInfo outline_stages[2] = { outline_vert_stage_ci, outline_frag_shader_stage_ci }; // TODO(spike): consistent naming in general
+    VkPipelineShaderStageCreateInfo shader_stages[2]  = { vertex_shader_stage_create_info, fragment_shader_stage_create_info }; // TODO: rename standard_ or somelike
+    VkPipelineShaderStageCreateInfo outline_stages[2] = { outline_vert_stage_ci, outline_frag_shader_stage_ci }; // TODO: consistent naming in general
     VkPipelineShaderStageCreateInfo laser_stages[2]   = { laser_vert_stage_create_info, laser_frag_stage_create_info };
     VkPipelineShaderStageCreateInfo sprite_stages[2]  = { sprite_vert_stage_ci, sprite_frag_stage_ci };
    	VkPipelineShaderStageCreateInfo model_stages[2]   = { model_vert_stage_ci, model_frag_stage_ci };
@@ -1992,7 +1992,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
 	// descriptors + pipeline layout (shared by sprite and cube pipelines)
 
     VkSamplerCreateInfo sampler_creation_info = {0};
-    sampler_creation_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO; // TODO(spike): double check all this info at some point
+    sampler_creation_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO; // TODO: double check all this info at some point
     sampler_creation_info.magFilter = VK_FILTER_NEAREST;
     sampler_creation_info.minFilter = VK_FILTER_NEAREST;
     sampler_creation_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
@@ -2206,7 +2206,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
 
         vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &outline_ci, 0, &renderer_state.outline_pipeline_handle);
 
-        // TODO(spike): is this needed? if decide yes, then add this to the other pipelines as well
+        // TODO: is this needed? if decide yes, then add this to the other pipelines as well
         rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_FILL;
         depth_stencil_state_creation_info.depthWriteEnable  = VK_TRUE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
@@ -2467,7 +2467,7 @@ void rendererDraw(void)
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
     
-	vkCmdSetViewport(command_buffer, 0, 1, &viewport); // TODO(spike): look at this more
+	vkCmdSetViewport(command_buffer, 0, 1, &viewport); // TODO: look at this more
 	VkRect2D scissor = {0};
     scissor.offset.x = 0;
     scissor.offset.y = 0;
@@ -2648,7 +2648,7 @@ void rendererDraw(void)
         }
 
         float model_matrix[16];
-        Vec4 identity_quaternion = { 0, 0, 0, 1}; // TODO(spike): make global
+        Vec4 identity_quaternion = { 0, 0, 0, 1}; // TODO: make global
         mat4BuildTRS(model_matrix, sprite->coords, identity_quaternion, sprite->size);
 
         PushConstants push_constants = {0};
@@ -2723,7 +2723,7 @@ void rendererDraw(void)
 
 void rendererResize(uint32 width, uint32 height)
 {
-    (void)width; // TODO(spike): get rid of these when we actually use these variables
+    (void)width; // TODO: get rid of these when we actually use these variables
     (void)height;
 }
 

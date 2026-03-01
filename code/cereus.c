@@ -1,8 +1,8 @@
 #include "win32_cereus_bridge.h"
 #include "worldstate_structs.h"
-#include <string.h> // TODO(spike): temporary, for memset
-#include <math.h> // TODO(spike): also temporary, for sin/cos
-#include <stdio.h> // TODO(spike): "temporary", for fopen 
+#include <string.h> // TODO: temporary, for memset
+#include <math.h> // TODO: also temporary, for sin/cos
+#include <stdio.h> // TODO: "temporary", for fopen 
 
 #include <windows.h>
 #ifdef VOID
@@ -11,7 +11,7 @@
 
 #define FOR(i, n) for (int i = 0; i < n; i++)
 
-const int32 SCREEN_WIDTH_PX = 1920; // TODO(spike): get from platform layer
+const int32 SCREEN_WIDTH_PX = 1920; // TODO: get from platform layer
 const int32	SCREEN_HEIGHT_PX = 1080;
 
 const float TAU = 6.2831853071f;
@@ -122,7 +122,7 @@ float camera_lerp_t = 0.0f;
 const float CAMERA_T_TIMESTEP = 0.05f;
 CameraMode camera_mode = MAIN_WAITING;
 
-int32 camera_target_plane = 0; // plane that camera wants to target TODO(spike): should probably be something defined by level, not just player coords at startup
+int32 camera_target_plane = 0; // plane that camera wants to target TODO: should probably be something defined by level, not just player coords at startup
 
 AssetToLoad assets_to_load[1024] = {0};
 
@@ -729,7 +729,7 @@ bool readChunkHeader(FILE* file, char out_tag[4], int32 *out_size)
 }
 
 // gets position and count of some chunk tag. cursor placed right before chunk tag
-// TODO(spike): should this be tag[3] or tag[4]? this fixes bug with CMRAL tag passed, but not sure i fully understand why
+// TODO: should this be tag[3] or tag[4]? this fixes bug with CMRAL tag passed, but not sure i fully understand why
 int32 getCountAndPositionOfChunk(FILE* file, char tag[3], int32 positions[64])
 {
 	char chunk[4] = {0};
@@ -1113,7 +1113,7 @@ void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
         }
         else
         {
-            // TODO(spike): maybe collapse
+            // TODO: maybe collapse
             fwrite(&rb->reset_info[to_reset_index].start_coords.x, 4, 1, file);
             fwrite(&rb->reset_info[to_reset_index].start_coords.y, 4, 1, file);
             fwrite(&rb->reset_info[to_reset_index].start_coords.z, 4, 1, file);
@@ -1346,7 +1346,7 @@ SpriteId getModelId(TileType tile)
     }
 }
 
-// TODO(spike):
+// TODO:
 // drawAsset is slow (>1mspt by itself) likely due to cache misses on AssetToDraw (CUBE_3D_*** accessing ~9MB into array)
 // when we have actual 3D models, hopefully can cut this size hugely, because we won't have >1000 of the same entity on screen, probably? right now its basically all VOIDs 
 void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation, Vec3 color)
@@ -1363,7 +1363,7 @@ void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotati
     a->instance_count++;
 }
 
-// TODO(spike): this code was meant to be temporary but i don't seem to have changed it. maybe do! or at least clean it up a bit if decide to keep
+// TODO: this code was meant to be temporary but i don't seem to have changed it. maybe do! or at least clean it up a bit if decide to keep
 // uses color as alpha channel.
 void drawText(char* string, Vec2 coords, float scale, float alpha)
 {
@@ -2265,10 +2265,10 @@ int32 findNextFreeInLaserBuffer()
     return -1;
 }
 
-// TODO(spike): - need guard on offset_magnitude in the mirrors: if too close to edge, don't want to allow reflection
-// 				- look if we need to round from position_norm instead of checking if player is turning for some calculations; does this handle first falls vs. other falls correctly..? maybe yes, but should probably fix this anyway
-// 				- figure out moving sources and their lasers
-// 				- two mirrors moving at once isnt handled.
+// TODO: - need guard on offset_magnitude in the mirrors: if too close to edge, don't want to allow reflection
+// 		 - look if we need to round from position_norm instead of checking if player is turning for some calculations; does this handle first falls vs. other falls correctly..? maybe yes, but should probably fix this anyway
+// 		 - figure out moving sources and their lasers
+// 		 - two mirrors moving at once isnt handled.
 
 void updateLaserBuffer(void)
 {
@@ -2387,13 +2387,17 @@ void updateLaserBuffer(void)
 
                 if (real_hit_type == PLAYER)
                 {
-                    if (!th_hit && player->in_motion > STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH)
+                    bool do_passthrough = false;
+                    bool direction_on_axis = false;
+                    if (!th_hit && player->in_motion > STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH) do_passthrough = true;
+                    if (player->moving_direction == current_direction || player->moving_direction == oppositeDirection(current_direction)) direction_on_axis = true;
+                    if (do_passthrough && !direction_on_axis)
                     {
-                        // passthrough
                         current_tile_coords = getNextCoords(current_tile_coords, current_direction);
                         continue;
                     }
-                    lb->end_coords = intCoordsToNorm(current_tile_coords);
+                    if (direction_on_axis) lb->end_coords = player->position_norm;
+                    else lb->end_coords = intCoordsToNorm(current_tile_coords);
                     LaserColor laser_color = colorToLaserColor(lb->color);
                     if (laser_color.red) player->hit_by_red = true;
                     if (laser_color.green) 
@@ -2428,7 +2432,9 @@ void updateLaserBuffer(void)
                             if (player_turning) passthrough_comparison = PUSH_FROM_TURN_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH;
                             else passthrough_comparison = STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH; 
 
-                            if (mirror->moving_direction == oppositeDirection(current_direction))
+                            bool direction_on_axis = false;
+                            if (mirror->moving_direction == current_direction || mirror->moving_direction == oppositeDirection(current_direction)) direction_on_axis = true;
+                            if (direction_on_axis)
                             {
                                 Vec3 offset_test = vec3Subtract(prev_lb.end_coords, intCoordsToNorm(current_tile_coords));
                                 if (laser_turn_index == 0 || (offset_test.x == 0 && offset_test.y == 0) || (offset_test.x == 0 && offset_test.z == 0) || (offset_test.y == 0 && offset_test.z == 0))
@@ -2585,13 +2591,21 @@ void updateLaserBuffer(void)
                     if (isEntity(real_hit_type))
                     {
                         Entity* e = getEntityPointer(current_tile_coords);
-                        if (!th_hit && e->in_motion > STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH)
+                        if (e)
                         {
-                            current_tile_coords = getNextCoords(current_tile_coords, current_direction);
-                            continue;
+                            bool do_passthrough = false;
+                            bool direction_on_axis = false;
+                            if (!th_hit && e->in_motion > STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH) do_passthrough = true;
+                            if (e->moving_direction == current_direction || e->moving_direction == oppositeDirection(current_direction)) direction_on_axis = true;
+                            if (do_passthrough && !direction_on_axis)
+                            {
+                                current_tile_coords = getNextCoords(current_tile_coords, current_direction);
+                                continue;
+                            }
+                            if (direction_on_axis) lb->end_coords = e->position_norm; // TODO: this feels like it should create problems with 2-step undo animations but it doesn't seem to. look into this more
                         }
                     }
-                    lb->end_coords = intCoordsToNorm(current_tile_coords);
+                    if (vec3IsEqual(lb->end_coords, VEC3_0)) lb->end_coords = intCoordsToNorm(current_tile_coords); // if not already updated above
                     Vec3 dir_basis = directionToVector(current_direction);
                     if (dir_basis.x == 0) lb->end_coords.x = lb->start_coords.x;
                     if (dir_basis.y == 0) lb->end_coords.y = lb->start_coords.y;
@@ -3131,8 +3145,6 @@ bool performUndo(int32 undo_animation_time)
             e->direction = delta->old_direction;
             e->rotation_quat = directionToQuaternion(e->direction, true);
             e->removed = delta->was_removed;
-            e->in_motion = undo_animation_time;
-            e->moving_direction = NO_DIRECTION; // TODO(spike): maybe should be doing something else here? double check with laser buffer logic. regardless will be somewhat difficult to calculate because of first/second animation cases
 
             if (!delta->was_removed)
             {
@@ -3146,94 +3158,106 @@ bool performUndo(int32 undo_animation_time)
                     int32 dy = (int32)roundf(e->position_norm.y - old_position.y);
                     int32 dz = (int32)roundf(e->position_norm.z - old_position.z);
 
-                    // a lot of edge case handling for how to interpolate undos
+                    if (dx != 0 || dy != 0 || dz != 0 || was_at_different_direction) // only do any sort of interpolation if the object moved / changed orientation
+                    {
+                        if (dx != 0 && dy != 0 && dz != 0) e->in_motion = undo_animation_time;
+                        // moving direction is updated later. TODO: note that this doesn't work with the 2-step animations (it just assumes whatever diff coord direction function returns as direction) - but should work for all 'normal' animations
 
-                    if (e->id == PLAYER_ID)
-                    {
-                        if (dy != 0 && was_at_different_direction)
+                        // a lot of edge case handling for how to interpolate undos
+                        if (e->id == PLAYER_ID)
                         {
-                            // player turn and fall
-                            Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
-                            int32 first_animation_time = undo_animation_time / 2;
-                            int32 second_animation_time = undo_animation_time - first_animation_time;
-                            createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, first_animation_time);
-                            createInterpolationAnimation(VEC3_0, VEC3_0, 0, old_rotation, e->rotation_quat, &e->rotation_quat, PLAYER_ID, second_animation_time);
-                        }
-                        else if (dy != 0 && (dx != 0 || dz != 0))
-                        {
-                            // player move and fall
-                            Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
-                            int32 first_animation_time = undo_animation_time / 2;
-                            int32 second_animation_time = undo_animation_time - first_animation_time;
-                            createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, first_animation_time);
-                            createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, second_animation_time);
-                        }
-                        else
-                        {
-                            createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, PLAYER_ID, undo_animation_time);
-                        }
-                    }
-                    else if (e->id == PACK_ID)
-                    {
-                        Int3 old_player_coords = {0};
-                        uint32 scan_pos = header->delta_start_pos;
-                        FOR(scan_index, header->entity_count)
-                        {
-                            UndoEntityDelta* d = &undo_buffer.deltas[scan_pos];
-                            if (d->id == PLAYER_ID)
+                            if (dy != 0 && was_at_different_direction)
                             {
-                                old_player_coords = d->old_coords;
-                                break;
+                                // player turn and fall
+                                Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
+                                int32 first_animation_time = undo_animation_time / 2;
+                                int32 second_animation_time = undo_animation_time - first_animation_time;
+                                createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, first_animation_time);
+                                createInterpolationAnimation(VEC3_0, VEC3_0, 0, old_rotation, e->rotation_quat, &e->rotation_quat, PLAYER_ID, second_animation_time);
+                                e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
                             }
-                            scan_pos = (scan_pos + 1) % MAX_UNDO_DELTAS;
+                            else if (dy != 0 && (dx != 0 || dz != 0))
+                            {
+                                // player move and fall
+                                Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
+                                int32 first_animation_time = undo_animation_time / 2;
+                                int32 second_animation_time = undo_animation_time - first_animation_time;
+                                createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, first_animation_time);
+                                createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, second_animation_time);
+                                e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
+                            }
+                            else
+                            {
+                                createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, PLAYER_ID, undo_animation_time);
+                                e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
+                            }
                         }
-
-                        Direction player_to_old_pack_dir = getDirectionFromCoordDiff(delta->old_coords, old_player_coords);
-                        Direction player_to_new_pack_dir = getDirectionFromCoordDiff(normCoordsToInt(old_position), old_player_coords);
-
-                        int32 clockwise_calculation = player_to_new_pack_dir - player_to_old_pack_dir;
-                        bool clockwise = (clockwise_calculation == -1 || clockwise_calculation == 3);
-
-                        if (dy == 0 && dx != 0 && dz != 0) // if dx and dz != 0 this must be a turn
+                        else if (e->id == PACK_ID)
                         {
-                            createPackRotationAnimation(intCoordsToNorm(old_player_coords), old_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, undo_animation_time);
-                        }
-                        else if (dy != 0 && dx != 0 && dz != 0) // if dx and dz != 0 this must be a turn
-                        {
-                            Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
-                            int32 first_animation_time = undo_animation_time / 2;
-                            int32 second_animation_time = undo_animation_time - first_animation_time;
-                            createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, first_animation_time);
-                            createPackRotationAnimation(intCoordsToNorm(old_player_coords), mid_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, second_animation_time);
+                            Int3 old_player_coords = {0};
+                            uint32 scan_pos = header->delta_start_pos;
+                            FOR(scan_index, header->entity_count)
+                            {
+                                UndoEntityDelta* d = &undo_buffer.deltas[scan_pos];
+                                if (d->id == PLAYER_ID)
+                                {
+                                    old_player_coords = d->old_coords;
+                                    break;
+                                }
+                                scan_pos = (scan_pos + 1) % MAX_UNDO_DELTAS;
+                            }
+
+                            Direction player_to_old_pack_dir = getDirectionFromCoordDiff(delta->old_coords, old_player_coords);
+                            Direction player_to_new_pack_dir = getDirectionFromCoordDiff(normCoordsToInt(old_position), old_player_coords);
+
+                            int32 clockwise_calculation = player_to_new_pack_dir - player_to_old_pack_dir;
+                            bool clockwise = (clockwise_calculation == -1 || clockwise_calculation == 3);
+
+                            if (dy == 0 && dx != 0 && dz != 0) // if dx and dz != 0 this must be a turn
+                            {
+                                createPackRotationAnimation(intCoordsToNorm(old_player_coords), old_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, undo_animation_time);
+                                e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
+                            }
+                            else if (dy != 0 && dx != 0 && dz != 0) // if dx and dz != 0 this must be a turn
+                            {
+                                Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
+                                int32 first_animation_time = undo_animation_time / 2;
+                                int32 second_animation_time = undo_animation_time - first_animation_time;
+                                createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, first_animation_time);
+                                createPackRotationAnimation(intCoordsToNorm(old_player_coords), mid_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, second_animation_time);
+                                e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
+                            }
+                            else if (dy != 0 && (dx != 0 || dz != 0))
+                            {
+                                // pack move and fall
+                                Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
+                                int32 first_animation_time = undo_animation_time / 2;
+                                int32 second_animation_time = undo_animation_time - first_animation_time;
+                                createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, first_animation_time);
+                                createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, second_animation_time);
+                                e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
+                            }
+                            else // pack, but just moving normally, or being pushed / falling normally, so interpolate normally
+                            {
+                                createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, PACK_ID, undo_animation_time);
+                                e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
+                            }
                         }
                         else if (dy != 0 && (dx != 0 || dz != 0))
                         {
-                            // pack move and fall
+                            // object move and fall
                             Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
                             int32 first_animation_time = undo_animation_time / 2;
                             int32 second_animation_time = undo_animation_time - first_animation_time;
                             createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, first_animation_time);
                             createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, second_animation_time);
+                            e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
                         }
-                        else // pack, but just moving normally, or being pushed / falling normally, so interpolate normally
+                        else
                         {
-                            createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, PACK_ID, undo_animation_time);
+                            createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, e->id, undo_animation_time);
+                            e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
                         }
-                    }
-                    else if (dy != 0 && (dx != 0 || dz != 0))
-                    {
-                        // object move and fall
-                        Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
-                        int32 first_animation_time = undo_animation_time / 2;
-                        int32 second_animation_time = undo_animation_time - first_animation_time;
-                        createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, first_animation_time);
-                        createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, second_animation_time);
-                    }
-                    else
-                    {
-                        createInterpolationAnimation(old_position, e->position_norm, &e->position_norm,
-                                                     old_rotation, e->rotation_quat, &e->rotation_quat,
-                                                     e->id, undo_animation_time);
                     }
                 }
             }
@@ -3435,14 +3459,14 @@ void updatePackDetached()
 	- F, G, H are used as mouse buttons
 
 	0: normal mode:
-    - WASD movement TODO(spike): add arrow keys
+    - WASD movement TODO: add arrow keys
     - Z undo
     - R restart
-    - Q interact TODO(spike): think about removing this
+    - Q interact TODO: think about removing this
 
 	1: place/break mode
     - WASD, SPACE, SHIFT: camera movement
-    - E: toggle rendering of models TODO(spike): remove this when have 3d models for everything
+    - E: toggle rendering of models TODO: remove this when have 3d models for everything
     - LMB: break block
     - RMB: place selected on normal totarget block
     - MMB: select targeted block as picked block
@@ -3452,7 +3476,7 @@ void updatePackDetached()
     - C: save camera
     - V: save alt camera
     - X: remove alt camera
-    - J: change wide camera TODO(spike): is this working?
+    - J: change wide camera TODO: is this working?
     - B: fov up
     - N: fov down
     - M: clear solved levels
@@ -3513,7 +3537,7 @@ void editorMode(TickInput *tick_input)
                     entity->position_norm = (Vec3){0};
                     entity->removed = true;
 
-                    // TODO(spike): if deleting entity, go through reset blocks and remove from reset block
+                    // TODO: if deleting entity, go through reset blocks and remove from reset block
                 }
                 setTileType(NONE, raycast_output.hit_coords);
                 setTileDirection(NORTH, raycast_output.hit_coords);
@@ -3795,7 +3819,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
 			if (time_until_game_input == 0 && tick_input.escape_press && !in_overworld)
             {
-                // leave current level if not in overworld. TODO(spike): why is saving solved levels required here?
+                // leave current level if not in overworld. TODO: why is saving solved levels required here?
                 char save_solved_levels[64][64] = {0};
                 memcpy(save_solved_levels, next_world_state.solved_levels, sizeof(save_solved_levels));
                 levelChangePrep("overworld");
@@ -4051,7 +4075,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                             }
                             else
                             {
-                                // TODO(spike): what's going on here?
                                 //doFailedClimbUpAnimation();
                                 //time_until_game_input = FAILED_CLIMB_TIME;
                             }
@@ -4239,7 +4262,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     }
                     time_until_game_input = TURN_ANIMATION_TIME;
         		}
-                else if (input_direction == oppositeDirection(player->direction)) // TODO(spike): CONTINUE (don't allow climb on all sides) 
+                else if (input_direction == oppositeDirection(player->direction))
                 {
                     if (!player_will_fall_next_turn)
                     {
@@ -4995,7 +5018,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             recordActionForUndo(&pending_undo_snapshot);
         }
 
-        // toggle drawing (TODO(spike): TEMP)
+        // toggle drawing (TEMP)
         if (tick_input.e_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
         {
             render_models = !render_models;
@@ -5036,7 +5059,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             // clear laser buffer 
             memset(laser_buffer, 0, sizeof(laser_buffer));
 
-            // draw most things (not player or pack) TODO(spike): after models can include pack here because can be DEFAULT_SCALE
+            // draw most things (not player or pack) TODO: after models can include pack here because can be DEFAULT_SCALE
             for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
             {
                 TileType draw_tile = world_state.buffer[tile_index];
@@ -5071,7 +5094,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             {
                 player = &world_state.player;
 
-                // TODO(spike): this is terrible (fix with shaders)
+                // TODO: this is terrible (fix with shaders)
                 bool hit_by_green = false;
                 if (player->green_hit.north || player->green_hit.west || player->green_hit.south || player->green_hit.east || player->green_hit.up || player->green_hit.down) hit_by_green = true;
                 if      (player->hit_by_red && hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_WHITE,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
@@ -5268,7 +5291,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (editor_state.selected_id > 0)
             {
                 Entity* e = getEntityFromId(editor_state.selected_id);
-                if (e != 0) // TODO(spike): this guard is somewhat bad solution; i still persist selected_id even if that id doesn't exist anymore. this prevents crash, but later: on entity delete check if matches against id, and if so remove from editor_state.
+                if (e != 0) // TODO: this guard is somewhat bad solution; i still persist selected_id even if that id doesn't exist anymore. this prevents crash, but later: on entity delete check if matches against id, and if so remove from editor_state.
                 {
                     char selected_id_text[256] = {0};
                     snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d", editor_state.selected_id);
