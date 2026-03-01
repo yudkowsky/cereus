@@ -1448,7 +1448,6 @@ void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
         }
         else
         {
-            // TODO: maybe collapse
             fwrite(&rb->reset_info[to_reset_index].start_coords.x, 4, 1, file);
             fwrite(&rb->reset_info[to_reset_index].start_coords.y, 4, 1, file);
             fwrite(&rb->reset_info[to_reset_index].start_coords.z, 4, 1, file);
@@ -1681,9 +1680,6 @@ SpriteId getModelId(TileType tile)
     }
 }
 
-// TODO:
-// drawAsset is slow (>1mspt by itself) likely due to cache misses on AssetToDraw (CUBE_3D_*** accessing ~9MB into array)
-// when we have actual 3D models, hopefully can cut this size hugely, because we won't have >1000 of the same entity on screen, probably? right now its basically all VOIDs 
 void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation, Vec3 color)
 {
     if (id < 0) return;
@@ -1697,7 +1693,7 @@ void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotati
 }
 
 // TODO: this code was meant to be temporary but i don't seem to have changed it. maybe do! or at least clean it up a bit if decide to keep
-// uses color as alpha channel.
+// uses color.x as alpha channel.
 void drawText(char* string, Vec2 coords, float scale, float alpha)
 {
     float pen_x = coords.x;

@@ -164,8 +164,9 @@ typedef struct RendererState
     VkFence* in_flight_fences; 
     VkFence* images_in_flight;
 
-    VkShaderModule vertex_shader_module_handle; // TODO: rename
-    VkShaderModule fragment_shader_module_handle; // TODO: rename
+    VkShaderModule cube_vertex_shader_module_handle; // TODO: rename
+    VkShaderModule cube_fragment_shader_module_handle; // TODO: rename
+    VkShaderModule outline_vertex_shader_module_handle;
     VkShaderModule outline_fragment_shader_module_handle;
     VkShaderModule laser_vertex_shader_module_handle;
     VkShaderModule laser_fragment_shader_module_handle;
@@ -1044,6 +1045,28 @@ void loadAllEntities()
     renderer_state.loaded_models[MODEL_3D_WIN_BLOCK - MODEL_3D_VOID] = loadModel("data/assets/suzanne.glb");
 }
 
+VkPipelineShaderStageCreateInfo loadShaderStage(char* path, VkShaderModule* module, VkShaderStageFlagBits stage_bit)
+{
+    // load module
+    void* bytes = 0;
+    size_t size = 0;
+    if (!readEntireFile(path, &bytes, &size)) return (VkPipelineShaderStageCreateInfo){0};
+    VkShaderModuleCreateInfo shader_module_ci = {0};
+    shader_module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    shader_module_ci.codeSize = size;
+    shader_module_ci.pCode = (uint32*)bytes;
+    vkCreateShaderModule(renderer_state.logical_device_handle, &shader_module_ci, 0, module);
+    free(bytes);
+
+    // load stage
+    VkPipelineShaderStageCreateInfo shader_stage_ci = {0};
+    shader_stage_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shader_stage_ci.stage = stage_bit;
+    shader_stage_ci.module = *module;
+    shader_stage_ci.pName = "main";
+    return shader_stage_ci;
+}
+
 void rendererInitialize(RendererPlatformHandles platform_handles)
 {
     renderer_state.platform_handles = platform_handles;
@@ -1552,8 +1575,6 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
         vkCreateSemaphore(renderer_state.logical_device_handle, &semaphore_info, 0, &renderer_state.image_available_semaphores[frames_in_flight_increment]);
         vkCreateSemaphore(renderer_state.logical_device_handle, &semaphore_info, 0, &renderer_state.render_finished_semaphores[frames_in_flight_increment]);
         vkCreateFence(renderer_state.logical_device_handle, &fence_info, 0, &renderer_state.in_flight_fences[frames_in_flight_increment]);
-
-        // TODO: should do some bailouts here
 	}
 
     // used in the draw loop:
@@ -1561,7 +1582,6 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
     // these might return the same handle, but that's fine
     vkGetDeviceQueue(renderer_state.logical_device_handle, renderer_state.graphics_family_index, 0, &renderer_state.graphics_queue_handle);
     vkGetDeviceQueue(renderer_state.logical_device_handle, renderer_state.present_family_index, 0, &renderer_state.present_queue_handle);
-
 
 	// STAGE AND UPLOAD VERTEX / INDEX BUFFER FOR SPRITES AND CUBES
     renderer_state.sprite_index_count = 6;
@@ -1574,253 +1594,26 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
 
     renderer_state.images_in_flight = calloc(renderer_state.swapchain_image_count, sizeof(VkFence)); // calloc because we want these to start at VK_NULL_HANDLE, i.e. 0.
 
-    // SETTING UP VERTEX SHADER MODULE
+    // LOADING SHADER MODULES
 
-    void* vert_bytes = 0; // a pointer that will hold the vertex shader's SPIR-V bytes loaded from disk. 
-    size_t vert_size = 0; // holds byte count of vertex shader
-    if (!readEntireFile("data/shaders/spirv/tri.vert.spv", &vert_bytes, &vert_size))
-    {
-		return;
-    }
+    VkPipelineShaderStageCreateInfo cube_vert_shader_stage_ci 	 = loadShaderStage("data/shaders/spirv/tri.vert.spv", 	  &renderer_state.cube_vertex_shader_module_handle, 	 VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo cube_frag_shader_stage_ci 	 = loadShaderStage("data/shaders/spirv/tri.frag.spv", 	  &renderer_state.cube_fragment_shader_module_handle, 	 VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo outline_vert_shader_stage_ci = loadShaderStage("data/shaders/spirv/outline.vert.spv", &renderer_state.outline_fragment_shader_module_handle, VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo outline_frag_shader_stage_ci = loadShaderStage("data/shaders/spirv/outline.frag.spv", &renderer_state.outline_fragment_shader_module_handle, VK_SHADER_STAGE_FRAGMENT_BIT);
+	VkPipelineShaderStageCreateInfo laser_vert_shader_stage_ci 	 = loadShaderStage("data/shaders/spirv/laser.vert.spv",   &renderer_state.laser_vertex_shader_module_handle, 	 VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo laser_frag_shader_stage_ci 	 = loadShaderStage("data/shaders/spirv/laser.frag.spv",   &renderer_state.laser_fragment_shader_module_handle, 	 VK_SHADER_STAGE_FRAGMENT_BIT);
+	VkPipelineShaderStageCreateInfo sprite_vert_shader_stage_ci  = loadShaderStage("data/shaders/spirv/sprite.vert.spv",  &renderer_state.sprite_vertex_shader_module_handle, 	 VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo sprite_frag_shader_stage_ci  = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  &renderer_state.sprite_fragment_shader_module_handle,	 VK_SHADER_STAGE_FRAGMENT_BIT );
+	VkPipelineShaderStageCreateInfo model_vert_shader_stage_ci 	 = loadShaderStage("data/shaders/spirv/model.vert.spv",   &renderer_state.model_vertex_shader_module_handle, 	 VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo model_frag_shader_stage_ci 	 = loadShaderStage("data/shaders/spirv/model.frag.spv",   &renderer_state.model_fragment_shader_module_handle, 	 VK_SHADER_STAGE_FRAGMENT_BIT);
 
-    VkShaderModuleCreateInfo vertex_shader_module_creation_info = {0};
-    vertex_shader_module_creation_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    vertex_shader_module_creation_info.codeSize = vert_size;
-    vertex_shader_module_creation_info.pCode = (const uint32*)vert_bytes;
+    VkPipelineShaderStageCreateInfo cube_shader_stages[2]  	 = { cube_vert_shader_stage_ci,    cube_frag_shader_stage_ci }; 
+    VkPipelineShaderStageCreateInfo outline_shader_stages[2] = { outline_vert_shader_stage_ci, outline_frag_shader_stage_ci }; 
+    VkPipelineShaderStageCreateInfo laser_shader_stages[2]   = { laser_vert_shader_stage_ci,   laser_frag_shader_stage_ci };
+    VkPipelineShaderStageCreateInfo sprite_shader_stages[2]  = { sprite_vert_shader_stage_ci,  sprite_frag_shader_stage_ci };
+   	VkPipelineShaderStageCreateInfo model_shader_stages[2]   = { model_vert_shader_stage_ci,   model_frag_shader_stage_ci };
 
-    vkCreateShaderModule(renderer_state.logical_device_handle, &vertex_shader_module_creation_info, 0, &renderer_state.vertex_shader_module_handle);
-    free(vert_bytes);
-
-	// SETTING UP FRAGMENT SHADER MODULE
-
-    void* frag_bytes = 0;
-    size_t frag_size = 0;
-    if (!readEntireFile("data/shaders/spirv/tri.frag.spv", &frag_bytes, &frag_size))
-    {
-        return;
-    }
-
-    VkShaderModuleCreateInfo fragment_shader_module_creation_info = {0};
-    fragment_shader_module_creation_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    fragment_shader_module_creation_info.codeSize = frag_size;
-    fragment_shader_module_creation_info.pCode = (const uint32*)frag_bytes;
-
-    vkCreateShaderModule(renderer_state.logical_device_handle, &fragment_shader_module_creation_info, 0, &renderer_state.fragment_shader_module_handle);
-    free(frag_bytes);
-
-    // SETTING UP OUTLINE FRAGMENT SHADER 
-
-    void* outline_vert_bytes = 0;
-    size_t outline_vert_size = 0;
-    if (!readEntireFile("data/shaders/spirv/outline.vert.spv", &outline_vert_bytes, &outline_vert_size))
-    {
-        return;
-    }
-
-    VkShaderModuleCreateInfo outline_vert_shader_module_ci = {0};
-    outline_vert_shader_module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    outline_vert_shader_module_ci.codeSize = outline_vert_size;
-    outline_vert_shader_module_ci.pCode = (const uint32*)outline_vert_bytes;
-
-    VkShaderModule outline_vertex_shader_module_handle;
-    vkCreateShaderModule(renderer_state.logical_device_handle, &outline_vert_shader_module_ci, 0, &outline_vertex_shader_module_handle);
-    free(outline_vert_bytes);
-
-    // SETTING UP OUTLINE FRAGMENT SHADER 
-
-    void* outline_frag_bytes = 0;
-    size_t outline_frag_size = 0;
-    if (!readEntireFile("data/shaders/spirv/outline.frag.spv", &outline_frag_bytes, &outline_frag_size))
-    {
-        return;
-    }
-
-    VkShaderModuleCreateInfo outline_frag_shader_module_ci = {0};
-    outline_frag_shader_module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    outline_frag_shader_module_ci.codeSize = outline_frag_size;
-    outline_frag_shader_module_ci.pCode = (const uint32*)outline_frag_bytes;
-
-	vkCreateShaderModule(renderer_state.logical_device_handle, &outline_frag_shader_module_ci, 0, &renderer_state.outline_fragment_shader_module_handle);
-	free(outline_frag_bytes);
-
-    // SETTING UP LASER VERTEX SHADER
-
-    void* laser_vert_bytes = 0;
-    size_t laser_vert_size = 0;
-    if (!readEntireFile("data/shaders/spirv/laser.vert.spv", &laser_vert_bytes, &laser_vert_size))
-	{
-        return;
-    }
-    
-    VkShaderModuleCreateInfo laser_vert_shader_module_ci = {0};
-    laser_vert_shader_module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    laser_vert_shader_module_ci.codeSize = laser_vert_size;
-    laser_vert_shader_module_ci.pCode = (const uint32*)laser_vert_bytes;
-
-    vkCreateShaderModule(renderer_state.logical_device_handle, &laser_vert_shader_module_ci, 0, &renderer_state.laser_vertex_shader_module_handle);
-    free(laser_vert_bytes);
-
-    // SETTING UP LASER FRAGMENT SHADER
-
-    void* laser_frag_bytes = 0;
-    size_t laser_frag_size = 0;
-    if (!readEntireFile("data/shaders/spirv/laser.frag.spv", &laser_frag_bytes, &laser_frag_size))
-	{
-        return;
-    }
-    
-    VkShaderModuleCreateInfo laser_frag_shader_module_ci = {0};
-    laser_frag_shader_module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    laser_frag_shader_module_ci.codeSize = laser_frag_size;
-    laser_frag_shader_module_ci.pCode = (const uint32*)laser_frag_bytes;
-
-    vkCreateShaderModule(renderer_state.logical_device_handle, &laser_frag_shader_module_ci, 0, &renderer_state.laser_fragment_shader_module_handle);
-    free(laser_frag_bytes);
-
-    // SETTING UP SPRITE VERTEX SHADER
-
-    void* sprite_vert_bytes = 0;
-    size_t sprite_vert_size = 0;
-    if (!readEntireFile("data/shaders/spirv/sprite.vert.spv", &sprite_vert_bytes, &sprite_vert_size))
-    {
-        return;
-    }
-
-    VkShaderModuleCreateInfo sprite_vert_shader_module_ci = {0};
-    sprite_vert_shader_module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    sprite_vert_shader_module_ci.codeSize = sprite_vert_size;
-    sprite_vert_shader_module_ci.pCode = (const uint32*)sprite_vert_bytes;
-
-    vkCreateShaderModule(renderer_state.logical_device_handle, &sprite_vert_shader_module_ci, 0, &renderer_state.sprite_vertex_shader_module_handle);
-    free(sprite_vert_bytes);
-
-    // SETTING UP SPRITE FRAGMENT SHADER
-
-    void* sprite_frag_bytes = 0;
-    size_t sprite_frag_size = 0;
-    if (!readEntireFile("data/shaders/spirv/sprite.frag.spv", &sprite_frag_bytes, &sprite_frag_size))
-    {
-        return;
-    }
-
-    VkShaderModuleCreateInfo sprite_frag_shader_module_ci = {0};
-    sprite_frag_shader_module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    sprite_frag_shader_module_ci.codeSize = sprite_frag_size;
-    sprite_frag_shader_module_ci.pCode = (const uint32*)sprite_frag_bytes;
-
-    vkCreateShaderModule(renderer_state.logical_device_handle, &sprite_frag_shader_module_ci, 0, &renderer_state.sprite_fragment_shader_module_handle);
-    free(sprite_frag_bytes);
-
-    // SETTING UP MODEL VERTEX SHADER
-
-    void* model_vert_bytes = 0;
-    size_t model_vert_size = 0;
-    if (!readEntireFile("data/shaders/spirv/model.vert.spv", &model_vert_bytes, &model_vert_size))
-    {
-        return;
-    }
-
-    VkShaderModuleCreateInfo model_vert_shader_module_ci = {0};
-    model_vert_shader_module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    model_vert_shader_module_ci.codeSize = model_vert_size;
-    model_vert_shader_module_ci.pCode = (const uint32*)model_vert_bytes;
-
-    vkCreateShaderModule(renderer_state.logical_device_handle, &model_vert_shader_module_ci, 0, &renderer_state.model_vertex_shader_module_handle);
-    free(model_vert_bytes);
-
-    // SETTING UP MODEL FRAGMENT SHADER
-
-    void* model_frag_bytes = 0;
-    size_t model_frag_size = 0;
-    if (!readEntireFile("data/shaders/spirv/model.frag.spv", &model_frag_bytes, &model_frag_size))
-    {
-        return;
-    }
-
-    VkShaderModuleCreateInfo model_frag_shader_module_ci = {0};
-    model_frag_shader_module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    model_frag_shader_module_ci.codeSize = model_frag_size;
-    model_frag_shader_module_ci.pCode = (const uint32*)model_frag_bytes;
-
-    vkCreateShaderModule(renderer_state.logical_device_handle, &model_frag_shader_module_ci, 0, &renderer_state.model_fragment_shader_module_handle);
-    free(model_frag_bytes);
-
-    // TODO: try moving below into their respective setups later
-    // vertex shader stage
-    VkPipelineShaderStageCreateInfo vertex_shader_stage_create_info = {0};
-    vertex_shader_stage_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertex_shader_stage_create_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertex_shader_stage_create_info.module = renderer_state.vertex_shader_module_handle;
-    vertex_shader_stage_create_info.pName = "main";
-
-    // fragment shader stage
-    VkPipelineShaderStageCreateInfo fragment_shader_stage_create_info = {0};
-    fragment_shader_stage_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragment_shader_stage_create_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragment_shader_stage_create_info.module = renderer_state.fragment_shader_module_handle;
-    fragment_shader_stage_create_info.pName = "main";
-
-    // outline vertex shader stage
-    VkPipelineShaderStageCreateInfo outline_vert_stage_ci = {0};
-    outline_vert_stage_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    outline_vert_stage_ci.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    outline_vert_stage_ci.module = outline_vertex_shader_module_handle;  // Use dedicated outline vertex shader
-    outline_vert_stage_ci.pName = "main";
-
-    // outline fragment shader stage
-    VkPipelineShaderStageCreateInfo outline_frag_shader_stage_ci = {0};
-	outline_frag_shader_stage_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-	outline_frag_shader_stage_ci.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-	outline_frag_shader_stage_ci.module = renderer_state.outline_fragment_shader_module_handle;
-	outline_frag_shader_stage_ci.pName = "main";
-
-    // laser vertex shader
-    VkPipelineShaderStageCreateInfo laser_vert_stage_create_info = {0};
-    laser_vert_stage_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    laser_vert_stage_create_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    laser_vert_stage_create_info.module = renderer_state.laser_vertex_shader_module_handle;
-    laser_vert_stage_create_info.pName = "main";
-
-    // laser fragment shader
-    VkPipelineShaderStageCreateInfo laser_frag_stage_create_info = {0};;
-    laser_frag_stage_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-	laser_frag_stage_create_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    laser_frag_stage_create_info.module = renderer_state.laser_fragment_shader_module_handle;
-    laser_frag_stage_create_info.pName = "main";
-
-    // sprite vertex shader
-    VkPipelineShaderStageCreateInfo sprite_vert_stage_ci = {0};
-    sprite_vert_stage_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    sprite_vert_stage_ci.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    sprite_vert_stage_ci.module = renderer_state.sprite_vertex_shader_module_handle;
-    sprite_vert_stage_ci.pName = "main";
-
-    // sprite fragment shader
-    VkPipelineShaderStageCreateInfo sprite_frag_stage_ci = {0};
-    sprite_frag_stage_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    sprite_frag_stage_ci.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    sprite_frag_stage_ci.module = renderer_state.sprite_fragment_shader_module_handle;
-    sprite_frag_stage_ci.pName = "main";
-
-    // model vertex shader
-    VkPipelineShaderStageCreateInfo model_vert_stage_ci = {0};
-    model_vert_stage_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    model_vert_stage_ci.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    model_vert_stage_ci.module = renderer_state.model_vertex_shader_module_handle;
-    model_vert_stage_ci.pName = "main";
-
-    VkPipelineShaderStageCreateInfo model_frag_stage_ci = {0};
-    model_frag_stage_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    model_frag_stage_ci.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    model_frag_stage_ci.module = renderer_state.model_fragment_shader_module_handle;
-    model_frag_stage_ci.pName = "main";
-
-    VkPipelineShaderStageCreateInfo shader_stages[2]  = { vertex_shader_stage_create_info, fragment_shader_stage_create_info }; // TODO: rename standard_ or somelike
-    VkPipelineShaderStageCreateInfo outline_stages[2] = { outline_vert_stage_ci, outline_frag_shader_stage_ci }; // TODO: consistent naming in general
-    VkPipelineShaderStageCreateInfo laser_stages[2]   = { laser_vert_stage_create_info, laser_frag_stage_create_info };
-    VkPipelineShaderStageCreateInfo sprite_stages[2]  = { sprite_vert_stage_ci, sprite_frag_stage_ci };
-   	VkPipelineShaderStageCreateInfo model_stages[2]   = { model_vert_stage_ci, model_frag_stage_ci };
-
+    // vertex input
     // simple vertex input (sprites, outlines, lasers)
     VkVertexInputBindingDescription vertex_binding_simple = {0};
     vertex_binding_simple.binding = 0;
@@ -2128,12 +1921,12 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
         vkCreatePipelineLayout(renderer_state.logical_device_handle, &model_pipeline_layout_ci, 0, &renderer_state.model_pipeline_layout);
     }
 
-    // base graphics pipeline info
+    // BASE GRAPHICS PIPELINE INFO
 
    	VkGraphicsPipelineCreateInfo base_graphics_pipeline_creation_info = {0}; // struct that points to all those sub-blocks we just defined; it actually builds the pipeline object
 	base_graphics_pipeline_creation_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 	base_graphics_pipeline_creation_info.stageCount = 2;
-	base_graphics_pipeline_creation_info.pStages = shader_stages;
+	base_graphics_pipeline_creation_info.pStages = cube_shader_stages;
 	base_graphics_pipeline_creation_info.pVertexInputState = &vertex_input_simple;
 	base_graphics_pipeline_creation_info.pInputAssemblyState = &input_assembly_state_creation_info;
 	base_graphics_pipeline_creation_info.pViewportState = &viewport_state_creation_info;
@@ -2168,7 +1961,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_ALWAYS;
 
         VkGraphicsPipelineCreateInfo sprite_ci = base_graphics_pipeline_creation_info;
-        sprite_ci.pStages = sprite_stages;
+        sprite_ci.pStages = sprite_shader_stages;
         vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &sprite_ci, 0, &renderer_state.sprite_pipeline_handle);
     }
 
@@ -2201,7 +1994,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
         rasterization_state_creation_info.lineWidth = 1.0f;
 
 		VkGraphicsPipelineCreateInfo outline_ci = base_graphics_pipeline_creation_info;
-        outline_ci.pStages = outline_stages;
+        outline_ci.pStages = outline_shader_stages;
         outline_ci.layout = renderer_state.outline_pipeline_layout; // use outline pipeline layout (no descriptors)
 
         vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &outline_ci, 0, &renderer_state.outline_pipeline_handle);
@@ -2233,7 +2026,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
         rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
 
         VkGraphicsPipelineCreateInfo laser_ci = base_graphics_pipeline_creation_info;
-        laser_ci.pStages = laser_stages;
+        laser_ci.pStages = laser_shader_stages;
         laser_ci.layout = renderer_state.laser_pipeline_layout;
 
         vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &laser_ci, 0, &renderer_state.laser_pipeline_handle);
@@ -2261,7 +2054,7 @@ void rendererInitialize(RendererPlatformHandles platform_handles)
         rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
         VkGraphicsPipelineCreateInfo model_ci = base_graphics_pipeline_creation_info;
-        model_ci.pStages = model_stages;
+        model_ci.pStages = model_shader_stages;
         model_ci.layout = renderer_state.model_pipeline_layout;
 
         vkCreateGraphicsPipelines(renderer_state.logical_device_handle, VK_NULL_HANDLE, 1, &model_ci, 0, &renderer_state.model_pipeline_handle);
