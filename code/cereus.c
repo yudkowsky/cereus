@@ -445,7 +445,8 @@ const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 
 const double DEFAULT_PHYSICS_TIMESTEP = 1.0/60.0;
 double physics_timestep = 1.0/60.0;
-double accumulator = 0;
+double physics_accumulator = 0;
+double timer_accumulator = 0;
 
 const char debug_level_name[64] = "overworld";
 const char relative_start_level_path_buffer[64] = "data/levels/";
@@ -522,6 +523,8 @@ Int3 player_ghost_coords = {0};
 Int3 pack_ghost_coords = {0};
 Direction player_ghost_direction = {0};
 Direction pack_ghost_direction = {0};
+bool do_player_ghost = false;
+bool do_pack_ghost = false;
 
 // CAMERA HELPERS
 
@@ -4008,7 +4011,10 @@ void editorMode(TickInput *tick_input)
 void gameFrame(double delta_time, TickInput tick_input)
 {	
     if (delta_time > 0.1) delta_time = 0.1;
-    accumulator += delta_time;
+    physics_accumulator += delta_time;
+
+    Entity* player = &next_world_state.player;
+    Entity* pack = &next_world_state.pack;
 
     // camera input (always at 60hz)
     if (editor_state.editor_mode != NO_MODE)
@@ -4087,11 +4093,9 @@ void gameFrame(double delta_time, TickInput tick_input)
         memset(&editor_state.edit_buffer, 0, sizeof(editor_state.edit_buffer));
     }
 
-    while (accumulator >= physics_timestep)
+    while (physics_accumulator >= physics_timestep)
    	{
 		next_world_state = world_state;
-        Entity* player = &next_world_state.player;
-        Entity* pack = &next_world_state.pack;
 
         debug_text_coords = DEBUG_TEXT_COORDS_START;
 
@@ -4958,8 +4962,8 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (undos_performed > 0 && !tick_input.z_press) undos_performed = 0;
 
         // decide which ghosts to render, if ghosts should be rendered
-        bool do_player_ghost = false;
-        bool do_pack_ghost = false;
+        do_player_ghost = false;
+        do_pack_ghost = false;
 		if (calculateGhosts())
         {
             do_player_ghost = true;
@@ -5362,156 +5366,8 @@ void gameFrame(double delta_time, TickInput tick_input)
         // finished updating state
         world_state = next_world_state;
 
-		// DRAW 3D
-        {
-            // draw lasers
-            FOR(laser_buffer_index, 64)
-            {
-                LaserBuffer lb = laser_buffer[laser_buffer_index];
-                if (lb.color == NO_COLOR) continue;
-
-                Vec3 diff = vec3Subtract(lb.end_coords, lb.start_coords);
-                Vec3 center = vec3Add(lb.start_coords, vec3ScalarMultiply(diff, 0.5));
-
-                float length = vec3Length(diff);
-                Vec3 scale = { LASER_WIDTH, LASER_WIDTH, length };
-                Vec4 rotation = directionToQuaternion(lb.direction, true);
-				
-                drawAsset(CUBE_3D_LASER_GREEN, LASER, center, scale, rotation, colorToRGB(lb.color));
-            }
-
-            // show start points
-            FOR(lb_index, 64)
-            {
-                LaserBuffer lb = laser_buffer[lb_index];
-                if (vec3IsEqual(lb.start_coords, VEC3_0)) continue;
-                char lb_text[256] = {0};
-                snprintf(lb_text, sizeof(lb_text), "lb start coords: %.2f, %.2f, %.2f, lb end coords: %.2f, %.2f, %.2f", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z);
-                if (do_debug_text) drawDebugText(lb_text);
-            }
-
-            // clear laser buffer 
-            memset(laser_buffer, 0, sizeof(laser_buffer));
-
-            // draw most things (not player or pack) TODO: after models can include pack here because can be DEFAULT_SCALE
-            for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
-            {
-                TileType draw_tile = world_state.buffer[tile_index];
-                if (draw_tile == NONE || draw_tile == PLAYER || draw_tile == PACK) continue;
-                if (isEntity(draw_tile))
-                {
-                    Entity* e = getEntityPointer(bufferIndexToCoords(tile_index));
-
-                    if (e->locked) draw_tile = LOCKED_BLOCK;
-					if (draw_tile == WIN_BLOCK)
-                    {
-                        if (in_overworld && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
-                        else if (!in_overworld && findInSolvedLevels(next_world_state.level_name) != -1) draw_tile = WON_BLOCK;
-                    }
-
-                    if (render_models)
-                    {
-                        drawAsset(getModelId(draw_tile), MODEL_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0);
-                    }
-                    else
-                    {
-                        drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0); 
-                    }
-                }
-                else
-                {
-                    drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false), VEC3_0);
-                }
-            }
-
-            if (!world_state.player.removed)
-            {
-                player = &world_state.player;
-
-                // TODO: this is terrible (fix with shaders)
-                bool hit_by_green = false;
-                if (player->green_hit.north || player->green_hit.west || player->green_hit.south || player->green_hit.east || player->green_hit.up || player->green_hit.down) hit_by_green = true;
-                if      (player->hit_by_red && hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_WHITE,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
-                else if (player->hit_by_red && hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_YELLOW,  CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
-                else if (player->hit_by_red &&      	       player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
-                else if (             		   hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_CYAN,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
-                else if (player->hit_by_red                 	  				  ) drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
-                else if (             		   hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_GREEN,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
-                else if (                            		   player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
-                else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
-
-                if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, true), VEC3_0);
-                if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, true),   VEC3_0);
-            }
-            if (!world_state.pack.removed) drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat, VEC3_0);
-        }
-
-        // draw camera boundary lines
-		if (time_until_meta_input == 0 && tick_input.t_press && !(editor_state.editor_mode == SELECT_WRITE))
-        {
-            draw_level_boundary = !draw_level_boundary;
-            if (draw_level_boundary) createDebugPopup("level / camera boundary visibility on", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
-            else			   		 createDebugPopup("level / camera boundary visibility off", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
-			time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
-        }
-        if (draw_level_boundary)
-        {
-			if (in_overworld)
-            {
-            	// draw camera screen lines
-                int32 x_draw_offset = 0;
-                int32 z_draw_offset = 0;
-
-                Vec3 x_wall_scale = { (float)OVERWORLD_SCREEN_SIZE_X, 5, 0.01f };
-                Vec3 z_wall_scale = { 0.01f, 5, (float)OVERWORLD_SCREEN_SIZE_Z };
-
-                FOR(z_index, 18)
-                {
-                    FOR(x_index, 12)
-                    {
-                        Vec3 x_draw_coords = (Vec3)
-                        { 
-                            (float)(x_draw_offset + OVERWORLD_CAMERA_CENTER_START.x), 3,
-                            (float)(z_draw_offset + OVERWORLD_CAMERA_CENTER_START.z) + ((float)OVERWORLD_SCREEN_SIZE_Z / 2)
-                        }; 
-                        Vec3 z_draw_coords = (Vec3)
-                        { 
-                            (float)(x_draw_offset + OVERWORLD_CAMERA_CENTER_START.x) - ((float)OVERWORLD_SCREEN_SIZE_X / 2), 3,
-                            (float)(z_draw_offset + OVERWORLD_CAMERA_CENTER_START.z)
-                        }; 
-
-                        Vec3 outline_offset = (Vec3){ (float)(-2 * OVERWORLD_SCREEN_SIZE_X), 0, (float)(-14 * OVERWORLD_SCREEN_SIZE_Z) };
-                        x_draw_coords = vec3Add(x_draw_coords, outline_offset);
-                        z_draw_coords = vec3Add(z_draw_coords, outline_offset);
-
-                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, VEC3_0);
-                    	drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, VEC3_0);
-                        x_draw_offset += OVERWORLD_SCREEN_SIZE_X;
-                    }
-                    x_draw_offset = 0;
-                    z_draw_offset += OVERWORLD_SCREEN_SIZE_Z;
-                }
-            }
-			else
-            {
-            	// draw level boundary
-                Vec3 x_draw_coords_near = (Vec3){ -0.5f, 				     (float)level_dim.y / 2.0f, ((float)level_dim.z / 2.0f) };
-                Vec3 z_draw_coords_near = (Vec3){ (float)level_dim.x / 2.0f, (float)level_dim.y / 2.0f, -0.5f};
-                Vec3 x_draw_coords_far  = (Vec3){ (float)level_dim.x + 0.5f, (float)level_dim.y / 2.0f, (float)level_dim.z / 2.0f };
-                Vec3 z_draw_coords_far  = (Vec3){ (float)level_dim.x / 2.0f, (float)level_dim.y / 2.0f, (float)level_dim.z + 0.5f };
-                Vec3 x_draw_scale = (Vec3){ 0, 						   (float)level_dim.y, (float)level_dim.z + 1.0f };
-                Vec3 z_draw_scale = (Vec3){ (float)level_dim.x + 1.0f, (float)level_dim.y, 0 };
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_near, x_draw_scale, IDENTITY_QUATERNION, VEC3_0);
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_near, z_draw_scale, IDENTITY_QUATERNION, VEC3_0);
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_far,  x_draw_scale, IDENTITY_QUATERNION, VEC3_0);
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_far,  z_draw_scale, IDENTITY_QUATERNION, VEC3_0);
-            }
-        }
-
 		// DRAW 2D
 
-        Vec3 color_2d = { 1, 0, 0 }; // using alpha as first channel. 2d assets just use sprite atlas, so not using color.
-        
         if (do_debug_text)
         {
             // display level name
@@ -5579,43 +5435,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
         */
 
-		if (editor_state.editor_mode != NO_MODE)
-        {
-            // crosshair
-            Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
-            Vec3 center_screen = { ((float)SCREEN_WIDTH_PX / 2) - 5, ((float)SCREEN_HEIGHT_PX / 2) - 18, 0.0f }; // weird numbers are just adjustment because raycast starts slightly offset 
-                                                                                                        		 // i think this is due to windowed mode, but could be issue with raycast.
-        	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, color_2d);
-
-            // picked block
-            Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
-            Vec3 picked_block_coords = { SCREEN_WIDTH_PX - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
-            drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, color_2d);
-
-            if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
-            {
-                SpriteId selected_id = getCube3DId(MIRROR);
-                if (render_models) selected_id = getModelId(getTileTypeFromId(editor_state.selected_id));
-                Entity* selected_e = 0;
-                if (editor_state.selected_id > 0) selected_e = getEntityFromId(editor_state.selected_id);
-                if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position_norm, DEFAULT_SCALE, selected_e->rotation_quat, VEC3_0);
-
-                if ((editor_state.selected_id / ID_OFFSET_RESET_BLOCK) * ID_OFFSET_RESET_BLOCK)
-                {
-                    Entity* rb = getEntityFromId(editor_state.selected_id);
-                    FOR(to_reset_index, MAX_RESET_COUNT)
-                	{
-                        ResetInfo ri = rb->reset_info[to_reset_index];
-                        if (ri.id == -1) continue;
-                        Entity* to_reset_e = getEntityFromId(ri.id);
-                        SpriteId to_reset_id = getCube3DId(MIRROR);
-                        if (render_models) to_reset_id = getModelId(getTileTypeFromId(to_reset_e->id));
-                        drawAsset(to_reset_id, OUTLINE_3D, to_reset_e->position_norm, DEFAULT_SCALE, to_reset_e->rotation_quat, VEC3_0);
-                    }
-                }
-            }
-        }
-
 		// draw selected id info
         if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
         {
@@ -5671,19 +5490,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-        // draw debug popup texts
-        FOR(popup_index, MAX_DEBUG_POPUP_COUNT)
-        {
-            DebugPopup* popup = &debug_popups[popup_index];
-            if (popup->frames_left > 0)
-            {
-                float alpha = 1.0f;
-                if (popup->frames_left < 30) alpha = (float)popup->frames_left / 30.0f;
-                drawText(popup->text, popup->coords, DEFAULT_TEXT_SCALE, alpha);
-                popup->frames_left--;
-            }
-        }
-
         // write level to file on i press
         if (time_until_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.i_press) 
         {
@@ -5696,11 +5502,238 @@ void gameFrame(double delta_time, TickInput tick_input)
 		if (time_until_game_input > 0) time_until_game_input--;
 		if (time_until_meta_input > 0) time_until_meta_input--;
 
-        accumulator -= physics_timestep;
-
-        vulkanSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset);
-        draw_command_count = 0;
+        physics_accumulator -= physics_timestep;
 	}
 
+    // update camera for drawing (every display frame)
+    camera_with_ow_offset = camera;
+    if (in_overworld && !world_state.player.removed)
+    {
+        Int3 player_delta = int3Subtract(world_state.player.coords, OVERWORLD_CAMERA_CENTER_START);
+        int32 screen_offset_x = 0;
+        int32 screen_offset_z = 0;
+        if (player_delta.x > 0) screen_offset_x = (player_delta.x + (OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
+        else                    screen_offset_x = (player_delta.x - (OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
+        if (player_delta.z > 0) screen_offset_z = (player_delta.z + (OVERWORLD_SCREEN_SIZE_Z / 2)) / OVERWORLD_SCREEN_SIZE_Z;
+        else                    screen_offset_z = (player_delta.z - (OVERWORLD_SCREEN_SIZE_Z / 2)) / OVERWORLD_SCREEN_SIZE_Z;
+
+        camera_with_ow_offset.coords.x = camera.coords.x + (screen_offset_x * OVERWORLD_SCREEN_SIZE_X);
+        camera_with_ow_offset.coords.z = camera.coords.z + (screen_offset_z * OVERWORLD_SCREEN_SIZE_Z);
+    }
+
+    // DRAW 3D
+    {
+        // draw lasers
+        FOR(laser_buffer_index, 64)
+        {
+            LaserBuffer lb = laser_buffer[laser_buffer_index];
+            if (lb.color == NO_COLOR) continue;
+
+            Vec3 diff = vec3Subtract(lb.end_coords, lb.start_coords);
+            Vec3 center = vec3Add(lb.start_coords, vec3ScalarMultiply(diff, 0.5));
+
+            float length = vec3Length(diff);
+            Vec3 scale = { LASER_WIDTH, LASER_WIDTH, length };
+            Vec4 rotation = directionToQuaternion(lb.direction, true);
+            
+            drawAsset(CUBE_3D_LASER_GREEN, LASER, center, scale, rotation, colorToRGB(lb.color));
+        }
+
+        // show start points
+        FOR(lb_index, 64)
+        {
+            LaserBuffer lb = laser_buffer[lb_index];
+            if (vec3IsEqual(lb.start_coords, VEC3_0)) continue;
+            char lb_text[256] = {0};
+            snprintf(lb_text, sizeof(lb_text), "lb start coords: %.2f, %.2f, %.2f, lb end coords: %.2f, %.2f, %.2f", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z);
+            if (do_debug_text) drawDebugText(lb_text);
+        }
+
+        // clear laser buffer 
+        memset(laser_buffer, 0, sizeof(laser_buffer));
+
+        // draw most things (not player or pack) TODO: after models can include pack here because can be DEFAULT_SCALE
+        for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
+        {
+            TileType draw_tile = world_state.buffer[tile_index];
+            if (draw_tile == NONE || draw_tile == PLAYER || draw_tile == PACK) continue;
+            if (isEntity(draw_tile))
+            {
+                Entity* e = getEntityPointer(bufferIndexToCoords(tile_index));
+
+                if (e->locked) draw_tile = LOCKED_BLOCK;
+                if (draw_tile == WIN_BLOCK)
+                {
+                    if (in_overworld && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
+                    else if (!in_overworld && findInSolvedLevels(next_world_state.level_name) != -1) draw_tile = WON_BLOCK;
+                }
+
+                if (render_models)
+                {
+                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0);
+                }
+                else
+                {
+                    drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0); 
+                }
+            }
+            else
+            {
+                drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false), VEC3_0);
+            }
+        }
+
+        if (!world_state.player.removed)
+        {
+            player = &world_state.player;
+
+            // TODO: this is terrible (fix with shaders)
+            bool hit_by_green = false;
+            if (player->green_hit.north || player->green_hit.west || player->green_hit.south || player->green_hit.east || player->green_hit.up || player->green_hit.down) hit_by_green = true;
+            if      (player->hit_by_red && hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_WHITE,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+            else if (player->hit_by_red && hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_YELLOW,  CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+            else if (player->hit_by_red &&      	       player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+            else if (             		   hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_CYAN,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+            else if (player->hit_by_red                 	  				  ) drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+            else if (             		   hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_GREEN,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+            else if (                            		   player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+            else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+
+            if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, true), VEC3_0);
+            if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, true),   VEC3_0);
+        }
+        if (!world_state.pack.removed) drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat, VEC3_0);
+
+        // draw camera boundary lines
+		if (time_until_meta_input == 0 && tick_input.t_press && !(editor_state.editor_mode == SELECT_WRITE))
+        {
+            draw_level_boundary = !draw_level_boundary;
+            if (draw_level_boundary) createDebugPopup("level / camera boundary visibility on", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
+            else			   		 createDebugPopup("level / camera boundary visibility off", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
+			time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+        }
+        if (draw_level_boundary)
+        {
+			if (in_overworld)
+            {
+            	// draw camera screen lines
+                int32 x_draw_offset = 0;
+                int32 z_draw_offset = 0;
+
+                Vec3 x_wall_scale = { (float)OVERWORLD_SCREEN_SIZE_X, 5, 0.01f };
+                Vec3 z_wall_scale = { 0.01f, 5, (float)OVERWORLD_SCREEN_SIZE_Z };
+
+                FOR(z_index, 18)
+                {
+                    FOR(x_index, 12)
+                    {
+                        Vec3 x_draw_coords = (Vec3)
+                        { 
+                            (float)(x_draw_offset + OVERWORLD_CAMERA_CENTER_START.x), 3,
+                            (float)(z_draw_offset + OVERWORLD_CAMERA_CENTER_START.z) + ((float)OVERWORLD_SCREEN_SIZE_Z / 2)
+                        }; 
+                        Vec3 z_draw_coords = (Vec3)
+                        { 
+                            (float)(x_draw_offset + OVERWORLD_CAMERA_CENTER_START.x) - ((float)OVERWORLD_SCREEN_SIZE_X / 2), 3,
+                            (float)(z_draw_offset + OVERWORLD_CAMERA_CENTER_START.z)
+                        }; 
+
+                        Vec3 outline_offset = (Vec3){ (float)(-2 * OVERWORLD_SCREEN_SIZE_X), 0, (float)(-14 * OVERWORLD_SCREEN_SIZE_Z) };
+                        x_draw_coords = vec3Add(x_draw_coords, outline_offset);
+                        z_draw_coords = vec3Add(z_draw_coords, outline_offset);
+
+                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, VEC3_0);
+                    	drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, VEC3_0);
+                        x_draw_offset += OVERWORLD_SCREEN_SIZE_X;
+                    }
+                    x_draw_offset = 0;
+                    z_draw_offset += OVERWORLD_SCREEN_SIZE_Z;
+                }
+            }
+			else
+            {
+            	// draw level boundary
+                Vec3 x_draw_coords_near = (Vec3){ -0.5f, 				     (float)level_dim.y / 2.0f, ((float)level_dim.z / 2.0f) };
+                Vec3 z_draw_coords_near = (Vec3){ (float)level_dim.x / 2.0f, (float)level_dim.y / 2.0f, -0.5f};
+                Vec3 x_draw_coords_far  = (Vec3){ (float)level_dim.x + 0.5f, (float)level_dim.y / 2.0f, (float)level_dim.z / 2.0f };
+                Vec3 z_draw_coords_far  = (Vec3){ (float)level_dim.x / 2.0f, (float)level_dim.y / 2.0f, (float)level_dim.z + 0.5f };
+                Vec3 x_draw_scale = (Vec3){ 0, 						   (float)level_dim.y, (float)level_dim.z + 1.0f };
+                Vec3 z_draw_scale = (Vec3){ (float)level_dim.x + 1.0f, (float)level_dim.y, 0 };
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_near, x_draw_scale, IDENTITY_QUATERNION, VEC3_0);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_near, z_draw_scale, IDENTITY_QUATERNION, VEC3_0);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_far,  x_draw_scale, IDENTITY_QUATERNION, VEC3_0);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_far,  z_draw_scale, IDENTITY_QUATERNION, VEC3_0);
+            }
+        }
+
+    }
+
+    // DRAW 2D
+    {
+        Vec3 color_2d = { 1, 0, 0 }; // using alpha as first channel. 2d assets just use sprite atlas, so not using color.
+        
+		if (editor_state.editor_mode != NO_MODE)
+        {
+            // crosshair
+            Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
+            Vec3 center_screen = { ((float)SCREEN_WIDTH_PX / 2) - 5, ((float)SCREEN_HEIGHT_PX / 2) - 18, 0.0f }; // weird numbers are just adjustment because raycast starts slightly offset 
+                                                                                                        		 // i think this is due to windowed mode, but could be issue with raycast.
+        	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, color_2d);
+
+            // picked block
+            Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
+            Vec3 picked_block_coords = { SCREEN_WIDTH_PX - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
+            drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, color_2d);
+
+            if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
+            {
+                SpriteId selected_id = getCube3DId(MIRROR);
+                if (render_models) selected_id = getModelId(getTileTypeFromId(editor_state.selected_id));
+                Entity* selected_e = 0;
+                if (editor_state.selected_id > 0) selected_e = getEntityFromId(editor_state.selected_id);
+                if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position_norm, DEFAULT_SCALE, selected_e->rotation_quat, VEC3_0);
+
+                if ((editor_state.selected_id / ID_OFFSET_RESET_BLOCK) * ID_OFFSET_RESET_BLOCK == ID_OFFSET_RESET_BLOCK)
+                {
+                    Entity* rb = getEntityFromId(editor_state.selected_id);
+                    FOR(to_reset_index, MAX_RESET_COUNT)
+                	{
+                        ResetInfo ri = rb->reset_info[to_reset_index];
+                        if (ri.id == -1) continue;
+                        Entity* to_reset_e = getEntityFromId(ri.id);
+                        SpriteId to_reset_id = getCube3DId(MIRROR);
+                        if (render_models) to_reset_id = getModelId(getTileTypeFromId(to_reset_e->id));
+                        drawAsset(to_reset_id, OUTLINE_3D, to_reset_e->position_norm, DEFAULT_SCALE, to_reset_e->rotation_quat, VEC3_0);
+                    }
+                }
+            }
+        }
+
+        // handle decrementing timers which should be consistent across physics timesteps
+        timer_accumulator += delta_time;
+        while (timer_accumulator >= 1.0/60.0)
+        {
+            FOR(popup_index, MAX_DEBUG_POPUP_COUNT)
+            {
+                if (debug_popups[popup_index].frames_left > 0) debug_popups[popup_index].frames_left--;
+            }
+            timer_accumulator -= 1.0/60.0;
+        }
+
+        // draw debug popup texts
+        FOR(popup_index, MAX_DEBUG_POPUP_COUNT)
+        {
+            DebugPopup* popup = &debug_popups[popup_index];
+            if (popup->frames_left > 0)
+            {
+                float alpha = 1.0f;
+                if (popup->frames_left < 30) alpha = (float)popup->frames_left / 30.0f;
+                drawText(popup->text, popup->coords, DEFAULT_TEXT_SCALE, alpha);
+            }
+        }
+    }
+
+    vulkanSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset);
+    draw_command_count = 0;
     vulkanDraw();
 }
