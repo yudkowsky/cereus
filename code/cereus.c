@@ -1,15 +1,236 @@
 #include "win32_cereus_bridge.h"
 #include "worldstate_structs.h"
-#include <string.h> // TODO: temporary, for memset
-#include <math.h> // TODO: also temporary, for sin/cos
-#include <stdio.h> // TODO: "temporary", for fopen 
+#include <string.h> // many of these imports are temporary, but haven't set up alternatives yet
+#include <math.h> 
+#include <stdio.h> 
 
-#include <windows.h>
+/*
+#include <windows.h> // temp for debug
 #ifdef VOID
 #undef VOID
 #endif
+*/
 
 #define FOR(i, n) for (int i = 0; i < n; i++)
+
+// GLOBAL STATE
+
+typedef enum
+{
+    NO_DIRECTION = -1,
+    NORTH = 0,
+    WEST  = 1,
+    SOUTH = 2,
+    EAST  = 3,
+    UP	  = 4,
+    DOWN  = 5,
+}
+Direction;
+
+typedef enum TileType
+{
+    NONE = 0,
+    VOID,
+    GRID,
+    WALL,
+    BOX,
+    PLAYER,
+    MIRROR,
+    GLASS,
+    PACK,
+    PERM_MIRROR,
+    NOT_VOID,
+    WIN_BLOCK,
+
+    SOURCE_RED,
+    SOURCE_GREEN,
+    SOURCE_BLUE,
+    SOURCE_MAGENTA,
+    SOURCE_YELLOW,
+    SOURCE_CYAN,
+    SOURCE_WHITE,
+
+    LOCKED_BLOCK,
+    RESET_BLOCK,
+    LADDER,
+    WON_BLOCK,
+
+    LASER_RED,
+    LASER_GREEN,
+    LASER_BLUE,
+    LASER_MAGENTA,
+    LASER_YELLOW,
+    LASER_CYAN,
+    LASER_WHITE
+}
+TileType;
+
+typedef enum Color
+{
+    NO_COLOR = 0,
+    RED      = 1,
+    GREEN    = 2,
+	BLUE     = 3,
+	MAGENTA  = 4,
+    YELLOW   = 5,
+    CYAN     = 6,
+    WHITE    = 7
+}
+Color;
+
+typedef struct GreenHit
+{
+    bool north;
+    bool west;
+    bool south;
+    bool east;
+    bool up;
+    bool down;
+}
+GreenHit;
+
+// uses id -1 as overwrite value. i think this is okay here.
+typedef struct ResetInfo
+{
+    int32 id;
+    Int3 start_coords;
+    TileType start_type;
+    Direction start_direction;
+    Int3 current_coords;
+}
+ResetInfo;
+
+typedef struct Entity
+{
+    Int3 coords;
+    Vec3 position_norm;
+    Direction direction;
+    Vec4 rotation_quat;
+    int32 id;
+    bool removed;
+
+    int32 in_motion;
+    Direction moving_direction;
+
+    bool first_fall_already_done;
+
+    // for sources/lasers
+    Color color;
+
+    // for player
+    bool hit_by_red;
+    GreenHit green_hit;
+    bool hit_by_blue;
+
+    // for win blocks
+    char next_level[64];
+    
+    // for locked blocks (and other entities that are locked)
+    bool locked;
+    char unlocked_by[64];
+
+    // for reset blocks;
+    ResetInfo reset_info[16];
+}
+Entity;
+
+typedef struct WorldState
+{
+    uint8 buffer[2000000]; // 2 bytes info per tile 
+    Entity player;
+    Entity pack;
+    Entity boxes[64];
+    Entity mirrors[64];
+    Entity sources[64];
+    Entity glass_blocks[64];
+    Entity win_blocks[64];
+    Entity locked_blocks[64];
+    Entity reset_blocks[64];
+
+    char level_name[64];
+
+	char solved_levels[64][64]; // TODO(spike): make this enum? after finalised level names, so don't need to change at two places? maybe this is too late for this, but need to figure something out here
+}
+WorldState;
+
+typedef struct TrailingHitbox
+{
+	Int3 coords;
+    Direction hit_direction;
+    Direction moving_direction;
+    int32 frames;
+    TileType type;
+}
+TrailingHitbox;
+
+typedef struct Animation
+{
+    int32 id;
+    int32 frames_left;
+    Vec3* position_to_change;
+    Vec4* rotation_to_change;
+    Vec3 position[32];
+    Vec4 rotation[32];
+}
+Animation;
+
+typedef enum PushResult
+{
+    CAN_PUSH = 0,
+	PAUSE_PUSH = 1,
+    FAILED_PUSH = 2
+}
+PushResult;
+
+typedef struct Push 
+{
+    Int3 previous_coords;
+    Int3 new_coords;
+    TileType type;
+    Entity* entity;
+}
+Push;
+
+// EDITOR STRUCTS
+
+typedef struct EditBuffer
+{
+    char string[64];
+    int32 length;
+}
+EditBuffer;
+
+typedef enum EditorMode
+{
+	NO_MODE = 0,
+    PLACE_BREAK = 1,
+    SELECT = 2,
+    SELECT_WRITE = 3,
+}
+EditorMode;
+
+typedef enum WritingField
+{
+    NO_WRITING_FIELD = 0,
+	WRITING_FIELD_NEXT_LEVEL,
+    WRITING_FIELD_UNLOCKED_BY
+}
+WritingField;
+
+typedef struct EditorState
+{
+    EditorMode editor_mode;
+    bool do_wide_camera;
+    Int3 selected_coords;
+    TileType picked_tile;
+    Direction picked_direction;
+
+    int32 selected_id;
+    WritingField writing_field;
+
+    EditBuffer edit_buffer;
+}
+EditorState;
 
 typedef enum
 {
@@ -19,6 +240,112 @@ typedef enum
     ALT_TO_MAIN
 }
 CameraMode;
+
+typedef struct RaycastHit
+{
+    bool hit;
+    Int3 hit_coords;
+    Int3 place_coords;
+}
+RaycastHit;
+
+typedef enum PopupType
+{
+    NO_TYPE = 0,
+    GAMEPLAY_MODE_CHANGE,
+    GAMEPLAY_SPEED_CHANGE,
+    DEBUG_STATE_VISIBILITY_CHANGE,
+	LEVEL_BOUNDARY_VISIBILITY_CHANGE,
+    LEVEL_SAVE,
+    MAIN_CAMERA_SAVE,
+    ALT_CAMERA_SAVE,
+    PHYSICS_TIMESTEP_CHANGE,
+}
+PopupType;
+
+typedef struct DebugPopup
+{
+	int32 frames_left;
+    char text[64];
+    Vec2 coords;
+    PopupType type;
+}
+DebugPopup;
+
+// LASER STRUCTS
+
+typedef struct LaserColor
+{
+    bool red;
+    bool green;
+    bool blue;
+}
+LaserColor;
+
+// assumes 0 width
+typedef struct LaserBuffer
+{
+    Vec3 start_coords;
+    Vec3 end_coords;
+    Direction direction;
+    Color color;
+}
+LaserBuffer;
+
+// UNDO BUFFER STRUCTS
+
+typedef struct UndoEntityDelta
+{
+    int32 id;
+    Int3 old_coords;
+    Direction old_direction;
+    bool was_removed;
+}
+UndoEntityDelta;
+
+typedef struct UndoActionHeader
+{
+	uint8 entity_count;
+    uint32 delta_start_pos;
+    bool level_changed;
+    bool was_teleport;
+    bool was_reset;
+}
+UndoActionHeader;
+
+typedef struct UndoLevelChange
+{
+    char from_level[64];
+    bool remove_from_solved;
+}
+UndoLevelChange;
+
+#define MAX_UNDO_DELTAS 2000000
+#define MAX_UNDO_ACTIONS 200000 // assumes a ratio of deltas:actions of 10:1
+#define MAX_LEVEL_CHANGES 50000
+
+typedef struct UndoBuffer
+{
+    // entity deltas (circular)
+    UndoEntityDelta deltas[MAX_UNDO_DELTAS];
+    uint32 delta_write_pos;
+    uint32 delta_count;
+
+    // action headers (circular)
+    UndoActionHeader headers[MAX_UNDO_ACTIONS];
+    uint32 header_write_pos;
+    uint32 header_count;
+    uint32 oldest_action_index;
+
+    // level changes (sparse)
+    UndoLevelChange level_changes[MAX_LEVEL_CHANGES];
+    uint8 level_change_indices[MAX_UNDO_ACTIONS];
+    uint32 level_change_write_pos;
+    uint32 level_change_count;
+}
+UndoBuffer;
+
+// CONSTS AND GLOBALS
 
 const int32 SCREEN_WIDTH_PX = 1920; // TODO: get from platform layer
 const int32	SCREEN_HEIGHT_PX = 1080;
@@ -194,7 +521,7 @@ Int3 pack_ghost_coords;
 Direction player_ghost_direction;
 Direction pack_ghost_direction;
 
-// CAMERA STUFF
+// CAMERA HELPERS
 
 void cameraBasisFromYaw(float yaw, Vec3* right, Vec3* forward)
 {
