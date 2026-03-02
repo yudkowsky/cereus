@@ -1442,144 +1442,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     vkCreateDevice(vulkan_state.physical_device_handle, &device_info, 0, &vulkan_state.logical_device_handle);
 
-    /*
-    VkExtent2D chosen_extent = surface_capabilities.currentExtent;
-
-    if (chosen_extent.width == UINT32_MAX) // if UINT32_MAX here, no size is set, so we have to grab window dimensions ourselves
-    {
-		RECT window_rect = {0};
-        GetClientRect(vulkan_state.platform_handles.window_handle, &window_rect); // TODO: why does this function call work?? secret <windows.h> hiding somewhere?
-		uint32 window_width = (uint32)(window_rect.right - window_rect.left);
-		uint32 window_height = (uint32)(window_rect.bottom - window_rect.top);
-
-        if (window_width < surface_capabilities.minImageExtent.width) window_width = surface_capabilities.minImageExtent.width;
-        if (window_width > surface_capabilities.maxImageExtent.width) window_width = surface_capabilities.maxImageExtent.width;
-        if (window_height < surface_capabilities.minImageExtent.height) window_height = surface_capabilities.minImageExtent.height;
-        if (window_height > surface_capabilities.maxImageExtent.height) window_height = surface_capabilities.maxImageExtent.height;
-
-        chosen_extent.width = window_width;
-        chosen_extent.height = window_height;
-    }
-
-    vulkan_state.swapchain_extent = chosen_extent; // only assign after selection so we always have true data in vulkan_state
-
-	// depth image creation for 3d rendering
-
-    vulkan_state.depth_format = VK_FORMAT_D32_SFLOAT;
-
-    VkImageCreateInfo depth_image_info = {0};
-    depth_image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    depth_image_info.imageType = VK_IMAGE_TYPE_2D;
-    depth_image_info.extent.width = vulkan_state.swapchain_extent.width;
-    depth_image_info.extent.height = vulkan_state.swapchain_extent.height;
-    depth_image_info.extent.depth = 1;
-    depth_image_info.mipLevels = 1;
-    depth_image_info.arrayLayers = 1;
-    depth_image_info.format = vulkan_state.depth_format;
-    depth_image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-    depth_image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depth_image_info.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    depth_image_info.samples = VK_SAMPLE_COUNT_1_BIT;
-    depth_image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    vkCreateImage(vulkan_state.logical_device_handle, &depth_image_info, 0, &vulkan_state.depth_image);
-	
-    VkMemoryRequirements depth_image_memory_requirements;
-    vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.depth_image, &depth_image_memory_requirements);
-
-	VkMemoryAllocateInfo depth_memory_allocation_info = {0};
-    depth_memory_allocation_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    depth_memory_allocation_info.allocationSize = depth_image_memory_requirements.size;
-    depth_memory_allocation_info.memoryTypeIndex = findMemoryType(depth_image_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    vkAllocateMemory(vulkan_state.logical_device_handle, &depth_memory_allocation_info, 0, &vulkan_state.depth_image_memory);
-
-    vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.depth_image, vulkan_state.depth_image_memory, 0);
-
-    VkImageViewCreateInfo depth_view_info = {0};
-    depth_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    depth_view_info.image = vulkan_state.depth_image;
-    depth_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    depth_view_info.format = vulkan_state.depth_format;
-    depth_view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    depth_view_info.subresourceRange.baseMipLevel = 0;
-    depth_view_info.subresourceRange.levelCount = 1;
-    depth_view_info.subresourceRange.baseArrayLayer = 0;
-    depth_view_info.subresourceRange.layerCount = 1;
-
-    vkCreateImageView(vulkan_state.logical_device_handle, &depth_view_info, 0, &vulkan_state.depth_image_view);
-    */
-
-    /*
-    uint32 minimum_swapchain_image_count = surface_capabilities.minImageCount + 1; // may be different from actual count (asking for minimum when creating swapchain)
-
-    // if maxImageCount = 0, then this means 'no maximum', so no need to clamp.
-    if (surface_capabilities.maxImageCount != 0 && minimum_swapchain_image_count > surface_capabilities.maxImageCount) minimum_swapchain_image_count = surface_capabilities.maxImageCount;
-
-    uint32 queue_family_indices[2] = { vulkan_state.graphics_family_index, vulkan_state.present_family_index }; // only used if concurrent sharing mode is enabled
-
-	// the swapchain = the WSI-owned pool of images to be presented tied to your window. creating it
-    // tells the driver what kind of images to allocate, and how they will be scheduled / used
-
-    VkSwapchainCreateInfoKHR swapchain_creation_info = {0}; // struct to tell WSI exactly what backbuffer pool to get
-    swapchain_creation_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    swapchain_creation_info.surface = vulkan_state.surface_handle;
-    swapchain_creation_info.minImageCount = minimum_swapchain_image_count;
-	swapchain_creation_info.imageFormat = chosen_surface_format.format;
-	swapchain_creation_info.imageColorSpace = chosen_surface_format.colorSpace;
-    swapchain_creation_info.imageExtent = chosen_extent;
-	swapchain_creation_info.imageArrayLayers = 1; // 1 layer per image - win32 swapchains are single-view (no multi-view)
-	swapchain_creation_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    swapchain_creation_info.presentMode = chosen_present_mode;
-    swapchain_creation_info.preTransform = surface_capabilities.currentTransform;
-    swapchain_creation_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; // TODO: should set this as something available from my surface_capabilities.supportedCompositeAlpha
-   	swapchain_creation_info.clipped = VK_TRUE;
-    swapchain_creation_info.oldSwapchain = VK_NULL_HANDLE;
-
-    if (graphics_present_families_same) 
-    {
-        swapchain_creation_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        // queueFamilyIndexCount and pQueueFamilyIndices are ignored on exclusive sharing mode
-    } 
-    else 
-    {
-		swapchain_creation_info.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-        swapchain_creation_info.queueFamilyIndexCount = 2;
-		swapchain_creation_info.pQueueFamilyIndices = queue_family_indices;
-    }
-
-	vkCreateSwapchainKHR(vulkan_state.logical_device_handle, &swapchain_creation_info, 0, &vulkan_state.swapchain_handle);
-    */
-
-    /*
-	vkGetSwapchainImagesKHR(vulkan_state.logical_device_handle, vulkan_state.swapchain_handle, &vulkan_state.swapchain_image_count, 0);
-    VkImage* swapchain_images = malloc(sizeof(*swapchain_images) * vulkan_state.swapchain_image_count);
-    vkGetSwapchainImagesKHR(vulkan_state.logical_device_handle, vulkan_state.swapchain_handle, &vulkan_state.swapchain_image_count, swapchain_images);
-
-    VkImageViewCreateInfo view_creation_info = {0};
-    view_creation_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    view_creation_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    view_creation_info.format = chosen_surface_format.format;
-    view_creation_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY; // how the R/G/B/A channels are read from the image
-    view_creation_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY; // a swizzle map tells vulkan how to rewrite R/G/B/A channels when the image is read through the view.
-    view_creation_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY; // we just want to keep them as is - other situations might want to reorder (e.g. BGRA image -> RGBA ordering)
-    view_creation_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-	view_creation_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT; // which aspects of the image the view exposes: color only
-	view_creation_info.subresourceRange.baseMipLevel = 0; // mipmaps are prefiltered, downscaled versions of the image. we just have the full-res image, so 0 downscaling...
-	view_creation_info.subresourceRange.levelCount = 1; // ...and so we only have the one level.
-	view_creation_info.subresourceRange.baseArrayLayer = 0; // many vulkan images can have array layers (e.g. a cube with 6) - this says view starts at array 0 (the only array) 
-
-    vulkan_state.swapchain_image_views = malloc(sizeof(VkImageView) * vulkan_state.swapchain_image_count);
-
-    for (uint32 swapchain_image_increment = 0; swapchain_image_increment < vulkan_state.swapchain_image_count; swapchain_image_increment++)
-    {
-        view_creation_info.image = swapchain_images[swapchain_image_increment];
-    	vkCreateImageView(vulkan_state.logical_device_handle, &view_creation_info, 0, &vulkan_state.swapchain_image_views[swapchain_image_increment]);
-    }
-
-	free(swapchain_images);
-    */
-
 	// a render pass is vulkan's contract for how to use images (attachments) - 'single color attachment' = we
     // have just just one render target (the swapchain image) and don't do depth / stencil.
 
@@ -1644,68 +1506,12 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     // it doesn't allocate memory, it just ties the render pass to the actual image 
     // one framebuffer per swapchan image view, because each acquired image is a different underlying image view
 
-    /*
-    vulkan_state.swapchain_framebuffers = malloc(sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
-
-    VkFramebufferCreateInfo framebuffer_creation_info = {0};
-    framebuffer_creation_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    framebuffer_creation_info.renderPass = vulkan_state.render_pass_handle;
-    framebuffer_creation_info.width = vulkan_state.swapchain_extent.width;
-    framebuffer_creation_info.height = vulkan_state.swapchain_extent.height;
-    framebuffer_creation_info.layers = 1;
-
-    for (uint32 swapchain_image_index = 0; swapchain_image_index < vulkan_state.swapchain_image_count; swapchain_image_index++)
-    {
-		VkImageView framebuffer_attachments[2] = { vulkan_state.swapchain_image_views[swapchain_image_index], vulkan_state.depth_image_view };
-        framebuffer_creation_info.attachmentCount = 2;
-        framebuffer_creation_info.pAttachments = framebuffer_attachments;
-
-        vkCreateFramebuffer(vulkan_state.logical_device_handle, &framebuffer_creation_info, 0, &vulkan_state.swapchain_framebuffers[swapchain_image_index]);
-    }
-    */
-
 	VkCommandPoolCreateInfo command_pool_creation_info = {0}; // describes the command pool tied to graphics queue family
 	command_pool_creation_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     command_pool_creation_info.queueFamilyIndex = vulkan_state.graphics_family_index;
     command_pool_creation_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT; // lets us reset / rerecord command buffers
 
 	vkCreateCommandPool(vulkan_state.logical_device_handle, &command_pool_creation_info, 0, &vulkan_state.graphics_command_pool_handle);
-
-    /*
-    vulkan_state.swapchain_command_buffers = malloc(sizeof(VkCommandBuffer) * vulkan_state.swapchain_image_count);
-
-	VkCommandBufferAllocateInfo command_buffer_allocation_info = {0}; // which command pool (memory) to allocate from; how many command buffers to allocate in one shot
-    command_buffer_allocation_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    command_buffer_allocation_info.commandPool = vulkan_state.graphics_command_pool_handle;
-    command_buffer_allocation_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY; // primary command buffers submit directly to the graphics queue. secondary CBs are for nesting / multithreading 
-    command_buffer_allocation_info.commandBufferCount = vulkan_state.swapchain_image_count;
-	
-    vkAllocateCommandBuffers(vulkan_state.logical_device_handle, &command_buffer_allocation_info, vulkan_state.swapchain_command_buffers);
-
-	VkCommandBufferBeginInfo command_buffer_begin_info = {0}; // container for how a command buffer begins recording (unused for us, no flags needed)
-	command_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-    VkClearValue clear_color = { .color = { .float32 = { 0.0f, 0.0f, 0.0f, 1.0f } } }; // isn't actually used
-    
-	VkRenderPassBeginInfo render_pass_begin_info = {0}; // describes which render pass, framebuffer, render area, and clear values to use when we begin the render pass
-    render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    render_pass_begin_info.renderPass = vulkan_state.render_pass_handle;
-    render_pass_begin_info.renderArea.offset.x = 0;
-    render_pass_begin_info.renderArea.offset.y = 0;
-    render_pass_begin_info.renderArea.extent = vulkan_state.swapchain_extent;
-    render_pass_begin_info.clearValueCount = 1;
-    render_pass_begin_info.pClearValues = &clear_color;
-    
-    for (uint32 swapchain_image_increment = 0; swapchain_image_increment < vulkan_state.swapchain_image_count; swapchain_image_increment++)
-    {
-        render_pass_begin_info.framebuffer = vulkan_state.swapchain_framebuffers[swapchain_image_increment];
-
-        vkBeginCommandBuffer(vulkan_state.swapchain_command_buffers[swapchain_image_increment], &command_buffer_begin_info); // start recording into the CB
-        vkCmdBeginRenderPass(vulkan_state.swapchain_command_buffers[swapchain_image_increment], &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE); // the clear actually happens
-        vkCmdEndRenderPass(vulkan_state.swapchain_command_buffers[swapchain_image_increment]); // triggers the transition toward final layout declared, so image is ready to present
-        vkEndCommandBuffer(vulkan_state.swapchain_command_buffers[swapchain_image_increment]); // seals CB - now immutable until reset
-    }
-    */
 
     // a semaphore is a GPU-GPU sync primitive. it has two states, signaled and not.
     // its signaled by the GPU as part of a queue operation, and waited by the GPU
@@ -2434,23 +2240,47 @@ void vulkanDraw(void)
 
     // dynamic pipeline state (same baked graphics pipeline, but change viewport / scissor whenever we change what's in frame. for now we don't really use this though)
 
+    // compute 16:9 letterbox viewport
+    float target_aspect = 16.0f / 9.0f;
+    float window_width = (float)vulkan_state.swapchain_extent.width;
+    float window_height = (float)vulkan_state.swapchain_extent.height;
+    float window_aspect = window_width / window_height;
+
+    float viewport_width, viewport_height, viewport_x, viewport_y;
+    if (window_aspect > target_aspect)
+    {
+        // window is wider than 16:9: bars on sides
+        viewport_height = window_height;
+        viewport_width = window_height * target_aspect;
+        viewport_x = (window_width - viewport_width) * 0.5f;
+        viewport_y = 0.0f;
+    }
+    else
+    {
+        viewport_width = window_width;
+        viewport_height = window_width / target_aspect;
+        viewport_x = 0.0f;
+        viewport_y = (window_height - viewport_height) * 0.5f;
+    }
+
     VkViewport viewport = {0};
-    viewport.x = 0.0f;
-    viewport.y = (float)vulkan_state.swapchain_extent.height;
-    viewport.width = (float)vulkan_state.swapchain_extent.width;
-    viewport.height = -(float)vulkan_state.swapchain_extent.height; // negative for y-up
+    viewport.width = viewport_width;
+    viewport.height = -viewport_height; // negative for y-up
+    viewport.x = viewport_x;
+    viewport.y = viewport_y + viewport_height;
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
-    
-	vkCmdSetViewport(command_buffer, 0, 1, &viewport); // TODO: look at this more
-	VkRect2D scissor = {0};
-    scissor.offset.x = 0;
-    scissor.offset.y = 0;
-    scissor.extent = vulkan_state.swapchain_extent;
+
+    vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+
+    VkRect2D scissor = {0};
+    scissor.offset.x = (int32)viewport_x;
+    scissor.offset.y = (int32)viewport_y;
+    scissor.extent.width = (uint32)viewport_width;
+    scissor.extent.height = (uint32)viewport_height;
     vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
-    // shared camera matrices for cubes
-    float aspect = (float)vulkan_state.swapchain_extent.width / (float)vulkan_state.swapchain_extent.height;
+    float aspect = target_aspect;
     float projection_matrix[16], view_matrix[16];
     mat4BuildPerspective(projection_matrix, vulkan_camera.fov * (6.283185f / 360.0f), aspect, 0.1f, 300.0f);
     mat4BuildViewFromQuat(view_matrix, vulkan_camera.coords, vulkan_camera.rotation);
@@ -2604,10 +2434,7 @@ void vulkanDraw(void)
     vkCmdBindIndexBuffer(command_buffer, vulkan_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
     float ortho[16], view2d[16];
-    mat4BuildOrtho(ortho,
-            0.0f, (float)vulkan_state.swapchain_extent.width,
-            0.0f, (float)vulkan_state.swapchain_extent.height,
-            0.0f, 1.0f);
+    mat4BuildOrtho(ortho, 0.0f, (float)vulkan_state.swapchain_extent.width, 0.0f, (float)vulkan_state.swapchain_extent.height, 0.0f, 1.0f);
     mat4Identity(view2d);
 
     int32 last_sprite_asset = -1;

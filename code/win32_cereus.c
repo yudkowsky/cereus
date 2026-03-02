@@ -255,7 +255,8 @@ int CALLBACK WinMain(
 		L"Window Name",
 		WS_OVERLAPPEDWINDOW,
         0, 0,
-		display_info.display_width, display_info.display_height,
+		//display_info.display_width, display_info.display_height,
+        1920, 1080, // temp overwrite dims for easier debugging
 		0, 0, module_handle, 0);
 
     global_window_handle = window_handle;
