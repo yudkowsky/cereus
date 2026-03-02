@@ -4981,6 +4981,11 @@ void gameFrame(double delta_time, TickInput tick_input)
         resetFirstFall(player);
 		changeMoving(pack);
         resetFirstFall(pack);
+        if (pack_turn_state.pack_intermediate_states_timer > 0)
+        {
+            pack->in_motion = 0;
+            pack->moving_direction = NO_DIRECTION;
+        }
 
 		// handle turning hitboxes
         if (pack_turn_state.pack_hitbox_turning_to_timer > 0) pack_turn_state.pack_hitbox_turning_to_timer--;
