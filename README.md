@@ -31,4 +31,4 @@ mode toggle:
 
 1: place / break mode: able to fly around, space / shift to go up / down, otherwise WASD.
 
-there's a bunch of binds in place/break mode, but most probably aren't so interesting. if you want to fly around and then reset the camera to where it started press backspace.
+there's a bunch of binds in place/break mode, but most probably aren't so interesting. if you want to fly around and then reset the camera to where it started press backspace. you can press J to toggle camera FOV aswell, also resettable with backspace
