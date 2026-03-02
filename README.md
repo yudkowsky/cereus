@@ -1,3 +1,6 @@
+Compilation requires Vulkan SDK - I use 1.4.321.1, but the vulkan code is all very orthodox, so it 'should' work on any version.
+To compile: navigate to ../cereus/code and run build_cereus.bat. It will create a folder ../build_cereus in the same repo as cereus is in (this is essentially just the handmade hero setup copied) - in there, there will be a data folder and a .exe; double click on the exe to start into the overworld.
+
 When in the game:
 
 WASD for movement
