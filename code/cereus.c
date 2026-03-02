@@ -3278,6 +3278,13 @@ void gameInitialize(char* level_name, DisplayInfo display_from_platform)
     gameInitializeState(level_name);
 }
 
+void gameRedraw()
+{
+    if (draw_command_count == 0) return;
+    vulkanSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset);
+    vulkanDraw();
+}
+
 // UNDO / RESTART
 
 // writes one delta into the circular buffer
@@ -4021,6 +4028,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 {	
     if (delta_time > 0.1) delta_time = 0.1;
     physics_accumulator += delta_time;
+
+    draw_command_count = 0;
 
     Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
@@ -5767,6 +5776,5 @@ void gameFrame(double delta_time, TickInput tick_input)
     }
 
     vulkanSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset);
-    draw_command_count = 0;
     vulkanDraw();
 }

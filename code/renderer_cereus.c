@@ -1054,6 +1054,173 @@ VkPipelineShaderStageCreateInfo loadShaderStage(char* path, VkShaderModule* modu
     return shader_stage_ci;
 }
 
+void createSwapchainResources(void)
+{
+    // query current surface state
+    VkSurfaceCapabilitiesKHR surface_capabilities = {0};
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vulkan_state.physical_device_handle, vulkan_state.surface_handle, &surface_capabilities);
+
+    VkExtent2D chosen_extent = surface_capabilities.currentExtent;
+    if (chosen_extent.width == UINT32_MAX)
+    {
+        // TODO(spike): pass client rect from windows layer. actually, display_info should just be the client, not the display.
+        RECT window_rect = {0};
+        GetClientRect(vulkan_state.platform_handles.window_handle, &window_rect);
+        uint32 width =  (uint32)(window_rect.right - window_rect.left);
+        uint32 height = (uint32)(window_rect.bottom - window_rect.top);
+        if (width  < surface_capabilities.minImageExtent.width)  width  = surface_capabilities.minImageExtent.width;
+        if (width  > surface_capabilities.maxImageExtent.width)  width  = surface_capabilities.maxImageExtent.width;
+        if (height < surface_capabilities.minImageExtent.height) height = surface_capabilities.minImageExtent.height;
+        if (height > surface_capabilities.maxImageExtent.height) height = surface_capabilities.maxImageExtent.height;
+        chosen_extent.width = width;
+        chosen_extent.height = height;
+    }
+    vulkan_state.swapchain_extent = chosen_extent;
+
+    // swapchain
+    uint32 min_image_count = surface_capabilities.minImageCount + 1;
+    if (surface_capabilities.maxImageCount != 0 && min_image_count > surface_capabilities.maxImageCount) min_image_count = surface_capabilities.maxImageCount;
+
+    uint32 queue_family_indices[2] = { vulkan_state.graphics_family_index, vulkan_state.present_family_index };
+    bool same_family = (vulkan_state.graphics_family_index == vulkan_state.present_family_index);
+
+    VkSwapchainKHR old_swapchain = vulkan_state.swapchain_handle;
+
+    VkSwapchainCreateInfoKHR swapchain_ci = {0};
+    swapchain_ci.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+    swapchain_ci.surface = vulkan_state.surface_handle;
+    swapchain_ci.minImageCount = min_image_count;
+    swapchain_ci.imageFormat = vulkan_state.swapchain_format;
+    swapchain_ci.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+    swapchain_ci.imageExtent = chosen_extent;
+    swapchain_ci.imageArrayLayers = 1;
+    swapchain_ci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    swapchain_ci.presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR; // TODO: store / handle chosen present mode
+    swapchain_ci.preTransform = surface_capabilities.currentTransform;
+    swapchain_ci.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    swapchain_ci.clipped = VK_TRUE;
+    swapchain_ci.oldSwapchain = old_swapchain;
+
+    if (same_family) 
+    {
+        swapchain_ci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    }
+    else
+    {
+        swapchain_ci.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+        swapchain_ci.queueFamilyIndexCount = 2;
+        swapchain_ci.pQueueFamilyIndices = queue_family_indices;
+    }
+
+    vkCreateSwapchainKHR(vulkan_state.logical_device_handle, &swapchain_ci, 0, &vulkan_state.swapchain_handle);
+
+    if (old_swapchain != VK_NULL_HANDLE) vkDestroySwapchainKHR(vulkan_state.logical_device_handle, old_swapchain, 0);
+
+    // swapchain image views
+    vkGetSwapchainImagesKHR(vulkan_state.logical_device_handle, vulkan_state.swapchain_handle, &vulkan_state.swapchain_image_count, 0);
+    VkImage* swapchain_images = malloc(sizeof(VkImage) * vulkan_state.swapchain_image_count);
+    vkGetSwapchainImagesKHR(vulkan_state.logical_device_handle, vulkan_state.swapchain_handle, &vulkan_state.swapchain_image_count, swapchain_images);
+
+    vulkan_state.swapchain_image_views = realloc(vulkan_state.swapchain_image_views, sizeof(VkImageView) * vulkan_state.swapchain_image_count);
+
+    VkImageViewCreateInfo view_ci = {0};
+    view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view_ci.format = vulkan_state.swapchain_format;
+    view_ci.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+    view_ci.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+    view_ci.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+    view_ci.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+    view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_ci.subresourceRange.baseMipLevel = 0;
+    view_ci.subresourceRange.levelCount = 1;
+    view_ci.subresourceRange.baseArrayLayer = 0;
+    view_ci.subresourceRange.layerCount = 1;
+
+    for (uint32 image_index = 0; image_index < vulkan_state.swapchain_image_count; image_index++)
+    {
+        view_ci.image = swapchain_images[image_index];
+        vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.swapchain_image_views[image_index]);
+    }
+    free(swapchain_images);
+
+    // depth image + view
+    VkImageCreateInfo depth_ci = {0};
+	depth_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	depth_ci.imageType = VK_IMAGE_TYPE_2D;
+	depth_ci.extent.width = vulkan_state.swapchain_extent.width;
+	depth_ci.extent.height = vulkan_state.swapchain_extent.height;
+	depth_ci.extent.depth = 1;
+	depth_ci.mipLevels = 1;
+	depth_ci.arrayLayers = 1;
+	depth_ci.format = vulkan_state.depth_format;
+	depth_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+	depth_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	depth_ci.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	depth_ci.samples = VK_SAMPLE_COUNT_1_BIT;
+	depth_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    vkCreateImage(vulkan_state.logical_device_handle, &depth_ci, 0, &vulkan_state.depth_image);
+
+    VkMemoryRequirements depth_memory_requirements = {0};
+    vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.depth_image, &depth_memory_requirements);
+
+    VkMemoryAllocateInfo depth_alloc = {0};
+    depth_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    depth_alloc.allocationSize = depth_memory_requirements.size;
+    depth_alloc.memoryTypeIndex = findMemoryType(depth_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    vkAllocateMemory(vulkan_state.logical_device_handle, &depth_alloc, 0, &vulkan_state.depth_image_memory);
+    vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.depth_image, vulkan_state.depth_image_memory, 0);
+
+    VkImageViewCreateInfo depth_view_ci = {0};
+    depth_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    depth_view_ci.image = vulkan_state.depth_image;
+    depth_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    depth_view_ci.format = vulkan_state.depth_format;
+    depth_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    depth_view_ci.subresourceRange.baseMipLevel = 0;
+    depth_view_ci.subresourceRange.levelCount = 1;
+    depth_view_ci.subresourceRange.baseArrayLayer = 0;
+    depth_view_ci.subresourceRange.layerCount = 1;
+
+    vkCreateImageView(vulkan_state.logical_device_handle, &depth_view_ci, 0, &vulkan_state.depth_image_view);
+
+    // framebuffers
+    vulkan_state.swapchain_framebuffers = realloc(vulkan_state.swapchain_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
+
+    for (uint32 framebuffer_index = 0; framebuffer_index < vulkan_state.swapchain_image_count; framebuffer_index++)
+    {
+        VkImageView framebuffer_attachments[2] = { vulkan_state.swapchain_image_views[framebuffer_index], vulkan_state.depth_image_view };
+
+        VkFramebufferCreateInfo framebuffer_ci = {0};
+        framebuffer_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebuffer_ci.renderPass = vulkan_state.render_pass_handle;
+        framebuffer_ci.attachmentCount = 2;
+        framebuffer_ci.pAttachments = framebuffer_attachments;
+        framebuffer_ci.width = vulkan_state.swapchain_extent.width;
+        framebuffer_ci.height = vulkan_state.swapchain_extent.height;
+        framebuffer_ci.layers = 1;
+
+        vkCreateFramebuffer(vulkan_state.logical_device_handle, &framebuffer_ci, 0, &vulkan_state.swapchain_framebuffers[framebuffer_index]);
+    }
+
+    // command buffers
+    vulkan_state.swapchain_command_buffers = realloc(vulkan_state.swapchain_command_buffers, sizeof(VkCommandBuffer) * vulkan_state.swapchain_image_count);
+
+    VkCommandBufferAllocateInfo command_buffer_alloc = {0};
+    command_buffer_alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    command_buffer_alloc.commandPool = vulkan_state.graphics_command_pool_handle;
+    command_buffer_alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    command_buffer_alloc.commandBufferCount = vulkan_state.swapchain_image_count;
+
+    vkAllocateCommandBuffers(vulkan_state.logical_device_handle, &command_buffer_alloc, vulkan_state.swapchain_command_buffers);
+
+    // per image fence tracking
+    free(vulkan_state.images_in_flight);
+    vulkan_state.images_in_flight = calloc(vulkan_state.swapchain_image_count, sizeof(VkFence));
+}
+
 void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo display)
 {
     vulkan_display = display;
@@ -1275,6 +1442,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     vkCreateDevice(vulkan_state.physical_device_handle, &device_info, 0, &vulkan_state.logical_device_handle);
 
+    /*
     VkExtent2D chosen_extent = surface_capabilities.currentExtent;
 
     if (chosen_extent.width == UINT32_MAX) // if UINT32_MAX here, no size is set, so we have to grab window dimensions ourselves
@@ -1340,7 +1508,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     depth_view_info.subresourceRange.layerCount = 1;
 
     vkCreateImageView(vulkan_state.logical_device_handle, &depth_view_info, 0, &vulkan_state.depth_image_view);
+    */
 
+    /*
     uint32 minimum_swapchain_image_count = surface_capabilities.minImageCount + 1; // may be different from actual count (asking for minimum when creating swapchain)
 
     // if maxImageCount = 0, then this means 'no maximum', so no need to clamp.
@@ -1379,7 +1549,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     }
 
 	vkCreateSwapchainKHR(vulkan_state.logical_device_handle, &swapchain_creation_info, 0, &vulkan_state.swapchain_handle);
+    */
 
+    /*
 	vkGetSwapchainImagesKHR(vulkan_state.logical_device_handle, vulkan_state.swapchain_handle, &vulkan_state.swapchain_image_count, 0);
     VkImage* swapchain_images = malloc(sizeof(*swapchain_images) * vulkan_state.swapchain_image_count);
     vkGetSwapchainImagesKHR(vulkan_state.logical_device_handle, vulkan_state.swapchain_handle, &vulkan_state.swapchain_image_count, swapchain_images);
@@ -1406,9 +1578,12 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     }
 
 	free(swapchain_images);
+    */
 
 	// a render pass is vulkan's contract for how to use images (attachments) - 'single color attachment' = we
     // have just just one render target (the swapchain image) and don't do depth / stencil.
+
+    vulkan_state.depth_format = VK_FORMAT_D32_SFLOAT;
 
 	VkAttachmentDescription color_attachment = {0};
     color_attachment.format = chosen_surface_format.format;
@@ -1469,6 +1644,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     // it doesn't allocate memory, it just ties the render pass to the actual image 
     // one framebuffer per swapchan image view, because each acquired image is a different underlying image view
 
+    /*
     vulkan_state.swapchain_framebuffers = malloc(sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
 
     VkFramebufferCreateInfo framebuffer_creation_info = {0};
@@ -1486,6 +1662,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         vkCreateFramebuffer(vulkan_state.logical_device_handle, &framebuffer_creation_info, 0, &vulkan_state.swapchain_framebuffers[swapchain_image_index]);
     }
+    */
 
 	VkCommandPoolCreateInfo command_pool_creation_info = {0}; // describes the command pool tied to graphics queue family
 	command_pool_creation_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -1494,6 +1671,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
 	vkCreateCommandPool(vulkan_state.logical_device_handle, &command_pool_creation_info, 0, &vulkan_state.graphics_command_pool_handle);
 
+    /*
     vulkan_state.swapchain_command_buffers = malloc(sizeof(VkCommandBuffer) * vulkan_state.swapchain_image_count);
 
 	VkCommandBufferAllocateInfo command_buffer_allocation_info = {0}; // which command pool (memory) to allocate from; how many command buffers to allocate in one shot
@@ -1527,6 +1705,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCmdEndRenderPass(vulkan_state.swapchain_command_buffers[swapchain_image_increment]); // triggers the transition toward final layout declared, so image is ready to present
         vkEndCommandBuffer(vulkan_state.swapchain_command_buffers[swapchain_image_increment]); // seals CB - now immutable until reset
     }
+    */
 
     // a semaphore is a GPU-GPU sync primitive. it has two states, signaled and not.
     // its signaled by the GPU as part of a queue operation, and waited by the GPU
@@ -1585,7 +1764,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 	uploadBufferToLocalDevice(CUBE_VERTICES, sizeof(CUBE_VERTICES), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &vulkan_state.cube_vertex_buffer, &vulkan_state.cube_vertex_memory);
 	uploadBufferToLocalDevice(CUBE_INDICES,  sizeof(CUBE_INDICES),  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,  &vulkan_state.cube_index_buffer,  &vulkan_state.cube_index_memory);
 
-    vulkan_state.images_in_flight = calloc(vulkan_state.swapchain_image_count, sizeof(VkFence)); // calloc because we want these to start at VK_NULL_HANDLE, i.e. 0.
+    //vulkan_state.images_in_flight = calloc(vulkan_state.swapchain_image_count, sizeof(VkFence)); // calloc because we want these to start at VK_NULL_HANDLE, i.e. 0.
+
+	createSwapchainResources();
 
     // LOADING SHADER MODULES
 
@@ -2498,16 +2679,16 @@ void vulkanDraw(void)
 
     switch (present_result)
 	{
-        case VK_SUCCESS:
-            break;
-        case VK_SUBOPTIMAL_KHR:
-            break;
+        case VK_SUCCESS: break;
+        case VK_SUBOPTIMAL_KHR: break;
         case VK_ERROR_OUT_OF_DATE_KHR:
-            return; // swapchain no longer matches the surface; recreate before drawing again
-        case VK_ERROR_SURFACE_LOST_KHR:
-            return; // surface died; recreate surface (then swapchain)
-        default:
-        	return;
+        {
+            vkDeviceWaitIdle(vulkan_state.logical_device_handle);
+            createSwapchainResources();
+            return;
+        }
+        case VK_ERROR_SURFACE_LOST_KHR: return; // surface died; recreate surface (then swapchain)
+        default: return;
     }
 
     // ADVANCE TO NEXT FRAME SLOT
@@ -2515,15 +2696,29 @@ void vulkanDraw(void)
 	vulkan_state.current_frame = (vulkan_state.current_frame + 1) % vulkan_state.frames_in_flight;
 }
 
-/*
 void vulkanResize(uint32 width, uint32 height)
 {
-    (void)width; // TODO: get rid of these when we actually use these variables
-    (void)height;
+    if (width == 0 || height == 0) return;
+    if (vulkan_state.logical_device_handle == VK_NULL_HANDLE) return;
+    if (vulkan_state.swapchain_handle == VK_NULL_HANDLE) return;
+    vkDeviceWaitIdle(vulkan_state.logical_device_handle);
+
+    // destroy old resources
+    for (uint32 image_index = 0; image_index < vulkan_state.swapchain_image_count; image_index++)
+    {
+        vkDestroyFramebuffer(vulkan_state.logical_device_handle, vulkan_state.swapchain_framebuffers[image_index], 0);
+        vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.swapchain_image_views[image_index], 0);
+    }
+    vkFreeCommandBuffers(vulkan_state.logical_device_handle, vulkan_state.graphics_command_pool_handle, vulkan_state.swapchain_image_count, vulkan_state.swapchain_command_buffers);
+    vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.depth_image_view, 0);
+    vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.depth_image, 0);
+    vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.depth_image_memory, 0);
+    // old swapchain is destroyed inside createSwapchainResources
+
+    createSwapchainResources();
 }
 
 void vulkanShutdown(void)
 {
 
 }
-*/

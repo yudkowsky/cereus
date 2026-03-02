@@ -4,10 +4,6 @@
 #include "win32_vulkan_bridge.h"
 #include "win32_cereus_bridge.h"
 
-#define local_persist static
-#define global_variable static 
-#define internal static
-
 HWND global_window_handle = 0;
 TickInput tick_input = {0};
 bool cursor_locked = false;
@@ -64,10 +60,20 @@ LRESULT CALLBACK windowMessageProcessor(
             }
             break;
         }
+        case WM_SIZE:
+        {
+            if (wParam != SIZE_MINIMIZED)
+            {
+                vulkanResize(LOWORD(lParam), HIWORD(lParam));
+                gameRedraw();
+            }
+            return 0;
+        }
         case WM_DESTROY:
+        {
             PostQuitMessage(0);
             return 0;
-
+        }
         case WM_INPUT:
         {	
 			UINT size_of_input = 0;
@@ -93,8 +99,8 @@ LRESULT CALLBACK windowMessageProcessor(
             }
             return 0;
         }
-
         case WM_KEYDOWN:
+        {
             switch (wParam)
             {
                 case 'A': tick_input.a_press = true; break;
@@ -145,7 +151,9 @@ LRESULT CALLBACK windowMessageProcessor(
             	case VK_TAB:	tick_input.tab_press = true;	break;
             }
             break;
+        }
         case WM_KEYUP:
+        {
             switch (wParam)
             {
                 case 'A': tick_input.a_press = false; break;
@@ -196,6 +204,7 @@ LRESULT CALLBACK windowMessageProcessor(
             	case VK_TAB:	tick_input.tab_press    = false; break;
             }
             break;
+        }
     }
     return DefWindowProcW(window_handle, message_id, wParam, lParam);
 }
