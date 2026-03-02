@@ -3797,6 +3797,7 @@ void updatePackDetached()
 /*
 	- T press: draw camera boundary lines
     - Y press: get rid of debug text in top left
+    - backspace press: reset camera to saved location
 
 	- F, G, H are used as mouse buttons
 
@@ -4146,6 +4147,12 @@ void gameFrame(double delta_time, TickInput tick_input)
         createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
     }
 
+    if (tick_input.backspace_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+    {
+        camera = saved_level_camera;
+        camera.rotation = buildCameraQuaternion(camera);
+    }
+
     while (physics_accumulator >= physics_timestep)
    	{
 		next_world_state = world_state;
@@ -4183,7 +4190,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 memset(animations, 0, sizeof(animations));
                 Camera save_camera = camera;
                 gameInitializeState(next_world_state.level_name);
-                camera = save_camera;
+              	camera = save_camera; 
                 time_until_game_input = META_TIME_UNTIL_ALLOW_INPUT;
                 restart_last_turn = true;
             }
@@ -5523,6 +5530,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 
     // DRAW 3D
     {
+        updateLaserBuffer();
+
         // draw lasers
         FOR(laser_buffer_index, 64)
         {
@@ -5534,11 +5543,14 @@ void gameFrame(double delta_time, TickInput tick_input)
 
             float length = vec3Length(diff);
             Vec3 scale = { LASER_WIDTH, LASER_WIDTH, length };
-            Vec4 rotation = directionToQuaternion(lb.direction, true);
+            Vec4 rotation = {0};
+			if (lb.direction == UP || lb.direction == DOWN) rotation = directionToQuaternion(lb.direction, false);
+			else rotation = directionToQuaternion(lb.direction, true);
             
             drawAsset(CUBE_3D_LASER_GREEN, LASER, center, scale, rotation, colorToRGB(lb.color));
         }
 
+        /*
         // show start points
         FOR(lb_index, 64)
         {
@@ -5548,6 +5560,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             snprintf(lb_text, sizeof(lb_text), "lb start coords: %.2f, %.2f, %.2f, lb end coords: %.2f, %.2f, %.2f", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z);
             if (do_debug_text) createDebugText(lb_text);
         }
+        */
 
         // clear laser buffer 
         memset(laser_buffer, 0, sizeof(laser_buffer));

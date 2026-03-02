@@ -135,8 +135,9 @@ LRESULT CALLBACK windowMessageProcessor(
                 case '8': tick_input.eight_press = true; break;
                 case '9': tick_input.nine_press  = true; break;
 
-                case VK_OEM_PERIOD: tick_input.dot_press = true;   break;
-                case VK_OEM_COMMA:  tick_input.comma_press = true; break;
+                case VK_OEM_PERIOD: tick_input.dot_press 	   = true; break;
+                case VK_OEM_COMMA:  tick_input.comma_press 	   = true; break;
+                case VK_BACK:       tick_input.backspace_press = true; break;
 
                 case VK_SPACE: 	tick_input.space_press = true;  break;
                 case VK_SHIFT: 	tick_input.shift_press = true;  break;
@@ -185,13 +186,14 @@ LRESULT CALLBACK windowMessageProcessor(
                 case '8': tick_input.eight_press = false; break;
                 case '9': tick_input.nine_press  = false; break;
 
-                case VK_OEM_PERIOD: tick_input.dot_press = false;   break;
-                case VK_OEM_COMMA:  tick_input.comma_press = false; break;
+                case VK_OEM_PERIOD: tick_input.dot_press       = false; break;
+                case VK_OEM_COMMA:  tick_input.comma_press     = false; break;
+                case VK_BACK:       tick_input.backspace_press = false; break;
 
-                case VK_SPACE: 	tick_input.space_press = false;  break;
-                case VK_SHIFT: 	tick_input.shift_press = false;  break;
+                case VK_SPACE: 	tick_input.space_press  = false; break;
+                case VK_SHIFT: 	tick_input.shift_press  = false; break;
                 case VK_ESCAPE: tick_input.escape_press = false; break;
-            	case VK_TAB:	tick_input.tab_press = false; 	 break;
+            	case VK_TAB:	tick_input.tab_press    = false; break;
             }
             break;
     }
