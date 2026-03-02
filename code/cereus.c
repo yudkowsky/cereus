@@ -498,13 +498,19 @@ int32 time_until_meta_input = 0;
 EditorState editor_state = {0};
 LaserBuffer laser_buffer[64] = {0};
 
-const Vec2 DEBUG_TEXT_COORDS_START = { 50.0f, 1080.0f - 80.0f };
+// debug text
+const Vec2 DEBUG_TEXT_START_COORDS = { 50.0f, 1080.0f - 80.0f };
+const int32 MAX_DEBUG_TEXT_COUNT = 32;
 const float DEBUG_TEXT_Y_DIFF = 40.0f;
-Vec2 debug_text_coords = {0}; 
-DebugPopup debug_popups[32];
+char debug_text_buffer[32][256] = {0};
+int32 debug_text_count = 0;
+
+// debug popups
 const Vec2 DEBUG_POPUP_START_COORDS = { 960.0f, 30.0f };
+DebugPopup debug_popups[32];
 const float DEBUG_POPUP_STEP_SIZE = 30.0f;
 const int32 DEFAULT_POPUP_TIME = 100;
+
 bool do_debug_text = true;
 
 // stuff from worldstate
@@ -1725,10 +1731,11 @@ void drawText(char* string, Vec2 coords, float scale, float alpha)
     }
 }
 
-void drawDebugText(char* string)
+void createDebugText(char* string)
 {
-    drawText(string, debug_text_coords, DEFAULT_TEXT_SCALE, 1.0f);
-    debug_text_coords.y -= DEBUG_TEXT_Y_DIFF;
+    if (debug_text_count >= MAX_DEBUG_TEXT_COUNT) return;
+    memcpy(debug_text_buffer[debug_text_count], string, 256);
+    debug_text_count++;
 }
 
 void createDebugPopup(char* string, PopupType popup_type)
@@ -4096,8 +4103,7 @@ void gameFrame(double delta_time, TickInput tick_input)
     while (physics_accumulator >= physics_timestep)
    	{
 		next_world_state = world_state;
-
-        debug_text_coords = DEBUG_TEXT_COORDS_START;
+        debug_text_count = 0;
 
         // mode toggle
         if (editor_state.editor_mode != SELECT_WRITE)
@@ -5321,7 +5327,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             // camera delta info
             char delta_text[256];
             snprintf(delta_text, sizeof(delta_text), "player delta from origin: %.1d, %.1d --- %.1d, %.1d", player_delta.x, player_delta.z, screen_offset_x, screen_offset_z);
-            if (do_debug_text) drawDebugText(delta_text);
+            if (do_debug_text) createDebugText(delta_text);
         }
 
         // speed up / slow down physics tick
@@ -5371,57 +5377,57 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (do_debug_text)
         {
             // display level name
-            drawDebugText(next_world_state.level_name);
+            createDebugText(next_world_state.level_name);
 
             char player_text[256] = {0};
             snprintf(player_text, sizeof(player_text), "player info: coords: %d, %d, %d, moving time: %d, moving direction: %d", player->coords.x, player->coords.y, player->coords.z, player->in_motion, player->moving_direction);
-            drawDebugText(player_text);
+            createDebugText(player_text);
 
             char pack_text[256] = {0};
             snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, moving_time: %d, moving_direction: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack->in_motion, pack->moving_direction);
-            drawDebugText(pack_text);
+            createDebugText(pack_text);
 
             /*
             // camera pos info
             char camera_text[256] = {0};
             snprintf(camera_text, sizeof(camera_text), "current camera info:    %.1f, %.1f, %.1f, fov: %.1f", camera.coords.x, camera.coords.y, camera.coords.z, camera.fov);
-            drawDebugText(camera_text);
+            createDebugText(camera_text);
 
             // saved camera info
             char saved_camera_text[256] = {0};
             snprintf(saved_camera_text, sizeof(saved_camera_text), "main saved camera info: %.1f, %.1f, %.1f, fov: %.1f", saved_level_camera.coords.x, saved_level_camera.coords.y, saved_level_camera.coords.z, saved_level_camera.fov);
-            drawDebugText(saved_camera_text);
+            createDebugText(saved_camera_text);
 
             // saved alt camera info
             char alt_camera_text[256] = {0};
             snprintf(alt_camera_text, sizeof(alt_camera_text), "alt saved camera info:  %.1f, %.1f, %.1f, fov: %.1f", alt_camera.coords.x, alt_camera.coords.y, alt_camera.coords.z, alt_camera.fov);
-            drawDebugText(alt_camera_text);
+            createDebugText(alt_camera_text);
 
             // camera_t info
             char t_text[256] = {0};
             snprintf(t_text, sizeof(t_text), "t value: %.2f", camera_lerp_t);
-            drawDebugText(t_text);
+            createDebugText(t_text);
             */
 
             /*
             // show undos performed
             char undo_text[256] = {0};
             snprintf(undo_text, sizeof(undo_text), "undos performed: %d", undos_performed);
-            drawDebugText(undo_text);
+            createDebugText(undo_text);
             */
 
             /*
             // show current selected id + coords
             char edit_text[256] = {0};
             snprintf(edit_text, sizeof(edit_text), "selected id: %d; coords: %d, %d, %d", editor_state.selected_id, editor_state.selected_coords.x, editor_state.selected_coords.y, editor_state.selected_coords.z);
-            drawDebugText(edit_text);
+            createDebugText(edit_text);
             */
 
 			/*
             // show undo deltas in buffer
             char undo_buffer_text[256] = {0};
             snprintf(undo_buffer_text, sizeof(undo_buffer_text), "undo deltas in buffer: %d", undo_buffer.delta_count);
-            drawDebugText(undo_buffer_text);
+            createDebugText(undo_buffer_text);
             */
         }
 
@@ -5458,15 +5464,15 @@ void gameFrame(double delta_time, TickInput tick_input)
                         case WRITING_FIELD_UNLOCKED_BY: memcpy(writing_field_state, "unlocked by", 	sizeof(writing_field_state)); break;
                     }
                     snprintf(writing_field_text, sizeof(writing_field_text), "writing_field: %s", writing_field_state); 
-                    drawDebugText(writing_field_text);
+                    createDebugText(writing_field_text);
 
                     char next_level_text[256] = {0};
                     snprintf(next_level_text, sizeof(next_level_text), "next_level: %s", e->next_level);
-                    drawDebugText(next_level_text);
+                    createDebugText(next_level_text);
 
                     char unlocked_by_text[256] = {0};
                     snprintf(unlocked_by_text, sizeof(unlocked_by_text), "unlocked_by: %s", e->unlocked_by);
-                    drawDebugText(unlocked_by_text);
+                    createDebugText(unlocked_by_text);
 
                     if (getTileType(e->coords) == RESET_BLOCK)
                     {
@@ -5475,18 +5481,18 @@ void gameFrame(double delta_time, TickInput tick_input)
                             if (e->reset_info[reset_index].id == -1) continue;
 							char reset_id_text[256] = {0};
                             snprintf(reset_id_text, sizeof(reset_id_text), "id of nr. %d reset: %d", reset_index, e->reset_info[reset_index].id);
-                            drawDebugText(reset_id_text);
+                            createDebugText(reset_id_text);
                         }
                     }
                 }
                 else
                 {
-                    drawDebugText("selected entity deleted");
+                    createDebugText("selected entity deleted");
                 }
             }
             else
             {
-                drawDebugText("no entity selected");
+                createDebugText("no entity selected");
             }
         }
 
@@ -5546,7 +5552,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (vec3IsEqual(lb.start_coords, VEC3_0)) continue;
             char lb_text[256] = {0};
             snprintf(lb_text, sizeof(lb_text), "lb start coords: %.2f, %.2f, %.2f, lb end coords: %.2f, %.2f, %.2f", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z);
-            if (do_debug_text) drawDebugText(lb_text);
+            if (do_debug_text) createDebugText(lb_text);
         }
 
         // clear laser buffer 
@@ -5720,7 +5726,19 @@ void gameFrame(double delta_time, TickInput tick_input)
             timer_accumulator -= 1.0/60.0;
         }
 
-        // draw debug popup texts
+        // draw debug texts
+        if (do_debug_text)
+        {
+            Vec2 debug_text_coords = DEBUG_TEXT_START_COORDS;
+            FOR(debug_text_index, debug_text_count)
+            {
+                if (debug_text_buffer[debug_text_index][0] == 0) break;
+                drawText(debug_text_buffer[debug_text_index], debug_text_coords, DEFAULT_TEXT_SCALE, 1.0f);
+                debug_text_coords.y -= DEBUG_TEXT_Y_DIFF;
+            }
+        }
+
+        // draw debug popups
         FOR(popup_index, MAX_DEBUG_POPUP_COUNT)
         {
             DebugPopup* popup = &debug_popups[popup_index];
