@@ -7,6 +7,7 @@
 HWND global_window_handle = 0;
 TickInput tick_input = {0};
 bool cursor_locked = false;
+DisplayInfo display_info = {0};
 
 void centerCursorInWindow(void)
 {
@@ -64,8 +65,10 @@ LRESULT CALLBACK windowMessageProcessor(
         {
             if (wParam != SIZE_MINIMIZED)
             {
+                display_info.client_width = LOWORD(lParam);
+                display_info.client_height = HIWORD(lParam);
                 vulkanResize(LOWORD(lParam), HIWORD(lParam));
-                gameRedraw();
+                gameRedraw(display_info);
             }
             return 0;
         }
@@ -235,19 +238,16 @@ int CALLBACK WinMain(
 
     RegisterClassExW(&window_class);
 	
-    DisplayInfo display_info = {0};
-    {
-        HMONITOR monitor = MonitorFromWindow(0, MONITOR_DEFAULTTOPRIMARY); // passing null means getting primary monitor
-        MONITORINFOEXW monitor_info = { .cbSize = sizeof(monitor_info) };
-        GetMonitorInfoW(monitor, (MONITORINFO*)&monitor_info);
+    HMONITOR monitor = MonitorFromWindow(0, MONITOR_DEFAULTTOPRIMARY); // passing null means getting primary monitor
+    MONITORINFOEXW monitor_info = { .cbSize = sizeof(monitor_info) };
+    GetMonitorInfoW(monitor, (MONITORINFO*)&monitor_info);
 
-        DEVMODEW dev_mode = { .dmSize = sizeof(dev_mode) };
-        EnumDisplaySettingsW(monitor_info.szDevice, ENUM_CURRENT_SETTINGS, &dev_mode);
+    DEVMODEW dev_mode = { .dmSize = sizeof(dev_mode) };
+    EnumDisplaySettingsW(monitor_info.szDevice, ENUM_CURRENT_SETTINGS, &dev_mode);
 
-        display_info.width = (int32)dev_mode.dmPelsWidth;
-        display_info.height = (int32)dev_mode.dmPelsHeight;
-        display_info.refresh_rate = (int32)dev_mode.dmDisplayFrequency;
-    }
+    display_info.display_width = (int32)dev_mode.dmPelsWidth;
+    display_info.display_height = (int32)dev_mode.dmPelsHeight;
+    display_info.refresh_rate = (int32)dev_mode.dmDisplayFrequency;
 
 	HWND window_handle = CreateWindowExW(
 		0,
@@ -255,7 +255,7 @@ int CALLBACK WinMain(
 		L"Window Name",
 		WS_OVERLAPPEDWINDOW,
         0, 0,
-		display_info.width, display_info.height,
+		display_info.display_width, display_info.display_height,
 		0, 0, module_handle, 0);
 
     global_window_handle = window_handle;
@@ -270,6 +270,11 @@ int CALLBACK WinMain(
     RegisterRawInputDevices(&raw_input_device, 1, sizeof(raw_input_device));
 
     RendererPlatformHandles platform_handles = { .module_handle = module_handle, .window_handle = window_handle };
+
+    RECT client_rect = {0};
+	GetClientRect(window_handle, &client_rect);
+    display_info.client_width = client_rect.right - client_rect.left;
+    display_info.client_height = client_rect.bottom - client_rect.top;
 
     vulkanInitialize(platform_handles, display_info);
 

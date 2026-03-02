@@ -16,8 +16,10 @@ RendererPlatformHandles;
 
 typedef struct DisplayInfo
 {
-    int32 width;
-    int32 height;
+    int32 display_width;
+    int32 display_height;
+    int32 client_width;
+    int32 client_height;
     int32 refresh_rate;
 }
 DisplayInfo;

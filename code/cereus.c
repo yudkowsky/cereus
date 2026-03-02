@@ -363,7 +363,7 @@ typedef struct UndoBuffer
 UndoBuffer;
 
 // CONSTS AND GLOBALS
-DisplayInfo display_info = {0};
+DisplayInfo game_display = {0};
 
 const float TAU = 6.2831853071f;
 
@@ -3270,17 +3270,24 @@ void gameInitializeState(char* level_name)
     world_state = next_world_state;
 }
 
+void recalculateDebugStartCoords()
+{
+    debug_text_start_coords = (Vec2){ 50.0f, game_display.client_height - 50.0f };
+    debug_popup_start_coords = (Vec2){ game_display.client_width / 2.0f, 30.0f };
+}
+
 void gameInitialize(char* level_name, DisplayInfo display_from_platform)
 {	
-    display_info = display_from_platform;
-    debug_text_start_coords = (Vec2){ 50.0f, display_info.height - 80.0f };
-    debug_popup_start_coords = (Vec2){ display_info.width / 2.0f, 30.0f };
+    game_display = display_from_platform;
+	recalculateDebugStartCoords();
     gameInitializeState(level_name);
 }
 
-void gameRedraw()
+void gameRedraw(DisplayInfo display_from_platform)
 {
     if (draw_command_count == 0) return;
+    game_display = display_from_platform;
+	recalculateDebugStartCoords();
     vulkanSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset);
     vulkanDraw();
 }
@@ -5460,7 +5467,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             // draw selected id info
             if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
             {
-                Vec2 center_screen = { (float)display_info.width / 2, (float)display_info.height / 2 };
+                Vec2 center_screen = { (float)game_display.client_width / 2, (float)game_display.client_height / 2 };
                 drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE, 1.0f);
 
                 if (editor_state.selected_id > 0)
@@ -5707,13 +5714,13 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             // crosshair
             Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
-            Vec3 center_screen = { ((float)display_info.width / 2) - 5, ((float)display_info.height / 2) - 18, 0.0f }; // weird numbers are just adjustment because raycast starts slightly offset 
+            Vec3 center_screen = { ((float)game_display.client_width / 2) - 5, ((float)game_display.client_height / 2) - 18, 0.0f }; // weird numbers are just adjustment because raycast starts slightly offset 
                                                                                                         		 // i think this is due to windowed mode, but could be issue with raycast.
         	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, color_2d);
 
             // picked block
             Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
-            Vec3 picked_block_coords = { display_info.width - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
+            Vec3 picked_block_coords = { game_display.client_width - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
             drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, color_2d);
 
             if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
