@@ -14,7 +14,7 @@
     OutputDebugStringA(log_buffer); \
 } while(0)
 
-const Int2 SCREEN_RESOLUTION = { 1920, 1080 };
+DisplayInfo vulkan_display = {0};
 
 const uint32 CUBE_INSTANCE_CAPACITY = 8192;
 
@@ -1054,8 +1054,10 @@ VkPipelineShaderStageCreateInfo loadShaderStage(char* path, VkShaderModule* modu
     return shader_stage_ci;
 }
 
-void vulkanInitialize(RendererPlatformHandles platform_handles)
+void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo display)
 {
+    vulkan_display = display;
+
     vulkan_state.platform_handles = platform_handles;
     vulkan_state.vulkan_instance_handle = VK_NULL_HANDLE;
     vulkan_state.surface_handle = VK_NULL_HANDLE;
@@ -1171,12 +1173,16 @@ void vulkanInitialize(RendererPlatformHandles platform_handles)
     //VkPresentModeKHR chosen_present_mode = VK_PRESENT_MODE_FIFO_KHR; 
     VkPresentModeKHR chosen_present_mode = VK_PRESENT_MODE_IMMEDIATE_KHR; 
 
-    for (uint32 present_mode_increment = 0; present_mode_increment < present_mode_count; present_mode_increment++)
+    if (vulkan_display.refresh_rate > 60)
     {
-		if (present_modes[present_mode_increment] == VK_PRESENT_MODE_MAILBOX_KHR)
+        // on high refresh rate monitors prefer mailbox
+        for (uint32 present_mode_increment = 0; present_mode_increment < present_mode_count; present_mode_increment++)
         {
-            chosen_present_mode = VK_PRESENT_MODE_MAILBOX_KHR;
-            break;
+            if (present_modes[present_mode_increment] == VK_PRESENT_MODE_MAILBOX_KHR)
+            {
+                chosen_present_mode = VK_PRESENT_MODE_MAILBOX_KHR;
+                break;
+            }
         }
     }
     free(present_modes);

@@ -8,11 +8,6 @@
 #define global_variable static 
 #define internal static
 
-int screen_width = 1920;
-int screen_height = 1080;
-//int screen_width = 800;
-//int screen_height = 450;
-
 HWND global_window_handle = 0;
 TickInput tick_input = {0};
 bool cursor_locked = false;
@@ -228,6 +223,20 @@ int CALLBACK WinMain(
 	window_class.lpszClassName = L"standard_window_class";
 
     RegisterClassExW(&window_class);
+	
+    DisplayInfo display_info = {0};
+    {
+        HMONITOR monitor = MonitorFromWindow(0, MONITOR_DEFAULTTOPRIMARY); // passing null means getting primary monitor
+        MONITORINFOEXW monitor_info = { .cbSize = sizeof(monitor_info) };
+        GetMonitorInfoW(monitor, (MONITORINFO*)&monitor_info);
+
+        DEVMODEW dev_mode = { .dmSize = sizeof(dev_mode) };
+        EnumDisplaySettingsW(monitor_info.szDevice, ENUM_CURRENT_SETTINGS, &dev_mode);
+
+        display_info.width = (int32)dev_mode.dmPelsWidth;
+        display_info.height = (int32)dev_mode.dmPelsHeight;
+        display_info.refresh_rate = (int32)dev_mode.dmDisplayFrequency;
+    }
 
 	HWND window_handle = CreateWindowExW(
 		0,
@@ -235,11 +244,8 @@ int CALLBACK WinMain(
 		L"Window Name",
 		WS_OVERLAPPEDWINDOW,
         0, 0,
-		screen_width, screen_height,
-		0,
-		0,
-		module_handle, 
-		0);
+		display_info.width, display_info.height,
+		0, 0, module_handle, 0);
 
     global_window_handle = window_handle;
 
@@ -252,9 +258,9 @@ int CALLBACK WinMain(
     raw_input_device.hwndTarget  = window_handle;
     RegisterRawInputDevices(&raw_input_device, 1, sizeof(raw_input_device));
 
-    RendererPlatformHandles platform_handles = { .module_handle = module_handle, .window_handle = window_handle};
+    RendererPlatformHandles platform_handles = { .module_handle = module_handle, .window_handle = window_handle };
 
-    vulkanInitialize(platform_handles);
+    vulkanInitialize(platform_handles, display_info);
 
     LARGE_INTEGER ticks_per_second;
     LARGE_INTEGER last_tick;
@@ -268,7 +274,7 @@ int CALLBACK WinMain(
     char* file_path = 0;
     if (command_line[0] != '\0') file_path = command_line;
 
-    gameInitialize(file_path); 
+    gameInitialize(file_path, display_info); 
 
 	double frame_times[60] = {0};
 	int32 frame_time_index = 0;

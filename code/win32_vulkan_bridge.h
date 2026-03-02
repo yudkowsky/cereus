@@ -2,4 +2,4 @@
 #include "types.h"
 #include "worldstate_structs.h"
 
-void vulkanInitialize(RendererPlatformHandles);
+void vulkanInitialize(RendererPlatformHandles, DisplayInfo);

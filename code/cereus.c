@@ -149,7 +149,7 @@ typedef struct WorldState
 
     char level_name[64];
 
-	char solved_levels[64][64]; // TODO(spike): make this enum? after finalised level names, so don't need to change at two places? maybe this is too late for this, but need to figure something out here
+	char solved_levels[64][64]; // TODO: make this enum? after finalised level names, so don't need to change at two places? maybe this is too late for this, but need to figure something out here
 }
 WorldState;
 
@@ -336,8 +336,9 @@ typedef struct UndoLevelChange
 }
 UndoLevelChange;
 
+// TODO: do some testing as to what happens when these break
 #define MAX_UNDO_DELTAS 2000000
-#define MAX_UNDO_ACTIONS 200000 // assumes a ratio of deltas:actions of 10:1
+#define MAX_UNDO_ACTIONS 200000 // assumes a ratio of deltas:actions of 10:1 i.e. 10 entities per level
 #define MAX_LEVEL_CHANGES 50000
 
 typedef struct UndoBuffer
@@ -362,9 +363,7 @@ typedef struct UndoBuffer
 UndoBuffer;
 
 // CONSTS AND GLOBALS
-
-const int32 SCREEN_WIDTH_PX = 1920; // TODO: get from platform layer
-const int32	SCREEN_HEIGHT_PX = 1080;
+DisplayInfo display_info = {0};
 
 const float TAU = 6.2831853071f;
 
@@ -499,14 +498,14 @@ EditorState editor_state = {0};
 LaserBuffer laser_buffer[64] = {0};
 
 // debug text
-const Vec2 DEBUG_TEXT_START_COORDS = { 50.0f, 1080.0f - 80.0f };
+Vec2 debug_text_start_coords = {0};
 const int32 MAX_DEBUG_TEXT_COUNT = 32;
 const float DEBUG_TEXT_Y_DIFF = 40.0f;
 char debug_text_buffer[32][256] = {0};
 int32 debug_text_count = 0;
 
 // debug popups
-const Vec2 DEBUG_POPUP_START_COORDS = { 960.0f, 30.0f };
+Vec2 debug_popup_start_coords = {0};
 DebugPopup debug_popups[32];
 const float DEBUG_POPUP_STEP_SIZE = 30.0f;
 const int32 DEFAULT_POPUP_TIME = 100;
@@ -1750,7 +1749,7 @@ void createDebugPopup(char* string, PopupType popup_type)
             {
                 FOR(string_index, 64) if (string[string_index] == '\0') 
                 {
-                    debug_popups[popup_index].coords.x = DEBUG_POPUP_START_COORDS.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
+                    debug_popups[popup_index].coords.x = debug_popup_start_coords.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
                     break;
                 }
                 debug_popups[popup_index].frames_left = DEFAULT_POPUP_TIME;
@@ -1770,10 +1769,10 @@ void createDebugPopup(char* string, PopupType popup_type)
 
     FOR(string_index, 64) if (string[string_index] == '\0') 
     {
-        debug_popups[next_free_in_popups].coords.x = DEBUG_POPUP_START_COORDS.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
+        debug_popups[next_free_in_popups].coords.x = debug_popup_start_coords.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
         break;
     }
-    debug_popups[next_free_in_popups].coords.y = DEBUG_POPUP_START_COORDS.y + (next_free_in_popups * DEBUG_POPUP_STEP_SIZE);
+    debug_popups[next_free_in_popups].coords.y = debug_popup_start_coords.y + (next_free_in_popups * DEBUG_POPUP_STEP_SIZE);
     debug_popups[next_free_in_popups].frames_left = DEFAULT_POPUP_TIME;
     debug_popups[next_free_in_popups].type = popup_type;
     memcpy(debug_popups[next_free_in_popups].text, string, 64 * sizeof(char));
@@ -3271,9 +3270,11 @@ void gameInitializeState(char* level_name)
     world_state = next_world_state;
 }
 
-void gameInitialize(char* level_name) 
+void gameInitialize(char* level_name, DisplayInfo display_from_platform)
 {	
-    //loadUndoBufferFromFile();
+    display_info = display_from_platform;
+    debug_text_start_coords = (Vec2){ 50.0f, display_info.height - 80.0f };
+    debug_popup_start_coords = (Vec2){ display_info.width / 2.0f, 30.0f };
     gameInitializeState(level_name);
 }
 
@@ -5439,11 +5440,11 @@ void gameFrame(double delta_time, TickInput tick_input)
             snprintf(undo_buffer_text, sizeof(undo_buffer_text), "undo deltas in buffer: %d", undo_buffer.delta_count);
             createDebugText(undo_buffer_text);
             */
-            // draw selected id info
 
+            // draw selected id info
             if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
             {
-                Vec2 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2 };
+                Vec2 center_screen = { (float)display_info.width / 2, (float)display_info.height / 2 };
                 drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE, 1.0f);
 
                 if (editor_state.selected_id > 0)
@@ -5684,13 +5685,13 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             // crosshair
             Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
-            Vec3 center_screen = { ((float)SCREEN_WIDTH_PX / 2) - 5, ((float)SCREEN_HEIGHT_PX / 2) - 18, 0.0f }; // weird numbers are just adjustment because raycast starts slightly offset 
+            Vec3 center_screen = { ((float)display_info.width / 2) - 5, ((float)display_info.height / 2) - 18, 0.0f }; // weird numbers are just adjustment because raycast starts slightly offset 
                                                                                                         		 // i think this is due to windowed mode, but could be issue with raycast.
         	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, color_2d);
 
             // picked block
             Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
-            Vec3 picked_block_coords = { SCREEN_WIDTH_PX - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
+            Vec3 picked_block_coords = { display_info.width - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
             drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, color_2d);
 
             if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
@@ -5730,7 +5731,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // draw debug texts
         if (do_debug_text)
         {
-            Vec2 debug_text_coords = DEBUG_TEXT_START_COORDS;
+            Vec2 debug_text_coords = debug_text_start_coords;
             FOR(debug_text_index, debug_text_count)
             {
                 if (debug_text_buffer[debug_text_index][0] == 0) break;

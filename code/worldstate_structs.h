@@ -7,12 +7,20 @@
 #undef VOID
 #endif
 
-typedef struct
+typedef struct RendererPlatformHandles
 {
     void* module_handle;
     void* window_handle;
 }
 RendererPlatformHandles;
+
+typedef struct DisplayInfo
+{
+    int32 width;
+    int32 height;
+    int32 refresh_rate;
+}
+DisplayInfo;
 
 typedef enum 
 {
