@@ -4066,8 +4066,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (tick_input.shift_press) camera.coords.y -= CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
         }
     }
-    // handle writing once per present frame
 
+    // handle writing once per present frame
     if (editor_state.editor_mode == SELECT_WRITE)
     {
         char (*writing_to_field)[64] = 0;
@@ -4100,30 +4100,55 @@ void gameFrame(double delta_time, TickInput tick_input)
         memset(&editor_state.edit_buffer, 0, sizeof(editor_state.edit_buffer));
     }
 
+    // mode toggle
+    if (editor_state.editor_mode != SELECT_WRITE)
+    {
+        if (tick_input.zero_press) 
+        {
+            editor_state.editor_mode = NO_MODE;
+            createDebugPopup("game mode", GAMEPLAY_MODE_CHANGE);
+        }
+        if (tick_input.one_press) 
+        {
+            editor_state.editor_mode = PLACE_BREAK;
+            createDebugPopup("place / break mode", GAMEPLAY_MODE_CHANGE);
+        }
+        if (tick_input.two_press) 
+        {
+            editor_state.editor_mode = SELECT;
+            createDebugPopup("select mode", GAMEPLAY_MODE_CHANGE);
+        }
+    }
+
+    // speed up / slow down physics tick
+    if (tick_input.dot_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+    {
+        char timestep_text[256] = {0};
+        if (physics_timestep > DEFAULT_PHYSICS_TIMESTEP)
+        {
+            physics_timestep /= 2;
+            time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+            snprintf(timestep_text, sizeof(timestep_text), "physics timestep increased (%f)", physics_timestep);
+            createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
+        }
+        else
+        {
+            createDebugPopup("physics timestep already at minimum!", PHYSICS_TIMESTEP_CHANGE);
+        }
+    }
+    else if (tick_input.comma_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+    {
+        physics_timestep *= 2;
+        time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+        char timestep_text[256] = {0};
+        snprintf(timestep_text, sizeof(timestep_text), "physics timestep decreased (%f)", physics_timestep);
+        createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
+    }
+
     while (physics_accumulator >= physics_timestep)
    	{
 		next_world_state = world_state;
         debug_text_count = 0;
-
-        // mode toggle
-        if (editor_state.editor_mode != SELECT_WRITE)
-    	{
-            if (tick_input.zero_press) 
-            {
-                editor_state.editor_mode = NO_MODE;
-                createDebugPopup("game mode", GAMEPLAY_MODE_CHANGE);
-            }
-            if (tick_input.one_press) 
-            {
-                editor_state.editor_mode = PLACE_BREAK;
-                createDebugPopup("place / break mode", GAMEPLAY_MODE_CHANGE);
-            }
-            if (tick_input.two_press) 
-            {
-                editor_state.editor_mode = SELECT;
-                createDebugPopup("select mode", GAMEPLAY_MODE_CHANGE);
-            }
-        }
 
         if (editor_state.editor_mode == NO_MODE)
         {
@@ -5330,31 +5355,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (do_debug_text) createDebugText(delta_text);
         }
 
-        // speed up / slow down physics tick
-        if (tick_input.dot_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
-        {
-            char timestep_text[256] = {0};
-            if (physics_timestep > DEFAULT_PHYSICS_TIMESTEP)
-            {
-                physics_timestep /= 2;
-                time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
-                snprintf(timestep_text, sizeof(timestep_text), "physics timestep increased (%f)", physics_timestep);
-                createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
-            }
-            else
-            {
-                createDebugPopup("physics timestep already at minimum!", PHYSICS_TIMESTEP_CHANGE);
-            }
-        }
-        else if (tick_input.comma_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
-        {
-            physics_timestep *= 2;
-            time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
-            char timestep_text[256] = {0};
-            snprintf(timestep_text, sizeof(timestep_text), "physics timestep decreased (%f)", physics_timestep);
-            createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
-        }
-
         // record undo if this is pushed to later, most likely due to pack turn
         if (pending_undo_record)
         {
@@ -5369,11 +5369,16 @@ void gameFrame(double delta_time, TickInput tick_input)
             time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
 
-        // finished updating state
-        world_state = next_world_state;
+        // write level to file on i press
+        if (time_until_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.i_press) 
+        {
+            saveLevelRewrite(level_path, true);
+            saveLevelRewrite(relative_level_path, true);
+            createDebugPopup("level saved", LEVEL_SAVE);
+            writeSolvedLevelsToFile();
+        }
 
-		// DRAW 2D
-
+        // create debug texts
         if (do_debug_text)
         {
             // display level name
@@ -5429,86 +5434,69 @@ void gameFrame(double delta_time, TickInput tick_input)
             snprintf(undo_buffer_text, sizeof(undo_buffer_text), "undo deltas in buffer: %d", undo_buffer.delta_count);
             createDebugText(undo_buffer_text);
             */
-        }
+            // draw selected id info
 
-        /*
-        // temp draw outline around trailing hitboxes
-        FOR(th_index, MAX_TRAILING_HITBOX_COUNT)
-        {
-            TrailingHitbox th = next_world_state.trailing_hitboxes[th_index];
-            if (th.frames == 0 || th.hit_direction != NO_DIRECTION) continue;
-            drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0);
-        }
-        */
-
-		// draw selected id info
-        if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
-        {
-            Vec2 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2 };
-            drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE, 1.0f);
-
-            if (editor_state.selected_id > 0)
+            if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
             {
-                Entity* e = getEntityFromId(editor_state.selected_id);
-                if (e) // TODO: this guard is somewhat bad solution; i still persist selected_id even if that id doesn't exist anymore. this prevents crash, but later: on entity delete check if matches against id, and if so remove from editor_state.
+                Vec2 center_screen = { (float)SCREEN_WIDTH_PX / 2, (float)SCREEN_HEIGHT_PX / 2 };
+                drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE, 1.0f);
+
+                if (editor_state.selected_id > 0)
                 {
-                    char selected_id_text[256] = {0};
-                    snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d", editor_state.selected_id);
-
-                    char writing_field_text[256] = {0};
-                    char writing_field_state[256] = {0};
-                    switch (editor_state.writing_field)
+                    Entity* e = getEntityFromId(editor_state.selected_id);
+                    if (e) // TODO: this guard is somewhat bad solution; i still persist selected_id even if that id doesn't exist anymore. this prevents crash, but later: on entity delete check if matches against id, and if so remove from editor_state.
                     {
-                        case NO_WRITING_FIELD:    		memcpy(writing_field_state, "none", 		sizeof(writing_field_state)); break;
-                        case WRITING_FIELD_NEXT_LEVEL:  memcpy(writing_field_state, "next level", 	sizeof(writing_field_state)); break;
-                        case WRITING_FIELD_UNLOCKED_BY: memcpy(writing_field_state, "unlocked by", 	sizeof(writing_field_state)); break;
-                    }
-                    snprintf(writing_field_text, sizeof(writing_field_text), "writing_field: %s", writing_field_state); 
-                    createDebugText(writing_field_text);
+                        char selected_id_text[256] = {0};
+                        snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d", editor_state.selected_id);
 
-                    char next_level_text[256] = {0};
-                    snprintf(next_level_text, sizeof(next_level_text), "next_level: %s", e->next_level);
-                    createDebugText(next_level_text);
-
-                    char unlocked_by_text[256] = {0};
-                    snprintf(unlocked_by_text, sizeof(unlocked_by_text), "unlocked_by: %s", e->unlocked_by);
-                    createDebugText(unlocked_by_text);
-
-                    if (getTileType(e->coords) == RESET_BLOCK)
-                    {
-                        FOR(reset_index, MAX_RESET_COUNT)
-						{
-                            if (e->reset_info[reset_index].id == -1) continue;
-							char reset_id_text[256] = {0};
-                            snprintf(reset_id_text, sizeof(reset_id_text), "id of nr. %d reset: %d", reset_index, e->reset_info[reset_index].id);
-                            createDebugText(reset_id_text);
+                        char writing_field_text[256] = {0};
+                        char writing_field_state[256] = {0};
+                        switch (editor_state.writing_field)
+                        {
+                            case NO_WRITING_FIELD:    		memcpy(writing_field_state, "none", 		sizeof(writing_field_state)); break;
+                            case WRITING_FIELD_NEXT_LEVEL:  memcpy(writing_field_state, "next level", 	sizeof(writing_field_state)); break;
+                            case WRITING_FIELD_UNLOCKED_BY: memcpy(writing_field_state, "unlocked by", 	sizeof(writing_field_state)); break;
                         }
+                        snprintf(writing_field_text, sizeof(writing_field_text), "writing_field: %s", writing_field_state); 
+                        createDebugText(writing_field_text);
+
+                        char next_level_text[256] = {0};
+                        snprintf(next_level_text, sizeof(next_level_text), "next_level: %s", e->next_level);
+                        createDebugText(next_level_text);
+
+                        char unlocked_by_text[256] = {0};
+                        snprintf(unlocked_by_text, sizeof(unlocked_by_text), "unlocked_by: %s", e->unlocked_by);
+                        createDebugText(unlocked_by_text);
+
+                        if (getTileType(e->coords) == RESET_BLOCK)
+                        {
+                            FOR(reset_index, MAX_RESET_COUNT)
+                            {
+                                if (e->reset_info[reset_index].id == -1) continue;
+                                char reset_id_text[256] = {0};
+                                snprintf(reset_id_text, sizeof(reset_id_text), "id of nr. %d reset: %d", reset_index, e->reset_info[reset_index].id);
+                                createDebugText(reset_id_text);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        createDebugText("selected entity deleted");
                     }
                 }
                 else
                 {
-                    createDebugText("selected entity deleted");
+                    createDebugText("no entity selected");
                 }
             }
-            else
-            {
-                createDebugText("no entity selected");
-            }
         }
 
-        // write level to file on i press
-        if (time_until_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.i_press) 
-        {
-            saveLevelRewrite(level_path, true);
-            saveLevelRewrite(relative_level_path, true);
-            createDebugPopup("level saved", LEVEL_SAVE);
-            writeSolvedLevelsToFile();
-        }
-
-		if (time_until_game_input > 0) time_until_game_input--;
-		if (time_until_meta_input > 0) time_until_meta_input--;
+        // finished updating state
+        world_state = next_world_state;
 
         physics_accumulator -= physics_timestep;
+
+        if (time_until_game_input > 0) time_until_game_input--;
 	}
 
     // update camera for drawing (every display frame)
@@ -5672,6 +5660,15 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
+        /*
+        // temp draw outline around trailing hitboxes
+        FOR(th_index, MAX_TRAILING_HITBOX_COUNT)
+        {
+            TrailingHitbox th = trailing_hitboxes[th_index];
+            if (th.frames == 0 || th.hit_direction != NO_DIRECTION) continue;
+            drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0);
+        }
+        */
     }
 
     // DRAW 2D
@@ -5719,10 +5716,9 @@ void gameFrame(double delta_time, TickInput tick_input)
         timer_accumulator += delta_time;
         while (timer_accumulator >= 1.0/60.0)
         {
-            FOR(popup_index, MAX_DEBUG_POPUP_COUNT)
-            {
-                if (debug_popups[popup_index].frames_left > 0) debug_popups[popup_index].frames_left--;
-            }
+            FOR(popup_index, MAX_DEBUG_POPUP_COUNT) if (debug_popups[popup_index].frames_left > 0) debug_popups[popup_index].frames_left--;
+            if (time_until_meta_input > 0) time_until_meta_input--;
+
             timer_accumulator -= 1.0/60.0;
         }
 
