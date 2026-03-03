@@ -3942,6 +3942,7 @@ void editorMode(TickInput *tick_input)
         if (tick_input->m_press)
         {
             clearSolvedLevels();
+            createDebugPopup("solved levels cleared", NO_TYPE);
             time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
     }
@@ -4167,6 +4168,8 @@ void gameFrame(double delta_time, TickInput tick_input)
     {
         camera = saved_level_camera;
         camera.rotation = buildCameraQuaternion(camera);
+        createDebugPopup("returned camera to saved position", NO_TYPE);
+        time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
     }
 
     while (physics_accumulator >= physics_timestep)
@@ -4203,6 +4206,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     pending_undo_was_reset = true; // disables interpolation
                     recordActionForUndo(&world_state);
                 }
+                createDebugPopup("level restarted", NO_TYPE);
                 memset(animations, 0, sizeof(animations));
                 Camera save_camera = camera;
                 gameInitializeState(next_world_state.level_name);
@@ -5467,9 +5471,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             // draw selected id info
             if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
             {
-                Vec2 center_screen = { (float)game_display.client_width / 2, (float)game_display.client_height / 2 };
-                drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE, 1.0f);
-
                 if (editor_state.selected_id > 0)
                 {
                     Entity* e = getEntityFromId(editor_state.selected_id);
@@ -5767,6 +5768,13 @@ void gameFrame(double delta_time, TickInput tick_input)
                 drawText(debug_text_buffer[debug_text_index], debug_text_coords, DEFAULT_TEXT_SCALE, 1.0f);
                 debug_text_coords.y -= DEBUG_TEXT_Y_DIFF;
             }
+        }
+
+        // draw input text at center of screen
+        if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
+        {
+            Vec2 center_screen = { (float)game_display.client_width / 2, (float)game_display.client_height / 2 };
+            drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE, 1.0f);
         }
 
         // draw debug popups
