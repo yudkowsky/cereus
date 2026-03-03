@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include "win32_vulkan_bridge.h"
 #include "win32_cereus_bridge.h"
+#include <timeapi.h>
 
 HWND global_window_handle = 0;
 TickInput tick_input = {0};
@@ -48,16 +49,20 @@ LRESULT CALLBACK windowMessageProcessor(
         }
         case WM_ACTIVATE:
         {
-			if (LOWORD(wParam) == WA_ACTIVE || LOWORD(wParam) == WA_CLICKACTIVE)
-            {
-                cursor_locked = true;
-                while (ShowCursor(FALSE) >= 0) { }
-                centerCursorInWindow();
-            }
-			else
+            if (LOWORD(wParam) == WA_INACTIVE)
             {
                 cursor_locked = false;
-                while (ShowCursor(TRUE) < 0) { }
+                while (ShowCursor(TRUE) < 0) {}
+            }
+            break;
+        }
+        case WM_LBUTTONDOWN:
+        {
+            if (!cursor_locked)
+            {
+                cursor_locked = true;
+                while (ShowCursor(FALSE) >= 0) {}
+                centerCursorInWindow();
             }
             break;
         }
@@ -331,6 +336,27 @@ int CALLBACK WinMain(
 
         QueryPerformanceCounter(&work_end);
         double work_ms = (work_end.QuadPart - work_start.QuadPart) * seconds_per_tick * 1000.0;
+
+        /*
+        //timeBeginPeriod(1);
+
+        double target_ms = 1000.0 / 200.0; // 200 fps cap
+        double sleep_ms = target_ms - work_ms;
+        if (sleep_ms > 1.0)
+        {
+            Sleep((DWORD)(sleep_ms - 1));
+            LARGE_INTEGER spin_start;
+            QueryPerformanceCounter(&spin_start);
+            while (true)
+            {
+                LARGE_INTEGER now;
+                QueryPerformanceCounter(&now);
+                double elapsed = (now.QuadPart - work_start.QuadPart) * seconds_per_tick * 1000.0;
+                if (elapsed >= target_ms) break;
+            }
+        }
+        */
+
         frame_times[frame_time_index] = work_ms;
         frame_time_index = (frame_time_index + 1) % 60;
         

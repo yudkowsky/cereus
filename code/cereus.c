@@ -27,7 +27,7 @@ typedef enum
 }
 Direction;
 
-typedef enum TileType
+typedef enum
 {
     NONE = 0,
     VOID,
@@ -3833,7 +3833,7 @@ void updatePackDetached()
     - C: save camera
     - V: save alt camera
     - X: remove alt camera
-    - J: change wide camera TODO: is this working?
+    - J: change wide camera
     - B: fov up
     - N: fov down
     - M: clear solved levels
@@ -5714,7 +5714,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             // crosshair
             Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
-            Vec3 center_screen = { ((float)game_display.client_width / 2) - 5, ((float)game_display.client_height / 2) - 18, 0.0f }; // weird numbers are just adjustment because raycast starts slightly offset 
+            Vec3 center_screen = { ((float)game_display.client_width / 2), ((float)game_display.client_height / 2), 0.0f }; // weird numbers are just adjustment because raycast starts slightly offset 
                                                                                                         		 // i think this is due to windowed mode, but could be issue with raycast.
         	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, color_2d);
 
