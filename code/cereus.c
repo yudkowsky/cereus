@@ -153,7 +153,7 @@ typedef struct WorldState
 }
 WorldState;
 
-typedef struct TrailingHitbox
+typedef struct
 {
 	Int3 coords;
     Direction hit_direction;
@@ -163,7 +163,7 @@ typedef struct TrailingHitbox
 }
 TrailingHitbox;
 
-typedef struct Animation
+typedef struct
 {
     int32 id;
     int32 frames_left;
@@ -174,7 +174,7 @@ typedef struct Animation
 }
 Animation;
 
-typedef enum PushResult
+typedef enum
 {
     CAN_PUSH = 0,
 	PAUSE_PUSH = 1,
@@ -182,7 +182,7 @@ typedef enum PushResult
 }
 PushResult;
 
-typedef struct Push 
+typedef struct
 {
     Int3 previous_coords;
     Int3 new_coords;
@@ -191,7 +191,7 @@ typedef struct Push
 }
 Push;
 
-typedef struct PackTurnState
+typedef struct
 {
     int32 pack_intermediate_states_timer;
     Int3 pack_intermediate_coords;
@@ -206,6 +206,16 @@ typedef struct PackTurnState
     int32 entity_to_fall_after_blue_not_blue_turn_timer;
 }
 PackTurnState;
+
+typedef enum
+{
+    WORLD_0,
+    WORLD_1,
+    GATE_1,
+    //WORLD_2,
+    //GATE_2
+}
+GameProgress;
 
 // EDITOR STRUCTS
 
@@ -399,7 +409,7 @@ const int32 MAX_LASER_TRAVEL_DISTANCE = 128;
 const int32 MAX_LASER_TURNS_ALLOWED = 16;
 const int32 MAX_PSEUDO_SOURCE_COUNT = 32;
 const int32 MAX_PUSHABLE_STACK_SIZE = 32;
-const int32 MAX_TRAILING_HITBOX_COUNT = 16;
+const int32 MAX_TRAILING_HITBOX_COUNT = 32;
 const int32 MAX_LEVEL_COUNT = 64;
 const int32 MAX_RESET_COUNT = 16;
 const int32 MAX_DEBUG_POPUP_COUNT = 32;
@@ -503,6 +513,7 @@ const int32 MAX_DEBUG_TEXT_COUNT = 32;
 const float DEBUG_TEXT_Y_DIFF = 40.0f;
 char debug_text_buffer[32][256] = {0};
 int32 debug_text_count = 0;
+bool do_debug_text = false;
 
 // debug popups
 Vec2 debug_popup_start_coords = {0};
@@ -510,18 +521,15 @@ DebugPopup debug_popups[32];
 const float DEBUG_POPUP_STEP_SIZE = 30.0f;
 const int32 DEFAULT_POPUP_TIME = 100;
 
-bool do_debug_text = false;
-
-// stuff from worldstate
 bool in_overworld = false;
 bool pack_detached = false;
+GameProgress game_progress = WORLD_0;
 
 bool player_will_fall_next_turn = false;
-
-TrailingHitbox trailing_hitboxes[16];
 bool bypass_player_fall;
-
 PackTurnState pack_turn_state = {0};
+
+TrailingHitbox trailing_hitboxes[32];
 
 // ghosts from tp
 Int3 player_ghost_coords = {0};
@@ -4215,7 +4223,35 @@ void gameFrame(double delta_time, TickInput tick_input)
                 createDebugPopup("level restarted", NO_TYPE);
                 memset(animations, 0, sizeof(animations));
                 Camera save_camera = camera;
+
                 gameInitializeState(next_world_state.level_name);
+
+                if (in_overworld)
+                {
+                    setTileType(NONE, player->coords);
+                    setTileDirection(NORTH, player->coords);
+                    setTileType(NONE, pack->coords);
+                    setTileDirection(NORTH, pack->coords);
+                    switch (game_progress)
+                	{
+                        case WORLD_0: player->coords = (Int3){ 58, 2, 220 }; break;
+                        case WORLD_1: player->coords = (Int3){ 58, 2, 197 }; break;
+                        case GATE_1:  player->coords = (Int3){ 58, 2, 189 }; break;
+                    }
+                    player->position_norm = intCoordsToNorm(player->coords);
+                    player->direction = NORTH;
+                    player->rotation_quat = directionToQuaternion(NORTH, false);
+                    // assume pack is always attached after a restart
+                    pack->coords = getNextCoords(player->coords, SOUTH);
+                    pack->position_norm = intCoordsToNorm(pack->coords);
+                    pack->direction = NORTH;
+                    pack->rotation_quat = directionToQuaternion(NORTH, false);
+                    setTileType(PLAYER, player->coords);
+                    setTileDirection(NORTH, player->coords);
+                    setTileType(PACK, pack->coords);
+                    setTileDirection(NORTH, pack->coords);
+                }
+                
               	camera = save_camera; 
                 time_until_game_input = META_TIME_UNTIL_ALLOW_INPUT;
                 restart_last_turn = true;
@@ -5201,6 +5237,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
+        // TODO: is this needed?
         // final redo of laser buffer, after all logic is complete, for drawing
 		updateLaserBuffer();
 
@@ -5212,6 +5249,14 @@ void gameFrame(double delta_time, TickInput tick_input)
             else			   createDebugPopup("debug state visibility off", DEBUG_STATE_VISIBILITY_CHANGE);
             time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
+
+        // update gameProgress based on which levels are solved
+        if (findInSolvedLevels("red-last") != -1)
+        {
+			if (player->coords.z <= 189) game_progress = GATE_1;
+			else game_progress = WORLD_1;
+        }
+        else game_progress = WORLD_0;
 
         // CAMERA SHENANIGANS
         char level_path[64];
@@ -5433,6 +5478,12 @@ void gameFrame(double delta_time, TickInput tick_input)
             // display level name
             createDebugText(next_world_state.level_name);
 
+            // game progress info
+            char game_text[256] = {0};
+            snprintf(game_text, sizeof(game_text), "game progress: %d", game_progress);
+            createDebugText(game_text);
+
+            // entity info
             char player_text[256] = {0};
             snprintf(player_text, sizeof(player_text), "player info: coords: %d, %d, %d, moving time: %d, moving direction: %d", player->coords.x, player->coords.y, player->coords.z, player->in_motion, player->moving_direction);
             createDebugText(player_text);
