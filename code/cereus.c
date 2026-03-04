@@ -470,9 +470,13 @@ const float CAMERA_MOVE_STEP = 0.2f;
 const float CAMERA_FOV = 15.0f;
 
 Camera camera = {0};
-Camera saved_level_camera = {0};
-Camera alt_camera = {0};
 Camera camera_with_ow_offset = {0};
+CameraMode camera_mode = MAIN_WAITING;
+
+Camera saved_main_camera = {0};
+Camera saved_alt_camera = {0};
+Camera saved_overworld_camera = {0};
+CameraMode saved_overworld_camera_mode = {0};
 
 Int3 camera_screen_offset = {0};
 const Int3 OVERWORLD_CAMERA_CENTER_START = { 58, 2, 197 };
@@ -480,21 +484,17 @@ bool draw_level_boundary = false;
 
 float camera_lerp_t = 0.0f;
 const float CAMERA_T_TIMESTEP = 0.05f;
-CameraMode camera_mode = MAIN_WAITING;
 int32 camera_target_plane = 0; // plane that camera wants to target TODO: should probably be something defined by level, not just player coords at startup
 
 DrawCommand draw_commands[8192] = {0};
 int32 draw_command_count = 0;
-
-Int3 level_dim = {0};
-
-bool render_models = false;
 
 static WorldState world_state = {0};
 static WorldState next_world_state = {0};
 static WorldState pending_undo_snapshot = {0};
 static WorldState leap_of_faith_snapshot = {0};
 static WorldState overworld_zero = {0};
+Int3 level_dim = {0};
 
 UndoBuffer undo_buffer = {0};
 bool restart_last_turn = false;
@@ -503,11 +503,31 @@ bool pending_undo_was_teleport = false;
 bool pending_undo_was_reset = false;
 int32 undos_performed = 0;
 
-Animation animations[32];
 int32 time_until_game_input = 0;
 int32 time_until_meta_input = 0;
 EditorState editor_state = {0};
 LaserBuffer laser_buffer[64] = {0};
+
+bool in_overworld = false;
+bool pack_detached = false;
+bool render_models = false;
+GameProgress game_progress = WORLD_0;
+bool cheating = false;
+
+bool player_will_fall_next_turn = false;
+bool bypass_player_fall;
+PackTurnState pack_turn_state = {0};
+
+TrailingHitbox trailing_hitboxes[32];
+Animation animations[32];
+
+// ghosts from tp
+Int3 player_ghost_coords = {0};
+Int3 pack_ghost_coords = {0};
+Direction player_ghost_direction = {0};
+Direction pack_ghost_direction = {0};
+bool do_player_ghost = false;
+bool do_pack_ghost = false;
 
 // debug text
 Vec2 debug_text_start_coords = {0};
@@ -522,24 +542,6 @@ Vec2 debug_popup_start_coords = {0};
 DebugPopup debug_popups[32];
 const float DEBUG_POPUP_STEP_SIZE = 30.0f;
 const int32 DEFAULT_POPUP_TIME = 100;
-
-bool in_overworld = false;
-bool pack_detached = false;
-GameProgress game_progress = WORLD_0;
-
-bool player_will_fall_next_turn = false;
-bool bypass_player_fall;
-PackTurnState pack_turn_state = {0};
-
-TrailingHitbox trailing_hitboxes[32];
-
-// ghosts from tp
-Int3 player_ghost_coords = {0};
-Int3 pack_ghost_coords = {0};
-Direction player_ghost_direction = {0};
-Direction pack_ghost_direction = {0};
-bool do_player_ghost = false;
-bool do_pack_ghost = false;
 
 // CAMERA HELPERS
 
@@ -1493,8 +1495,8 @@ bool saveLevelRewrite(char* path, bool save_reset_block_state)
     fwrite(&z, 1, 1, file);
 
     writeBufferToFile(file, SAVE_WRITE_VERSION);
-    writeCameraToFile(file, &saved_level_camera, false);
-    if (alt_camera.fov != 0) writeCameraToFile(file, &alt_camera, true);
+    writeCameraToFile(file, &saved_main_camera, false);
+    if (saved_alt_camera.fov != 0) writeCameraToFile(file, &saved_alt_camera, true);
 
     FOR(win_block_index, MAX_ENTITY_INSTANCE_COUNT)
     {
@@ -3262,13 +3264,22 @@ void gameInitializeState(char* level_name)
     }
 
     file = fopen(level_path, "rb+");
-
-    saved_level_camera = loadCameraInfo(file, false);
-    alt_camera = loadCameraInfo(file, true);
-    camera = saved_level_camera;
-    camera_mode = MAIN_WAITING; // TODO: actually save overworld camera, and set back into that mode.
-    camera_lerp_t = 0.0f;
-
+    saved_main_camera = loadCameraInfo(file, false);
+    saved_alt_camera = loadCameraInfo(file, true);
+    if (in_overworld)
+    {
+        if (saved_overworld_camera.fov > 0) camera = saved_overworld_camera; // on first startup, just use the camera that's saved as main camera in the overworld
+        else camera = saved_main_camera;
+        camera_mode = saved_overworld_camera_mode;
+        if (camera_mode == ALT_WAITING) camera_lerp_t = 1.0f;
+        else camera_lerp_t = 0.0f;
+    }
+    else
+    {
+        camera = saved_main_camera;
+        camera_mode = MAIN_WAITING;
+        camera_lerp_t = 0.0f;
+    }
     loadWinBlockPaths(file);
     loadLockedInfoPaths(file);
     loadResetBlockInfo(file);
@@ -4185,7 +4196,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
     if (tick_input.backspace_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
     {
-        camera = saved_level_camera;
+        camera = saved_main_camera;
         camera.rotation = buildCameraQuaternion(camera);
         camera_mode = MAIN_WAITING;
         camera_lerp_t = 0.0f;
@@ -4234,12 +4245,14 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                 if (in_overworld)
                 {
+                    // copy world state from overworld_zero, but save the solved levels and overwrite the level name
 					char persist_solved_levels[64][64];
                     memcpy(&persist_solved_levels, &next_world_state.solved_levels, sizeof(char) * 64 * 64);
                     memcpy(&next_world_state, &overworld_zero, sizeof(WorldState));
                     memcpy(&next_world_state.solved_levels, &persist_solved_levels, sizeof(char) * 64 * 64);
                     memcpy(&next_world_state.level_name, "overworld", sizeof(char) * 64);
 
+                    // set player and pack position based on game progress
                     setTileType(NONE, player->coords);
                     setTileDirection(NORTH, player->coords);
                     setTileType(NONE, pack->coords);
@@ -5145,6 +5158,16 @@ void gameFrame(double delta_time, TickInput tick_input)
                         char level_path[64] = {0};
                         buildLevelPathFromName(next_world_state.level_name, &level_path, false);
                         saveLevelRewrite(level_path, false);
+                        if (camera_mode == ALT_WAITING) 
+                        {
+                            saved_overworld_camera = saved_alt_camera;
+                            saved_overworld_camera_mode = ALT_WAITING;
+                        }
+                        else 
+                        {
+                            saved_overworld_camera = saved_main_camera;
+                            saved_overworld_camera_mode = MAIN_WAITING;
+                        }
                     }
                     levelChangePrep(wb->next_level);
                     time_until_game_input = META_TIME_UNTIL_ALLOW_INPUT;
@@ -5334,14 +5357,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                 fclose(file);
             }
 
-            if (tick_input.c_press) saved_level_camera = camera;
-            else alt_camera = camera;
+            if (tick_input.c_press) saved_main_camera = camera;
+            else saved_alt_camera = camera;
         }
 
         if (time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE && tick_input.x_press) 
         {
-            memset(&alt_camera, 0, sizeof(Camera));
-            camera = saved_level_camera;
+            memset(&saved_alt_camera, 0, sizeof(Camera));
+            camera = saved_main_camera;
             camera.rotation = buildCameraQuaternion(camera);
 
             Camera empty_camera = {0};
@@ -5380,7 +5403,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // alternative camera: switch modes on tab. defined as meta input, so that can move player at same time as tab camera change.
         if (tick_input.tab_press && time_until_meta_input == 0 && editor_state.editor_mode == NO_MODE) 
         {
-            if (alt_camera.fov != 0)
+            if (saved_alt_camera.fov != 0)
             {
                 if (camera_mode == MAIN_WAITING || camera_mode == ALT_TO_MAIN) camera_mode = MAIN_TO_ALT;
                 else camera_mode = ALT_TO_MAIN;
@@ -5395,7 +5418,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (camera_lerp_t >= 1) 
             {
                 camera_lerp_t = 1.0f;
-                camera = alt_camera;
+                camera = saved_alt_camera;
                 camera.rotation = buildCameraQuaternion(camera);
                 camera_mode = ALT_WAITING;
             }
@@ -5406,14 +5429,14 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (camera_lerp_t <= 0)
             {
                 camera_lerp_t = 0.0f;
-                camera = saved_level_camera;
+                camera = saved_main_camera;
                 camera.rotation = buildCameraQuaternion(camera);
                 camera_mode = MAIN_WAITING;
             }
         }
         if (camera_lerp_t != 0 && camera_lerp_t != 1)
         {
-            camera = lerpCamera(saved_level_camera, alt_camera, camera_lerp_t, (float)camera_target_plane);
+            camera = lerpCamera(saved_main_camera, saved_alt_camera, camera_lerp_t, (float)camera_target_plane);
         }
 
         // handle wide camera
@@ -5426,8 +5449,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (editor_state.editor_mode == NO_MODE)
                 {
                     editor_state.do_wide_camera = false;
-                    if (camera_mode == MAIN_WAITING) camera.fov = saved_level_camera.fov;
-                    else if (camera_mode == ALT_WAITING) camera.fov = alt_camera.fov;
+                    if (camera_mode == MAIN_WAITING) camera.fov = saved_main_camera.fov;
+                    else if (camera_mode == ALT_WAITING) camera.fov = saved_alt_camera.fov;
                     else camera.fov = 15.0f;
                 }
                 else
@@ -5437,8 +5460,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             else
             {
-                if (saved_level_camera.fov == camera.fov) camera.fov = 15.0f; // if working on a new level, and have saved camera as 60fov, then default to 15
-                else camera.fov = saved_level_camera.fov;
+                if (saved_main_camera.fov == camera.fov) camera.fov = 15.0f; // if working on a new level, and have saved camera as 60fov, then default to 15
+                else camera.fov = saved_main_camera.fov;
             }
             time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
@@ -5522,12 +5545,12 @@ void gameFrame(double delta_time, TickInput tick_input)
 
             // saved camera info
             char saved_camera_text[256] = {0};
-            snprintf(saved_camera_text, sizeof(saved_camera_text), "main saved camera info: %.1f, %.1f, %.1f, fov: %.1f", saved_level_camera.coords.x, saved_level_camera.coords.y, saved_level_camera.coords.z, saved_level_camera.fov);
+            snprintf(saved_camera_text, sizeof(saved_camera_text), "main saved camera info: %.1f, %.1f, %.1f, fov: %.1f", saved_main_camera.coords.x, saved_main_camera.coords.y, saved_main_camera.coords.z, saved_main_camera.fov);
             createDebugText(saved_camera_text);
 
             // saved alt camera info
             char alt_camera_text[256] = {0};
-            snprintf(alt_camera_text, sizeof(alt_camera_text), "alt saved camera info:  %.1f, %.1f, %.1f, fov: %.1f", alt_camera.coords.x, alt_camera.coords.y, alt_camera.coords.z, alt_camera.fov);
+            snprintf(alt_camera_text, sizeof(alt_camera_text), "alt saved camera info:  %.1f, %.1f, %.1f, fov: %.1f", saved_alt_camera.coords.x, saved_alt_camera.coords.y, saved_alt_camera.coords.z, saved_alt_camera.fov);
             createDebugText(alt_camera_text);
 
             // camera_t info
