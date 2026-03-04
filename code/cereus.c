@@ -3252,9 +3252,13 @@ void gameInitializeState(char* level_name)
     }
 
     file = fopen(level_path, "rb+");
-    camera = loadCameraInfo(file, false);
+
+    saved_level_camera = loadCameraInfo(file, false);
     alt_camera = loadCameraInfo(file, true);
-    saved_level_camera = camera;
+    camera = saved_level_camera;
+    camera_mode = MAIN_WAITING; // TODO: actually save overworld camera, and set back into that mode.
+    camera_lerp_t = 0.0f;
+
     loadWinBlockPaths(file);
     loadLockedInfoPaths(file);
     loadResetBlockInfo(file);
@@ -4168,6 +4172,8 @@ void gameFrame(double delta_time, TickInput tick_input)
     {
         camera = saved_level_camera;
         camera.rotation = buildCameraQuaternion(camera);
+        camera_mode = MAIN_WAITING;
+        camera_lerp_t = 0.0f;
         createDebugPopup("returned camera to saved position", NO_TYPE);
         time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
     }
@@ -5425,7 +5431,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, moving_time: %d, moving_direction: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack->in_motion, pack->moving_direction);
             createDebugText(pack_text);
 
-            /*
             // camera pos info
             char camera_text[256] = {0};
             snprintf(camera_text, sizeof(camera_text), "current camera info:    %.1f, %.1f, %.1f, fov: %.1f", camera.coords.x, camera.coords.y, camera.coords.z, camera.fov);
@@ -5445,7 +5450,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             char t_text[256] = {0};
             snprintf(t_text, sizeof(t_text), "t value: %.2f", camera_lerp_t);
             createDebugText(t_text);
-            */
 
             /*
             // show undos performed
