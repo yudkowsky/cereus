@@ -149,6 +149,11 @@ LRESULT CALLBACK windowMessageProcessor(
                 case '8': tick_input.eight_press = true; break;
                 case '9': tick_input.nine_press  = true; break;
 
+                case VK_UP:    tick_input.w_press = true; break;
+                case VK_DOWN:  tick_input.s_press = true; break;
+                case VK_LEFT:  tick_input.a_press = true; break;
+                case VK_RIGHT: tick_input.d_press = true; break;
+
                 case VK_OEM_PERIOD: tick_input.dot_press 	   = true; break;
                 case VK_OEM_COMMA:  tick_input.comma_press 	   = true; break;
                 case VK_BACK:       tick_input.backspace_press = true; break;
@@ -201,6 +206,11 @@ LRESULT CALLBACK windowMessageProcessor(
                 case '7': tick_input.seven_press = false; break;
                 case '8': tick_input.eight_press = false; break;
                 case '9': tick_input.nine_press  = false; break;
+
+                case VK_UP:    tick_input.w_press = false; break;
+                case VK_DOWN:  tick_input.s_press = false; break;
+                case VK_LEFT:  tick_input.a_press = false; break;
+                case VK_RIGHT: tick_input.d_press = false; break;
 
                 case VK_OEM_PERIOD: tick_input.dot_press       = false; break;
                 case VK_OEM_COMMA:  tick_input.comma_press     = false; break;

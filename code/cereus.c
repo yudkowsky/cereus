@@ -510,7 +510,7 @@ DebugPopup debug_popups[32];
 const float DEBUG_POPUP_STEP_SIZE = 30.0f;
 const int32 DEFAULT_POPUP_TIME = 100;
 
-bool do_debug_text = true;
+bool do_debug_text = false;
 
 // stuff from worldstate
 bool in_overworld = false;
