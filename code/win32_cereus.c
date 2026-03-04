@@ -267,14 +267,18 @@ int CALLBACK WinMain(
     display_info.display_height = (int32)dev_mode.dmPelsHeight;
     display_info.refresh_rate = (int32)dev_mode.dmDisplayFrequency;
 
+    RECT work_area; // TODO: think about putting work area as display_width/height in display_info
+	SystemParametersInfoW(SPI_GETWORKAREA, 0, &work_area, 0);
+
 	HWND window_handle = CreateWindowExW(
 		0,
 		L"standard_window_class",
 		L"Window Name",
 		WS_OVERLAPPEDWINDOW,
-        0, 0,
-		display_info.display_width, display_info.display_height,
+        work_area.left, work_area.top,
+		//display_info.display_width, display_info.display_height,
         //1920, 1080, // temp overwrite dims for easier debugging
+        work_area.right - work_area.left, work_area.bottom - work_area.top,
 		0, 0, module_handle, 0);
 
     global_window_handle = window_handle;

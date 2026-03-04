@@ -3277,7 +3277,7 @@ void gameInitializeState(char* level_name)
 void recalculateDebugStartCoords()
 {
     debug_text_start_coords = (Vec2){ 50.0f, game_display.client_height - 50.0f };
-    debug_popup_start_coords = (Vec2){ game_display.client_width / 2.0f, 30.0f };
+    debug_popup_start_coords = (Vec2){ game_display.client_width / 2.0f, 80.0f };
 }
 
 void gameInitialize(char* level_name, DisplayInfo display_from_platform)
@@ -4778,7 +4778,9 @@ void gameFrame(double delta_time, TickInput tick_input)
             else if (pack_turn_state.pack_intermediate_states_timer == 4)
             {
                 if (pack_turn_state.do_orthogonal_push_on_turn) pushAll(pack_turn_state.pack_hitbox_turning_to_coords, pack_turn_state.pack_orthogonal_push_direction, PUSH_FROM_TURN_ANIMATION_TIME, true, false); // CHANGE THIS IF WANT PACK TO SWEEP
-
+            }
+            else if (pack_turn_state.pack_intermediate_states_timer == 3)
+            {
                 setTileType(NONE, pack->coords);
                 setTileDirection(NORTH, pack->coords);
 				pack->coords = pack_turn_state.pack_hitbox_turning_to_coords;
@@ -5189,6 +5191,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     setTileType(NONE, lb->coords);
                     setTileDirection(NORTH, lb->coords);
                 }
+                createDebugPopup("something was unlocked!", 150);
             }
             else if (find_result == -1 && lb->removed)
             {
