@@ -3,7 +3,10 @@
 #include <stdio.h>
 #include "win32_vulkan_bridge.h"
 #include "win32_cereus_bridge.h"
-#include <timeapi.h>
+
+// temp for sleep
+typedef MMRESULT (WINAPI *timeBeginPeriod_t)(UINT);
+typedef MMRESULT (WINAPI *timeEndPeriod_t)(UINT);
 
 HWND global_window_handle = 0;
 TickInput tick_input = {0};
@@ -270,8 +273,8 @@ int CALLBACK WinMain(
 		L"Window Name",
 		WS_OVERLAPPEDWINDOW,
         0, 0,
-		//display_info.display_width, display_info.display_height,
-        1920, 1080, // temp overwrite dims for easier debugging
+		display_info.display_width, display_info.display_height,
+        //1920, 1080, // temp overwrite dims for easier debugging
 		0, 0, module_handle, 0);
 
     global_window_handle = window_handle;
@@ -314,6 +317,16 @@ int CALLBACK WinMain(
 
 	LARGE_INTEGER work_start, work_end;
 
+    // sleep code
+    {
+        HMODULE winmm = LoadLibraryA("winmm.dll");
+        if (winmm)
+        {
+            timeBeginPeriod_t pTimeBeginPeriod = (timeBeginPeriod_t)GetProcAddress(winmm, "timeBeginPeriod");
+            if (pTimeBeginPeriod) pTimeBeginPeriod(1);
+        }
+    }
+
     while (running)
     {
 		QueryPerformanceCounter(&work_start);
@@ -347,31 +360,24 @@ int CALLBACK WinMain(
         QueryPerformanceCounter(&work_end);
         double work_ms = (work_end.QuadPart - work_start.QuadPart) * seconds_per_tick * 1000.0;
 
-        /*
-        //timeBeginPeriod(1);
-
-        double target_ms = 1000.0 / 200.0; // 200 fps cap
-        double sleep_ms = target_ms - work_ms;
-        if (sleep_ms > 1.0)
+        // sleep code
         {
-            Sleep((DWORD)(sleep_ms - 1));
-            LARGE_INTEGER spin_start;
-            QueryPerformanceCounter(&spin_start);
-            while (true)
+            double target_ms = 1000.0 / 200.0;
+            double sleep_ms = target_ms - work_ms;
+            if (sleep_ms > 1.5)
             {
-                LARGE_INTEGER now;
-                QueryPerformanceCounter(&now);
-                double elapsed = (now.QuadPart - work_start.QuadPart) * seconds_per_tick * 1000.0;
-                if (elapsed >= target_ms) break;
+                Sleep((DWORD)(sleep_ms - 1.5));
             }
         }
-        */
 
-        frame_times[frame_time_index] = work_ms;
+        LARGE_INTEGER frame_end;
+        QueryPerformanceCounter(&frame_end);
+        double total_ms = (frame_end.QuadPart - work_start.QuadPart) * seconds_per_tick * 1000.0;
+        frame_times[frame_time_index] = total_ms;
         frame_time_index = (frame_time_index + 1) % 60;
         
         title_update_counter++;
-        if (title_update_counter >= 500)
+        if (title_update_counter >= 300)
         {
             double avg_ms = 0.0;
             for (int i = 0; i < 60; i++) avg_ms += frame_times[i];

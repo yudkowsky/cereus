@@ -5075,6 +5075,13 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
+        // if player red, reset first fall timer (and pack, if it is attached)
+        if (player->hit_by_red)
+		{
+            player->first_fall_already_done = false;
+            if (!pack_detached) pack->first_fall_already_done = false;
+        }
+
         // win block logic
         if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_game_input == 0) && editor_state.editor_mode == NO_MODE)
         {
