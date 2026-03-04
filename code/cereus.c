@@ -5383,7 +5383,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         camera_with_ow_offset = camera;
         
 		// adjust overworld camera based on position
-		if (in_overworld && !player->removed)
+		if (in_overworld)
         {
             Int3 player_delta = int3Subtract(player->coords, OVERWORLD_CAMERA_CENTER_START);
             //int32 screen_offset_x = player_delta.x / (OVERWORLD_SCREEN_SIZE_X - (OVERWORLD_SCREEN_SIZE_X / 2));
@@ -5545,7 +5545,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
     // update camera for drawing (every display frame)
     camera_with_ow_offset = camera;
-    if (in_overworld && !world_state.player.removed)
+    if (in_overworld)
     {
         Int3 player_delta = int3Subtract(world_state.player.coords, OVERWORLD_CAMERA_CENTER_START);
         int32 screen_offset_x = 0;
