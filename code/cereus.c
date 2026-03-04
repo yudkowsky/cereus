@@ -286,6 +286,7 @@ typedef enum PopupType
     MAIN_CAMERA_SAVE,
     ALT_CAMERA_SAVE,
     PHYSICS_TIMESTEP_CHANGE,
+    CHEAT_MODE_TOGGLE,
 }
 PopupType;
 
@@ -4422,9 +4423,14 @@ void gameFrame(double delta_time, TickInput tick_input)
 						if (move_player)
                         {
                             // don't allow walking off edge
-                            Int3 coords_below = getNextCoords(next_player_coords, DOWN);
-                            TileType tile_below = getTileType(coords_below);
-                            if ((tile_below != NONE || player->hit_by_red) && (!isEntity(tile_below) || getEntityPointer(coords_below)->moving_direction == NO_DIRECTION))
+                            Int3 coords_below_next_coords = getNextCoords(next_player_coords, DOWN);
+                            TileType tile_below_next_coords = getTileType(coords_below_next_coords);
+
+                            bool allow_movement = true;
+                            if (tile_below_next_coords == NONE && !player->hit_by_red) allow_movement = false;
+                            if (isEntity(tile_below_next_coords) && getEntityPointer(coords_below_next_coords)->moving_direction != NO_DIRECTION) allow_movement = false;
+
+                            if (allow_movement || cheating)
                             {
                                 if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
                                 doStandardMovement(input_direction, next_player_coords, animation_time, true);
@@ -4555,7 +4561,9 @@ void gameFrame(double delta_time, TickInput tick_input)
                 {
                     // player is turning
 
-                    if (player->hit_by_red || getTileType(getNextCoords(player->coords, DOWN)) != NONE)
+                    bool allow_turn = true;
+                    if (getTileType(getNextCoords(player->coords, DOWN)) == NONE && !player->hit_by_red) allow_turn = false;
+                    if (allow_turn || cheating)
                     {
                         Direction polarity_direction = NORTH;
                         int32 clockwise = false;
@@ -4869,8 +4877,21 @@ void gameFrame(double delta_time, TickInput tick_input)
 
 		updateLaserBuffer();
 
+        // toggle cheating
+		if (time_until_meta_input == 0 && tick_input.three_press && !(editor_state.editor_mode == SELECT_WRITE))
+        {
+            cheating = !cheating;
+            if (cheating) createDebugPopup("cheating", CHEAT_MODE_TOGGLE);
+            else createDebugPopup("not cheating", CHEAT_MODE_TOGGLE);
+            time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+        }
+
         // falling logic
-        if (undos_performed == 0) // only do gravity if not currently holding the undo button.
+        bool do_falling_logic = true;
+        if (undos_performed != 0) do_falling_logic = false; // only do gravity if not currently holding the undo button.
+        if (cheating) do_falling_logic = false;
+
+        if (do_falling_logic)
         {
             if (!player->hit_by_blue) doFallingObjects(true);
 
@@ -5262,7 +5283,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     setTileType(NONE, lb->coords);
                     setTileDirection(NORTH, lb->coords);
                 }
-                createDebugPopup("something was unlocked!", 150);
+                createDebugPopup("something was unlocked!", NO_TYPE);
             }
             else if (find_result == -1 && lb->removed)
             {
@@ -5497,7 +5518,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             recordActionForUndo(&pending_undo_snapshot);
         }
 
-        // toggle drawing (TEMP)
+        // toggle drawing
         if (tick_input.e_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
         {
             render_models = !render_models;

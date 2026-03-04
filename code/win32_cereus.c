@@ -55,7 +55,24 @@ LRESULT CALLBACK windowMessageProcessor(
             if (LOWORD(wParam) == WA_INACTIVE)
             {
                 cursor_locked = false;
-                while (ShowCursor(TRUE) < 0) {}
+                while (ShowCursor(TRUE) < 0) { }
+            }
+            else // WM_ACTIVE or WA_CLICKACTIVE
+            {
+                // only re-lock if not clicking on title bar. when activating via alt-tab, the click isn't on a non-client area
+                POINT point = {0};
+                GetCursorPos(&point);
+                POINT client_point = point;
+                ScreenToClient(window_handle, &client_point);
+                bool click_in_client = (client_point.x >= 0 && client_point.x < display_info.client_width && client_point.y >= 0 && client_point.y < display_info.client_height);
+
+                // re-lock if alt-tab (WA_ACTIVE) or clicked inside client area
+                if (LOWORD(wParam) == WA_ACTIVE || click_in_client)
+                {
+                    cursor_locked = true;
+                    while (ShowCursor(FALSE) >= 0) { }
+                    centerCursorInWindow();
+                }
             }
             break;
         }
@@ -64,7 +81,7 @@ LRESULT CALLBACK windowMessageProcessor(
             if (!cursor_locked)
             {
                 cursor_locked = true;
-                while (ShowCursor(FALSE) >= 0) {}
+                while (ShowCursor(FALSE) >= 0) { }
                 centerCursorInWindow();
             }
             break;
@@ -285,6 +302,10 @@ int CALLBACK WinMain(
 
     ShowWindow(window_handle, initial_show_state);
 
+    // lock cursor on startup
+    cursor_locked = true;
+    while (ShowCursor(FALSE) >= 0) { }
+
 	RAWINPUTDEVICE raw_input_device = {0};
     raw_input_device.usUsagePage = 0x01; // generic desktop controls
     raw_input_device.usUsage 	 = 0x02; // mouse
@@ -323,11 +344,11 @@ int CALLBACK WinMain(
 
     // sleep code
     {
-        HMODULE winmm = LoadLibraryA("winmm.dll");
-        if (winmm)
+        HMODULE random_ass_library = LoadLibraryA("winmm.dll");
+        if (random_ass_library)
         {
-            timeBeginPeriod_t pTimeBeginPeriod = (timeBeginPeriod_t)GetProcAddress(winmm, "timeBeginPeriod");
-            if (pTimeBeginPeriod) pTimeBeginPeriod(1);
+            timeBeginPeriod_t begin_time_period = (timeBeginPeriod_t)GetProcAddress(random_ass_library, "timeBeginPeriod");
+            if (begin_time_period) begin_time_period(1);
         }
     }
 
