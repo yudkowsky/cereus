@@ -462,6 +462,7 @@ const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
 const char undo_meta_path[64] = "data/meta/undo-buffer.meta";
+const char overworld_zero_name[64] = "overworld-zero";
 
 // CAMERA
 const float CAMERA_SENSITIVITY = 0.005f;
@@ -493,6 +494,7 @@ static WorldState world_state = {0};
 static WorldState next_world_state = {0};
 static WorldState pending_undo_snapshot = {0};
 static WorldState leap_of_faith_snapshot = {0};
+static WorldState overworld_zero = {0};
 
 UndoBuffer undo_buffer = {0};
 bool restart_last_turn = false;
@@ -3292,6 +3294,11 @@ void gameInitialize(char* level_name, DisplayInfo display_from_platform)
 {	
     game_display = display_from_platform;
 	recalculateDebugStartCoords();
+
+    // read overworld-zero's world state from file on startup, so it's kept in memory
+    gameInitializeState("overworld-zero");
+    memcpy(&overworld_zero, &world_state, sizeof(WorldState));
+
     gameInitializeState(level_name);
 }
 
@@ -4213,7 +4220,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             if (time_until_game_input == 0 && tick_input.r_press)
             {
-                // TODO: fix overworld case here
                 // restart
                 if (!restart_last_turn) 
                 {
@@ -4228,13 +4234,19 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                 if (in_overworld)
                 {
+					char persist_solved_levels[64][64];
+                    memcpy(&persist_solved_levels, &next_world_state.solved_levels, sizeof(char) * 64 * 64);
+                    memcpy(&next_world_state, &overworld_zero, sizeof(WorldState));
+                    memcpy(&next_world_state.solved_levels, &persist_solved_levels, sizeof(char) * 64 * 64);
+                    memcpy(&next_world_state.level_name, "overworld", sizeof(char) * 64);
+
                     setTileType(NONE, player->coords);
                     setTileDirection(NORTH, player->coords);
                     setTileType(NONE, pack->coords);
                     setTileDirection(NORTH, pack->coords);
                     switch (game_progress)
                 	{
-                        case WORLD_0: player->coords = (Int3){ 58, 2, 220 }; break;
+                        case WORLD_0: player->coords = (Int3){ 58, 2, 228 }; break;
                         case WORLD_1: player->coords = (Int3){ 58, 2, 197 }; break;
                         case GATE_1:  player->coords = (Int3){ 58, 2, 189 }; break;
                     }
@@ -5264,6 +5276,12 @@ void gameFrame(double delta_time, TickInput tick_input)
         char relative_level_path[64];
         buildLevelPathFromName(world_state.level_name, &relative_level_path, false);
 
+        // only used if saving in overworld
+        char overworld_zero_path[64];
+        buildLevelPathFromName(overworld_zero_name, &overworld_zero_path, true);
+        char overworld_zero_relative_path[64];
+        buildLevelPathFromName(overworld_zero_name, &overworld_zero_relative_path, false);
+
         // write camera to file on c press, alternative camera on v press
         if (time_until_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && (tick_input.c_press || tick_input.v_press))
         {
@@ -5468,6 +5486,11 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             saveLevelRewrite(level_path, true);
             saveLevelRewrite(relative_level_path, true);
+            if (in_overworld)
+            {
+                saveLevelRewrite(overworld_zero_path, true);
+                saveLevelRewrite(overworld_zero_relative_path, true);
+            }
             createDebugPopup("level saved", LEVEL_SAVE);
             writeSolvedLevelsToFile();
         }
@@ -5519,12 +5542,10 @@ void gameFrame(double delta_time, TickInput tick_input)
             createDebugText(undo_text);
             */
 
-            /*
             // show current selected id + coords
             char edit_text[256] = {0};
             snprintf(edit_text, sizeof(edit_text), "selected id: %d; coords: %d, %d, %d", editor_state.selected_id, editor_state.selected_coords.x, editor_state.selected_coords.y, editor_state.selected_coords.z);
             createDebugText(edit_text);
-            */
 
 			/*
             // show undo deltas in buffer
