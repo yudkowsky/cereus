@@ -10,6 +10,8 @@ glslc outline.vert -g -o ..\spirv\outline.vert.spv
 glslc outline.frag -g -o ..\spirv\outline.frag.spv
 glslc laser.vert -g -o ..\spirv\laser.vert.spv
 glslc laser.frag -g -o ..\spirv\laser.frag.spv 
+glslc laser_outline.vert -g -o ..\spirv\laser_outline.vert.spv
+glslc laser_outline.frag -g -o ..\spirv\laser_outline.frag.spv
 glslc sprite.vert -g -o ..\spirv\sprite.vert.spv
 glslc sprite.frag -g -o ..\spirv\sprite.frag.spv
 glslc model.vert -g -o ..\spirv\model.vert.spv
