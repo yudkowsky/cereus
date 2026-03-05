@@ -1178,7 +1178,7 @@ void createSwapchainResources(void)
     depth_view_ci.image = vulkan_state.depth_image;
     depth_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
     depth_view_ci.format = vulkan_state.depth_format;
-    depth_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    depth_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
     depth_view_ci.subresourceRange.baseMipLevel = 0;
     depth_view_ci.subresourceRange.levelCount = 1;
     depth_view_ci.subresourceRange.baseArrayLayer = 0;
@@ -1219,6 +1219,46 @@ void createSwapchainResources(void)
     // per image fence tracking
     free(vulkan_state.images_in_flight);
     vulkan_state.images_in_flight = calloc(vulkan_state.swapchain_image_count, sizeof(VkFence));
+}
+
+void resetPipelineStates(VkPipelineColorBlendAttachmentState* blend, VkPipelineDepthStencilStateCreateInfo* depth_stencil, VkPipelineRasterizationStateCreateInfo* raster)
+{
+    // blend: opaque, no blending
+    blend->blendEnable = VK_FALSE;
+    blend->srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+    blend->dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+    blend->colorBlendOp = VK_BLEND_OP_ADD;
+    blend->srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    blend->dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    blend->alphaBlendOp = VK_BLEND_OP_ADD;
+    blend->colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+    // depth: test + write, less
+    depth_stencil->depthTestEnable = VK_TRUE;
+    depth_stencil->depthWriteEnable = VK_TRUE;
+    depth_stencil->depthCompareOp = VK_COMPARE_OP_LESS;
+    depth_stencil->depthBoundsTestEnable = VK_FALSE;
+
+    // stencil: off
+    depth_stencil->stencilTestEnable = VK_FALSE;
+    depth_stencil->front.failOp = VK_STENCIL_OP_KEEP;
+    depth_stencil->front.passOp = VK_STENCIL_OP_KEEP;
+    depth_stencil->front.depthFailOp = VK_STENCIL_OP_KEEP;
+    depth_stencil->front.compareOp = VK_COMPARE_OP_ALWAYS;
+    depth_stencil->front.compareMask = 0xFF;
+    depth_stencil->front.writeMask = 0x00;
+    depth_stencil->front.reference = 0;
+    depth_stencil->back = depth_stencil->front;
+
+    // rasterization: filled, no cull
+    raster->polygonMode = VK_POLYGON_MODE_FILL;
+    raster->cullMode = VK_CULL_MODE_NONE;
+    raster->frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    raster->lineWidth = 1.0f;
+    raster->depthBiasEnable = VK_TRUE;
+    raster->depthBiasConstantFactor = 0.0f;
+    raster->depthBiasClamp = 0.0f;
+    raster->depthBiasSlopeFactor = 0.0f;
 }
 
 void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo display)
@@ -1442,17 +1482,16 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     vkCreateDevice(vulkan_state.physical_device_handle, &device_info, 0, &vulkan_state.logical_device_handle);
 
-	// a render pass is vulkan's contract for how to use images (attachments) - 'single color attachment' = we
-    // have just just one render target (the swapchain image) and don't do depth / stencil.
+	// a render pass is vulkan's contract for how to use images (attachments) 
 
-    vulkan_state.depth_format = VK_FORMAT_D32_SFLOAT;
+    vulkan_state.depth_format = VK_FORMAT_D32_SFLOAT_S8_UINT;
 
 	VkAttachmentDescription color_attachment = {0};
     color_attachment.format = chosen_surface_format.format;
     color_attachment.samples = VK_SAMPLE_COUNT_1_BIT; // no multi-sampling anti-aliasing, so only one color sample
 	color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; // start each frame by clearing the swapchain image to a solid color
 	color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; // we want the image to be read by the present engine after the render pass
-	color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; // don't care about previous layout of swapchain image
 	color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
@@ -1466,7 +1505,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     depth_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
     depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; 
     depth_attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -1773,10 +1812,18 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkPipelineDepthStencilStateCreateInfo depth_stencil_state_creation_info = {0}; // depth/stencil settings for the pipeline (not using this for simple 2D)
 	depth_stencil_state_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
 	depth_stencil_state_creation_info.depthTestEnable =  VK_TRUE;
-	depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
+	depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
 	depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
 	depth_stencil_state_creation_info.depthBoundsTestEnable = VK_FALSE;
-	depth_stencil_state_creation_info.stencilTestEnable = VK_FALSE;
+	depth_stencil_state_creation_info.stencilTestEnable = VK_TRUE;
+    depth_stencil_state_creation_info.front.failOp = VK_STENCIL_OP_KEEP;
+    depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_REPLACE;
+    depth_stencil_state_creation_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
+    depth_stencil_state_creation_info.front.compareOp = VK_COMPARE_OP_ALWAYS;
+    depth_stencil_state_creation_info.front.compareMask = 0xFF;
+    depth_stencil_state_creation_info.front.writeMask = 0xFF;
+    depth_stencil_state_creation_info.front.reference = 1;
+    depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
 
 	// descriptors + pipeline layout (shared by sprite and cube pipelines)
 
@@ -1944,6 +1991,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     // define sprite pipeline: depth off, blending on
 
     {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
         color_blend_attachment_state.blendEnable = VK_TRUE;
         color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
         color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
@@ -1964,6 +2013,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 	// define instanced cube pipeline: depth on, blending off
 
     {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
         color_blend_attachment_state.blendEnable = VK_FALSE;
         
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
@@ -1979,6 +2030,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     // define outline pipeline
 
     {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
         color_blend_attachment_state.blendEnable = VK_FALSE;
 
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
@@ -1994,16 +2047,13 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         outline_ci.layout = vulkan_state.outline_pipeline_layout; // use outline pipeline layout (no descriptors)
 
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &outline_ci, 0, &vulkan_state.outline_pipeline_handle);
-
-        // TODO: is this needed? if decide yes, then add this to the other pipelines as well
-        rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_FILL;
-        depth_stencil_state_creation_info.depthWriteEnable  = VK_TRUE;
-        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
     }
 
     // define laser pipeline
 
     {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
         // additive blending
         color_blend_attachment_state.blendEnable = VK_TRUE;
         color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
@@ -2014,8 +2064,14 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
 
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
-        depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
+        depth_stencil_state_creation_info.stencilTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_REPLACE;
+        depth_stencil_state_creation_info.front.compareOp = VK_COMPARE_OP_ALWAYS;
+        depth_stencil_state_creation_info.front.writeMask = 0xFF;
+        depth_stencil_state_creation_info.front.reference = 1;
+        depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
 
         rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
 
@@ -2031,13 +2087,25 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     // define laser outline pipeline
 
     {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
         color_blend_attachment_state.blendEnable = VK_FALSE;
 
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
+        // only draw where stencil is zero
+        depth_stencil_state_creation_info.stencilTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.front.failOp = VK_STENCIL_OP_KEEP;
+        depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_KEEP;
+        depth_stencil_state_creation_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
+        depth_stencil_state_creation_info.front.compareOp = VK_COMPARE_OP_EQUAL;
+        depth_stencil_state_creation_info.front.compareMask = 0xFF;
+        depth_stencil_state_creation_info.front.writeMask = 0x00;
+        depth_stencil_state_creation_info.front.reference = 0;
+        depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
 
-        rasterization_state_creation_info.cullMode = VK_CULL_MODE_FRONT_BIT;
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
         rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_FILL;
 
         VkGraphicsPipelineCreateInfo laser_outline_ci = base_graphics_pipeline_creation_info;
@@ -2050,6 +2118,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     // define model pipeline: depth on, blending off, filled, backface culling
 
     {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
         color_blend_attachment_state.blendEnable = VK_FALSE;
         color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
