@@ -17,8 +17,14 @@ pc;
 
 void main()
 {
-    float alpha = 0.4;
-    vec3 color_cap = vec3(0.8, 0.8, 0.8);
-    vec3 clamped_color = min(pc.color.rgb, color_cap);
-    out_color = vec4(clamped_color * alpha, alpha);
+    float radial = length(frag_pos_model.xy) * 2.0;
+
+    // flat interior fill
+	float fill = 0.15;
+
+    // bright edge
+    float edge = smoothstep(0.7, 1.0, radial) * 0.8;
+
+    float intensity = fill + edge;
+    out_color = vec4(pc.color.rgb * intensity, intensity);
 }

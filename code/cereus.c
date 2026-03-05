@@ -498,11 +498,12 @@ static WorldState overworld_zero = {0};
 Int3 level_dim = {0};
 
 UndoBuffer undo_buffer = {0};
-bool restart_last_turn = false;
 bool pending_undo_record = false;
 bool pending_undo_was_teleport = false;
 bool pending_undo_was_reset = false;
 int32 undos_performed = 0;
+bool restart_last_turn = false;
+//bool silence_unlocks_due_to_restart_or_undo = false;
 
 int32 time_until_game_input = 0;
 int32 time_until_meta_input = 0;
@@ -4208,7 +4209,9 @@ void gameFrame(double delta_time, TickInput tick_input)
     while (physics_accumulator >= physics_timestep)
    	{
 		next_world_state = world_state;
-        debug_text_count = 0;
+
+        debug_text_count = 0; // TODO: does this need to be global? or can it just be in this / one larger scope
+        bool silence_unlocks_due_to_restart_or_undo = false;
 
         if (editor_state.editor_mode == NO_MODE)
         {
@@ -4228,6 +4231,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     updatePackDetached();
                     undos_performed++;
                 }
+                silence_unlocks_due_to_restart_or_undo = true;
                 time_until_game_input = undo_animation_time;
             }
             if (time_until_game_input == 0 && tick_input.r_press)
@@ -4277,10 +4281,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                     setTileType(PACK, pack->coords);
                     setTileDirection(NORTH, pack->coords);
                 }
-                
               	camera = save_camera; 
-                time_until_game_input = META_TIME_UNTIL_ALLOW_INPUT;
                 restart_last_turn = true;
+                silence_unlocks_due_to_restart_or_undo = true;
+                time_until_game_input = META_TIME_UNTIL_ALLOW_INPUT;
             }
 			if (time_until_game_input == 0 && tick_input.escape_press && !in_overworld)
             {
@@ -5283,7 +5287,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     setTileType(NONE, lb->coords);
                     setTileDirection(NORTH, lb->coords);
                 }
-                createDebugPopup("something was unlocked!", NO_TYPE);
+                if (!silence_unlocks_due_to_restart_or_undo) createDebugPopup("something was unlocked!", NO_TYPE);
             }
             else if (find_result == -1 && lb->removed)
             {

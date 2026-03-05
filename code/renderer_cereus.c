@@ -81,7 +81,7 @@ CubeInstanceData;
 typedef struct Laser
 {
     Vec3 center;
-    Vec3 scale;
+    float length;
     Vec4 rotation;
     Vec3 color;
 }
@@ -213,6 +213,7 @@ typedef struct VulkanState
     uint32 cube_instance_capacity;
 
     LoadedModel loaded_models[64];
+    LoadedModel laser_cylinder_model; // TODO: probably index everything into loaded models; figure out what order i want to put stuff in, if can't just take their id
 }
 VulkanState;
 
@@ -1028,8 +1029,9 @@ LoadedModel loadModel(char* path)
 
 void loadAllEntities()
 {
-	vulkan_state.loaded_models[MODEL_3D_MIRROR 	- MODEL_3D_VOID] = loadModel("data/assets/suzanne.glb");
-    vulkan_state.loaded_models[MODEL_3D_WIN_BLOCK - MODEL_3D_VOID] = loadModel("data/assets/suzanne.glb");
+	vulkan_state.loaded_models[MODEL_3D_MIRROR 	- MODEL_3D_VOID] = loadModel("data/assets/laser-cylinder.glb");
+    vulkan_state.loaded_models[MODEL_3D_WIN_BLOCK - MODEL_3D_VOID] = loadModel("data/assets/laser-cylinder.glb");
+    vulkan_state.laser_cylinder_model = loadModel("data/assets/laser-cylinder.glb");
 }
 
 VkPipelineShaderStageCreateInfo loadShaderStage(char* path, VkShaderModule* module, VkShaderStageFlagBits stage_bit)
@@ -2099,7 +2101,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Cam
         {
             Laser* laser = &laser_instances[laser_instance_count++];
             laser->center   = command->coords;
-            laser->scale    = command->scale;
+            laser->length   = command->scale.z;
             laser->rotation = command->rotation;
             laser->color    = command->color;
         }
@@ -2403,16 +2405,46 @@ void vulkanDraw(void)
 
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_pipeline_handle);
 
+    LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
+    if (laser_mesh->index_count > 0)
+    {
+        VkDeviceSize laser_vb_offset = 0;
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_vb_offset);
+        vkCmdBindIndexBuffer(command_buffer, laser_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+        for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
+        {
+            Laser* laser = &laser_instances[laser_index];
+
+            Vec3 laser_scale = { 1.0f, 1.0f, laser->length };
+
+            float model_matrix[16];
+            mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
+
+            LaserPushConstants pc = {0};
+            memcpy(pc.model, model_matrix, sizeof(pc.model));
+            memcpy(pc.view, view_matrix, sizeof(pc.view));
+            memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
+            pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 1.0f };
+
+            vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &pc);
+
+            vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
+        }
+    }
+    /*
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_pipeline_handle);
+
     VkDeviceSize laser_vb_offset = 0;
-    vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.cube_vertex_buffer, &laser_vb_offset);
-    vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
     for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
     {
         Laser* laser = &laser_instances[laser_index];
         
+        float beam_radius = 0.25f;
         float model_matrix[16];
-        mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser->scale);
+        Vec3 laser_scale = { beam_radius, beam_radius, laser->length };
+        mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
 
         LaserPushConstants pc = {0};
         memcpy(pc.model, model_matrix, sizeof(pc.model));
@@ -2424,6 +2456,7 @@ void vulkanDraw(void)
 
         vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, 1, 0, 0, 0);
     }
+    */
 
 	// SPRITE PIPELINE
 

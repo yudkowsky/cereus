@@ -20,10 +20,7 @@ pc;
 void main()
 {
     out_frag_pos_model = in_position;
-
-    out_uv = in_uv; // unused in fragment shader
-    out_normal = mat3(pc.model) * in_normal; // also unused in fragment shader
-
-	vec4 world_pos = pc.model * vec4(in_position, 1.0);
-    gl_Position = pc.projection * pc.view * world_pos;
+    out_uv = in_uv;
+    out_normal = in_normal;
+    gl_Position = pc.projection * pc.view * pc.model * vec4(in_position, 1.0);
 }
