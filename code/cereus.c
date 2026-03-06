@@ -3869,6 +3869,7 @@ void updatePackDetached()
     - B: fov up
     - N: fov down
     - M: clear solved levels
+	- P: face camera north
 
     2: select mode
     - LMB / RMB to select block, to set win blocks / locked blocks / reset blocks
@@ -5411,7 +5412,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-        // set up overworld alternative camera relative to current camera
+        // TODO: wrap all this stuff (above, below) into if (time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE) - and organise these button presses better
 
         // change camera fov for editor
         if (tick_input.n_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE && editor_state.editor_mode != NO_MODE)
@@ -5423,6 +5424,15 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             camera.fov++;
             time_until_meta_input = 4;
+        }
+
+        // snap camera to face straight ahead (north) TODO: snap to nearest axis
+        if (tick_input.p_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+        {
+            camera.yaw = 0;
+            camera.rotation = buildCameraQuaternion(camera);
+            createDebugPopup("camera snapped to north", NO_TYPE);
+            time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
 
         // alternative camera: switch modes on tab. defined as meta input, so that can move player at same time as tab camera change.
