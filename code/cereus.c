@@ -5426,12 +5426,19 @@ void gameFrame(double delta_time, TickInput tick_input)
             time_until_meta_input = 4;
         }
 
-        // snap camera to face straight ahead (north) TODO: snap to nearest axis
+        // snap camera yaw to nearest axis
         if (tick_input.p_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
         {
-            camera.yaw = 0;
+            float camera_snap_yaw = 0;
+            if 		(camera.yaw >= TAU * -0.375f && camera.yaw < TAU * -0.125f) camera_snap_yaw = TAU * -0.25f;
+            else if (camera.yaw >= TAU * -0.125f && camera.yaw < TAU *  0.125f) camera_snap_yaw = 0;
+            else if (camera.yaw >= TAU *  0.125f && camera.yaw < TAU *  0.375f) camera_snap_yaw = TAU * 0.25f;
+            else if (camera.yaw >= TAU *  0.375f || camera.yaw < TAU * -0.375f) camera_snap_yaw = TAU * 0.5f;
+            camera.yaw = camera_snap_yaw;
             camera.rotation = buildCameraQuaternion(camera);
-            createDebugPopup("camera snapped to north", NO_TYPE);
+            char yaw_text[256] = {0};
+            snprintf(yaw_text, sizeof(yaw_text), "camera yaw snapped to: %.3f", camera_snap_yaw);
+            createDebugPopup(yaw_text, NO_TYPE);
             time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
 
