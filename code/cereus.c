@@ -4832,7 +4832,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (time_until_meta_input == 0) editorMode(&tick_input);
         }
 
-        // handle pack turning sequence
+        // pack turn sequence 
         if (pack_turn_state.pack_intermediate_states_timer > 0)
         {
             if (pack_turn_state.pack_intermediate_states_timer == 7)
@@ -4881,15 +4881,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
 		updateLaserBuffer();
-
-        // toggle cheating
-		if (time_until_meta_input == 0 && tick_input.three_press && !(editor_state.editor_mode == SELECT_WRITE))
-        {
-            cheating = !cheating;
-            if (cheating) createDebugPopup("cheating", CHEAT_MODE_TOGGLE);
-            else createDebugPopup("not cheating", CHEAT_MODE_TOGGLE);
-            time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
-        }
 
         // falling logic
         bool do_falling_logic = true;
@@ -5109,24 +5100,11 @@ void gameFrame(double delta_time, TickInput tick_input)
             pack->in_motion = 0;
             pack->moving_direction = NO_DIRECTION;
         }
-
-		// handle turning hitboxes
-        if (pack_turn_state.pack_hitbox_turning_to_timer > 0) pack_turn_state.pack_hitbox_turning_to_timer--;
-
-        // decrement trailing hitboxes 
-        FOR(i, MAX_TRAILING_HITBOX_COUNT) if (trailing_hitboxes[i].frames > 0) trailing_hitboxes[i].frames--;
-        if (bypass_player_fall) bypass_player_fall = false;
-
-        // reset undos performed if no longer holding z undos
-        if (undos_performed > 0 && !tick_input.z_press) undos_performed = 0;
-
-        // decide which ghosts to render, if ghosts should be rendered
-        do_player_ghost = false;
-        do_pack_ghost = false;
-		if (calculateGhosts())
-        {
-            do_player_ghost = true;
-            if (!pack_detached) do_pack_ghost = true;
+        // if player red, reset first fall timer (and pack, if it is attached)
+        if (player->hit_by_red)
+		{
+            player->first_fall_already_done = false;
+            if (!pack_detached) pack->first_fall_already_done = false;
         }
 
         // delete player / pack if above void
@@ -5164,12 +5142,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-        // if player red, reset first fall timer (and pack, if it is attached)
-        if (player->hit_by_red)
-		{
-            player->first_fall_already_done = false;
-            if (!pack_detached) pack->first_fall_already_done = false;
-        }
+        // LOGIC TO DO WITH WIN, RESET, AND LOCKED BLOCKS
 
         // win block logic
         if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_game_input == 0) && editor_state.editor_mode == NO_MODE)
@@ -5218,7 +5191,45 @@ void gameFrame(double delta_time, TickInput tick_input)
             time_until_game_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
 
-        // reset block logic
+		// locked block logic
+        Entity* entity_group[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.win_blocks, next_world_state.sources };
+        FOR(group_index, 4)
+        {
+            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+            {
+                Entity* e = &entity_group[group_index][entity_index];
+                if (e->unlocked_by[0] == '\0') e->locked = false;
+                if (findInSolvedLevels(e->unlocked_by) == -1) e->locked = true; 
+                else e->locked = false;
+            }
+        }
+        FOR(locked_block_index, MAX_ENTITY_INSTANCE_COUNT)
+        {
+            Entity* lb = &next_world_state.locked_blocks[locked_block_index];
+            if (lb->id == -1) continue;
+            int32 find_result = findInSolvedLevels(lb->unlocked_by);
+            if (find_result == INT32_MAX) continue;
+            if (find_result != -1 && !lb->removed)
+            {
+                // locked block to be unlocked
+                lb->removed = true;
+                if (getTileType(lb->coords) == LOCKED_BLOCK)
+                {
+                    setTileType(NONE, lb->coords);
+                    setTileDirection(NORTH, lb->coords);
+                }
+                if (!silence_unlocks_due_to_restart_or_undo) createDebugPopup("something was unlocked!", NO_TYPE);
+            }
+            else if (find_result == -1 && lb->removed)
+            {
+                lb->removed = false;
+                setTileType(LOCKED_BLOCK, lb->coords);
+                setTileDirection(NORTH, lb->coords);
+            }
+        }
+
+        // reset block logic - probably won't be needed in final game due to ow changes.
+        /*
         if ((getTileType(getNextCoords(player->coords, DOWN)) == RESET_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_game_input == 0) && editor_state.editor_mode == NO_MODE)
         {
             Entity* rb = getEntityPointer(getNextCoords(player->coords, DOWN));
@@ -5260,58 +5271,33 @@ void gameFrame(double delta_time, TickInput tick_input)
             recordActionForUndo(&world_state);
             time_until_game_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
+        */
 
-		// figure out if entities should be locked / unlocked
-        Entity* entity_group[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.win_blocks, next_world_state.sources };
-        FOR(group_index, 4)
+        // MISC STUFF
+
+		// handle turning hitboxes
+        if (pack_turn_state.pack_hitbox_turning_to_timer > 0) pack_turn_state.pack_hitbox_turning_to_timer--;
+
+        // decrement trailing hitboxes 
+        FOR(i, MAX_TRAILING_HITBOX_COUNT) if (trailing_hitboxes[i].frames > 0) trailing_hitboxes[i].frames--;
+        if (bypass_player_fall) bypass_player_fall = false;
+
+        // reset undos performed if no longer holding z undos
+        if (undos_performed > 0 && !tick_input.z_press) undos_performed = 0;
+
+        // decide which ghosts to render, if ghosts should be rendered
+        do_player_ghost = false;
+        do_pack_ghost = false;
+		if (calculateGhosts())
         {
-            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
-            {
-                Entity* e = &entity_group[group_index][entity_index];
-                if (e->unlocked_by[0] == '\0') e->locked = false;
-                if (findInSolvedLevels(e->unlocked_by) == -1) e->locked = true; 
-                else e->locked = false;
-            }
-        }
-        FOR(locked_block_index, MAX_ENTITY_INSTANCE_COUNT)
-        {
-            Entity* lb = &next_world_state.locked_blocks[locked_block_index];
-            if (lb->id == -1) continue;
-            int32 find_result = findInSolvedLevels(lb->unlocked_by);
-            if (find_result == INT32_MAX) continue;
-            if (find_result != -1 && !lb->removed)
-            {
-                // locked block to be unlocked
-                lb->removed = true;
-                if (getTileType(lb->coords) == LOCKED_BLOCK)
-                {
-                    setTileType(NONE, lb->coords);
-                    setTileDirection(NORTH, lb->coords);
-                }
-                if (!silence_unlocks_due_to_restart_or_undo) createDebugPopup("something was unlocked!", NO_TYPE);
-            }
-            else if (find_result == -1 && lb->removed)
-            {
-                lb->removed = false;
-                setTileType(LOCKED_BLOCK, lb->coords);
-                setTileDirection(NORTH, lb->coords);
-            }
+            do_player_ghost = true;
+            if (!pack_detached) do_pack_ghost = true;
         }
 
-        // TODO: is this needed?
-        // final redo of laser buffer, after all logic is complete, for drawing
+        // final redo of laser buffer, after all logic is complete, for drawing // TODO: which of these calls throughout the code are now needed?
 		updateLaserBuffer();
 
-        // get rid of debug text on press
-		if (time_until_meta_input == 0 && tick_input.y_press && !(editor_state.editor_mode == SELECT_WRITE)) 
-        {
-            do_debug_text = !do_debug_text;
-            if (do_debug_text) createDebugPopup("debug state visibility on", DEBUG_STATE_VISIBILITY_CHANGE);
-            else			   createDebugPopup("debug state visibility off", DEBUG_STATE_VISIBILITY_CHANGE);
-            time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
-        }
-
-        // update gameProgress based on which levels are solved
+        // update gameProgress based on which levels are solved, and current coords of the player
         if (findInSolvedLevels("red-last") != -1)
         {
 			if (player->coords.z <= 189) game_progress = GATE_1;
@@ -5319,130 +5305,98 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
         else game_progress = WORLD_0;
 
-        // CAMERA SHENANIGANS
-        char level_path[64];
-        buildLevelPathFromName(world_state.level_name, &level_path, true);
-        char relative_level_path[64];
-        buildLevelPathFromName(world_state.level_name, &relative_level_path, false);
-
-        // only used if saving in overworld
-        char overworld_zero_path[64];
-        buildLevelPathFromName(overworld_zero_name, &overworld_zero_path, true);
-        char overworld_zero_relative_path[64];
-        buildLevelPathFromName(overworld_zero_name, &overworld_zero_relative_path, false);
-
-        // write camera to file on c press, alternative camera on v press
-        if (time_until_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && (tick_input.c_press || tick_input.v_press))
+        // record undo if this is pushed to later, most likely due to pack turn
+        if (pending_undo_record)
         {
-            char tag[4] = {0};
-            bool write_alt_camera = false;
-            if (tick_input.c_press) 
+            pending_undo_record = false;
+            recordActionForUndo(&pending_undo_snapshot);
+        }
+
+        // EDITOR HOTKEYS
+        if (time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+        {
+            // change camera fov for editor
+            if (tick_input.n_press && editor_state.editor_mode != NO_MODE)
             {
-                memcpy(&tag, &MAIN_CAMERA_CHUNK_TAG, sizeof(tag));
-                createDebugPopup("main camera saved", MAIN_CAMERA_SAVE);
+                camera.fov--;
+                time_until_meta_input = 4;
             }
-            else 					
+            else if (tick_input.b_press && editor_state.editor_mode != NO_MODE)
             {
-                memcpy(&tag, &ALT_CAMERA_CHUNK_TAG, sizeof(tag));
-                createDebugPopup("alt camera saved", ALT_CAMERA_SAVE);
-                write_alt_camera = true;
+                camera.fov++;
+                time_until_meta_input = 4;
             }
 
+            // snap camera yaw to nearest axis
+            if (tick_input.p_press)
             {
-                FILE* file = fopen(level_path, "rb+");
-                int32 positions[64] = {0};
-                int32 count = getCountAndPositionOfChunk(file, tag, positions);
+                float camera_snap_yaw = 0;
+                if 		(camera.yaw >= TAU * -0.375f && camera.yaw < TAU * -0.125f) camera_snap_yaw = TAU * -0.25f;
+                else if (camera.yaw >= TAU * -0.125f && camera.yaw < TAU *  0.125f) camera_snap_yaw = 0;
+                else if (camera.yaw >= TAU *  0.125f && camera.yaw < TAU *  0.375f) camera_snap_yaw = TAU * 0.25f;
+                else if (camera.yaw >= TAU *  0.375f || camera.yaw < TAU * -0.375f) camera_snap_yaw = TAU * 0.5f;
+                camera.yaw = camera_snap_yaw;
+                camera.rotation = buildCameraQuaternion(camera);
+                char yaw_text[256] = {0};
+                snprintf(yaw_text, sizeof(yaw_text), "camera yaw snapped to: %.3f", camera_snap_yaw);
+                createDebugPopup(yaw_text, NO_TYPE);
+                time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+            }
 
-                if (count > 0)
+            // set camera fov to wide for editor
+            if (tick_input.j_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+            {
+                editor_state.do_wide_camera = !editor_state.do_wide_camera;
+                time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                if (editor_state.do_wide_camera)
                 {
-                    fseek(file, positions[0], SEEK_SET);
-                    writeCameraToFile(file, &camera, write_alt_camera);
+                    if (editor_state.editor_mode == NO_MODE)
+                    {
+                        editor_state.do_wide_camera = false;
+                        if (camera_mode == MAIN_WAITING) camera.fov = saved_main_camera.fov;
+                        else if (camera_mode == ALT_WAITING) camera.fov = saved_alt_camera.fov;
+                        else camera.fov = 15.0f;
+                    }
+                    else
+                    {
+                        camera.fov = 60.0f;
+                    }
                 }
                 else
                 {
-                    fseek(file, 0, SEEK_END);
-                    writeCameraToFile(file, &camera, write_alt_camera);
+                    if (saved_main_camera.fov == camera.fov) camera.fov = 15.0f; // if working on a new level, and have saved camera as 60fov, then default to 15
+                    else camera.fov = saved_main_camera.fov;
                 }
-                fclose(file);
+                time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
             }
+
+            // toggle drawing
+            if (tick_input.e_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
             {
-                FILE* file = fopen(relative_level_path, "rb+");
-                int32 positions[64] = {0};
-                int32 count = getCountAndPositionOfChunk(file, tag, positions);
-
-                if (count > 0)
-                {
-                    fseek(file, positions[0], SEEK_SET);
-                    writeCameraToFile(file, &camera, write_alt_camera);
-                }
-                else
-                {
-                    fseek(file, 0, SEEK_END);
-                    writeCameraToFile(file, &camera, write_alt_camera);
-                }
-                fclose(file);
+                render_models = !render_models;
+                time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
             }
 
-            if (tick_input.c_press) saved_main_camera = camera;
-            else saved_alt_camera = camera;
-        }
-
-        if (time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE && tick_input.x_press) 
-        {
-            memset(&saved_alt_camera, 0, sizeof(Camera));
-            camera = saved_main_camera;
-            camera.rotation = buildCameraQuaternion(camera);
-
-            Camera empty_camera = {0};
+            // get rid of debug text on press
+            if (time_until_meta_input == 0 && tick_input.y_press && !(editor_state.editor_mode == SELECT_WRITE)) 
             {
-                FILE* file = fopen(relative_level_path, "rb+");
-                int32 positions[64] = {0};
-                getCountAndPositionOfChunk(file, ALT_CAMERA_CHUNK_TAG, positions);
-                fseek(file, positions[0], SEEK_SET);
-                writeCameraToFile(file, &empty_camera, true);
-                fclose(file);
+                do_debug_text = !do_debug_text;
+                if (do_debug_text) createDebugPopup("debug state visibility on", DEBUG_STATE_VISIBILITY_CHANGE);
+                else			   createDebugPopup("debug state visibility off", DEBUG_STATE_VISIBILITY_CHANGE);
+                time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
             }
+
+            // toggle cheating
+            if (time_until_meta_input == 0 && tick_input.three_press && !(editor_state.editor_mode == SELECT_WRITE))
             {
-                FILE* file = fopen(level_path, "rb+");
-                int32 positions[64] = {0};
-                getCountAndPositionOfChunk(file, ALT_CAMERA_CHUNK_TAG, positions);
-                fseek(file, positions[0], SEEK_SET);
-                writeCameraToFile(file, &empty_camera, true);
-                fclose(file);
+                cheating = !cheating;
+                if (cheating) createDebugPopup("cheating", CHEAT_MODE_TOGGLE);
+                else createDebugPopup("not cheating", CHEAT_MODE_TOGGLE);
+                time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
             }
         }
 
-        // TODO: wrap all this stuff (above, below) into if (time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE) - and organise these button presses better
-
-        // change camera fov for editor
-        if (tick_input.n_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE && editor_state.editor_mode != NO_MODE)
-        {
-            camera.fov--;
-            time_until_meta_input = 4;
-        }
-        else if (tick_input.b_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE && editor_state.editor_mode != NO_MODE)
-        {
-            camera.fov++;
-            time_until_meta_input = 4;
-        }
-
-        // snap camera yaw to nearest axis
-        if (tick_input.p_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
-        {
-            float camera_snap_yaw = 0;
-            if 		(camera.yaw >= TAU * -0.375f && camera.yaw < TAU * -0.125f) camera_snap_yaw = TAU * -0.25f;
-            else if (camera.yaw >= TAU * -0.125f && camera.yaw < TAU *  0.125f) camera_snap_yaw = 0;
-            else if (camera.yaw >= TAU *  0.125f && camera.yaw < TAU *  0.375f) camera_snap_yaw = TAU * 0.25f;
-            else if (camera.yaw >= TAU *  0.375f || camera.yaw < TAU * -0.375f) camera_snap_yaw = TAU * 0.5f;
-            camera.yaw = camera_snap_yaw;
-            camera.rotation = buildCameraQuaternion(camera);
-            char yaw_text[256] = {0};
-            snprintf(yaw_text, sizeof(yaw_text), "camera yaw snapped to: %.3f", camera_snap_yaw);
-            createDebugPopup(yaw_text, NO_TYPE);
-            time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
-        }
-
-        // alternative camera: switch modes on tab. defined as meta input, so that can move player at same time as tab camera change.
+        // alternative camera: switch modes on tab. defined as meta input, so can move player at same time as tab camera change.
         if (tick_input.tab_press && time_until_meta_input == 0 && editor_state.editor_mode == NO_MODE) 
         {
             if (saved_alt_camera.fov != 0)
@@ -5481,41 +5435,12 @@ void gameFrame(double delta_time, TickInput tick_input)
             camera = lerpCamera(saved_main_camera, saved_alt_camera, camera_lerp_t, (float)camera_target_plane);
         }
 
-        // handle wide camera
-        if (tick_input.j_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
-        {
-            editor_state.do_wide_camera = !editor_state.do_wide_camera;
-            time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
-            if (editor_state.do_wide_camera)
-            {
-                if (editor_state.editor_mode == NO_MODE)
-                {
-                    editor_state.do_wide_camera = false;
-                    if (camera_mode == MAIN_WAITING) camera.fov = saved_main_camera.fov;
-                    else if (camera_mode == ALT_WAITING) camera.fov = saved_alt_camera.fov;
-                    else camera.fov = 15.0f;
-                }
-                else
-                {
-                    camera.fov = 60.0f;
-                }
-            }
-            else
-            {
-                if (saved_main_camera.fov == camera.fov) camera.fov = 15.0f; // if working on a new level, and have saved camera as 60fov, then default to 15
-                else camera.fov = saved_main_camera.fov;
-            }
-            time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
-        }
-
         camera_with_ow_offset = camera;
         
 		// adjust overworld camera based on position
 		if (in_overworld)
         {
             Int3 player_delta = int3Subtract(player->coords, OVERWORLD_CAMERA_CENTER_START);
-            //int32 screen_offset_x = player_delta.x / (OVERWORLD_SCREEN_SIZE_X - (OVERWORLD_SCREEN_SIZE_X / 2));
-            //int32 screen_offset_z = player_delta.z / (OVERWORLD_SCREEN_SIZE_Z - (OVERWORLD_SCREEN_SIZE_Z / 2));
             int32 screen_offset_x = 0;
         	int32 screen_offset_z = 0;
 			if (player_delta.x > 0) screen_offset_x = (player_delta.x + (OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
@@ -5532,32 +5457,114 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (do_debug_text) createDebugText(delta_text);
         }
 
-        // record undo if this is pushed to later, most likely due to pack turn
-        if (pending_undo_record)
+        // SAVING STUFF
         {
-            pending_undo_record = false;
-            recordActionForUndo(&pending_undo_snapshot);
-        }
+            // paths for saving data both to source and to inside build
+            char level_path[64];
+            buildLevelPathFromName(world_state.level_name, &level_path, true);
+            char relative_level_path[64];
+            buildLevelPathFromName(world_state.level_name, &relative_level_path, false);
 
-        // toggle drawing
-        if (tick_input.e_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
-        {
-            render_models = !render_models;
-            time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
-        }
+            // only used if saving in overworld
+            char overworld_zero_path[64];
+            buildLevelPathFromName(overworld_zero_name, &overworld_zero_path, true);
+            char overworld_zero_relative_path[64];
+            buildLevelPathFromName(overworld_zero_name, &overworld_zero_relative_path, false);
 
-        // write level to file on i press
-        if (time_until_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.i_press) 
-        {
-            saveLevelRewrite(level_path, true);
-            saveLevelRewrite(relative_level_path, true);
-            if (in_overworld)
+            // write camera to file on c press, alternative camera on v press
+            if (time_until_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && (tick_input.c_press || tick_input.v_press))
             {
-                saveLevelRewrite(overworld_zero_path, true);
-                saveLevelRewrite(overworld_zero_relative_path, true);
+                char tag[4] = {0};
+                bool write_alt_camera = false;
+                if (tick_input.c_press) 
+                {
+                    memcpy(&tag, &MAIN_CAMERA_CHUNK_TAG, sizeof(tag));
+                    createDebugPopup("main camera saved", MAIN_CAMERA_SAVE);
+                }
+                else 					
+                {
+                    memcpy(&tag, &ALT_CAMERA_CHUNK_TAG, sizeof(tag));
+                    createDebugPopup("alt camera saved", ALT_CAMERA_SAVE);
+                    write_alt_camera = true;
+                }
+
+                {
+                    FILE* file = fopen(level_path, "rb+");
+                    int32 positions[64] = {0};
+                    int32 count = getCountAndPositionOfChunk(file, tag, positions);
+
+                    if (count > 0)
+                    {
+                        fseek(file, positions[0], SEEK_SET);
+                        writeCameraToFile(file, &camera, write_alt_camera);
+                    }
+                    else
+                    {
+                        fseek(file, 0, SEEK_END);
+                        writeCameraToFile(file, &camera, write_alt_camera);
+                    }
+                    fclose(file);
+                }
+                {
+                    FILE* file = fopen(relative_level_path, "rb+");
+                    int32 positions[64] = {0};
+                    int32 count = getCountAndPositionOfChunk(file, tag, positions);
+
+                    if (count > 0)
+                    {
+                        fseek(file, positions[0], SEEK_SET);
+                        writeCameraToFile(file, &camera, write_alt_camera);
+                    }
+                    else
+                    {
+                        fseek(file, 0, SEEK_END);
+                        writeCameraToFile(file, &camera, write_alt_camera);
+                    }
+                    fclose(file);
+                }
+
+                if (tick_input.c_press) saved_main_camera = camera;
+                else saved_alt_camera = camera;
             }
-            createDebugPopup("level saved", LEVEL_SAVE);
-            writeSolvedLevelsToFile();
+
+            if (time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE && tick_input.x_press) 
+            {
+                memset(&saved_alt_camera, 0, sizeof(Camera));
+                camera = saved_main_camera;
+                camera.rotation = buildCameraQuaternion(camera);
+
+                Camera empty_camera = {0};
+                {
+                    FILE* file = fopen(relative_level_path, "rb+");
+                    int32 positions[64] = {0};
+                    getCountAndPositionOfChunk(file, ALT_CAMERA_CHUNK_TAG, positions);
+                    fseek(file, positions[0], SEEK_SET);
+                    writeCameraToFile(file, &empty_camera, true);
+                    fclose(file);
+                }
+                {
+                    FILE* file = fopen(level_path, "rb+");
+                    int32 positions[64] = {0};
+                    getCountAndPositionOfChunk(file, ALT_CAMERA_CHUNK_TAG, positions);
+                    fseek(file, positions[0], SEEK_SET);
+                    writeCameraToFile(file, &empty_camera, true);
+                    fclose(file);
+                }
+            }
+
+            // write level to file on i press
+            if (time_until_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.i_press) 
+            {
+                saveLevelRewrite(level_path, true);
+                saveLevelRewrite(relative_level_path, true);
+                if (in_overworld)
+                {
+                    saveLevelRewrite(overworld_zero_path, true);
+                    saveLevelRewrite(overworld_zero_relative_path, true);
+                }
+                createDebugPopup("level saved", LEVEL_SAVE);
+                writeSolvedLevelsToFile();
+            }
         }
 
         // create debug texts
