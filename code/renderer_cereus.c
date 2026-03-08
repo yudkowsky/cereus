@@ -172,9 +172,10 @@ typedef struct VulkanState
     VkPipeline outline_pipeline_handle;
     VkPipelineLayout model_pipeline_layout;
     VkPipeline model_pipeline_handle;
-    VkPipeline laser_pipeline_handle;
-    VkPipelineLayout laser_pipeline_layout;
+
+    VkPipeline laser_fill_pipeline_handle;
     VkPipeline laser_outline_pipeline_handle;
+    VkPipelineLayout laser_pipeline_layout;
 
     VkSampler pixel_art_sampler;
     CachedAsset asset_cache[256];
@@ -1632,10 +1633,10 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 	VkPipelineShaderStageCreateInfo cube_frag_shader_stage_ci 	 	   = loadShaderStage("data/shaders/spirv/tri.frag.spv", 	  	  &cube_frag_shader_module_handle, 	  		VK_SHADER_STAGE_FRAGMENT_BIT);
     VkPipelineShaderStageCreateInfo outline_vert_shader_stage_ci 	   = loadShaderStage("data/shaders/spirv/outline.vert.spv", 	  &outline_vert_shader_module_handle, 		VK_SHADER_STAGE_VERTEX_BIT);
 	VkPipelineShaderStageCreateInfo outline_frag_shader_stage_ci 	   = loadShaderStage("data/shaders/spirv/outline.frag.spv", 	  &outline_frag_shader_module_handle, 		VK_SHADER_STAGE_FRAGMENT_BIT);
-	VkPipelineShaderStageCreateInfo laser_vert_shader_stage_ci 	 	   = loadShaderStage("data/shaders/spirv/laser.vert.spv",   	  &laser_vert_shader_module_handle,   		VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo laser_frag_shader_stage_ci 	 	   = loadShaderStage("data/shaders/spirv/laser.frag.spv",   	  &laser_frag_shader_module_handle,   		VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo laser_outline_vert_shader_stage_ci = loadShaderStage("data/shaders/spirv/laser_outline.vert.spv", &laser_outline_vert_shader_module_handle, VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo laser_outline_frag_shader_stage_ci = loadShaderStage("data/shaders/spirv/laser_outline.frag.spv", &laser_outline_frag_shader_module_handle, VK_SHADER_STAGE_FRAGMENT_BIT);
+	VkPipelineShaderStageCreateInfo laser_vert_shader_stage_ci 	 	   = loadShaderStage("data/shaders/spirv/laser-fill.vert.spv",   	  &laser_vert_shader_module_handle,   		VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo laser_frag_shader_stage_ci 	 	   = loadShaderStage("data/shaders/spirv/laser-fill.frag.spv",   	  &laser_frag_shader_module_handle,   		VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo laser_outline_vert_shader_stage_ci = loadShaderStage("data/shaders/spirv/laser-outline.vert.spv", &laser_outline_vert_shader_module_handle, VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo laser_outline_frag_shader_stage_ci = loadShaderStage("data/shaders/spirv/laser-outline.frag.spv", &laser_outline_frag_shader_module_handle, VK_SHADER_STAGE_FRAGMENT_BIT);
 	VkPipelineShaderStageCreateInfo sprite_vert_shader_stage_ci  	   = loadShaderStage("data/shaders/spirv/sprite.vert.spv",  	  &sprite_vert_shader_module_handle,  		VK_SHADER_STAGE_VERTEX_BIT);
 	VkPipelineShaderStageCreateInfo sprite_frag_shader_stage_ci  	   = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  &sprite_frag_shader_module_handle,  		VK_SHADER_STAGE_FRAGMENT_BIT );
 	VkPipelineShaderStageCreateInfo model_vert_shader_stage_ci 	 	   = loadShaderStage("data/shaders/spirv/model.vert.spv",   	  &model_vert_shader_module_handle,   		VK_SHADER_STAGE_VERTEX_BIT);
@@ -2079,7 +2080,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         laser_ci.pStages = laser_shader_stages;
         laser_ci.layout = vulkan_state.laser_pipeline_layout;
 
-        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &laser_ci, 0, &vulkan_state.laser_pipeline_handle);
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &laser_ci, 0, &vulkan_state.laser_fill_pipeline_handle);
 
         createInstanceBuffer();
     }
@@ -2491,13 +2492,14 @@ void vulkanDraw(void)
 		vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
     }
 
-    // LASER PIPELINE
+    // LASER PASSES
 
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_pipeline_handle);
 
     LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
     if (laser_mesh->index_count > 0)
     {
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_fill_pipeline_handle);
+
         VkDeviceSize laser_vb_offset = 0;
         vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_vb_offset);
         vkCmdBindIndexBuffer(command_buffer, laser_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
@@ -2521,18 +2523,12 @@ void vulkanDraw(void)
 
             vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
         }
-    }
 
-    // LASER OUTLINE PIPELINE
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_outline_pipeline_handle);
 
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_outline_pipeline_handle);
-
-    LoadedModel* laser_outline_mesh = &vulkan_state.laser_cylinder_model;
-    if (laser_outline_mesh->index_count > 0)
-    {
         VkDeviceSize laser_outline_vb_offset = 0;
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_outline_mesh->vertex_buffer, &laser_outline_vb_offset);
-        vkCmdBindIndexBuffer(command_buffer, laser_outline_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_outline_vb_offset);
+        vkCmdBindIndexBuffer(command_buffer, laser_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
         for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
         {
@@ -2551,7 +2547,7 @@ void vulkanDraw(void)
 
             vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &pc);
 
-            vkCmdDrawIndexed(command_buffer, laser_outline_mesh->index_count, 1, 0, 0, 0);
+            vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
         }
     }
 
