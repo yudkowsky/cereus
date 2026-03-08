@@ -387,7 +387,7 @@ int CALLBACK WinMain(
 
         // sleep code
         {
-            double target_ms = 1000.0 / 200.0;
+            double target_ms = 1000.0 / 120.0;
             double sleep_ms = target_ms - work_ms;
             if (sleep_ms > 1.5)
             {
