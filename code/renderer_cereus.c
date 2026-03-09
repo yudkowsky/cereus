@@ -32,15 +32,16 @@ const char* ATLAS_3D_PATH 	= "data/sprites/atlas-3d.png";
 
 bool first_submit_since_draw = true;
 
-typedef struct Vertex
+typedef struct 
 {
     float x, y, z;
     float u, v;
     float nx, ny, nz;
+    float r, g, b;
 }
 Vertex;
 
-typedef struct Sprite
+typedef struct
 {
     uint32 asset_index;
     Vec3 coords;
@@ -50,7 +51,7 @@ typedef struct Sprite
 }
 Sprite;
 
-typedef struct Cube 
+typedef struct 
 {
 	uint32 asset_index;
     Vec3 coords;
@@ -60,7 +61,7 @@ typedef struct Cube
 }
 Cube;
 
-typedef struct Model
+typedef struct
 {
     uint32 model_id;
     Vec3 coords;
@@ -70,7 +71,7 @@ typedef struct Model
 Model;
 
 // for instancing of cubes
-typedef struct CubeInstanceData
+typedef struct 
 {
     float model[16];
     Vec4 uv_rect;
@@ -78,7 +79,7 @@ typedef struct CubeInstanceData
 }
 CubeInstanceData;
 
-typedef struct Laser
+typedef struct 
 {
     Vec3 center;
     float length;
@@ -87,7 +88,7 @@ typedef struct Laser
 }
 Laser;
 
-typedef struct CachedAsset
+typedef struct 
 {
 	VkImage image;
     VkDeviceMemory memory;
@@ -96,7 +97,7 @@ typedef struct CachedAsset
 }
 CachedAsset;
 
-typedef struct PushConstants // TODO: rename
+typedef struct
 {
     float model[16];
     float view[16];
@@ -104,9 +105,9 @@ typedef struct PushConstants // TODO: rename
     Vec4 uv_rect;
     float alpha; // used for text at the moment (2/28)
 }
-PushConstants;
+PushConstants; // TODO: rename
 
-typedef struct LaserPushConstants
+typedef struct 
 {
     float model[16];
     float view[16];
@@ -115,14 +116,14 @@ typedef struct LaserPushConstants
 }
 LaserPushConstants;
 
-typedef struct InstancedPushConstants
+typedef struct 
 {
     float view[16];
     float proj[16];
 }
 InstancedPushConstants;
 
-typedef struct LoadedModel
+typedef struct
 {
     cgltf_data* data;
     VkBuffer vertex_buffer;
@@ -133,7 +134,7 @@ typedef struct LoadedModel
 }
 LoadedModel;
 
-typedef struct VulkanState 
+typedef struct 
 {
     RendererPlatformHandles platform_handles;
     VkInstance vulkan_instance_handle;
@@ -978,6 +979,15 @@ LoadedModel loadModel(char* path)
             }
             if (!pos_accessor || !primitive->indices) continue;
 
+    		float base_color[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+            if (primitive->material && primitive->material->has_pbr_metallic_roughness) // name for default gltf material model, for some reason
+            {
+                base_color[0] = primitive->material->pbr_metallic_roughness.base_color_factor[0];
+                base_color[1] = primitive->material->pbr_metallic_roughness.base_color_factor[1];
+                base_color[2] = primitive->material->pbr_metallic_roughness.base_color_factor[2];
+                base_color[3] = primitive->material->pbr_metallic_roughness.base_color_factor[3];
+            }
+
             cgltf_size vert_count = pos_accessor->count;
 
             for (cgltf_size vert_index = 0; vert_index < vert_count; vert_index++)
@@ -1015,6 +1025,10 @@ LoadedModel loadModel(char* path)
                     vertex->ny = 1.0f;
                     vertex->nz = 0.0f;
                 }
+
+                vertex->r = base_color[0];
+                vertex->g = base_color[1];
+                vertex->b = base_color[2];
             }
 
             // merge primitives into big vertex array with offset 
@@ -1043,7 +1057,7 @@ LoadedModel loadModel(char* path)
 
 void loadAllEntities()
 {
-	vulkan_state.loaded_models[MODEL_3D_MIRROR 	- MODEL_3D_VOID] = loadModel("data/assets/test.glb");
+	vulkan_state.loaded_models[MODEL_3D_MIRROR 	- MODEL_3D_VOID] = loadModel("data/assets/mirror.glb");
     vulkan_state.loaded_models[MODEL_3D_WIN_BLOCK - MODEL_3D_VOID] = loadModel("data/assets/test.glb");
     vulkan_state.loaded_models[MODEL_3D_SOURCE_RED - MODEL_3D_VOID] = loadModel("data/assets/laser-box.glb");
     vulkan_state.laser_cylinder_model = loadModel("data/assets/laser-cylinder.glb");
@@ -1666,13 +1680,14 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
    	VkPipelineShaderStageCreateInfo model_shader_stages[2]   	   = { model_vert_shader_stage_ci,   	   model_frag_shader_stage_ci };
 
     // vertex input
-    // simple vertex input (sprites, outlines, lasers)
+    // per-vertex data: used for individually drawn meshes (sprites, models (currently), lasers, etc.)
+    // transform is set via push constant per draw call
     VkVertexInputBindingDescription vertex_binding_simple = {0};
     vertex_binding_simple.binding = 0;
     vertex_binding_simple.stride = sizeof(Vertex);
     vertex_binding_simple.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    VkVertexInputAttributeDescription vertex_attributes_simple[3] = {0};
+    VkVertexInputAttributeDescription vertex_attributes_simple[4] = {0};
 
     vertex_attributes_simple[0].binding = 0;
     vertex_attributes_simple[0].location = 0;
@@ -1689,14 +1704,20 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     vertex_attributes_simple[2].format = VK_FORMAT_R32G32B32_SFLOAT;
     vertex_attributes_simple[2].offset = offsetof(Vertex, nx);
 
+    vertex_attributes_simple[3].binding = 0;
+    vertex_attributes_simple[3].location = 3;
+    vertex_attributes_simple[3].format = VK_FORMAT_R32G32B32_SFLOAT;
+    vertex_attributes_simple[3].offset = offsetof(Vertex, r);
+
     VkPipelineVertexInputStateCreateInfo vertex_input_simple = {0};
     vertex_input_simple.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertex_input_simple.vertexBindingDescriptionCount = 1;
     vertex_input_simple.pVertexBindingDescriptions = &vertex_binding_simple;
-    vertex_input_simple.vertexAttributeDescriptionCount = 3;
+    vertex_input_simple.vertexAttributeDescriptionCount = 4;
     vertex_input_simple.pVertexAttributeDescriptions = vertex_attributes_simple;
 
-    // instanced vertex input (cubes)
+    // per-vertex + per-instance data: used for batched drawing of many objects in a single draw call (just cubes right now)
+    // where each instance carries its own model matrix and texture atlas region
     VkVertexInputBindingDescription vertex_bindings_instanced[2] = {0};
     vertex_bindings_instanced[0].binding = 0;
     vertex_bindings_instanced[0].stride = sizeof(Vertex);
@@ -1706,7 +1727,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     vertex_bindings_instanced[1].stride = sizeof(CubeInstanceData);
     vertex_bindings_instanced[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
 
-    VkVertexInputAttributeDescription vertex_attributes_instanced[8] = {0};
+    VkVertexInputAttributeDescription vertex_attributes_instanced[9] = {0};
 
     vertex_attributes_instanced[0].binding = 0;
     vertex_attributes_instanced[0].location = 0;
@@ -1723,36 +1744,41 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     vertex_attributes_instanced[2].format = VK_FORMAT_R32G32B32_SFLOAT;
     vertex_attributes_instanced[2].offset = offsetof(Vertex, nx);
 
-    vertex_attributes_instanced[3].binding = 1;
+    vertex_attributes_instanced[3].binding = 0;
     vertex_attributes_instanced[3].location = 3;
-    vertex_attributes_instanced[3].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    vertex_attributes_instanced[3].offset = offsetof(CubeInstanceData, model) + 0;
+    vertex_attributes_instanced[3].format = VK_FORMAT_R32G32B32_SFLOAT;
+    vertex_attributes_instanced[3].offset = offsetof(Vertex, r);
 
     vertex_attributes_instanced[4].binding = 1;
     vertex_attributes_instanced[4].location = 4;
     vertex_attributes_instanced[4].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    vertex_attributes_instanced[4].offset = offsetof(CubeInstanceData, model) + 16;
+    vertex_attributes_instanced[4].offset = offsetof(CubeInstanceData, model) + 0;
 
     vertex_attributes_instanced[5].binding = 1;
     vertex_attributes_instanced[5].location = 5;
     vertex_attributes_instanced[5].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    vertex_attributes_instanced[5].offset = offsetof(CubeInstanceData, model) + 32;
+    vertex_attributes_instanced[5].offset = offsetof(CubeInstanceData, model) + 16;
 
     vertex_attributes_instanced[6].binding = 1;
     vertex_attributes_instanced[6].location = 6;
     vertex_attributes_instanced[6].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    vertex_attributes_instanced[6].offset = offsetof(CubeInstanceData, model) + 48;
+    vertex_attributes_instanced[6].offset = offsetof(CubeInstanceData, model) + 32;
 
     vertex_attributes_instanced[7].binding = 1;
     vertex_attributes_instanced[7].location = 7;
     vertex_attributes_instanced[7].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    vertex_attributes_instanced[7].offset = offsetof(CubeInstanceData, uv_rect);
+    vertex_attributes_instanced[7].offset = offsetof(CubeInstanceData, model) + 48;
+
+    vertex_attributes_instanced[8].binding = 1;
+    vertex_attributes_instanced[8].location = 8;
+    vertex_attributes_instanced[8].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    vertex_attributes_instanced[8].offset = offsetof(CubeInstanceData, uv_rect);
 
     VkPipelineVertexInputStateCreateInfo vertex_input_instanced = {0};
     vertex_input_instanced.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
     vertex_input_instanced.vertexBindingDescriptionCount = 2;
     vertex_input_instanced.pVertexBindingDescriptions = vertex_bindings_instanced;
-    vertex_input_instanced.vertexAttributeDescriptionCount = 8;
+    vertex_input_instanced.vertexAttributeDescriptionCount = 9;
     vertex_input_instanced.pVertexAttributeDescriptions = vertex_attributes_instanced;
 
     // struct that describes how vertices are assembled into primatives before rasterization

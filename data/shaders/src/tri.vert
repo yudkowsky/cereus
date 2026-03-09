@@ -3,11 +3,12 @@
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec2 input_uv;
 layout(location = 2) in vec3 input_normal;
-layout(location = 3) in vec4 model_col0;
-layout(location = 4) in vec4 model_col1;
-layout(location = 5) in vec4 model_col2;
-layout(location = 6) in vec4 model_col3;
-layout(location = 7) in vec4 instance_uv_rect;
+// ignore color
+layout(location = 4) in vec4 model_col0;
+layout(location = 5) in vec4 model_col1;
+layout(location = 6) in vec4 model_col2;
+layout(location = 7) in vec4 model_col3;
+layout(location = 8) in vec4 instance_uv_rect;
 
 layout(location = 0) out vec2 uv;
 layout(location = 1) out vec3 normal;
