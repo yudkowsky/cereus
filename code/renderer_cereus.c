@@ -1057,9 +1057,18 @@ LoadedModel loadModel(char* path)
 
 void loadAllEntities()
 {
-	vulkan_state.loaded_models[MODEL_3D_MIRROR 	- MODEL_3D_VOID] = loadModel("data/assets/mirror.glb");
     vulkan_state.loaded_models[MODEL_3D_WIN_BLOCK - MODEL_3D_VOID] = loadModel("data/assets/test.glb");
-    vulkan_state.loaded_models[MODEL_3D_SOURCE_RED - MODEL_3D_VOID] = loadModel("data/assets/laser-box.glb");
+
+	vulkan_state.loaded_models[MODEL_3D_MIRROR 	- MODEL_3D_VOID] = loadModel("data/assets/mirror.glb");
+
+    vulkan_state.loaded_models[MODEL_3D_SOURCE_RED     - MODEL_3D_VOID] = loadModel("data/assets/red-source.glb");
+    vulkan_state.loaded_models[MODEL_3D_SOURCE_GREEN   - MODEL_3D_VOID] = loadModel("data/assets/green-source.glb");
+    vulkan_state.loaded_models[MODEL_3D_SOURCE_BLUE    - MODEL_3D_VOID] = loadModel("data/assets/blue-source.glb");
+    vulkan_state.loaded_models[MODEL_3D_SOURCE_MAGENTA - MODEL_3D_VOID] = loadModel("data/assets/magenta-source.glb");
+    vulkan_state.loaded_models[MODEL_3D_SOURCE_YELLOW  - MODEL_3D_VOID] = loadModel("data/assets/yellow-source.glb");
+    vulkan_state.loaded_models[MODEL_3D_SOURCE_CYAN    - MODEL_3D_VOID] = loadModel("data/assets/cyan-source.glb");
+    vulkan_state.loaded_models[MODEL_3D_SOURCE_WHITE   - MODEL_3D_VOID] = loadModel("data/assets/white-source.glb");
+
     vulkan_state.laser_cylinder_model = loadModel("data/assets/laser-cylinder.glb");
 }
 

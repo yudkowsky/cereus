@@ -8,7 +8,7 @@ layout(location = 0) out vec4 out_color;
 void main()
 {
     float low = 20.0 / 255.0;
-    float high = 50.0 / 255.0;
+    float high = 200.0 / 255.0;
 
     vec3 out_normal = normalize(normal);
     vec3 light_direction = normalize(vec3(0.3, 1.0, 0.5));
