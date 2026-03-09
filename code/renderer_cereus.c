@@ -930,106 +930,122 @@ LoadedModel loadModel(char* path)
         cgltf_free(data);
         return result;
     }
-    if (data->meshes_count == 0 || data->meshes[0].primitives_count == 0)
+
+    // first pass: count total verts and indices across all meshes/primitives
+    cgltf_size total_verts = 0;
+    cgltf_size total_indices = 0;
+
+    for (cgltf_size mesh_index = 0; mesh_index < data->meshes_count; mesh_index++)
     {
-        LOG("no meshes or primitives in: %s\n", path);
+        for (cgltf_size primitive_index = 0; primitive_index < data->meshes[mesh_index].primitives_count; primitive_index++)
+        {
+            // every attribute in a primitive describes same set of vertices, and so has the same count; this pass only needs to get the pass for the malloc
+            cgltf_primitive* primitive = &data->meshes[mesh_index].primitives[primitive_index];
+            if (primitive->attributes_count == 0 || !primitive->indices) continue;
+            total_verts += primitive->attributes[0].data->count; 
+            total_indices += primitive->indices->count;
+        }
+    }
+    if (total_verts == 0 || total_indices == 0)
+    {
+        LOG("no geometry in: %s\n", path);
         cgltf_free(data);
         return result;
     }
 
-    cgltf_primitive* primitive = &data->meshes[0].primitives[0];
+    Vertex* vertices = malloc(sizeof(Vertex) * total_verts);
+    uint32* indices = malloc(sizeof(uint32) * total_indices);
 
-    cgltf_accessor* pos_accessor = 0;
-    cgltf_accessor* uv_accessor = 0;
-    cgltf_accessor* normal_accessor = 0;
+    cgltf_size vert_offset = 0;
+    cgltf_size index_offset = 0;
 
-    for (cgltf_size attr_index = 0; attr_index < primitive->attributes_count; attr_index++)
+    // second pass: fill buffers
+    for (cgltf_size mesh_index = 0; mesh_index < data->meshes_count; mesh_index++)
     {
-        if 		(primitive->attributes[attr_index].type == cgltf_attribute_type_position) pos_accessor 	  = primitive->attributes[attr_index].data;
-        else if (primitive->attributes[attr_index].type == cgltf_attribute_type_texcoord) uv_accessor 	  = primitive->attributes[attr_index].data;
-        else if (primitive->attributes[attr_index].type == cgltf_attribute_type_normal)   normal_accessor = primitive->attributes[attr_index].data;
-    }
-
-    if (!pos_accessor)
-    {
-        LOG("no position attribute in: %s\n", path);
-        cgltf_free(data);
-        return result;
-    }
-    if (!primitive->indices)
-    {
-        LOG("no index data in: %s\n", path);
-        cgltf_free(data);
-        return result;
-    }
-
-    // build interleaved vertex array (gltf -> vulkan formats)
-    cgltf_size vert_count = pos_accessor->count;
-    Vertex* vertices = malloc(sizeof(Vertex) * vert_count);
-
-    for (cgltf_size vert_index = 0; vert_index < vert_count; vert_index++)
-    {
-        float pos[3] = {0};
-        cgltf_accessor_read_float(pos_accessor, vert_index, pos, 3);
-        vertices[vert_index].x = pos[0];
-        vertices[vert_index].y = pos[1];
-        vertices[vert_index].z = pos[2];
-
-        if (uv_accessor)
+        for (cgltf_size primitive_index = 0; primitive_index < data->meshes[mesh_index].primitives_count; primitive_index++)
         {
-            float uv[2] = {0};
-            cgltf_accessor_read_float(uv_accessor, vert_index, uv, 2);
-            vertices[vert_index].u = uv[0];
-            vertices[vert_index].v = uv[1];
-        }
-        else
-        {
-            vertices[vert_index].u = 0.0f;
-            vertices[vert_index].v = 0.0f;
-        }
-		if (normal_accessor)
-        {
-            float normals[3] = {0};
-            cgltf_accessor_read_float(normal_accessor, vert_index, normals, 3);
-            vertices[vert_index].nx = normals[0];
-            vertices[vert_index].ny = normals[1];
-            vertices[vert_index].nz = normals[2];
-        }
-		else
-        {
-            vertices[vert_index].nx = 0.0f;
-            vertices[vert_index].ny = 1.0f;
-            vertices[vert_index].nz = 0.0f;
+            cgltf_primitive* primitive = &data->meshes[mesh_index].primitives[primitive_index];
+
+            cgltf_accessor* pos_accessor = 0;
+            cgltf_accessor* uv_accessor = 0;
+            cgltf_accessor* normal_accessor = 0;
+
+            for (cgltf_size attr_index = 0; attr_index < primitive->attributes_count; attr_index ++)
+            {
+                if 		(primitive->attributes[attr_index].type == cgltf_attribute_type_position) pos_accessor 	  = primitive->attributes[attr_index].data;
+                else if (primitive->attributes[attr_index].type == cgltf_attribute_type_texcoord) uv_accessor 	  = primitive->attributes[attr_index].data;
+                else if (primitive->attributes[attr_index].type == cgltf_attribute_type_normal)   normal_accessor = primitive->attributes[attr_index].data;
+            }
+            if (!pos_accessor || !primitive->indices) continue;
+
+            cgltf_size vert_count = pos_accessor->count;
+
+            for (cgltf_size vert_index = 0; vert_index < vert_count; vert_index++)
+            {
+                Vertex* vertex = &vertices[vert_offset + vert_index];
+                float pos[3] = {0};
+                cgltf_accessor_read_float(pos_accessor, vert_index, pos, 3);
+                vertex->x = pos[0];
+                vertex->y = pos[1];
+                vertex->z = pos[2];
+
+                if (uv_accessor)
+                {
+                    float uv[2] = {0};
+                    cgltf_accessor_read_float(uv_accessor, vert_index, uv, 2);
+                    vertex->u = uv[0];
+                    vertex->v = uv[1];
+                }
+                else
+                {
+                    vertex->u = 0.0f;
+                    vertex->v = 0.0f;
+                }
+                if (normal_accessor)
+                {
+                    float normals[3] = {0};
+                    cgltf_accessor_read_float(normal_accessor, vert_index, normals, 3);
+                    vertex->nx = normals[0];
+                    vertex->ny = normals[1];
+                    vertex->nz = normals[2];
+                }
+                else
+                {
+                    vertex->nx = 0.0f;
+                    vertex->ny = 1.0f;
+                    vertex->nz = 0.0f;
+                }
+            }
+
+            // merge primitives into big vertex array with offset 
+            for (cgltf_size index_index = 0; index_index < primitive->indices->count; index_index++)
+            {
+                indices[index_offset + index_index] = (uint32)(cgltf_accessor_read_index(primitive->indices, index_index) + vert_offset);
+            }
+            vert_offset += vert_count;
+            index_offset += primitive->indices->count;
         }
     }
 
-    // build index array
-    uint32 index_count = (uint32)primitive->indices->count;
-    uint32* indices = malloc(sizeof(uint32) * index_count);
+    uploadBufferToLocalDevice(vertices, sizeof(Vertex) * total_verts, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &result.vertex_buffer, &result.vertex_memory);
+    uploadBufferToLocalDevice(indices, sizeof(uint32) * total_indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, &result.index_buffer, &result.index_memory);
 
-    for (cgltf_size index_index = 0; index_index < index_count; index_index++)
-    {
-        indices[index_index] = (uint32)cgltf_accessor_read_index(primitive->indices, index_index);
-    }
-
-    uploadBufferToLocalDevice(vertices, sizeof(Vertex) * vert_count, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &result.vertex_buffer, &result.vertex_memory);
-    uploadBufferToLocalDevice(indices, sizeof(uint32) * index_count, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, &result.index_buffer, &result.index_memory);
-
-    result.index_count = index_count;
+    result.index_count = (uint32)total_indices;
     result.data = data;
 
     free(vertices);
     free(indices);
 
-    LOG("loaded model: %s (%u verts, %u indices)\n", path, (uint32)vert_count, index_count);
+    LOG("loaded model: %s (%u verts, %u indices)\n", path, (uint32)total_verts, (uint32)total_indices);
 
     return result;
 }
 
 void loadAllEntities()
 {
-	vulkan_state.loaded_models[MODEL_3D_MIRROR 	- MODEL_3D_VOID] = loadModel("data/assets/mirror.glb");
-    vulkan_state.loaded_models[MODEL_3D_WIN_BLOCK - MODEL_3D_VOID] = loadModel("data/assets/mirror.glb");
+	vulkan_state.loaded_models[MODEL_3D_MIRROR 	- MODEL_3D_VOID] = loadModel("data/assets/test.glb");
+    vulkan_state.loaded_models[MODEL_3D_WIN_BLOCK - MODEL_3D_VOID] = loadModel("data/assets/test.glb");
+    vulkan_state.loaded_models[MODEL_3D_SOURCE_RED - MODEL_3D_VOID] = loadModel("data/assets/laser-box.glb");
     vulkan_state.laser_cylinder_model = loadModel("data/assets/laser-cylinder.glb");
 }
 
