@@ -18,9 +18,19 @@ layout(push_constant) uniform PushConstants
 
 void main()
 {
-    vec3 expanded = position + normalize(input_normal) * 0.05;
+    mat4 mvp = pc.proj * pc.view * pc.model;
 
-    gl_Position = pc.proj * pc.view * pc.model * vec4(expanded, 1.0);
+    vec4 clip_pos = mvp * vec4(position, 1.0);
+
+    // get normal direction in clip space
+    vec3 clip_normal = mat3(mvp) * input_normal;
+
+    // normalize only xy — we just need the screen-plane direction
+    vec2 dir = normalize(clip_normal.xy);
+
+    clip_pos.xy += dir * 0.005 * clip_pos.w;
+
+    gl_Position = clip_pos;
 
     normal = input_normal;
     color = vec3(0.0);

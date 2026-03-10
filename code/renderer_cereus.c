@@ -2085,7 +2085,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &cube_ci, 0, &vulkan_state.cube_pipeline_handle);
     }
 
-    // define outline pipeline
+    // define select outline pipeline
     {
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
@@ -2211,7 +2211,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         color_blend_attachment_state.blendEnable = VK_FALSE;
 
-        depth_stencil_state_creation_info.depthTestEnable = VK_FALSE;
+        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
 
@@ -2573,7 +2573,6 @@ void vulkanDraw(void)
             vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
             vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
 
-            /*
             // pass 2: blackline, only where stencil == 0
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_blackline_pipeline_handle);
             vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
@@ -2588,7 +2587,6 @@ void vulkanDraw(void)
             vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
             vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
             vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
-            */
         }
     }
 
