@@ -2225,7 +2225,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         depth_stencil_state_creation_info.front.reference = 2;
         depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
 
-        rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_FRONT_BIT;
 
         VkGraphicsPipelineCreateInfo model_blackline_ci = base_graphics_pipeline_creation_info;
         model_blackline_ci.pStages = model_blackline_shader_stages;
@@ -2590,36 +2590,6 @@ void vulkanDraw(void)
         }
     }
 
-    // MODEL SELECTED OUTLINES
-
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_pipeline_handle);
-
-    for (uint32 outline_index = 0; outline_index < model_selected_outline_instance_count; outline_index++)
-    {
-        Model* model = &model_selected_outline_instances[outline_index];
-        LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
-        if (model_data->index_count == 0) continue;
-
-        VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
-        vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-
-        float model_matrix[16];
-        mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
-
-        PushConstants pc = {0};
-        memcpy(pc.model, model_matrix,      sizeof(pc.model));
-        memcpy(pc.view,  view_matrix,       sizeof(pc.view));
-        memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
-        pc.uv_rect = (Vec4){0, 0, 1, 1};
-
-        vkCmdPushConstants(command_buffer, vulkan_state.outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
-
-		vkCmdSetDepthBias(command_buffer, -0.1f, 0.0f, -0.1f);
-        vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
-		vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
-    }
-
     // LASER PASSES
 
     LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
@@ -2678,6 +2648,37 @@ void vulkanDraw(void)
 
             vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
         }
+    }
+
+
+    // MODEL SELECTED OUTLINES
+
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_pipeline_handle);
+
+    for (uint32 outline_index = 0; outline_index < model_selected_outline_instance_count; outline_index++)
+    {
+        Model* model = &model_selected_outline_instances[outline_index];
+        LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
+        if (model_data->index_count == 0) continue;
+
+        VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
+        vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+        float model_matrix[16];
+        mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
+
+        PushConstants pc = {0};
+        memcpy(pc.model, model_matrix,      sizeof(pc.model));
+        memcpy(pc.view,  view_matrix,       sizeof(pc.view));
+        memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
+        pc.uv_rect = (Vec4){0, 0, 1, 1};
+
+        vkCmdPushConstants(command_buffer, vulkan_state.outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+
+		vkCmdSetDepthBias(command_buffer, -0.1f, 0.0f, -0.1f);
+        vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
+		vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
     }
 
 	// SPRITE PIPELINE
