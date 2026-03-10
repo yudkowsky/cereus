@@ -167,13 +167,14 @@ typedef struct
 
     VkPipelineLayout graphics_pipeline_layout; // TODO: clean this up
     VkPipeline sprite_pipeline_handle;
-    VkPipelineLayout cube_pipeline_layout; 
     VkPipeline cube_pipeline_handle;
-	VkPipelineLayout outline_pipeline_layout;
+    VkPipelineLayout cube_pipeline_layout; 
     VkPipeline outline_pipeline_handle;
-    VkPipelineLayout model_pipeline_layout;
+	VkPipelineLayout outline_pipeline_layout;
     VkPipeline model_pipeline_handle;
-
+    VkPipeline model_blackline_pipeline_handle;
+    VkPipeline model_stencil_clear_pipeline_handle;
+    VkPipelineLayout model_pipeline_layout;
     VkPipeline laser_fill_pipeline_handle;
     VkPipeline laser_outline_pipeline_handle;
     VkPipelineLayout laser_pipeline_layout;
@@ -303,8 +304,8 @@ uint32 laser_instance_count = 0;
 Model model_instances[1024];
 uint32 model_instance_count = 0;
 
-Model model_outline_instances[1024];
-uint32 model_outline_instance_count = 0;
+Model model_selected_outline_instances[1024];
+uint32 model_selected_outline_instance_count = 0;
 
 Camera vulkan_camera = {0};
 
@@ -1061,6 +1062,8 @@ void loadAllEntities()
 
 	vulkan_state.loaded_models[MODEL_3D_MIRROR 	- MODEL_3D_VOID] = loadModel("data/assets/mirror.glb");
 
+    vulkan_state.loaded_models[MODEL_3D_BOX - MODEL_3D_VOID] = loadModel("data/assets/rock.glb");
+
     vulkan_state.loaded_models[MODEL_3D_SOURCE_RED     - MODEL_3D_VOID] = loadModel("data/assets/red-source.glb");
     vulkan_state.loaded_models[MODEL_3D_SOURCE_GREEN   - MODEL_3D_VOID] = loadModel("data/assets/green-source.glb");
     vulkan_state.loaded_models[MODEL_3D_SOURCE_BLUE    - MODEL_3D_VOID] = loadModel("data/assets/blue-source.glb");
@@ -1667,26 +1670,31 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkShaderModule sprite_frag_smh = {0};
     VkShaderModule model_vert_smh = {0};
     VkShaderModule model_frag_smh = {0};
+    VkShaderModule model_blackline_vert_smh = {0};
+    VkShaderModule model_blackline_frag_smh = {0};
 
-    VkPipelineShaderStageCreateInfo cube_vert_shader_stage_ci 	 	   = loadShaderStage("data/shaders/spirv/tri.vert.spv", 	  	  &cube_vert_smh, 	  		VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo cube_frag_shader_stage_ci 	 	   = loadShaderStage("data/shaders/spirv/tri.frag.spv", 	  	  &cube_frag_smh, 	  		VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo outline_vert_shader_stage_ci 	   = loadShaderStage("data/shaders/spirv/outline.vert.spv", 	  &outline_vert_smh, 		VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo outline_frag_shader_stage_ci 	   = loadShaderStage("data/shaders/spirv/outline.frag.spv", 	  &outline_frag_smh, 		VK_SHADER_STAGE_FRAGMENT_BIT);
-	VkPipelineShaderStageCreateInfo laser_fill_vert_shader_stage_ci    = loadShaderStage("data/shaders/spirv/laser-fill.vert.spv",    &laser_fill_vert_smh,   	VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo laser_fill_frag_shader_stage_ci    = loadShaderStage("data/shaders/spirv/laser-fill.frag.spv",    &laser_fill_frag_smh,   	VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo laser_outline_vert_shader_stage_ci = loadShaderStage("data/shaders/spirv/laser-outline.vert.spv", &laser_outline_vert_smh,  VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo laser_outline_frag_shader_stage_ci = loadShaderStage("data/shaders/spirv/laser-outline.frag.spv", &laser_outline_frag_smh,  VK_SHADER_STAGE_FRAGMENT_BIT);
-	VkPipelineShaderStageCreateInfo sprite_vert_shader_stage_ci  	   = loadShaderStage("data/shaders/spirv/sprite.vert.spv",  	  &sprite_vert_smh,  		VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo sprite_frag_shader_stage_ci  	   = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  &sprite_frag_smh,  		VK_SHADER_STAGE_FRAGMENT_BIT );
-	VkPipelineShaderStageCreateInfo model_vert_shader_stage_ci 	 	   = loadShaderStage("data/shaders/spirv/model.vert.spv",   	  &model_vert_smh,   		VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo model_frag_shader_stage_ci 	 	   = loadShaderStage("data/shaders/spirv/model.frag.spv",   	  &model_frag_smh,   		VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo cube_vert_shader_stage_ci 	 	     = loadShaderStage("data/shaders/spirv/tri.vert.spv", 	  	  	  &cube_vert_smh, 	  		 VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo cube_frag_shader_stage_ci 	 	     = loadShaderStage("data/shaders/spirv/tri.frag.spv", 	  	  	  &cube_frag_smh, 	  		 VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo outline_vert_shader_stage_ci 	     = loadShaderStage("data/shaders/spirv/outline.vert.spv", 	  	  &outline_vert_smh, 		 VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo outline_frag_shader_stage_ci 	     = loadShaderStage("data/shaders/spirv/outline.frag.spv", 	  	  &outline_frag_smh, 		 VK_SHADER_STAGE_FRAGMENT_BIT);
+	VkPipelineShaderStageCreateInfo laser_fill_vert_shader_stage_ci      = loadShaderStage("data/shaders/spirv/laser-fill.vert.spv",      &laser_fill_vert_smh,   	 VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo laser_fill_frag_shader_stage_ci      = loadShaderStage("data/shaders/spirv/laser-fill.frag.spv",      &laser_fill_frag_smh,   	 VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo laser_outline_vert_shader_stage_ci   = loadShaderStage("data/shaders/spirv/laser-outline.vert.spv",   &laser_outline_vert_smh,   VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo laser_outline_frag_shader_stage_ci   = loadShaderStage("data/shaders/spirv/laser-outline.frag.spv",   &laser_outline_frag_smh,   VK_SHADER_STAGE_FRAGMENT_BIT);
+	VkPipelineShaderStageCreateInfo sprite_vert_shader_stage_ci  	     = loadShaderStage("data/shaders/spirv/sprite.vert.spv",  	  	  &sprite_vert_smh,  		 VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo sprite_frag_shader_stage_ci  	     = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  	  &sprite_frag_smh,  		 VK_SHADER_STAGE_FRAGMENT_BIT );
+	VkPipelineShaderStageCreateInfo model_vert_shader_stage_ci 	 	     = loadShaderStage("data/shaders/spirv/model.vert.spv",   	  	  &model_vert_smh,   		 VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo model_frag_shader_stage_ci 	 	     = loadShaderStage("data/shaders/spirv/model.frag.spv",   	  	  &model_frag_smh,   		 VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo model_blackline_vert_shader_stage_ci = loadShaderStage("data/shaders/spirv/model-blackline.vert.spv", &model_blackline_vert_smh, VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo model_blackline_frag_shader_stage_ci = loadShaderStage("data/shaders/spirv/model-blackline.frag.spv", &model_blackline_frag_smh, VK_SHADER_STAGE_FRAGMENT_BIT);
 
-    VkPipelineShaderStageCreateInfo cube_shader_stages[2]  	 	   = { cube_vert_shader_stage_ci,    	   cube_frag_shader_stage_ci }; 
-    VkPipelineShaderStageCreateInfo outline_shader_stages[2] 	   = { outline_vert_shader_stage_ci, 	   outline_frag_shader_stage_ci }; 
-    VkPipelineShaderStageCreateInfo laser_shader_stages[2]   	   = { laser_fill_vert_shader_stage_ci,    laser_fill_frag_shader_stage_ci };
-    VkPipelineShaderStageCreateInfo laser_outline_shader_stages[2] = { laser_outline_vert_shader_stage_ci, laser_outline_frag_shader_stage_ci };
-    VkPipelineShaderStageCreateInfo sprite_shader_stages[2]  	   = { sprite_vert_shader_stage_ci,  	   sprite_frag_shader_stage_ci };
-   	VkPipelineShaderStageCreateInfo model_shader_stages[2]   	   = { model_vert_shader_stage_ci,   	   model_frag_shader_stage_ci };
+    VkPipelineShaderStageCreateInfo cube_shader_stages[2]  	 	     = { cube_vert_shader_stage_ci,    	       cube_frag_shader_stage_ci }; 
+    VkPipelineShaderStageCreateInfo outline_shader_stages[2] 	     = { outline_vert_shader_stage_ci, 	       outline_frag_shader_stage_ci }; 
+    VkPipelineShaderStageCreateInfo laser_shader_stages[2]   	     = { laser_fill_vert_shader_stage_ci,      laser_fill_frag_shader_stage_ci };
+    VkPipelineShaderStageCreateInfo laser_outline_shader_stages[2]   = { laser_outline_vert_shader_stage_ci,   laser_outline_frag_shader_stage_ci };
+    VkPipelineShaderStageCreateInfo sprite_shader_stages[2]  	     = { sprite_vert_shader_stage_ci,  	   	   sprite_frag_shader_stage_ci };
+   	VkPipelineShaderStageCreateInfo model_shader_stages[2]   	     = { model_vert_shader_stage_ci,   	       model_frag_shader_stage_ci };
+    VkPipelineShaderStageCreateInfo model_blackline_shader_stages[2] = { model_blackline_vert_shader_stage_ci, model_blackline_frag_shader_stage_ci };
 
     // vertex input
     // per-vertex data: used for individually drawn meshes (sprites, models (currently), lasers, etc.)
@@ -2167,26 +2175,27 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &laser_outline_ci, 0, &vulkan_state.laser_outline_pipeline_handle);
     }
 
-    // define model pipeline: depth on, blending off, filled, backface culling
+    // define model pipeline: depth on, write to stencil 2.
     {
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
         color_blend_attachment_state.blendEnable = VK_FALSE;
-        /*
-        color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
-        color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
-        color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-        color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
-        */
 
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
 
-        rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_FILL;
-        rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
+        depth_stencil_state_creation_info.stencilTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.front.failOp = VK_STENCIL_OP_KEEP;
+        depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_REPLACE;
+        depth_stencil_state_creation_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
+        depth_stencil_state_creation_info.front.compareOp = VK_COMPARE_OP_ALWAYS;
+        depth_stencil_state_creation_info.front.compareMask = 0xFF;
+        depth_stencil_state_creation_info.front.writeMask = 0xFF;
+        depth_stencil_state_creation_info.front.reference = 2;
+        depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
+
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
         rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
         VkGraphicsPipelineCreateInfo model_ci = base_graphics_pipeline_creation_info;
@@ -2194,6 +2203,65 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         model_ci.layout = vulkan_state.model_pipeline_layout;
 
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &model_ci, 0, &vulkan_state.model_pipeline_handle);
+    }
+
+    // define model blackline pipeline: 
+    {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
+        color_blend_attachment_state.blendEnable = VK_FALSE;
+
+        depth_stencil_state_creation_info.depthTestEnable = VK_FALSE;
+        depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
+
+        depth_stencil_state_creation_info.stencilTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.front.failOp = VK_STENCIL_OP_KEEP;
+        depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_KEEP;
+        depth_stencil_state_creation_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
+        depth_stencil_state_creation_info.front.compareOp = VK_COMPARE_OP_NOT_EQUAL;
+        depth_stencil_state_creation_info.front.compareMask = 0xFF;
+        depth_stencil_state_creation_info.front.writeMask = 0x00;
+        depth_stencil_state_creation_info.front.reference = 2;
+        depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
+
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
+
+        VkGraphicsPipelineCreateInfo model_blackline_ci = base_graphics_pipeline_creation_info;
+        model_blackline_ci.pStages = model_blackline_shader_stages;
+        model_blackline_ci.layout = vulkan_state.model_pipeline_layout;
+
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &model_blackline_ci, 0, &vulkan_state.model_blackline_pipeline_handle);
+    }
+
+    // define model outline stencil clear pipeline
+    {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
+        color_blend_attachment_state.colorWriteMask = 0; // write nothing to color
+
+        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
+        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+
+        depth_stencil_state_creation_info.stencilTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.front.failOp = VK_STENCIL_OP_ZERO;
+        depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_ZERO;
+        depth_stencil_state_creation_info.front.depthFailOp = VK_STENCIL_OP_ZERO;
+        depth_stencil_state_creation_info.front.compareOp = VK_COMPARE_OP_ALWAYS;
+        depth_stencil_state_creation_info.front.compareMask = 0xFF;
+        depth_stencil_state_creation_info.front.writeMask = 0xFF;
+        depth_stencil_state_creation_info.front.reference = 0;
+        depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
+
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
+        rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+        VkGraphicsPipelineCreateInfo clear_ci = base_graphics_pipeline_creation_info;
+        clear_ci.pStages = model_shader_stages; // reuse fill shaders, doesn't matter since color write is off
+        clear_ci.layout = vulkan_state.model_pipeline_layout;
+
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &clear_ci, 0, &vulkan_state.model_stencil_clear_pipeline_handle);
     }
 
     createInstanceBuffer();
@@ -2210,7 +2278,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Cam
     outline_instance_count = 0;
     laser_instance_count = 0;
     model_instance_count = 0;
-    model_outline_instance_count = 0;
+    model_selected_outline_instance_count = 0;
 
     for (int asset_index = 0; asset_index < draw_command_count; asset_index++)
     {
@@ -2225,7 +2293,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Cam
             if (vulkan_state.loaded_models[sprite_id - MODEL_3D_VOID].index_count <= 0) render_model = false;
             if (render_model)
             {
-                Model* model = &model_outline_instances[model_outline_instance_count++];
+                Model* model = &model_selected_outline_instances[model_selected_outline_instance_count++];
                 model->model_id = (uint32)sprite_id;
                 model->coords   = command->coords;
                 model->scale    = command->scale;
@@ -2330,16 +2398,11 @@ void vulkanDraw(void)
 
 	switch (acquire_result)
     {
-        case VK_SUCCESS:
-            break;
-        case VK_SUBOPTIMAL_KHR:
-            break;
-		case VK_ERROR_OUT_OF_DATE_KHR:
-            return; // trigger swapchain recreate before drawing
-    	case VK_ERROR_SURFACE_LOST_KHR:
-            return; // recreate surface (then swapchain)
-        default:
-            return;
+        case VK_SUCCESS: break;
+        case VK_SUBOPTIMAL_KHR: break;
+        case VK_ERROR_OUT_OF_DATE_KHR: return; // TODO: trigger swapchain recreate before drawing
+        case VK_ERROR_SURFACE_LOST_KHR: return; // TODO: recreate surface (then swapchain)
+        default: return;
     }
 
     // PER-IMAGE FENCE BOOK-KEEPING
@@ -2482,15 +2545,10 @@ void vulkanDraw(void)
 		vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
     }
 
-    // MODEL PIPELINE (unbatched)
+    // MODEL PIPELINE (unbatched, stencil-per-object outlines)
 
     if (model_instance_count > 0)
     {
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_handle);
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        vulkan_state.model_pipeline_layout, 0, 1,
-        &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
-
         for (uint32 model_instance_index = 0; model_instance_index < model_instance_count; model_instance_index++)
         {
             Model* model = &model_instances[model_instance_index];
@@ -2498,9 +2556,6 @@ void vulkanDraw(void)
             if (model_data->index_count == 0) continue;
 
             VkDeviceSize offset = 0;
-            vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
-            vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-
             float model_matrix[16];
             mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
 
@@ -2510,19 +2565,40 @@ void vulkanDraw(void)
             memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
             pc.uv_rect = (Vec4){0, 0, 1, 1};
 
+            // pass 1: fill, write stencil = 2
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_handle);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
+            vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
+            vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
             vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
-
             vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
+
+            /*
+            // pass 2: blackline, only where stencil == 0
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_blackline_pipeline_handle);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
+            vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
+            vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+            vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
+
+            // pass 3: clear stencil back to 0 by redrawing fill with stencil write 0
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_stencil_clear_pipeline_handle);
+            vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
+            vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+            vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
+            */
         }
     }
 
-    // MODEL OUTLINES
+    // MODEL SELECTED OUTLINES
 
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_pipeline_handle);
 
-    for (uint32 outline_index = 0; outline_index < model_outline_instance_count; outline_index++)
+    for (uint32 outline_index = 0; outline_index < model_selected_outline_instance_count; outline_index++)
     {
-        Model* model = &model_outline_instances[outline_index];
+        Model* model = &model_selected_outline_instances[outline_index];
         LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
         if (model_data->index_count == 0) continue;
 
@@ -2548,10 +2624,10 @@ void vulkanDraw(void)
 
     // LASER PASSES
 
-
     LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
     if (laser_mesh->index_count > 0)
     {
+        // fill color of laser
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_fill_pipeline_handle);
 
         VkDeviceSize laser_vb_offset = 0;
@@ -2578,6 +2654,7 @@ void vulkanDraw(void)
             vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
         }
 
+        // stenciled exterior of laser
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_outline_pipeline_handle);
 
         VkDeviceSize laser_outline_vb_offset = 0;

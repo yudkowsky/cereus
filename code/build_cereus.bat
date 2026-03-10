@@ -16,6 +16,8 @@ glslc sprite.vert -g -o ..\spirv\sprite.vert.spv
 glslc sprite.frag -g -o ..\spirv\sprite.frag.spv
 glslc model.vert -g -o ..\spirv\model.vert.spv
 glslc model.frag -g -o ..\spirv\model.frag.spv
+glslc model-blackline.vert -g -o ..\spirv\model-blackline.vert.spv
+glslc model-blackline.frag -g -o ..\spirv\model-blackline.frag.spv
 popd
 
 IF EXIST ..\..\build_cereus rmdir \S \Q ..\..\build_cereus 2>nul
