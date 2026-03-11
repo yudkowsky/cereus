@@ -462,7 +462,7 @@ double physics_timestep = 1.0/60.0;
 double physics_accumulator = 0;
 double timer_accumulator = 0;
 
-const char debug_level_name[64] = "overworld";
+const char debug_level_name[64] = "wookash";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
