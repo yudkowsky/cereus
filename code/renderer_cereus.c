@@ -203,6 +203,11 @@ typedef struct
     VkDeviceMemory depth_image_memory;
     VkImageView depth_image_view;
 
+    VkImage normal_image;
+    VkDeviceMemory normal_image_memory;
+    VkImageView normal_image_view;
+    VkDescriptorSet normal_descriptor_set;
+
 	VkBuffer sprite_vertex_buffer;
     VkDeviceMemory sprite_vertex_memory;
     VkBuffer sprite_index_buffer;
@@ -752,6 +757,7 @@ int32 loadAsset(char* path)
 
     vkCreateImageView(vulkan_state.logical_device_handle, &image_view_info, 0, &texture_image_view);
 
+    // depth descriptor set update
     VkDescriptorImageInfo descriptor_image_info = {0};
     descriptor_image_info.sampler = vulkan_state.pixel_art_sampler;
     descriptor_image_info.imageView = texture_image_view;
@@ -762,7 +768,8 @@ int32 loadAsset(char* path)
     descriptor_set_alloc.descriptorPool = vulkan_state.descriptor_pool;
     descriptor_set_alloc.descriptorSetCount = 1;
     descriptor_set_alloc.pSetLayouts = &vulkan_state.descriptor_set_layout;
-    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &descriptor_set_alloc, &vulkan_state.descriptor_sets[vulkan_state.asset_cache_count]);
+
+	vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &descriptor_set_alloc, &vulkan_state.descriptor_sets[vulkan_state.asset_cache_count]);
 
 	VkWriteDescriptorSet descriptor_set_write = {0};
     descriptor_set_write.sType= VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1194,22 +1201,22 @@ void createSwapchainResources(void)
     free(swapchain_images);
 
     // depth image + view
-    VkImageCreateInfo depth_ci = {0};
-	depth_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-	depth_ci.imageType = VK_IMAGE_TYPE_2D;
-	depth_ci.extent.width = vulkan_state.swapchain_extent.width;
-	depth_ci.extent.height = vulkan_state.swapchain_extent.height;
-	depth_ci.extent.depth = 1;
-	depth_ci.mipLevels = 1;
-	depth_ci.arrayLayers = 1;
-	depth_ci.format = vulkan_state.depth_format;
-	depth_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-	depth_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	depth_ci.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-	depth_ci.samples = VK_SAMPLE_COUNT_1_BIT;
-	depth_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkImageCreateInfo depth_image_ci = {0};
+	depth_image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	depth_image_ci.imageType = VK_IMAGE_TYPE_2D;
+	depth_image_ci.extent.width = vulkan_state.swapchain_extent.width;
+	depth_image_ci.extent.height = vulkan_state.swapchain_extent.height;
+	depth_image_ci.extent.depth = 1;
+	depth_image_ci.mipLevels = 1;
+	depth_image_ci.arrayLayers = 1;
+	depth_image_ci.format = vulkan_state.depth_format;
+	depth_image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+	depth_image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	depth_image_ci.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+	depth_image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
+	depth_image_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    vkCreateImage(vulkan_state.logical_device_handle, &depth_ci, 0, &vulkan_state.depth_image);
+    vkCreateImage(vulkan_state.logical_device_handle, &depth_image_ci, 0, &vulkan_state.depth_image);
 
     VkMemoryRequirements depth_memory_requirements = {0};
     vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.depth_image, &depth_memory_requirements);
@@ -1235,17 +1242,59 @@ void createSwapchainResources(void)
 
     vkCreateImageView(vulkan_state.logical_device_handle, &depth_view_ci, 0, &vulkan_state.depth_image_view);
 
+    // normal image + view
+    VkImageCreateInfo normal_image_ci = {0};
+    normal_image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    normal_image_ci.imageType = VK_IMAGE_TYPE_2D;
+    normal_image_ci.extent.width = vulkan_state.swapchain_extent.width;
+    normal_image_ci.extent.height = vulkan_state.swapchain_extent.height;
+    normal_image_ci.extent.depth = 1;
+    normal_image_ci.mipLevels = 1;
+    normal_image_ci.arrayLayers = 1;
+    normal_image_ci.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    normal_image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+    normal_image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    normal_image_ci.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    normal_image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
+    normal_image_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    vkCreateImage(vulkan_state.logical_device_handle, &normal_image_ci, 0, &vulkan_state.normal_image);
+
+    VkMemoryRequirements normal_memory_requirements = {0};
+    vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.normal_image, &normal_memory_requirements);
+
+    VkMemoryAllocateInfo normal_alloc = {0};
+    normal_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    normal_alloc.allocationSize = normal_memory_requirements.size;
+    normal_alloc.memoryTypeIndex = findMemoryType(normal_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    vkAllocateMemory(vulkan_state.logical_device_handle, &normal_alloc, 0, &vulkan_state.normal_image_memory);
+    vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.normal_image, vulkan_state.normal_image_memory, 0);
+
+    VkImageViewCreateInfo normal_view_ci = {0};
+    normal_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    normal_view_ci.image = vulkan_state.normal_image;
+    normal_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    normal_view_ci.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    normal_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    normal_view_ci.subresourceRange.baseMipLevel = 0;
+    normal_view_ci.subresourceRange.levelCount = 1;
+    normal_view_ci.subresourceRange.baseArrayLayer = 0;
+    normal_view_ci.subresourceRange.layerCount = 1;
+
+    vkCreateImageView(vulkan_state.logical_device_handle, &normal_view_ci, 0, &vulkan_state.normal_image_view);
+
     // main scene framebuffers
     vulkan_state.swapchain_framebuffers = realloc(vulkan_state.swapchain_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
 
     for (uint32 framebuffer_index = 0; framebuffer_index < vulkan_state.swapchain_image_count; framebuffer_index++)
     {
-        VkImageView framebuffer_attachments[2] = { vulkan_state.swapchain_image_views[framebuffer_index], vulkan_state.depth_image_view };
+        VkImageView framebuffer_attachments[3] = { vulkan_state.swapchain_image_views[framebuffer_index], vulkan_state.depth_image_view, vulkan_state.normal_image_view };
 
         VkFramebufferCreateInfo framebuffer_ci = {0};
         framebuffer_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         framebuffer_ci.renderPass = vulkan_state.render_pass_handle;
-        framebuffer_ci.attachmentCount = 2;
+        framebuffer_ci.attachmentCount = 3;
         framebuffer_ci.pAttachments = framebuffer_attachments;
         framebuffer_ci.width = vulkan_state.swapchain_extent.width;
         framebuffer_ci.height = vulkan_state.swapchain_extent.height;
@@ -1298,6 +1347,21 @@ void createSwapchainResources(void)
         depth_desc_write.pImageInfo = &depth_desc_info;
 
         vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &depth_desc_write, 0, 0);
+
+        VkDescriptorImageInfo normal_desc_info = {0};
+        normal_desc_info.sampler = vulkan_state.pixel_art_sampler;
+        normal_desc_info.imageView = vulkan_state.normal_image_view;
+        normal_desc_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkWriteDescriptorSet normal_desc_write = {0};
+        normal_desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        normal_desc_write.dstSet = vulkan_state.normal_descriptor_set;
+        normal_desc_write.dstBinding = 0;
+        normal_desc_write.descriptorCount = 1;
+        normal_desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        normal_desc_write.pImageInfo = &normal_desc_info;
+
+        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &normal_desc_write, 0, 0);
 
         // post-process framebuffers
         vulkan_state.outline_post_framebuffers = realloc(vulkan_state.outline_post_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
@@ -1583,6 +1647,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     vulkan_state.depth_format = VK_FORMAT_D32_SFLOAT_S8_UINT;
 
+    // TODO: organise this better. the normal attachment is under 'first render pass' here.
     // first render pass
 	VkAttachmentDescription color_attachment = {0};
     color_attachment.format = chosen_surface_format.format;
@@ -1625,12 +1690,31 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     color_output_subpass_dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 	color_output_subpass_dependency.srcAccessMask = 0; // we don't rely on any prior contents
 	color_output_subpass_dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT; // we want to protect the attachment at the destination
-	
-    VkAttachmentDescription attachments[2] = { color_attachment, depth_attachment };
+
+    VkAttachmentDescription normal_attachment = {0};
+    normal_attachment.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    normal_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    normal_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    normal_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    normal_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    normal_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    normal_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    normal_attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkAttachmentReference normal_attachment_reference = {0};
+    normal_attachment_reference.attachment = 2;
+    normal_attachment_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference color_attachment_references[2] = { color_attachment_reference, normal_attachment_reference };
+
+    color_output_subpass.colorAttachmentCount = 2;
+    color_output_subpass.pColorAttachments = color_attachment_references;
+
+    VkAttachmentDescription attachments[3] = { color_attachment, depth_attachment, normal_attachment };
 
     VkRenderPassCreateInfo render_pass_creation_info = {0}; // container that ties attachment(s), subpass(es), and dependency(ies) into a single render pass object.
 	render_pass_creation_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-	render_pass_creation_info.attachmentCount = 2; 
+    render_pass_creation_info.attachmentCount = 3;
     render_pass_creation_info.pAttachments = attachments;
     render_pass_creation_info.subpassCount = 1;
 	render_pass_creation_info.pSubpasses = &color_output_subpass;
@@ -1949,7 +2033,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
 	// shared info for graphics pipeline that is tweaked based on sprite or cube (default right now is cube, but the parts that are particular to cube are defined later anyway)
 
-	VkPipelineColorBlendAttachmentState color_blend_attachment_state = {0}; // controls per-render-target blending, i.e., how the fragment shader's output color is combined with what's already there. for now, just write RGBA
+	VkPipelineColorBlendAttachmentState color_blend_attachment_state = {0};
+    VkPipelineColorBlendAttachmentState blend_attachments[2] = {0};
     color_blend_attachment_state.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     color_blend_attachment_state.blendEnable = VK_FALSE;
     color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
@@ -1963,8 +2048,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     color_blend_state_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     color_blend_state_creation_info.logicOpEnable = VK_FALSE;
     color_blend_state_creation_info.logicOp = VK_LOGIC_OP_COPY;
-    color_blend_state_creation_info.attachmentCount = 1; // one attachment in the subpass: the swapchain image
-    color_blend_state_creation_info.pAttachments = &color_blend_attachment_state;
+    color_blend_state_creation_info.attachmentCount = 2;
+    color_blend_state_creation_info.pAttachments = blend_attachments;
     color_blend_state_creation_info.blendConstants[0] = 0.0f;
     color_blend_state_creation_info.blendConstants[1] = 0.0f;
     color_blend_state_creation_info.blendConstants[2] = 0.0f;
@@ -2035,13 +2120,20 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     vkCreateDescriptorPool(vulkan_state.logical_device_handle, &descriptor_pool_creation_info, 0, &vulkan_state.descriptor_pool);
 
-    // allocate this once for the secondary render pass
-    VkDescriptorSetAllocateInfo depth_ds_alloc = {0};
-    depth_ds_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    depth_ds_alloc.descriptorPool = vulkan_state.descriptor_pool;
-    depth_ds_alloc.descriptorSetCount = 1;
-    depth_ds_alloc.pSetLayouts = &vulkan_state.descriptor_set_layout;
-    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &depth_ds_alloc, &vulkan_state.depth_descriptor_set);
+    // TODO: maybe wrap this, often writing this code
+    VkDescriptorSetAllocateInfo depth_descriptor_set_alloc = {0};
+    depth_descriptor_set_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    depth_descriptor_set_alloc.descriptorPool = vulkan_state.descriptor_pool;
+    depth_descriptor_set_alloc.descriptorSetCount = 1;
+    depth_descriptor_set_alloc.pSetLayouts = &vulkan_state.descriptor_set_layout;
+    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &depth_descriptor_set_alloc, &vulkan_state.depth_descriptor_set);
+
+	VkDescriptorSetAllocateInfo normal_descriptor_set_alloc = {0};
+    normal_descriptor_set_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    normal_descriptor_set_alloc.descriptorPool = vulkan_state.descriptor_pool;
+    normal_descriptor_set_alloc.descriptorSetCount = 1;
+    normal_descriptor_set_alloc.pSetLayouts = &vulkan_state.descriptor_set_layout;
+    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &normal_descriptor_set_alloc, &vulkan_state.normal_descriptor_set);
 
 	createSwapchainResources();
 
@@ -2143,10 +2235,12 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         push_constant_range.offset = 0;
         push_constant_range.size = sizeof(float) * 4; // texel_size, depth threshold, padding
 
+        VkDescriptorSetLayout post_layouts[2] = { vulkan_state.descriptor_set_layout, vulkan_state.descriptor_set_layout };
+
         VkPipelineLayoutCreateInfo layout_ci = {0};
         layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layout_ci.setLayoutCount = 1;
-        layout_ci.pSetLayouts = &vulkan_state.descriptor_set_layout;
+        layout_ci.setLayoutCount = 2;
+        layout_ci.pSetLayouts = post_layouts;
         layout_ci.pushConstantRangeCount = 1;
         layout_ci.pPushConstantRanges = &push_constant_range;
 
@@ -2189,6 +2283,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
         color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
 
+        blend_attachments[0] = color_blend_attachment_state;
+        blend_attachments[1] = color_blend_attachment_state;
+
         depth_stencil_state_creation_info.depthTestEnable = VK_FALSE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_ALWAYS;
@@ -2203,6 +2300,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
         color_blend_attachment_state.blendEnable = VK_FALSE;
+
+        blend_attachments[0] = color_blend_attachment_state;
+        blend_attachments[1] = color_blend_attachment_state;
         
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
@@ -2219,6 +2319,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
         color_blend_attachment_state.blendEnable = VK_FALSE;
+
+        blend_attachments[0] = color_blend_attachment_state;
+        blend_attachments[1] = color_blend_attachment_state;
 
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
@@ -2247,6 +2350,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
+
+        blend_attachments[0] = color_blend_attachment_state;
+        blend_attachments[1] = color_blend_attachment_state;
 
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
@@ -2280,6 +2386,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
 
+        blend_attachments[0] = color_blend_attachment_state;
+        blend_attachments[1] = color_blend_attachment_state;
+
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
@@ -2309,6 +2418,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
         color_blend_attachment_state.blendEnable = VK_FALSE;
+
+        blend_attachments[0] = color_blend_attachment_state;
+        blend_attachments[1] = color_blend_attachment_state;
 
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
@@ -2622,7 +2734,7 @@ void vulkanDraw(void)
 	command_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT; // submit once, reset next frame
 	vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
 
-    VkClearValue clear_values[2];
+    VkClearValue clear_values[3];
     clear_values[0].color.float32[0] = 0.005f;
     clear_values[0].color.float32[1] = 0.008f;
     clear_values[0].color.float32[2] = 0.02f;
@@ -2631,13 +2743,18 @@ void vulkanDraw(void)
     clear_values[1].depthStencil.depth = 1.0f;
     clear_values[1].depthStencil.stencil = 0;
 
+    clear_values[2].color.float32[0] = 0.0f;
+    clear_values[2].color.float32[1] = 0.0f;
+    clear_values[2].color.float32[2] = 0.0f;
+    clear_values[2].color.float32[3] = 0.0f;
+
     VkRenderPassBeginInfo render_pass_begin_info = {0};
     render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     render_pass_begin_info.renderPass = vulkan_state.render_pass_handle;
     render_pass_begin_info.framebuffer = vulkan_state.swapchain_framebuffers[swapchain_image_index];
     render_pass_begin_info.renderArea.offset = (VkOffset2D){ 0,0 };
     render_pass_begin_info.renderArea.extent = vulkan_state.swapchain_extent;
-    render_pass_begin_info.clearValueCount = 2;
+    render_pass_begin_info.clearValueCount = 3;
     render_pass_begin_info.pClearValues = clear_values;
 
     vkCmdBeginRenderPass(command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
@@ -2935,49 +3052,49 @@ void vulkanDraw(void)
     depth_to_read.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     depth_to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-    vkCmdPipelineBarrier(command_buffer,
-        VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        0, 0, 0, 0, 0, 1, &depth_to_read);
+    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &depth_to_read);
 
     // outline post pass
-    VkRenderPassBeginInfo post_rp_begin = {0};
-    post_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    post_rp_begin.renderPass = vulkan_state.outline_post_render_pass;
-    post_rp_begin.framebuffer = vulkan_state.outline_post_framebuffers[swapchain_image_index];
-    post_rp_begin.renderArea.offset = (VkOffset2D){0, 0};
-    post_rp_begin.renderArea.extent = vulkan_state.swapchain_extent;
-    post_rp_begin.clearValueCount = 0;
+    {
+        VkRenderPassBeginInfo post_rp_begin = {0};
+        post_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        post_rp_begin.renderPass = vulkan_state.outline_post_render_pass;
+        post_rp_begin.framebuffer = vulkan_state.outline_post_framebuffers[swapchain_image_index];
+        post_rp_begin.renderArea.offset = (VkOffset2D){0, 0};
+        post_rp_begin.renderArea.extent = vulkan_state.swapchain_extent;
+        post_rp_begin.clearValueCount = 0;
 
-    vkCmdBeginRenderPass(command_buffer, &post_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBeginRenderPass(command_buffer, &post_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
 
-    // use full window viewport for post pass, not letterboxed
-    VkViewport post_viewport = {0};
-    post_viewport.width = (float)vulkan_state.swapchain_extent.width;
-    post_viewport.height = (float)vulkan_state.swapchain_extent.height;
-    post_viewport.x = 0;
-    post_viewport.y = 0;
-    post_viewport.minDepth = 0.0f;
-    post_viewport.maxDepth = 1.0f;
+        // use full window viewport for post pass, not letterboxed
+        VkViewport post_viewport = {0};
+        post_viewport.width = (float)vulkan_state.swapchain_extent.width;
+        post_viewport.height = (float)vulkan_state.swapchain_extent.height;
+        post_viewport.x = 0;
+        post_viewport.y = 0;
+        post_viewport.minDepth = 0.0f;
+        post_viewport.maxDepth = 1.0f;
 
-    VkRect2D post_scissor = {0};
-    post_scissor.extent = vulkan_state.swapchain_extent;
+        VkRect2D post_scissor = {0};
+        post_scissor.extent = vulkan_state.swapchain_extent;
 
-    vkCmdSetViewport(command_buffer, 0, 1, &post_viewport);
-    vkCmdSetScissor(command_buffer, 0, 1, &post_scissor);
+        vkCmdSetViewport(command_buffer, 0, 1, &post_viewport);
+        vkCmdSetScissor(command_buffer, 0, 1, &post_scissor);
 
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline);
-    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline_layout, 0, 1, &vulkan_state.depth_descriptor_set, 0, 0);
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline);
+        VkDescriptorSet post_sets[2] = { vulkan_state.depth_descriptor_set, vulkan_state.normal_descriptor_set };
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline_layout, 0, 2, post_sets, 0, 0);
 
-    float post_pc[4] = {
-        1.0f / (float)vulkan_state.swapchain_extent.width,
-        1.0f / (float)vulkan_state.swapchain_extent.height,
-        5000.0f, // depth threshold
-        0.0f
-    };
-    vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 4, post_pc);
+        float post_pc[4] = {
+            1.0f / (float)vulkan_state.swapchain_extent.width,
+            1.0f / (float)vulkan_state.swapchain_extent.height,
+            0.01f, // depth threshold
+            0.1f // normal threshold
+        };
+        vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 4, post_pc);
 
-    vkCmdDraw(command_buffer, 3, 1, 0, 0); // fullscreen triangle
+        vkCmdDraw(command_buffer, 3, 1, 0, 0); // fullscreen triangle
+    }
 
     vkCmdEndRenderPass(command_buffer);
 
@@ -3055,11 +3172,18 @@ void vulkanResize(uint32 width, uint32 height)
         vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.swapchain_image_views[image_index], 0);
     }
     vkFreeCommandBuffers(vulkan_state.logical_device_handle, vulkan_state.graphics_command_pool_handle, vulkan_state.swapchain_image_count, vulkan_state.swapchain_command_buffers);
+
+    // destroy depth view + image
     vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.depth_image_view, 0);
     vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.depth_image, 0);
     vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.depth_image_memory, 0);
-    // old swapchain is destroyed inside createSwapchainResources
 
+    // destroy normal view + image
+    vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.normal_image_view, 0);
+    vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.normal_image, 0);
+    vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.normal_image_memory, 0);
+
+    // old swapchain is destroyed inside createSwapchainResources
     createSwapchainResources();
 }
 

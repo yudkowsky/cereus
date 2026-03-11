@@ -5,6 +5,7 @@ layout(location = 1) in vec3 normal;
 layout(location = 2) in vec3 frag_pos_model;
 
 layout(location = 0) out vec4 out_color;
+layout(location = 1) out vec4 out_normal;
 
 layout(push_constant) uniform PC
 {
@@ -27,4 +28,6 @@ void main()
 
     float intensity = fill + edge;
     out_color = vec4(pc.color.rgb * intensity, intensity);
+
+    out_normal = vec4(0.0);
 }

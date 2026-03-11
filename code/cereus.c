@@ -219,14 +219,14 @@ GameProgress;
 
 // EDITOR STRUCTS
 
-typedef struct EditBuffer
+typedef struct
 {
     char string[64];
     int32 length;
 }
 EditBuffer;
 
-typedef enum EditorMode
+typedef enum
 {
 	NO_MODE = 0,
     PLACE_BREAK = 1,
@@ -235,7 +235,7 @@ typedef enum EditorMode
 }
 EditorMode;
 
-typedef enum WritingField
+typedef enum
 {
     NO_WRITING_FIELD = 0,
 	WRITING_FIELD_NEXT_LEVEL,
@@ -243,7 +243,7 @@ typedef enum WritingField
 }
 WritingField;
 
-typedef struct EditorState
+typedef struct
 {
     EditorMode editor_mode;
     bool do_wide_camera;
@@ -267,7 +267,7 @@ typedef enum
 }
 CameraMode;
 
-typedef struct RaycastHit
+typedef struct
 {
     bool hit;
     Int3 hit_coords;
@@ -275,7 +275,7 @@ typedef struct RaycastHit
 }
 RaycastHit;
 
-typedef enum PopupType
+typedef enum
 {
     NO_TYPE = 0,
     GAMEPLAY_MODE_CHANGE,
@@ -290,7 +290,7 @@ typedef enum PopupType
 }
 PopupType;
 
-typedef struct DebugPopup
+typedef struct
 {
 	int32 frames_left;
     char text[64];
@@ -301,7 +301,7 @@ DebugPopup;
 
 // LASER STRUCTS
 
-typedef struct LaserColor
+typedef struct
 {
     bool red;
     bool green;
@@ -310,7 +310,7 @@ typedef struct LaserColor
 LaserColor;
 
 // assumes 0 width
-typedef struct LaserBuffer
+typedef struct
 {
     Vec3 start_coords;
     Vec3 end_coords;
@@ -321,7 +321,7 @@ LaserBuffer;
 
 // UNDO BUFFER STRUCTS
 
-typedef struct UndoEntityDelta
+typedef struct
 {
     int32 id;
     Int3 old_coords;
@@ -330,7 +330,7 @@ typedef struct UndoEntityDelta
 }
 UndoEntityDelta;
 
-typedef struct UndoActionHeader
+typedef struct
 {
 	uint8 entity_count;
     uint32 delta_start_pos;
@@ -340,14 +340,13 @@ typedef struct UndoActionHeader
 }
 UndoActionHeader;
 
-typedef struct UndoLevelChange
+typedef struct
 {
     char from_level[64];
     bool remove_from_solved;
 }
 UndoLevelChange;
 
-// TODO: do some testing as to what happens when these break
 #define MAX_UNDO_DELTAS 2000000
 #define MAX_UNDO_ACTIONS 200000 // assumes a ratio of deltas:actions of 10:1 i.e. 10 entities per level
 #define MAX_LEVEL_CHANGES 50000
@@ -374,9 +373,9 @@ typedef struct UndoBuffer
 UndoBuffer;
 
 // CONSTS AND GLOBALS
-DisplayInfo game_display = {0};
-
 const float TAU = 6.2831853071f;
+
+DisplayInfo game_display = {0};
 
 const Vec3 DEFAULT_SCALE = { 1.0f,  1.0f,  1.0f  };
 const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
@@ -1063,8 +1062,11 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
 // FILE I/O
 
 // .level file structure: 
-// first 4 bytes:    -,x,y,z of level dimensions
-// next x*y*z * 2 bytes: actual level buffer
+//
+// first byte is version. version 0 is a dense representation, like the buffer i have in memory. 
+// version 1 actually encodes buffer index, tile type, direction for every object, in a sparse representation, and so is much smaller
+// then 3 bytes: x,y,z of level dimensions
+// next x*y*z * 2 bytes: actual level buffer. this is still dense. takes up 2MB memory for the largest level (overworld)
 
 // then chunking starts: 4 bytes for tag, 4 bytes for size (not including tag or size), and then data
 // camera: 	 		tag: CMRA, 	size: 24 (6 * 4b), 			data: x, y, z, fov, yaw, pitch (as floats)
@@ -1088,7 +1090,6 @@ bool readChunkHeader(FILE* file, char out_tag[4], int32 *out_size)
 }
 
 // gets position and count of some chunk tag. cursor placed right before chunk tag
-// TODO: should this be tag[3] or tag[4]? this fixes bug with CMRAL tag passed, but not sure i fully understand why
 int32 getCountAndPositionOfChunk(FILE* file, char tag[3], int32 positions[64])
 {
 	char chunk[4] = {0};
@@ -1352,7 +1353,7 @@ void loadResetBlockInfo(FILE* file)
     }
 }
 
-// deciding to still keep level_dim in later versions also. can then just write buffer_index rather than the full coords and backsolve on load.
+// keep level_dim in later versions also. can then just write buffer_index rather than the full coords and backsolve on load.
 void writeBufferToFile(FILE* file, int32 version)
 {
     if (version == 0)
@@ -1421,6 +1422,9 @@ void writeLockedInfoToFile(FILE* file, Entity* e)
     memcpy(unlocked_by, e->unlocked_by, 63);
     fwrite(unlocked_by, 1, 64, file);
 }
+
+// reset blocks currently aren't used in the game. they were a block that could reset individual blocks to their start positions when interacted with. 
+// this was used in the overworld, but there's now a very different structure to the overworld which means that this is hardly necessary as a mechanic
 
 // if save_reset_block_state, save current positions of reset block as their new homes. otherwise, save their position to file, but keep their old homes
 void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
@@ -1716,26 +1720,24 @@ void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotati
     command->color = color;
 }
 
-// TODO: this code was meant to be temporary but i don't seem to have changed it. maybe do! or at least clean it up a bit if decide to keep
-// uses color.x as alpha channel.
+// uses color.x as alpha channel. TODO: get a dedicated alpha channel after reworking push constants
 void drawText(char* string, Vec2 coords, float scale, float alpha)
 {
     float pen_x = coords.x;
     float pen_y = coords.y;
     float aspect = (float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX;
-    for (char* pointer = string; *pointer; ++pointer)
+    for (char* pointer = string; *pointer; pointer++)
     {
-        char c = *pointer;
-        if (c == '\n')
+        unsigned char character = *pointer;
+        if (character == '\n')
         {
             pen_x = coords.x;
             pen_y += FONT_CELL_HEIGHT_PX * scale; 
             continue;
         }
-        unsigned char uc = (unsigned char)c;
-        if (uc < FONT_FIRST_ASCII || uc > FONT_LAST_ASCII) uc = '?';
+        if (character < FONT_FIRST_ASCII || character > FONT_LAST_ASCII) character = '?';
 
-        SpriteId id = (SpriteId)(SPRITE_2D_FONT_SPACE + ((unsigned char)c - 32));
+        SpriteId id = (SpriteId)(SPRITE_2D_FONT_SPACE + (character - 32));
         Vec3 draw_coords = { pen_x, pen_y, 0};
         Vec3 draw_scale = { scale * aspect, scale, 1};
         Vec3 color = { alpha, 0.0f, 0.0f };

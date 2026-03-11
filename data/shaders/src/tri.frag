@@ -5,6 +5,7 @@ layout(location = 0) in vec2 uv;
 layout(location = 1) in vec3 normal;
 
 layout(location = 0) out vec4 out_color;
+layout(location = 1) out vec4 out_normal;
 
 layout(push_constant) uniform PC 
 {
@@ -23,4 +24,5 @@ void main()
     float light = max(dot(normalize(normal), normalize(light_direction)), 0.2);
 
     out_color = vec4(tex.rgb * light, tex.a);
+    out_normal = vec4(normalize(normal), 0.0);
 }
