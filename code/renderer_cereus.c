@@ -3095,8 +3095,8 @@ void vulkanDraw(void)
             float post_pc[4] = {
                 1.0f / (float)vulkan_state.swapchain_extent.width,
                 1.0f / (float)vulkan_state.swapchain_extent.height,
-                0.0001f, // depth threshold
-                0.1f // normal threshold
+                0.0005f, // depth threshold
+                0.3f // normal threshold
             };
             vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 4, post_pc);
 
