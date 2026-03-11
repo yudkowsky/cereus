@@ -179,6 +179,13 @@ typedef struct
     VkPipeline laser_outline_pipeline_handle;
     VkPipelineLayout laser_pipeline_layout;
 
+    VkRenderPass outline_post_render_pass;
+    VkFramebuffer* outline_post_framebuffers;
+    VkPipeline outline_post_pipeline;
+    VkPipelineLayout outline_post_pipeline_layout;
+    VkDescriptorSet depth_descriptor_set;
+    VkImageView depth_sampled_view; // separate view without stencil aspect
+
     VkSampler pixel_art_sampler;
     CachedAsset asset_cache[256];
     uint32 asset_cache_count;
@@ -745,18 +752,17 @@ int32 loadAsset(char* path)
 
     vkCreateImageView(vulkan_state.logical_device_handle, &image_view_info, 0, &texture_image_view);
 
-	VkDescriptorSetAllocateInfo descriptor_set_allocation_info = {0};
-    descriptor_set_allocation_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptor_set_allocation_info.descriptorPool = vulkan_state.descriptor_pool;
-    descriptor_set_allocation_info.descriptorSetCount = 1;
-    descriptor_set_allocation_info.pSetLayouts = &vulkan_state.descriptor_set_layout;
-
-    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &descriptor_set_allocation_info, &vulkan_state.descriptor_sets[vulkan_state.asset_cache_count]);
-
     VkDescriptorImageInfo descriptor_image_info = {0};
     descriptor_image_info.sampler = vulkan_state.pixel_art_sampler;
     descriptor_image_info.imageView = texture_image_view;
     descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkDescriptorSetAllocateInfo descriptor_set_alloc = {0};
+    descriptor_set_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descriptor_set_alloc.descriptorPool = vulkan_state.descriptor_pool;
+    descriptor_set_alloc.descriptorSetCount = 1;
+    descriptor_set_alloc.pSetLayouts = &vulkan_state.descriptor_set_layout;
+    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &descriptor_set_alloc, &vulkan_state.descriptor_sets[vulkan_state.asset_cache_count]);
 
 	VkWriteDescriptorSet descriptor_set_write = {0};
     descriptor_set_write.sType= VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1199,7 +1205,7 @@ void createSwapchainResources(void)
 	depth_ci.format = vulkan_state.depth_format;
 	depth_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
 	depth_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	depth_ci.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	depth_ci.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 	depth_ci.samples = VK_SAMPLE_COUNT_1_BIT;
 	depth_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -1229,7 +1235,7 @@ void createSwapchainResources(void)
 
     vkCreateImageView(vulkan_state.logical_device_handle, &depth_view_ci, 0, &vulkan_state.depth_image_view);
 
-    // framebuffers
+    // main scene framebuffers
     vulkan_state.swapchain_framebuffers = realloc(vulkan_state.swapchain_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
 
     for (uint32 framebuffer_index = 0; framebuffer_index < vulkan_state.swapchain_image_count; framebuffer_index++)
@@ -1262,6 +1268,56 @@ void createSwapchainResources(void)
     // per image fence tracking
     free(vulkan_state.images_in_flight);
     vulkan_state.images_in_flight = calloc(vulkan_state.swapchain_image_count, sizeof(VkFence));
+
+    // depth-only view for sampling
+    {
+        VkImageViewCreateInfo depth_sampled_view_ci = {0};
+        depth_sampled_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        depth_sampled_view_ci.image = vulkan_state.depth_image;
+        depth_sampled_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        depth_sampled_view_ci.format = vulkan_state.depth_format;
+        depth_sampled_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        depth_sampled_view_ci.subresourceRange.baseMipLevel = 0;
+        depth_sampled_view_ci.subresourceRange.levelCount = 1;
+        depth_sampled_view_ci.subresourceRange.baseArrayLayer = 0;
+        depth_sampled_view_ci.subresourceRange.layerCount = 1;
+
+        vkCreateImageView(vulkan_state.logical_device_handle, &depth_sampled_view_ci, 0, &vulkan_state.depth_sampled_view);
+
+        VkDescriptorImageInfo depth_desc_info = {0};
+        depth_desc_info.sampler = vulkan_state.pixel_art_sampler;
+        depth_desc_info.imageView = vulkan_state.depth_sampled_view;
+        depth_desc_info.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+        VkWriteDescriptorSet depth_desc_write = {0};
+        depth_desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        depth_desc_write.dstSet = vulkan_state.depth_descriptor_set;
+        depth_desc_write.dstBinding = 0;
+        depth_desc_write.descriptorCount = 1;
+        depth_desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        depth_desc_write.pImageInfo = &depth_desc_info;
+
+        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &depth_desc_write, 0, 0);
+
+        // post-process framebuffers
+        vulkan_state.outline_post_framebuffers = realloc(vulkan_state.outline_post_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
+
+        for (uint32 i = 0; i < vulkan_state.swapchain_image_count; i++)
+        {
+            VkImageView attachment = vulkan_state.swapchain_image_views[i];
+
+            VkFramebufferCreateInfo fb_ci = {0};
+            fb_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+            fb_ci.renderPass = vulkan_state.outline_post_render_pass;
+            fb_ci.attachmentCount = 1;
+            fb_ci.pAttachments = &attachment;
+            fb_ci.width = vulkan_state.swapchain_extent.width;
+            fb_ci.height = vulkan_state.swapchain_extent.height;
+            fb_ci.layers = 1;
+
+            vkCreateFramebuffer(vulkan_state.logical_device_handle, &fb_ci, 0, &vulkan_state.outline_post_framebuffers[i]);
+        }
+    }
 }
 
 void resetPipelineStates(VkPipelineColorBlendAttachmentState* blend, VkPipelineDepthStencilStateCreateInfo* depth_stencil, VkPipelineRasterizationStateCreateInfo* raster)
@@ -1525,10 +1581,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     vkCreateDevice(vulkan_state.physical_device_handle, &device_info, 0, &vulkan_state.logical_device_handle);
 
-	// a render pass is vulkan's contract for how to use images (attachments) 
-
     vulkan_state.depth_format = VK_FORMAT_D32_SFLOAT_S8_UINT;
 
+    // first render pass
 	VkAttachmentDescription color_attachment = {0};
     color_attachment.format = chosen_surface_format.format;
     color_attachment.samples = VK_SAMPLE_COUNT_1_BIT; // no multi-sampling anti-aliasing, so only one color sample
@@ -1547,7 +1602,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     depth_attachment.format = vulkan_state.depth_format;
     depth_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
     depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; // store for second render pass
 	depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; 
@@ -1583,6 +1638,45 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     render_pass_creation_info.pDependencies = &color_output_subpass_dependency; // same story here - just a pointer to our one dependency, rather than an array.
 
     vkCreateRenderPass(vulkan_state.logical_device_handle, &render_pass_creation_info, 0, &vulkan_state.render_pass_handle);
+
+    // second render pass for outlines
+    VkAttachmentDescription post_color_attachment = {0};
+    post_color_attachment.format = vulkan_state.swapchain_format;
+    post_color_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    post_color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // keep scene contents
+    post_color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    post_color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    post_color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    post_color_attachment.initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    post_color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentReference post_color_reference = {0};
+    post_color_reference.attachment = 0;
+    post_color_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription post_subpass = {0};
+    post_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    post_subpass.colorAttachmentCount = 1;
+    post_subpass.pColorAttachments = &post_color_reference;
+
+    VkSubpassDependency post_dependency = {0};
+    post_dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    post_dependency.dstSubpass = 0;
+    post_dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    post_dependency.dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    post_dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    post_dependency.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+    VkRenderPassCreateInfo post_render_pass_ci = {0};
+    post_render_pass_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    post_render_pass_ci.attachmentCount = 1;
+    post_render_pass_ci.pAttachments = &post_color_attachment;
+    post_render_pass_ci.subpassCount = 1;
+    post_render_pass_ci.pSubpasses = &post_subpass;
+    post_render_pass_ci.dependencyCount = 1;
+    post_render_pass_ci.pDependencies = &post_dependency;
+
+    vkCreateRenderPass(vulkan_state.logical_device_handle, &post_render_pass_ci, 0, &vulkan_state.outline_post_render_pass);
 
 	// a framebuffer is the binding of the render pass' attachment slots to specific image views, with a fixed size (width/height) and layer count. 
     // it doesn't allocate memory, it just ties the render pass to the actual image 
@@ -1654,8 +1748,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     //vulkan_state.images_in_flight = calloc(vulkan_state.swapchain_image_count, sizeof(VkFence)); // calloc because we want these to start at VK_NULL_HANDLE, i.e. 0.
 
-	createSwapchainResources();
-
     // LOADING SHADER MODULES
 
     VkShaderModule cube_vert_smh = {0};
@@ -1670,8 +1762,10 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkShaderModule sprite_frag_smh = {0};
     VkShaderModule model_vert_smh = {0};
     VkShaderModule model_frag_smh = {0};
-    VkShaderModule model_blackline_vert_smh = {0};
-    VkShaderModule model_blackline_frag_smh = {0};
+    //VkShaderModule model_blackline_vert_smh = {0};
+    //VkShaderModule model_blackline_frag_smh = {0};
+    VkShaderModule outline_post_vert_smh = {0};
+    VkShaderModule outline_post_frag_smh = {0};
 
     VkPipelineShaderStageCreateInfo cube_vert_shader_stage_ci 	 	     = loadShaderStage("data/shaders/spirv/tri.vert.spv", 	  	  	  &cube_vert_smh, 	  		 VK_SHADER_STAGE_VERTEX_BIT);
 	VkPipelineShaderStageCreateInfo cube_frag_shader_stage_ci 	 	     = loadShaderStage("data/shaders/spirv/tri.frag.spv", 	  	  	  &cube_frag_smh, 	  		 VK_SHADER_STAGE_FRAGMENT_BIT);
@@ -1682,11 +1776,13 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkPipelineShaderStageCreateInfo laser_outline_vert_shader_stage_ci   = loadShaderStage("data/shaders/spirv/laser-outline.vert.spv",   &laser_outline_vert_smh,   VK_SHADER_STAGE_VERTEX_BIT);
     VkPipelineShaderStageCreateInfo laser_outline_frag_shader_stage_ci   = loadShaderStage("data/shaders/spirv/laser-outline.frag.spv",   &laser_outline_frag_smh,   VK_SHADER_STAGE_FRAGMENT_BIT);
 	VkPipelineShaderStageCreateInfo sprite_vert_shader_stage_ci  	     = loadShaderStage("data/shaders/spirv/sprite.vert.spv",  	  	  &sprite_vert_smh,  		 VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo sprite_frag_shader_stage_ci  	     = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  	  &sprite_frag_smh,  		 VK_SHADER_STAGE_FRAGMENT_BIT );
+	VkPipelineShaderStageCreateInfo sprite_frag_shader_stage_ci  	     = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  	  &sprite_frag_smh,  		 VK_SHADER_STAGE_FRAGMENT_BIT);
 	VkPipelineShaderStageCreateInfo model_vert_shader_stage_ci 	 	     = loadShaderStage("data/shaders/spirv/model.vert.spv",   	  	  &model_vert_smh,   		 VK_SHADER_STAGE_VERTEX_BIT);
 	VkPipelineShaderStageCreateInfo model_frag_shader_stage_ci 	 	     = loadShaderStage("data/shaders/spirv/model.frag.spv",   	  	  &model_frag_smh,   		 VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo model_blackline_vert_shader_stage_ci = loadShaderStage("data/shaders/spirv/model-blackline.vert.spv", &model_blackline_vert_smh, VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo model_blackline_frag_shader_stage_ci = loadShaderStage("data/shaders/spirv/model-blackline.frag.spv", &model_blackline_frag_smh, VK_SHADER_STAGE_FRAGMENT_BIT);
+    //VkPipelineShaderStageCreateInfo model_blackline_vert_shader_stage_ci = loadShaderStage("data/shaders/spirv/model-blackline.vert.spv", &model_blackline_vert_smh, VK_SHADER_STAGE_VERTEX_BIT);
+    //VkPipelineShaderStageCreateInfo model_blackline_frag_shader_stage_ci = loadShaderStage("data/shaders/spirv/model-blackline.frag.spv", &model_blackline_frag_smh, VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo outline_post_vert_stage_ci           = loadShaderStage("data/shaders/spirv/outline-post.vert.spv",    &outline_post_vert_smh,    VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo outline_post_frag_stage_ci           = loadShaderStage("data/shaders/spirv/outline-post.frag.spv",    &outline_post_frag_smh,    VK_SHADER_STAGE_FRAGMENT_BIT);
 
     VkPipelineShaderStageCreateInfo cube_shader_stages[2]  	 	     = { cube_vert_shader_stage_ci,    	       cube_frag_shader_stage_ci }; 
     VkPipelineShaderStageCreateInfo outline_shader_stages[2] 	     = { outline_vert_shader_stage_ci, 	       outline_frag_shader_stage_ci }; 
@@ -1694,7 +1790,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkPipelineShaderStageCreateInfo laser_outline_shader_stages[2]   = { laser_outline_vert_shader_stage_ci,   laser_outline_frag_shader_stage_ci };
     VkPipelineShaderStageCreateInfo sprite_shader_stages[2]  	     = { sprite_vert_shader_stage_ci,  	   	   sprite_frag_shader_stage_ci };
    	VkPipelineShaderStageCreateInfo model_shader_stages[2]   	     = { model_vert_shader_stage_ci,   	       model_frag_shader_stage_ci };
-    VkPipelineShaderStageCreateInfo model_blackline_shader_stages[2] = { model_blackline_vert_shader_stage_ci, model_blackline_frag_shader_stage_ci };
+    //VkPipelineShaderStageCreateInfo model_blackline_shader_stages[2] = { model_blackline_vert_shader_stage_ci, model_blackline_frag_shader_stage_ci };
+    VkPipelineShaderStageCreateInfo outline_post_shader_stages[2]    = { outline_post_vert_stage_ci,           outline_post_frag_stage_ci };
 
     // vertex input
     // per-vertex data: used for individually drawn meshes (sprites, models (currently), lasers, etc.)
@@ -1797,6 +1894,10 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     vertex_input_instanced.pVertexBindingDescriptions = vertex_bindings_instanced;
     vertex_input_instanced.vertexAttributeDescriptionCount = 9;
     vertex_input_instanced.pVertexAttributeDescriptions = vertex_attributes_instanced;
+
+    // empty vertex input for outline post render
+    VkPipelineVertexInputStateCreateInfo empty_vertex_input = {0};
+    empty_vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
     // struct that describes how vertices are assembled into primatives before rasterization
     VkPipelineInputAssemblyStateCreateInfo input_assembly_state_creation_info = {0}; 
@@ -1934,6 +2035,16 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     vkCreateDescriptorPool(vulkan_state.logical_device_handle, &descriptor_pool_creation_info, 0, &vulkan_state.descriptor_pool);
 
+    // allocate this once for the secondary render pass
+    VkDescriptorSetAllocateInfo depth_ds_alloc = {0};
+    depth_ds_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    depth_ds_alloc.descriptorPool = vulkan_state.descriptor_pool;
+    depth_ds_alloc.descriptorSetCount = 1;
+    depth_ds_alloc.pSetLayouts = &vulkan_state.descriptor_set_layout;
+    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &depth_ds_alloc, &vulkan_state.depth_descriptor_set);
+
+	createSwapchainResources();
+
 	// MAIN GRAPHICS PIPELINE LAYOUT
 
     {
@@ -2022,6 +2133,24 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         model_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
 
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &model_pipeline_layout_ci, 0, &vulkan_state.model_pipeline_layout);
+    }
+
+    // OUTLINE POST PIPELINE LAYOUT
+
+    {
+        VkPushConstantRange push_constant_range = {0};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = sizeof(float) * 4; // texel_size, depth threshold, padding
+
+        VkPipelineLayoutCreateInfo layout_ci = {0};
+        layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layout_ci.setLayoutCount = 1;
+        layout_ci.pSetLayouts = &vulkan_state.descriptor_set_layout;
+        layout_ci.pushConstantRangeCount = 1;
+        layout_ci.pPushConstantRanges = &push_constant_range;
+
+        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.outline_post_pipeline_layout);
     }
 
     // BASE GRAPHICS PIPELINE INFO
@@ -2205,6 +2334,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &model_ci, 0, &vulkan_state.model_pipeline_handle);
     }
 
+    /*
     // define model blackline pipeline: 
     {
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
@@ -2262,6 +2392,70 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         clear_ci.layout = vulkan_state.model_pipeline_layout;
 
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &clear_ci, 0, &vulkan_state.model_stencil_clear_pipeline_handle);
+    }
+    */
+
+    // define outline post pipeline. different enough that we might as well set up an entirely new creation info. sets up state first, then assigns TODO: see if i can do some cleanup here
+    {
+        VkPipelineInputAssemblyStateCreateInfo post_input_assembly_state_ci = {0};
+        post_input_assembly_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        post_input_assembly_state_ci.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+        VkPipelineViewportStateCreateInfo post_viewport_state_ci = {0};
+        post_viewport_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        post_viewport_state_ci.viewportCount = 1;
+        post_viewport_state_ci.scissorCount = 1;
+        post_viewport_state_ci.pViewports = &dummy_viewport;
+        post_viewport_state_ci.pScissors = &dummy_scissor;
+
+        VkDynamicState post_dynamic_states[2] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+        VkPipelineDynamicStateCreateInfo post_dynamic_state_ci = {0};
+        post_dynamic_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+        post_dynamic_state_ci.dynamicStateCount = 2;
+        post_dynamic_state_ci.pDynamicStates = post_dynamic_states;
+
+        VkPipelineRasterizationStateCreateInfo post_rasterization_state_ci = {0};
+        post_rasterization_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        post_rasterization_state_ci.polygonMode = VK_POLYGON_MODE_FILL;
+        post_rasterization_state_ci.cullMode = VK_CULL_MODE_NONE;
+        post_rasterization_state_ci.lineWidth = 1.0f;
+
+        VkPipelineMultisampleStateCreateInfo post_multisample_state_ci = {0};
+        post_multisample_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        post_multisample_state_ci.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+        VkPipelineColorBlendAttachmentState post_blend_attachment_state = {0};
+        post_blend_attachment_state.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        post_blend_attachment_state.blendEnable = VK_FALSE;
+
+        VkPipelineColorBlendStateCreateInfo post_color_blend_state_ci = {0};
+        post_color_blend_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        post_color_blend_state_ci.attachmentCount = 1;
+        post_color_blend_state_ci.pAttachments = &post_blend_attachment_state;
+
+        VkPipelineDepthStencilStateCreateInfo post_depth_stencil_state_ci = {0};
+        post_depth_stencil_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+        post_depth_stencil_state_ci.depthTestEnable = VK_FALSE;
+        post_depth_stencil_state_ci.depthWriteEnable = VK_FALSE;
+        post_depth_stencil_state_ci.stencilTestEnable = VK_FALSE;
+
+        VkGraphicsPipelineCreateInfo post_graphics_pipeline_ci = {0};
+        post_graphics_pipeline_ci.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        post_graphics_pipeline_ci.stageCount = 2;
+        post_graphics_pipeline_ci.pStages = outline_post_shader_stages;
+        post_graphics_pipeline_ci.pVertexInputState = &empty_vertex_input;
+        post_graphics_pipeline_ci.pInputAssemblyState = &post_input_assembly_state_ci;
+        post_graphics_pipeline_ci.pViewportState = &post_viewport_state_ci;
+        post_graphics_pipeline_ci.pRasterizationState = &post_rasterization_state_ci;
+        post_graphics_pipeline_ci.pMultisampleState = &post_multisample_state_ci;
+        post_graphics_pipeline_ci.pDepthStencilState = &post_depth_stencil_state_ci;
+        post_graphics_pipeline_ci.pColorBlendState = &post_color_blend_state_ci;
+        post_graphics_pipeline_ci.pDynamicState = &post_dynamic_state_ci;
+        post_graphics_pipeline_ci.layout = vulkan_state.outline_post_pipeline_layout;
+        post_graphics_pipeline_ci.renderPass = vulkan_state.outline_post_render_pass;
+        post_graphics_pipeline_ci.subpass = 0;
+
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &post_graphics_pipeline_ci, 0, &vulkan_state.outline_post_pipeline);
     }
 
     createInstanceBuffer();
@@ -2573,6 +2767,7 @@ void vulkanDraw(void)
             vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
             vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
 
+            /*
             // pass 2: blackline, only where stencil == 0
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_blackline_pipeline_handle);
             vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
@@ -2587,6 +2782,7 @@ void vulkanDraw(void)
             vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
             vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
             vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
+            */
         }
     }
 
@@ -2722,6 +2918,69 @@ void vulkanDraw(void)
     }
 
     vkCmdEndRenderPass(command_buffer);
+
+    // transition depth from attachment to shader read
+    VkImageMemoryBarrier depth_to_read = {0};
+    depth_to_read.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    depth_to_read.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depth_to_read.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    depth_to_read.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    depth_to_read.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    depth_to_read.image = vulkan_state.depth_image;
+    depth_to_read.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+    depth_to_read.subresourceRange.baseMipLevel = 0;
+    depth_to_read.subresourceRange.levelCount = 1;
+    depth_to_read.subresourceRange.baseArrayLayer = 0;
+    depth_to_read.subresourceRange.layerCount = 1;
+    depth_to_read.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    depth_to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(command_buffer,
+        VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, 0, 0, 0, 1, &depth_to_read);
+
+    // outline post pass
+    VkRenderPassBeginInfo post_rp_begin = {0};
+    post_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    post_rp_begin.renderPass = vulkan_state.outline_post_render_pass;
+    post_rp_begin.framebuffer = vulkan_state.outline_post_framebuffers[swapchain_image_index];
+    post_rp_begin.renderArea.offset = (VkOffset2D){0, 0};
+    post_rp_begin.renderArea.extent = vulkan_state.swapchain_extent;
+    post_rp_begin.clearValueCount = 0;
+
+    vkCmdBeginRenderPass(command_buffer, &post_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+
+    // use full window viewport for post pass, not letterboxed
+    VkViewport post_viewport = {0};
+    post_viewport.width = (float)vulkan_state.swapchain_extent.width;
+    post_viewport.height = (float)vulkan_state.swapchain_extent.height;
+    post_viewport.x = 0;
+    post_viewport.y = 0;
+    post_viewport.minDepth = 0.0f;
+    post_viewport.maxDepth = 1.0f;
+
+    VkRect2D post_scissor = {0};
+    post_scissor.extent = vulkan_state.swapchain_extent;
+
+    vkCmdSetViewport(command_buffer, 0, 1, &post_viewport);
+    vkCmdSetScissor(command_buffer, 0, 1, &post_scissor);
+
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline);
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline_layout, 0, 1, &vulkan_state.depth_descriptor_set, 0, 0);
+
+    float post_pc[4] = {
+        1.0f / (float)vulkan_state.swapchain_extent.width,
+        1.0f / (float)vulkan_state.swapchain_extent.height,
+        5000.0f, // depth threshold
+        0.0f
+    };
+    vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 4, post_pc);
+
+    vkCmdDraw(command_buffer, 3, 1, 0, 0); // fullscreen triangle
+
+    vkCmdEndRenderPass(command_buffer);
+
     vkEndCommandBuffer(command_buffer);
 
 	first_submit_since_draw = true;
@@ -2787,8 +3046,11 @@ void vulkanResize(uint32 width, uint32 height)
     vkDeviceWaitIdle(vulkan_state.logical_device_handle);
 
     // destroy old resources
+    vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.depth_sampled_view, 0);
+
     for (uint32 image_index = 0; image_index < vulkan_state.swapchain_image_count; image_index++)
     {
+        vkDestroyFramebuffer(vulkan_state.logical_device_handle, vulkan_state.outline_post_framebuffers[image_index], 0);
         vkDestroyFramebuffer(vulkan_state.logical_device_handle, vulkan_state.swapchain_framebuffers[image_index], 0);
         vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.swapchain_image_views[image_index], 0);
     }
