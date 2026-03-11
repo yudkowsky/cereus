@@ -65,7 +65,7 @@ typedef enum
 }
 TileType;
 
-typedef enum Color
+typedef enum
 {
     NO_COLOR = 0,
     RED      = 1,
@@ -78,7 +78,7 @@ typedef enum Color
 }
 Color;
 
-typedef struct GreenHit
+typedef struct
 {
     bool north;
     bool west;
@@ -89,8 +89,8 @@ typedef struct GreenHit
 }
 GreenHit;
 
-// uses id -1 as overwrite value. i think this is okay here.
-typedef struct ResetInfo
+// used for the reset blocks, which aren't currently active in the game
+typedef struct
 {
     int32 id;
     Int3 start_coords;
@@ -100,19 +100,21 @@ typedef struct ResetInfo
 }
 ResetInfo;
 
-typedef struct Entity
+// coords are integer coordinates of the entity, position_norm is the floating point coords in world space.
+// likewise direction is one of 6 orientations, rotation_quat is the actual rotation passed to renderer.
+typedef struct
 {
+    int32 id;
     Int3 coords;
     Vec3 position_norm;
     Direction direction;
     Vec4 rotation_quat;
-    int32 id;
     bool removed;
 
     int32 in_motion;
     Direction moving_direction;
 
-    bool first_fall_already_done;
+    bool first_fall_already_done; // first fall is slower (accelerates to terminal velocity). all other falls are lerped
 
     // for sources/lasers
     Color color;
@@ -123,18 +125,19 @@ typedef struct Entity
     bool hit_by_blue;
 
     // for win blocks
-    char next_level[64];
+    char next_level[64]; // TODO: make level names an enum so don't need to carry around 64 * char * 2 per entity
     
     // for locked blocks (and other entities that are locked)
     bool locked;
-    char unlocked_by[64];
+    char unlocked_by[64]; 
 
     // for reset blocks;
     ResetInfo reset_info[16];
 }
 Entity;
 
-typedef struct WorldState
+// the 2MB buffer is dense representation of the level encoded by coords
+typedef struct
 {
     uint8 buffer[2000000]; // 2 bytes info per tile 
     Entity player;
@@ -149,10 +152,11 @@ typedef struct WorldState
 
     char level_name[64];
 
-	char solved_levels[64][64]; // TODO: make this enum? after finalised level names, so don't need to change at two places? maybe this is too late for this, but need to figure something out here
+	char solved_levels[64][64];
 }
 WorldState;
 
+// trailing hitboxes are to leave something interactible in a location even if the actual object has moved on to a different integer coord. this is helpful mostly for updateLaserBuffer
 typedef struct
 {
 	Int3 coords;
@@ -191,19 +195,19 @@ typedef struct
 }
 Push;
 
+// this is a bunch of state to do with handling what gets pushed when during the turn. pack_intermediate_states_timer is the main thing: it just ticks down while the player is turning.
+// later there is a loop with some numbers that look nice for when things should be turning, based on this timer. the objects don't get pushed the same frame the player turns,
+// so we need to store the coords of what to push, and what direction to push it (if we are pushing during this turn)
 typedef struct
 {
     int32 pack_intermediate_states_timer;
+
     Int3 pack_intermediate_coords;
     Int3 pack_hitbox_turning_to_coords;
-    int32 pack_hitbox_turning_to_timer; // used for blue-not-blue logic
-    Direction pack_orthogonal_push_direction;
+
     bool do_diagonal_push_on_turn;
     bool do_orthogonal_push_on_turn;
-    bool do_player_and_pack_fall_after_turn;
-    bool player_hit_by_blue_in_turn;
-    Int3 entity_to_fall_after_blue_not_blue_turn_coords;
-    int32 entity_to_fall_after_blue_not_blue_turn_timer;
+    Direction pack_orthogonal_push_direction;
 }
 PackTurnState;
 
@@ -347,9 +351,10 @@ typedef struct
 }
 UndoLevelChange;
 
-#define MAX_UNDO_DELTAS 2000000
-#define MAX_UNDO_ACTIONS 200000 // assumes a ratio of deltas:actions of 10:1 i.e. 10 entities per level
-#define MAX_LEVEL_CHANGES 50000
+// approx. 5mb undo buffer
+#define MAX_UNDO_DELTAS 200000
+#define MAX_UNDO_ACTIONS 20000 // assumes a ratio of deltas:actions of 10:1 i.e. 10 entities per level
+#define MAX_LEVEL_CHANGES 5000
 
 typedef struct UndoBuffer
 {
@@ -484,16 +489,16 @@ bool draw_level_boundary = false;
 
 float camera_lerp_t = 0.0f;
 const float CAMERA_T_TIMESTEP = 0.05f;
-int32 camera_target_plane = 0; // plane that camera wants to target TODO: should probably be something defined by level, not just player coords at startup
+int32 camera_target_plane = 0; // y level of xz plane targeted during camera interpolation function TODO: should probably be something defined by level, not just player coords at startup
 
 DrawCommand draw_commands[8192] = {0};
 int32 draw_command_count = 0;
 
 static WorldState world_state = {0};
 static WorldState next_world_state = {0};
-static WorldState pending_undo_snapshot = {0};
+static WorldState pending_undo_snapshot = {0}; // TODO: pending_undo_snapshot and leap_of_faith_snapshot don't change the buffer, so could save 4MB by using some EntitySnapshot struct
 static WorldState leap_of_faith_snapshot = {0};
-static WorldState overworld_zero = {0};
+static WorldState overworld_zero = {0}; // TODO: probably don't have to carry this around, just read from zeroed overworld file when i need this (on restart in overworld)
 Int3 level_dim = {0};
 
 UndoBuffer undo_buffer = {0};
@@ -519,7 +524,7 @@ bool player_will_fall_next_turn = false;
 bool bypass_player_fall;
 PackTurnState pack_turn_state = {0};
 
-TrailingHitbox trailing_hitboxes[32];
+TrailingHitbox trailing_hitboxes[32]; 
 Animation animations[32];
 
 // ghosts from tp
@@ -661,24 +666,24 @@ bool vec3IsEqual(Vec3 a, Vec3 b)
     return (a.x == b.x && a.y == b.y && a.z == b.z); 
 }
 
-Vec3 vec3Negate(Vec3 coords) 
-{
-    return (Vec3){ -coords.x, -coords.y, -coords.z }; 
-}
-
 Int3 int3Negate(Int3 coords) 
 {
     return (Int3){ -coords.x, -coords.y, -coords.z }; 
 }
 
-bool vec3IsZero(Vec3 position) 
+Vec3 vec3Negate(Vec3 coords) 
 {
-    return (position.x == 0 && position.y == 0 && position.z == 0); 
+    return (Vec3){ -coords.x, -coords.y, -coords.z }; 
 }
 
-Vec3 vec3Add(Vec3 a, Vec3 b) 
+bool int3IsZero(Int3 coords)
 {
-    return (Vec3){ a.x+b.x, a.y+b.y, a.z+b.z };
+    return (coords.x == 0 && coords.y == 0 && coords.z == 0);
+}
+
+bool vec3IsZero(Vec3 coords) 
+{
+    return (coords.x == 0 && coords.y == 0 && coords.z == 0); 
 }
 
 Int3 int3Add(Int3 a, Int3 b)
@@ -686,9 +691,9 @@ Int3 int3Add(Int3 a, Int3 b)
     return (Int3){ a.x+b.x, a.y+b.y, a.z+b.z }; 
 }
 
-Vec3 vec3Subtract(Vec3 a, Vec3 b) 
+Vec3 vec3Add(Vec3 a, Vec3 b) 
 {
-    return (Vec3){ a.x-b.x, a.y-b.y, a.z-b.z }; 
+    return (Vec3){ a.x+b.x, a.y+b.y, a.z+b.z };
 }
 
 Int3 int3Subtract(Int3 a, Int3 b) 
@@ -696,19 +701,24 @@ Int3 int3Subtract(Int3 a, Int3 b)
     return (Int3){ a.x-b.x, a.y-b.y, a.z-b.z }; 
 }
 
+Vec3 vec3Subtract(Vec3 a, Vec3 b) 
+{
+    return (Vec3){ a.x-b.x, a.y-b.y, a.z-b.z }; 
+}
+
 Vec3 vec3Abs(Vec3 a) 
 {
     return (Vec3){ (float)fabs(a.x), (float)fabs(a.y), (float)fabs(a.z) }; 
 }
 
-Vec3 vec3ScalarMultiply(Vec3 position, float scalar) 
-{
-    return (Vec3){ position.x*scalar, position.y*scalar, position.z*scalar }; 
-}
-
 Int3 int3ScalarMultiply(Int3 position, int32 scalar) 
 {
     return (Int3){ position.x*scalar, position.y*scalar, position.z*scalar }; 
+}
+
+Vec3 vec3ScalarMultiply(Vec3 position, float scalar) 
+{
+    return (Vec3){ position.x*scalar, position.y*scalar, position.z*scalar }; 
 }
 
 float vec3Inner(Vec3 a, Vec3 b)
@@ -776,6 +786,11 @@ TileType getTileType(Int3 coords)
     return next_world_state.buffer[coordsToBufferIndexType(coords)]; 
 }
 
+Direction getTileDirection(Int3 coords) 
+{
+    return next_world_state.buffer[coordsToBufferIndexDirection(coords)]; 
+}
+
 bool isSource(TileType tile) 
 {
     return (tile == SOURCE_RED || tile == SOURCE_GREEN || tile == SOURCE_BLUE || tile == SOURCE_MAGENTA || tile == SOURCE_YELLOW || tile == SOURCE_CYAN|| tile == SOURCE_WHITE);
@@ -823,11 +838,6 @@ TileType getTileTypeFromId(int32 id)
     else return NONE;
 }
 
-Direction getTileDirection(Int3 coords) 
-{
-    return next_world_state.buffer[coordsToBufferIndexDirection(coords)]; 
-}
-
 Color getEntityColor(Int3 coords)
 {
     switch (getTileType(coords))
@@ -843,7 +853,7 @@ Color getEntityColor(Int3 coords)
     }
 }
 
-Entity* getEntityPointer(Int3 coords)
+Entity* getEntityAtCoords(Int3 coords)
 {
     TileType tile = getTileType(coords);
     Entity *entity_group = 0;
@@ -870,7 +880,7 @@ Entity* getEntityPointer(Int3 coords)
 
 int32 getEntityId(Int3 coords)
 {
-    Entity *entity = getEntityPointer(coords);
+    Entity *entity = getEntityAtCoords(coords);
     return entity->id;
 }
 
@@ -901,7 +911,7 @@ Entity* getEntityFromId(int32 id)
 
 Direction getEntityDirection(Int3 coords) 
 {
-    Entity *entity = getEntityPointer(coords);
+    Entity *entity = getEntityAtCoords(coords);
     return entity->direction;
 }
 
@@ -1290,7 +1300,7 @@ void loadResetBlockInfo(FILE* file)
         {
             if (int3IsEqual(rb_coords, next_world_state.reset_blocks[rb_index_state].coords))
             {
-                Entity* rb = getEntityPointer(rb_coords);
+                Entity* rb = getEntityAtCoords(rb_coords);
                 FOR(reset_entity_index, reset_entity_count)
                 {
                     int32 stored_id = -1;
@@ -1720,7 +1730,7 @@ void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotati
     command->color = color;
 }
 
-// uses color.x as alpha channel. TODO: get a dedicated alpha channel after reworking push constants
+// uses color.x as alpha channel.
 void drawText(char* string, Vec2 coords, float scale, float alpha)
 {
     float pen_x = coords.x;
@@ -2186,7 +2196,7 @@ void doFailedWalkAnimations(Direction direction)
     Int3 current_coords = next_world_state.player.coords;
     FOR(stack_index, stack_size) 
     {
-        createFailedWalkAnimation(intCoordsToNorm(current_coords), intCoordsToNorm(getNextCoords(current_coords, direction)), &getEntityPointer(current_coords)->position_norm, getEntityPointer(current_coords)->id);
+        createFailedWalkAnimation(intCoordsToNorm(current_coords), intCoordsToNorm(getNextCoords(current_coords, direction)), &getEntityAtCoords(current_coords)->position_norm, getEntityAtCoords(current_coords)->id);
         current_coords = getNextCoords(current_coords, UP);
     }
     if (!pack_detached) createFailedWalkAnimation(intCoordsToNorm(next_world_state.pack.coords), intCoordsToNorm(getNextCoords(next_world_state.pack.coords, direction)), &next_world_state.pack.position_norm, PACK_ID);
@@ -2273,7 +2283,7 @@ void doFailedTurnAnimations(Direction input_direction, bool clockwise)
     Int3 current_coords = next_world_state.player.coords;
     FOR(stack_index, stack_size)
     {
-        Entity* current_entity = getEntityPointer(current_coords);
+        Entity* current_entity = getEntityAtCoords(current_coords);
         Direction next_direction = getNextRotationalDirection(current_entity->direction, clockwise);
         createFailedStaticRotationAnimation(directionToQuaternion(current_entity->direction, true), directionToQuaternion(next_direction, true), &current_entity->rotation_quat, current_entity->id);
         current_coords = getNextCoords(current_coords, UP);
@@ -2340,7 +2350,7 @@ PushResult canPush(Int3 coords, Direction direction)
     TileType current_tile = getTileType(current_coords);
     for (int push_index = 0; push_index < MAX_ENTITY_PUSH_COUNT; push_index++) 
     {
-        Entity* entity = getEntityPointer(current_coords);
+        Entity* entity = getEntityAtCoords(current_coords);
         if (isEntity(current_tile) && entity->locked) return FAILED_PUSH;
 
         if (entity->in_motion > 0) return PAUSE_PUSH;
@@ -2350,11 +2360,11 @@ PushResult canPush(Int3 coords, Direction direction)
         current_tile = getTileType(current_coords);
 
         Int3 coords_ahead = getNextCoords(entity->coords, direction);
-        if (isPushable(getTileType(coords_ahead)) && getEntityPointer(coords_ahead)->in_motion) return PAUSE_PUSH;
+        if (isPushable(getTileType(coords_ahead)) && getEntityAtCoords(coords_ahead)->in_motion) return PAUSE_PUSH;
         Int3 coords_below = getNextCoords(entity->coords, DOWN);
-        if (isPushable(getTileType(coords_below)) && getEntityPointer(coords_below)->in_motion) return PAUSE_PUSH;
+        if (isPushable(getTileType(coords_below)) && getEntityAtCoords(coords_below)->in_motion) return PAUSE_PUSH;
         Int3 coords_below_and_ahead = getNextCoords(getNextCoords(entity->coords, DOWN), direction);
-        if (isPushable(getTileType(coords_below_and_ahead)) && getEntityPointer(coords_below_and_ahead)->in_motion) return PAUSE_PUSH;
+        if (isPushable(getTileType(coords_below_and_ahead)) && getEntityAtCoords(coords_below_and_ahead)->in_motion) return PAUSE_PUSH;
 
         if (!intCoordsWithinLevelBounds(current_coords)) return FAILED_PUSH;
 
@@ -2391,7 +2401,7 @@ Push pushOnceWithoutAnimation(Int3 coords, Direction direction, int32 time)
 {
     Push entity_to_push = {0};
 
-    Entity* entity = getEntityPointer(coords);
+    Entity* entity = getEntityAtCoords(coords);
     entity_to_push.type = getTileType(coords);
     entity_to_push.previous_coords = coords;
     entity_to_push.entity = entity; 
@@ -2462,7 +2472,7 @@ void pushUp(Int3 coords, int32 animation_time)
     {
         TileType tile = getTileType(current_coords);
         Direction dir = getTileDirection(current_coords);
-        Entity* e = getEntityPointer(current_coords);
+        Entity* e = getEntityAtCoords(current_coords);
         setTileType(NONE, current_coords);
         setTileDirection(NORTH, current_coords);
         Int3 coords_above = getNextCoords(current_coords, UP);
@@ -2621,10 +2631,28 @@ int32 findNextFreeInLaserBuffer()
     return -1;
 }
 
+// handles where lasers go. the complicated part of this function handles when mirrors are moving around, and offsets the lasers by visually by a bit.
+//
+// more detail about the mirror offset calculation:
+//
+// when a mirror is mid-animation between grid cells, the laser wants to hit at the actual visual position of the mirror, not the interger coords.
+// this means that the function needs to adjust the laser segment's end coords (and the next segment's start coords) based on the mirror's displacement.
+//
+// the displacement of the laser-turning-point can change depending along which axis the mirror is moving relative to the direction of the laser - 
+// but the displacement always travels along the 1D line of direction of travel of the laser.
+// the mirror can be moving along the incoming laser axis, or the reflected laser axis, or neither. if neither, no displacement is required - otherwise some displacement is required.
+//
+// the sign of the shift along this 1D line depends on the relative orientations of the incoming laser, reflected laser, and the direction the mirror is facing. so the function compares direction signs:
+// guess an offset, check if the resulting geometry is consistent (i.e., incoming and reflected rays point the right way relative to each other), and flip the bit if not.
+// this bit is the only information actually required, because the magnitude of the offset can be gotten just from mirror.in_motion and the total amount of time for the movement
+// (i.e., how far along the interpolation between one axis and another is the mirror). planning to just use position_norm here instead, which would be better and simpler.
+// 
+
 // TODO: - need guard on offset_magnitude in the mirrors: if too close to edge, don't want to allow reflection
-// 		 - look if we need to round from position_norm instead of checking if player is turning for some calculations; does this handle first falls vs. other falls correctly..? maybe yes, but should probably fix this anyway
+// 		 - look if we need to round from position_norm instead of checking if player is turning for some calculations; does this handle first falls vs. other falls correctly..?
 // 		 - figure out moving sources and their lasers
 // 		 - two mirrors moving at once isnt handled.
+// 		 - looks weird during some undo interpolation edge cases, because i don't write moving_direction correctly sometimes.
 
 void updateLaserBuffer(void)
 {
@@ -2636,6 +2664,7 @@ void updateLaserBuffer(void)
     player->hit_by_blue  = false;
     player->green_hit = (GreenHit){0};
 
+    // if a source is a non-primary color, create primary sources of the constituent colors
     Entity sources_as_primary[256] = {0};
     int32 primary_index = 0;
     FOR(source_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -2687,10 +2716,10 @@ void updateLaserBuffer(void)
         Int3 current_tile_coords = source->coords;
         if (source->in_motion)
         {
-
+            // TODO: moving sources should emit their laser based on position_norm, not on integer coords. but i haven't designed these levels yet anyway.
         }
 
-        int32 skip_mirror_id = 0;
+        int32 skip_mirror_id = 0; // because lasers will sometimes be 'between' integer coordinates, it can sometimes hit mirrors twice. so just store the id of the mirror we hit, and don't let the laser hit it (immediately) again
         int32 skip_next_mirror = 0;
         int32 laser_buffer_start_index = findNextFreeInLaserBuffer();
 
@@ -2776,8 +2805,8 @@ void updateLaserBuffer(void)
                 if (real_hit_type == MIRROR)
                 {
                     Entity* mirror = {0};
-                    if (th_hit) mirror = getEntityPointer(getNextCoords(current_tile_coords, th.moving_direction));
-                    else mirror = getEntityPointer(current_tile_coords);
+                    if (th_hit) mirror = getEntityAtCoords(getNextCoords(current_tile_coords, th.moving_direction));
+                    else mirror = getEntityAtCoords(current_tile_coords);
 
                     if (skip_next_mirror == 0 || skip_mirror_id != mirror->id)
                     {
@@ -2833,9 +2862,11 @@ void updateLaserBuffer(void)
                             Vec3 mirror_shift = vec3Subtract(mirror->position_norm, comparison_coords);
                             Vec3 laser_shift = vec3Subtract(intCoordsToNorm(current_tile_coords), lb->end_coords);
                             Vec3 total_shift = vec3Subtract(mirror_shift, laser_shift);
-                            bool reverse_offset = false;
-                            if (vec3IsZero(vec3Subtract(lb->end_coords, intCoordsToNorm(current_tile_coords)))) reverse_offset = true;
+                            bool reverse_offset = false; 
+                            if (vec3IsZero(vec3Subtract(lb->end_coords, intCoordsToNorm(current_tile_coords)))) reverse_offset = true; // TODO: this case should be handled above
 
+                            // this part is just 'which axis did the dot product of the two laser directions land on', hence 6 cases
+							// TODO: this entire section could probably be smarter, and not have to code 6 cases like this. 
                             if (!vec3IsZero(vec3Hadamard(total_shift, next_dir_basis)))
                             {
                                 float offset_magnitude = 0;
@@ -2946,7 +2977,7 @@ void updateLaserBuffer(void)
                 {
                     if (isEntity(real_hit_type))
                     {
-                        Entity* e = getEntityPointer(current_tile_coords);
+                        Entity* e = getEntityAtCoords(current_tile_coords);
                         if (e)
                         {
                             bool do_passthrough = false;
@@ -2958,7 +2989,7 @@ void updateLaserBuffer(void)
                                 current_tile_coords = getNextCoords(current_tile_coords, current_direction);
                                 continue;
                             }
-                            if (direction_on_axis) lb->end_coords = e->position_norm; // TODO: this feels like it should create problems with 2-step undo animations but it doesn't seem to. look into this more
+                            if (direction_on_axis) lb->end_coords = e->position_norm; // TODO: causes issues with some 2-step undo interpolations. but solveable by just assigning moving_direction correctly on undo.
                         }
                     }
                     if (vec3IsEqual(lb->end_coords, VEC3_0)) lb->end_coords = intCoordsToNorm(current_tile_coords); // if not already updated above
@@ -2985,7 +3016,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
     if (entity->removed) return false;
     Int3 next_coords = getNextCoords(entity->coords, DOWN);
     if (!intCoordsWithinLevelBounds(next_coords)) return false;
-    if (!(isPushable(getTileType(next_coords)) && getEntityPointer(next_coords)->removed) && getTileType(next_coords) != NONE) return true;
+    if (!(isPushable(getTileType(next_coords)) && getEntityAtCoords(next_coords)->removed) && getTileType(next_coords) != NONE) return true;
     TrailingHitbox _;
     if (trailingHitboxAtCoords(next_coords, &_) && entity->id != PLAYER_ID) return true;
 
@@ -2994,13 +3025,13 @@ bool doFallingEntity(Entity* entity, bool do_animation)
     Int3 current_end_coords = next_coords; 
     FOR(stack_fall_index, stack_size)
     {
-        Entity* entity_in_stack = getEntityPointer(current_start_coords);
+        Entity* entity_in_stack = getEntityAtCoords(current_start_coords);
         if (entity_in_stack->removed) return false; // should never happen, shouldn't have removed entity in the middle of a stack somewhere
         if (entity_in_stack->in_motion) return false; 
         if (entity_in_stack == &next_world_state.pack && !pack_detached && stack_fall_index != 0) return false;
         if (entity_in_stack == &next_world_state.player && !next_world_state.player.hit_by_red) time_until_game_input = FALL_ANIMATION_TIME;
 
-        // switch on if this is going to be first fall
+        // check if this is going to be first fall
         if (!entity_in_stack->first_fall_already_done)
         {
             if (do_animation) 
@@ -3049,7 +3080,6 @@ void doFallingObjects(bool do_animation)
             Entity* entity = &object_group_to_fall[to_fall_index][entity_index];
 
             if (entity->locked || entity->removed) continue;
-            if (pack_turn_state.pack_hitbox_turning_to_timer > 0 && int3IsEqual(pack_turn_state.pack_hitbox_turning_to_coords, entity->coords)) continue; // blocks blue-not-blue turn orthogonal case from falling immediately
             doFallingEntity(entity, do_animation);
 
             if (getTileType(getNextCoords(entity->coords, DOWN)) == VOID && !entity->in_motion)
@@ -3107,11 +3137,11 @@ bool calculateGhosts()
 
 // TEXT HELPERS FOR EDIT_BUFFER
 
-void editAppendChar(char c)
+void editAppendChar(char character)
 {
     EditBuffer* buffer = &editor_state.edit_buffer; 
-    if (buffer->length >= 256 - 1) return; // keep space for null terminator
-    buffer->string[buffer->length++] = c;
+    if (buffer->length >= 256) return;
+    buffer->string[buffer->length++] = character;
 }
 
 void editBackspace()
@@ -3127,8 +3157,8 @@ void updateTextInput(TickInput *input)
     for (int32 chars_typed_index = 0; chars_typed_index < input->text.count; chars_typed_index++)
     {
         uint32 codepoint = input->text.codepoints[chars_typed_index];
-        char c = (char)codepoint;
-        editAppendChar(c);
+        char character = (char)codepoint;
+        editAppendChar(character);
     }
     if (input->backspace_pressed_this_frame)
     {
@@ -3136,9 +3166,9 @@ void updateTextInput(TickInput *input)
     }
 }
 
-int32 glyphSprite(char c)
+int32 glyphSprite(char character)
 {
-    unsigned char uc = (unsigned char)c;
+    unsigned char uc = (unsigned char)character;
     if (uc < FONT_FIRST_ASCII || uc > FONT_LAST_ASCII) uc = '?';
     return (SpriteId)(uc - FONT_FIRST_ASCII);
 }
@@ -3149,7 +3179,10 @@ void initUndoBuffer()
     memset(undo_buffer.level_change_indices, 0xFF, sizeof(undo_buffer.level_change_indices));
 }
 
-// these functions are functional, but unusable. probably fwrite can't handle such a large buffer, or fwrite is just really slow? maybe i can just thread it?
+// TODO:
+// i want to write undo buffer to a file on every movement, because if player closes the game, and undo buffer is not up to date, then bad things happen.
+// but the write function takes >10ms, for some reason? maybe fwrite is just really slow, or i should thread it? 
+// either way, i'm not writing undo buffer to a file at all right now, because it causes noticeable lag.
 /*
 void writeUndoBufferToFile()
 {
@@ -3158,9 +3191,6 @@ void writeUndoBufferToFile()
     fwrite(&undo_buffer, sizeof(UndoBuffer), 1, file);
     fclose(file);
 }
-*/
-
-/*
 void loadUndoBufferFromFile()
 {
     FILE* file = fopen(undo_meta_path, "rb");
@@ -3310,7 +3340,7 @@ void gameInitialize(char* level_name, DisplayInfo display_from_platform)
     game_display = display_from_platform;
 	recalculateDebugStartCoords();
 
-    // read overworld-zero's world state from file on startup, so it's kept in memory
+    // read overworld-zero's world state from file on startup, so it's kept in memory. this is used on restart in the overworld.
     gameInitializeState("overworld-zero");
     memcpy(&overworld_zero, &world_state, sizeof(WorldState));
 
@@ -3699,7 +3729,7 @@ void doHeadRotation(bool clockwise)
     Int3 current_tile_coords = getNextCoords(next_world_state.player.coords, UP);
     FOR(stack_rotate_index, stack_size)
     {
-        Entity* entity = getEntityPointer(current_tile_coords);
+        Entity* entity = getEntityAtCoords(current_tile_coords);
         bool up_or_down = false;
         Direction current_direction = getTileDirection(current_tile_coords);
         Direction next_direction = NO_DIRECTION;
@@ -3891,7 +3921,7 @@ void editorMode(TickInput *tick_input)
 
             if ((tick_input->left_mouse_press || tick_input->f_press) && raycast_output.hit) 
             {
-                Entity *entity= getEntityPointer(raycast_output.hit_coords);
+                Entity *entity= getEntityAtCoords(raycast_output.hit_coords);
                 if (entity != 0)
                 {
                     entity->coords = (Int3){0};
@@ -3949,7 +3979,7 @@ void editorMode(TickInput *tick_input)
                     if (direction == DOWN) direction = NORTH;
                     else direction++;
                     setTileDirection(direction, raycast_output.hit_coords);
-                    Entity *entity = getEntityPointer(raycast_output.hit_coords);
+                    Entity *entity = getEntityAtCoords(raycast_output.hit_coords);
                     if (entity != 0)
                     {
                         entity->direction = direction;
@@ -4008,7 +4038,7 @@ void editorMode(TickInput *tick_input)
             if (editor_state.selected_id > 0) rb = getEntityFromId(editor_state.selected_id);
             if (rb != 0 && getTileType(rb->coords) == RESET_BLOCK)
             {
-                Entity* new_e = getEntityPointer(raycast_output.hit_coords);
+                Entity* new_e = getEntityAtCoords(raycast_output.hit_coords);
                 if (new_e != 0)
                 {
                     int32 present_in_rb = -1;
@@ -4383,8 +4413,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             {
                                 Int3 coords_ahead = next_player_coords;
                                 Int3 coords_below_and_ahead = getNextCoords(next_player_coords, DOWN);
-                                if (isPushable(getTileType(coords_ahead)) && getEntityPointer(coords_ahead)->in_motion) move_player = false;
-                                else if (isPushable(getTileType(coords_below_and_ahead)) && getEntityPointer(coords_below_and_ahead)->moving_direction != NO_DIRECTION) move_player = false;
+                                if (isPushable(getTileType(coords_ahead)) && getEntityAtCoords(coords_ahead)->in_motion) move_player = false;
+                                else if (isPushable(getTileType(coords_below_and_ahead)) && getEntityAtCoords(coords_below_and_ahead)->moving_direction != NO_DIRECTION) move_player = false;
                                 else
                                 {
                                     move_player = true;
@@ -4435,7 +4465,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                             bool allow_movement = true;
                             if (tile_below_next_coords == NONE && !player->hit_by_red) allow_movement = false;
-                            if (isEntity(tile_below_next_coords) && getEntityPointer(coords_below_next_coords)->moving_direction != NO_DIRECTION) allow_movement = false;
+                            if (isEntity(tile_below_next_coords) && getEntityAtCoords(coords_below_next_coords)->moving_direction != NO_DIRECTION) allow_movement = false;
 
                             if (allow_movement || cheating)
                             {
@@ -4610,8 +4640,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                             bool pause_turn = false;
                             TrailingHitbox _;
                             if (trailingHitboxAtCoords(diagonal_coords, &_)) pause_turn = true;
-                            else if (isEntity(getTileType(orthogonal_coords)) && getEntityPointer(orthogonal_coords)->in_motion) pause_turn = true;
-                            else if (isEntity(getTileType(diagonal_coords))   && getEntityPointer(diagonal_coords)->in_motion)   pause_turn = true;
+                            else if (isEntity(getTileType(orthogonal_coords)) && getEntityAtCoords(orthogonal_coords)->in_motion) pause_turn = true;
+                            else if (isEntity(getTileType(diagonal_coords))   && getEntityAtCoords(diagonal_coords)->in_motion)   pause_turn = true;
 
                             if (!pause_turn)
                             {
@@ -4727,7 +4757,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                                         pack_turn_state.pack_intermediate_states_timer = TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN + PACK_TIME_IN_INTERMEDIATE_STATE + 1;
                                         pack_turn_state.pack_intermediate_coords = diagonal_coords;
                                         pack_turn_state.pack_orthogonal_push_direction = orthogonal_push_direction;
-                                        pack_turn_state.pack_hitbox_turning_to_timer = TURN_ANIMATION_TIME + TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN;
                                         pack_turn_state.pack_hitbox_turning_to_coords = orthogonal_coords;
                                     }
                                 }
@@ -4834,13 +4863,14 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (time_until_meta_input == 0) editorMode(&tick_input);
         }
 
-        // pack turn sequence 
+        // pack turn sequence. numbers are magic and based on how long it takes for the pack to turn - but it's kind of hard to make a good looking generalization, e.g. just using 
+        // fractions of TURN_ANIMATION_TIME because it looks awkward for small values of the animation (anything less than 20) so i just hard code these numbers.
         if (pack_turn_state.pack_intermediate_states_timer > 0)
         {
             if (pack_turn_state.pack_intermediate_states_timer == 7)
             {
                 createTrailingHitbox(pack->coords, pack_turn_state.pack_orthogonal_push_direction, NO_DIRECTION, 4, PACK);
-				if (pack_turn_state.do_diagonal_push_on_turn) pushAll(pack_turn_state.pack_intermediate_coords, oppositeDirection(player->direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false); // CHANGE THIS IF WANT PACK TO SWEEP
+				if (pack_turn_state.do_diagonal_push_on_turn) pushAll(pack_turn_state.pack_intermediate_coords, oppositeDirection(player->direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false);
             }
             else if (pack_turn_state.pack_intermediate_states_timer == 5)
             {
@@ -4853,7 +4883,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             else if (pack_turn_state.pack_intermediate_states_timer == 4)
             {
-                if (pack_turn_state.do_orthogonal_push_on_turn) pushAll(pack_turn_state.pack_hitbox_turning_to_coords, pack_turn_state.pack_orthogonal_push_direction, PUSH_FROM_TURN_ANIMATION_TIME, true, false); // CHANGE THIS IF WANT PACK TO SWEEP
+                if (pack_turn_state.do_orthogonal_push_on_turn) pushAll(pack_turn_state.pack_hitbox_turning_to_coords, pack_turn_state.pack_orthogonal_push_direction, PUSH_FROM_TURN_ANIMATION_TIME, true, false);
             }
             else if (pack_turn_state.pack_intermediate_states_timer == 3)
             {
@@ -4871,13 +4901,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                     pending_undo_record = false;
                     recordActionForUndo(&pending_undo_snapshot);
                 }
-                if (pack_turn_state.do_player_and_pack_fall_after_turn)
-                {
-                    doFallingEntity(player, true);
-                    doFallingEntity(pack, true);
-                    pack_turn_state.do_player_and_pack_fall_after_turn = false;
-                }
-                pack_turn_state.player_hit_by_blue_in_turn = false;
             }
             pack_turn_state.pack_intermediate_states_timer--;
         }
@@ -4924,30 +4947,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (pack_detached)
                     {
                         doFallingEntity(pack, true);
-                    }
-                }
-            }
-            else
-            {
-                // in the middle of a turn (where pack is attached)
-
-                if (getTileType(getNextCoords(player->coords, DOWN)) == NONE && !player->hit_by_red)
-                {
-                    // in middle of turn, which means was on ground or red, and now no longer on ground AND not red, so must have stopped being red in the middle of the turn.
-                    pack_turn_state.do_player_and_pack_fall_after_turn = true;
-                }
-
-                if (isPushable(getTileType(pack_turn_state.pack_hitbox_turning_to_coords)))
-                {
-                    if (player->hit_by_blue) pack_turn_state.player_hit_by_blue_in_turn = true;
-                    if (!player->hit_by_blue && pack_turn_state.player_hit_by_blue_in_turn && pack_turn_state.pack_intermediate_states_timer > 0)
-                    {
-                        if (getTileType(getNextCoords(pack_turn_state.pack_hitbox_turning_to_coords, DOWN)) == NONE)
-                        {
-                            pack_turn_state.entity_to_fall_after_blue_not_blue_turn_timer = pack_turn_state.pack_intermediate_states_timer + 4; // this number is magic (sorry); it is the frame count that makes the entity fall as soon as possible, i.e., at the same time as the player (if magenta-not-magenta)
-                            pack_turn_state.entity_to_fall_after_blue_not_blue_turn_coords = getNextCoords(pack_turn_state.pack_hitbox_turning_to_coords, pack_turn_state.pack_orthogonal_push_direction);
-                            pack_turn_state.player_hit_by_blue_in_turn = false;
-                        }
                     }
                 }
             }
@@ -5052,15 +5051,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-        if (pack_turn_state.entity_to_fall_after_blue_not_blue_turn_timer > 0)
-        {
-            if (pack_turn_state.entity_to_fall_after_blue_not_blue_turn_timer == 1) 
-            {
-                if (isPushable(getTileType(pack_turn_state.entity_to_fall_after_blue_not_blue_turn_coords))) doFallingEntity(getEntityPointer(pack_turn_state.entity_to_fall_after_blue_not_blue_turn_coords), true);
-            }
-            pack_turn_state.entity_to_fall_after_blue_not_blue_turn_timer--;
-        }
-
         // pack detach logic
         TileType tile_behind_player = getTileType(getNextCoords(player->coords, oppositeDirection(player->direction)));
         if (!pack_detached && pack_turn_state.pack_intermediate_states_timer == 0 && tile_behind_player != PACK) pack_detached = true;
@@ -5149,7 +5139,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // win block logic
         if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_game_input == 0) && editor_state.editor_mode == NO_MODE)
         {
-            Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
+            Entity* wb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
             if (!pack_detached && !wb->locked)
             {
                 if (wb->next_level[0] != 0)
@@ -5182,7 +5172,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
         if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.f_press && time_until_game_input == 0) && editor_state.editor_mode == NO_MODE)
         {
-            Entity* wb = getEntityPointer(getNextCoords(player->coords, DOWN));
+            Entity* wb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
 			if (findInSolvedLevels(wb->next_level) == -1)
             {
                 int32 next_free = nextFreeInSolvedLevels(&next_world_state.solved_levels);
@@ -5234,7 +5224,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         /*
         if ((getTileType(getNextCoords(player->coords, DOWN)) == RESET_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_game_input == 0) && editor_state.editor_mode == NO_MODE)
         {
-            Entity* rb = getEntityPointer(getNextCoords(player->coords, DOWN));
+            Entity* rb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
             
             // clear current positions
             FOR(to_reset_index, MAX_RESET_COUNT)
@@ -5276,9 +5266,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         */
 
         // MISC STUFF
-
-		// handle turning hitboxes
-        if (pack_turn_state.pack_hitbox_turning_to_timer > 0) pack_turn_state.pack_hitbox_turning_to_timer--;
 
         // decrement trailing hitboxes 
         FOR(i, MAX_TRAILING_HITBOX_COUNT) if (trailing_hitboxes[i].frames > 0) trailing_hitboxes[i].frames--;
@@ -5749,7 +5736,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (draw_tile == NONE || draw_tile == PLAYER || draw_tile == PACK) continue;
             if (isEntity(draw_tile))
             {
-                Entity* e = getEntityPointer(bufferIndexToCoords(tile_index));
+                Entity* e = getEntityAtCoords(bufferIndexToCoords(tile_index));
 
                 if (e->locked) draw_tile = LOCKED_BLOCK;
                 if (draw_tile == WIN_BLOCK)

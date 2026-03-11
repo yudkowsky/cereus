@@ -26,7 +26,7 @@ void main()
 
     vec3 n_center = texture(normal_texture, frag_uv).rgb;
 
-    if (dot(n_center, n_center) < 0.01) discard; // doesnt have outline fully at the clear color
+    if (dot(n_center, n_center) < 0.01) discard; // doesn't have outline fully at the clear color
 
     vec3 n_up     = texture(normal_texture, frag_uv + vec2(0.0, step.y)).rgb;
     vec3 n_down   = texture(normal_texture, frag_uv - vec2(0.0, step.y)).rgb;

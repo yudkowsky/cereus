@@ -3,7 +3,6 @@
 layout(location = 0) in vec2 uv;
 
 layout(location = 0) out vec4 out_color;
-layout(location = 1) out vec4 out_normal;
 
 layout(push_constant) uniform PC
 {
@@ -22,6 +21,4 @@ void main()
     vec4 color = texture(tex, uv);
     color.a *= pc.alpha;
     out_color = color;
-
-    out_normal = vec4(0.0);
 }

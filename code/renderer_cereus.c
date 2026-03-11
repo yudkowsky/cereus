@@ -136,84 +136,103 @@ LoadedModel;
 
 typedef struct 
 {
+    // platform and instance
     RendererPlatformHandles platform_handles;
     VkInstance vulkan_instance_handle;
     VkSurfaceKHR surface_handle;
 	VkPhysicalDevice physical_device_handle;
 
+    // device and queues
     uint32 graphics_family_index;
     uint32 present_family_index;
     VkQueue graphics_queue_handle;
     VkQueue present_queue_handle;
     VkDevice logical_device_handle;
 
+    // swapchain
 	VkSwapchainKHR swapchain_handle;
     uint32 swapchain_image_count;
     VkImageView* swapchain_image_views;
 	VkFormat swapchain_format;
     VkExtent2D swapchain_extent;
 
-    VkCommandPool graphics_command_pool_handle;
-    VkCommandBuffer* swapchain_command_buffers;
-
-	uint32 frames_in_flight; // how many frames the CPU is allowed to get ahead of the GPU
-	uint32 current_frame;
-    VkSemaphore* image_available_semaphores; // semaphore(s) that handle WSI -> graphics. wsi produces swapchain image, graphics queue renders into that image.
-    VkSemaphore* render_finished_semaphores; // semaphore(s) that handle graphics -> present. once graphics finishes rendering, graphics sends renders to be presented.
-    VkFence* in_flight_fences; 
-    VkFence* images_in_flight;
-
-    // first render pass (models, cubes, TODO: sprites)
-    VkRenderPass render_pass_handle;
-    VkFramebuffer* swapchain_framebuffers;
-    VkPipelineLayout graphics_pipeline_layout; // TODO: clean this up
-    VkPipeline sprite_pipeline_handle;
-    VkPipeline cube_pipeline_handle;
-    VkPipelineLayout cube_pipeline_layout; 
-    VkPipeline outline_pipeline_handle;
-	VkPipelineLayout outline_pipeline_layout;
-    VkPipeline model_pipeline_handle;
-    VkPipeline model_blackline_pipeline_handle;
-    VkPipeline model_stencil_clear_pipeline_handle;
-    VkPipelineLayout model_pipeline_layout;
-
-    // second render pass (outlines, based on depth and normal)
-    VkRenderPass outline_post_render_pass;
-    VkFramebuffer* outline_post_framebuffers;
-    VkPipeline outline_post_pipeline;
-    VkPipelineLayout outline_post_pipeline_layout;
-    VkDescriptorSet depth_descriptor_set;
-    VkImageView depth_sampled_view; // separate view without stencil aspect
-
-    // third render pass (lasers, which affect the outlines, TODO: add sprites here, to be unaffected by the outlines)
-    VkRenderPass overlay_render_pass;
-    VkFramebuffer* overlay_framebuffers;
-    VkPipeline laser_fill_pipeline_handle;
-    VkPipeline laser_outline_pipeline_handle;
-    VkPipelineLayout laser_pipeline_layout;
-
-    VkSampler pixel_art_sampler;
-    CachedAsset asset_cache[256];
-    uint32 asset_cache_count;
-
-    int32 atlas_2d_asset_index;
-	int32 atlas_font_asset_index;
-    int32 atlas_3d_asset_index;
-
-    VkDescriptorSetLayout descriptor_set_layout;
-    VkDescriptorPool descriptor_pool;
-    VkDescriptorSet descriptor_sets[1024];
-
+    // depth + normal (shared attachments)
     VkFormat depth_format;
     VkImage depth_image;
     VkDeviceMemory depth_image_memory;
     VkImageView depth_image_view;
+    VkImageView depth_sampled_view;
+    VkDescriptorSet depth_descriptor_set;
 
     VkImage normal_image;
     VkDeviceMemory normal_image_memory;
     VkImageView normal_image_view;
     VkDescriptorSet normal_descriptor_set;
 
+    // commands + sync
+    VkCommandPool graphics_command_pool_handle;
+    VkCommandBuffer* swapchain_command_buffers;
+	uint32 frames_in_flight;
+	uint32 current_frame;
+    VkSemaphore* image_available_semaphores; // semaphore(s) that handle WSI -> graphics. wsi produces swapchain image, graphics queue renders into that image.
+    VkSemaphore* render_finished_semaphores; // semaphore(s) that handle graphics -> present. once graphics finishes rendering, graphics sends renders to be presented.
+    VkFence* in_flight_fences; 
+    VkFence* images_in_flight;
+
+    // RENDER PASSES
+
+    // scene pass (cubes, models, select outlines)
+    VkRenderPass render_pass_handle;
+    VkFramebuffer* swapchain_framebuffers;
+
+    // outline post pass (black outlines on everything)
+    VkRenderPass outline_post_render_pass;
+    VkFramebuffer* outline_post_framebuffers;
+
+    // overlay pass (lasers, which color the outlines, and sprites, which go over the outlines)
+    VkRenderPass overlay_render_pass;
+    VkFramebuffer* overlay_framebuffers;
+
+    // PIPELINES AND LAYOUTS
+
+    // first render pass, for the main scene
+    VkPipelineLayout default_graphics_pipeline_layout;
+
+    VkPipeline cube_pipeline_handle;
+    VkPipelineLayout cube_pipeline_layout; 
+
+    VkPipeline outline_pipeline_handle;
+	VkPipelineLayout outline_pipeline_layout;
+
+    VkPipeline model_pipeline_handle;
+    VkPipelineLayout model_pipeline_layout;
+
+    // second render pass (outlines, based on depth and normal)
+    VkPipeline outline_post_pipeline;
+    VkPipelineLayout outline_post_pipeline_layout;
+
+    // third render pass (lasers + sprites)
+    VkPipeline laser_fill_pipeline_handle;
+    VkPipeline laser_outline_pipeline_handle;
+    VkPipelineLayout laser_pipeline_layout;
+
+    VkPipeline sprite_pipeline_handle;
+    VkPipelineLayout sprite_pipeline_layout;
+
+    // shared resources
+    VkSampler pixel_art_sampler;
+    VkDescriptorSetLayout descriptor_set_layout;
+    VkDescriptorPool descriptor_pool;
+    VkDescriptorSet descriptor_sets[1024];
+
+    // asset cache
+    CachedAsset asset_cache[256];
+    uint32 asset_cache_count;
+    int32 atlas_2d_asset_index;
+	int32 atlas_font_asset_index;
+    int32 atlas_3d_asset_index;
+
+    // geometry buffers
 	VkBuffer sprite_vertex_buffer;
     VkDeviceMemory sprite_vertex_memory;
     VkBuffer sprite_index_buffer;
@@ -231,6 +250,7 @@ typedef struct
     void* cube_instance_mapped;
     uint32 cube_instance_capacity;
 
+    // models
     LoadedModel loaded_models[64];
     LoadedModel laser_cylinder_model; // TODO: probably index everything into loaded models; figure out what order i want to put stuff in, if can't just take their id
 }
@@ -2221,24 +2241,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
 	createSwapchainResources();
 
-	// MAIN GRAPHICS PIPELINE LAYOUT
-
-    {
-        VkPushConstantRange push_constant_range = {0};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        push_constant_range.offset     = 0;
-        push_constant_range.size       = (uint32)sizeof(PushConstants); 
-
-        VkPipelineLayoutCreateInfo graphics_pipeline_layout_creation_info = {0};
-        graphics_pipeline_layout_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        graphics_pipeline_layout_creation_info.setLayoutCount = 1;
-        graphics_pipeline_layout_creation_info.pSetLayouts = &vulkan_state.descriptor_set_layout; 
-        graphics_pipeline_layout_creation_info.pushConstantRangeCount = 1;
-        graphics_pipeline_layout_creation_info.pPushConstantRanges = &push_constant_range;
-
-        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &graphics_pipeline_layout_creation_info, 0, &vulkan_state.graphics_pipeline_layout);
-    }
-
 	// CREATE CUBE (INSTANCED) PIPELINE LAYOUT
 
     {
@@ -2273,24 +2275,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         outline_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
 
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &outline_pipeline_layout_ci, 0, &vulkan_state.outline_pipeline_layout);
-    }
-
-    // CREATE LASER PIPELINE LAYOUT
-
-    {
-		VkPushConstantRange push_constant_range = {0};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        push_constant_range.offset = 0;
-        push_constant_range.size = (uint32)sizeof(PushConstants);
-
-        VkPipelineLayoutCreateInfo laser_pipeline_layout_ci = {0};
-        laser_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        laser_pipeline_layout_ci.setLayoutCount = 0;
-        laser_pipeline_layout_ci.pSetLayouts = 0;
-        laser_pipeline_layout_ci.pushConstantRangeCount = 1;
-        laser_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
-
-        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &laser_pipeline_layout_ci, 0, &vulkan_state.laser_pipeline_layout);
     }
 
     // CREATE MODEL PIPELINE LAYOUT
@@ -2331,6 +2315,42 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.outline_post_pipeline_layout);
     }
 
+    // CREATE LASER PIPELINE LAYOUT
+
+    {
+		VkPushConstantRange push_constant_range = {0};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = (uint32)sizeof(PushConstants);
+
+        VkPipelineLayoutCreateInfo laser_pipeline_layout_ci = {0};
+        laser_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        laser_pipeline_layout_ci.setLayoutCount = 0;
+        laser_pipeline_layout_ci.pSetLayouts = 0;
+        laser_pipeline_layout_ci.pushConstantRangeCount = 1;
+        laser_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
+
+        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &laser_pipeline_layout_ci, 0, &vulkan_state.laser_pipeline_layout);
+    }
+
+	// SPRITE PIPELINE LAYOUT
+
+    {
+        VkPushConstantRange push_constant_range = {0};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        push_constant_range.offset     = 0;
+        push_constant_range.size       = (uint32)sizeof(PushConstants); 
+
+        VkPipelineLayoutCreateInfo sprite_pipeline_layout_ci= {0};
+        sprite_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        sprite_pipeline_layout_ci.setLayoutCount = 1;
+        sprite_pipeline_layout_ci.pSetLayouts = &vulkan_state.descriptor_set_layout; 
+        sprite_pipeline_layout_ci.pushConstantRangeCount = 1;
+        sprite_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
+
+        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &sprite_pipeline_layout_ci, 0, &vulkan_state.sprite_pipeline_layout);
+    }
+
     // BASE GRAPHICS PIPELINE INFO
 
    	VkGraphicsPipelineCreateInfo base_graphics_pipeline_creation_info = {0}; // struct that points to all those sub-blocks we just defined; it actually builds the pipeline object
@@ -2345,7 +2365,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 	base_graphics_pipeline_creation_info.pDepthStencilState = &depth_stencil_state_creation_info;
 	base_graphics_pipeline_creation_info.pColorBlendState = &color_blend_state_creation_info; // one color attachment; no blending
 	base_graphics_pipeline_creation_info.pDynamicState = &dynamic_state_creation_info; // declares that viewport / scissor are dynamic
-	base_graphics_pipeline_creation_info.layout = vulkan_state.graphics_pipeline_layout;
+	base_graphics_pipeline_creation_info.layout = 0; // will be set by each individual pipeline
 	base_graphics_pipeline_creation_info.renderPass = vulkan_state.render_pass_handle;
 	base_graphics_pipeline_creation_info.subpass = 0; // first (and only) subpass
 	base_graphics_pipeline_creation_info.basePipelineHandle = VK_NULL_HANDLE; // not deriving from another pipeline.
@@ -2354,30 +2374,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     vulkan_state.atlas_2d_asset_index   = getOrLoadAsset((char*)ATLAS_2D_PATH);
     vulkan_state.atlas_font_asset_index = getOrLoadAsset((char*)ATLAS_FONT_PATH);
     vulkan_state.atlas_3d_asset_index   = getOrLoadAsset((char*)ATLAS_3D_PATH);
-
-    // define sprite pipeline: depth off, blending on
-    {
-        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
-
-        color_blend_attachment_state.blendEnable = VK_TRUE;
-        color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
-        color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-        color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
-
-        blend_attachments[0] = color_blend_attachment_state;
-        blend_attachments[1] = color_blend_attachment_state;
-
-        depth_stencil_state_creation_info.depthTestEnable = VK_FALSE;
-        depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
-        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_ALWAYS;
-
-        VkGraphicsPipelineCreateInfo sprite_ci = base_graphics_pipeline_creation_info;
-        sprite_ci.pStages = sprite_shader_stages;
-        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &sprite_ci, 0, &vulkan_state.sprite_pipeline_handle);
-    }
 
 	// define instanced cube pipeline: depth on, blending off
     {
@@ -2398,7 +2394,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &cube_ci, 0, &vulkan_state.cube_pipeline_handle);
     }
 
-    // define select outline pipeline
+    // define selected outline pipeline
     {
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
@@ -2420,88 +2416,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         outline_ci.layout = vulkan_state.outline_pipeline_layout; // use outline pipeline layout (no descriptors)
 
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &outline_ci, 0, &vulkan_state.outline_pipeline_handle);
-    }
-
-    // define laser fill pipeline (overlay render pass, after outlines)
-    {
-        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
-
-        color_blend_attachment_state.blendEnable = VK_TRUE;
-        color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
-        color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
-
-        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
-        depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
-        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
-        depth_stencil_state_creation_info.stencilTestEnable = VK_TRUE;
-        depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_REPLACE;
-        depth_stencil_state_creation_info.front.compareOp = VK_COMPARE_OP_ALWAYS;
-        depth_stencil_state_creation_info.front.writeMask = 0xFF;
-        depth_stencil_state_creation_info.front.reference = 1;
-        depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
-
-        rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
-
-        VkPipelineColorBlendAttachmentState laser_blend = color_blend_attachment_state;
-        VkPipelineColorBlendStateCreateInfo laser_blend_ci = {0};
-        laser_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-        laser_blend_ci.attachmentCount = 1;
-        laser_blend_ci.pAttachments = &laser_blend;
-
-        VkGraphicsPipelineCreateInfo laser_ci = base_graphics_pipeline_creation_info;
-        laser_ci.pStages = laser_shader_stages;
-        laser_ci.layout = vulkan_state.laser_pipeline_layout;
-        laser_ci.renderPass = vulkan_state.overlay_render_pass;
-        laser_ci.pColorBlendState = &laser_blend_ci;
-
-        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &laser_ci, 0, &vulkan_state.laser_fill_pipeline_handle);
-    }
-
-    // define laser outline pipeline (overlay render pass, after outlines)
-    {
-        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
-
-        color_blend_attachment_state.blendEnable = VK_TRUE;
-        color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
-        color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
-
-        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
-        depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
-        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
-        depth_stencil_state_creation_info.stencilTestEnable = VK_TRUE;
-        depth_stencil_state_creation_info.front.failOp = VK_STENCIL_OP_KEEP;
-        depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_KEEP;
-        depth_stencil_state_creation_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
-        depth_stencil_state_creation_info.front.compareOp = VK_COMPARE_OP_EQUAL;
-        depth_stencil_state_creation_info.front.compareMask = 0xFF;
-        depth_stencil_state_creation_info.front.writeMask = 0x00;
-        depth_stencil_state_creation_info.front.reference = 0;
-        depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
-
-        rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
-        rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_FILL;
-
-        VkPipelineColorBlendAttachmentState laser_outline_blend = color_blend_attachment_state;
-        VkPipelineColorBlendStateCreateInfo laser_outline_blend_ci = {0};
-        laser_outline_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-        laser_outline_blend_ci.attachmentCount = 1;
-        laser_outline_blend_ci.pAttachments = &laser_outline_blend;
-
-        VkGraphicsPipelineCreateInfo laser_outline_ci = base_graphics_pipeline_creation_info;
-        laser_outline_ci.pStages = laser_outline_shader_stages;
-        laser_outline_ci.layout = vulkan_state.laser_pipeline_layout;
-        laser_outline_ci.renderPass = vulkan_state.overlay_render_pass;
-        laser_outline_ci.pColorBlendState = &laser_outline_blend_ci;
-
-        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &laser_outline_ci, 0, &vulkan_state.laser_outline_pipeline_handle);
     }
 
     // define model pipeline: depth on, write to stencil 2.
@@ -2659,6 +2573,119 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         post_graphics_pipeline_ci.subpass = 0;
 
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &post_graphics_pipeline_ci, 0, &vulkan_state.outline_post_pipeline);
+    }
+
+    // define laser fill pipeline (overlay render pass, after outlines)
+    {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
+        color_blend_attachment_state.blendEnable = VK_TRUE;
+        color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
+        color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
+
+        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
+        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
+        depth_stencil_state_creation_info.stencilTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_REPLACE;
+        depth_stencil_state_creation_info.front.compareOp = VK_COMPARE_OP_ALWAYS;
+        depth_stencil_state_creation_info.front.writeMask = 0xFF;
+        depth_stencil_state_creation_info.front.reference = 1;
+        depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
+
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
+
+        VkPipelineColorBlendAttachmentState laser_blend = color_blend_attachment_state;
+        VkPipelineColorBlendStateCreateInfo laser_blend_ci = {0};
+        laser_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        laser_blend_ci.attachmentCount = 1;
+        laser_blend_ci.pAttachments = &laser_blend;
+
+        VkGraphicsPipelineCreateInfo laser_ci = base_graphics_pipeline_creation_info;
+        laser_ci.pStages = laser_shader_stages;
+        laser_ci.layout = vulkan_state.laser_pipeline_layout;
+        laser_ci.renderPass = vulkan_state.overlay_render_pass;
+        laser_ci.pColorBlendState = &laser_blend_ci;
+
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &laser_ci, 0, &vulkan_state.laser_fill_pipeline_handle);
+    }
+
+    // define laser outline pipeline (overlay render pass, after outlines)
+    {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
+        color_blend_attachment_state.blendEnable = VK_TRUE;
+        color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
+        color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
+
+        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
+        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
+        depth_stencil_state_creation_info.stencilTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.front.failOp = VK_STENCIL_OP_KEEP;
+        depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_KEEP;
+        depth_stencil_state_creation_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
+        depth_stencil_state_creation_info.front.compareOp = VK_COMPARE_OP_EQUAL;
+        depth_stencil_state_creation_info.front.compareMask = 0xFF;
+        depth_stencil_state_creation_info.front.writeMask = 0x00;
+        depth_stencil_state_creation_info.front.reference = 0;
+        depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
+
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
+        rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_FILL;
+
+        VkPipelineColorBlendAttachmentState laser_outline_blend = color_blend_attachment_state;
+        VkPipelineColorBlendStateCreateInfo laser_outline_blend_ci = {0};
+        laser_outline_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        laser_outline_blend_ci.attachmentCount = 1;
+        laser_outline_blend_ci.pAttachments = &laser_outline_blend;
+
+        VkGraphicsPipelineCreateInfo laser_outline_ci = base_graphics_pipeline_creation_info;
+        laser_outline_ci.pStages = laser_outline_shader_stages;
+        laser_outline_ci.layout = vulkan_state.laser_pipeline_layout;
+        laser_outline_ci.renderPass = vulkan_state.overlay_render_pass;
+        laser_outline_ci.pColorBlendState = &laser_outline_blend_ci;
+
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &laser_outline_ci, 0, &vulkan_state.laser_outline_pipeline_handle);
+    }
+
+    // define sprite pipeline (overlay render pass)
+    {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
+        color_blend_attachment_state.blendEnable = VK_TRUE;
+        color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
+        color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
+
+        depth_stencil_state_creation_info.depthTestEnable = VK_FALSE;
+        depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
+        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_ALWAYS;
+
+        VkPipelineColorBlendAttachmentState sprite_blend = color_blend_attachment_state;
+        VkPipelineColorBlendStateCreateInfo sprite_blend_ci = {0};
+        sprite_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        sprite_blend_ci.attachmentCount = 1;
+        sprite_blend_ci.pAttachments = &sprite_blend;
+
+        VkGraphicsPipelineCreateInfo sprite_ci = base_graphics_pipeline_creation_info;
+        sprite_ci.pStages = sprite_shader_stages;
+        sprite_ci.layout = vulkan_state.sprite_pipeline_layout;
+        sprite_ci.renderPass = vulkan_state.overlay_render_pass;
+        sprite_ci.pColorBlendState = &sprite_blend_ci;
+
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &sprite_ci, 0, &vulkan_state.sprite_pipeline_handle);
     }
 
     createInstanceBuffer();
@@ -3086,46 +3113,6 @@ void vulkanDraw(void)
     }
     */
 
-	// SPRITE PIPELINE
-
-	vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_handle); 
-
-	VkDeviceSize sprite_vb_offset = 0;
-    vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &sprite_vb_offset);
-    vkCmdBindIndexBuffer(command_buffer, vulkan_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
-
-    float ortho[16], view2d[16];
-    mat4BuildOrtho(ortho, 0.0f, (float)vulkan_state.swapchain_extent.width, 0.0f, (float)vulkan_state.swapchain_extent.height, 0.0f, 1.0f);
-    mat4Identity(view2d);
-
-    int32 last_sprite_asset = -1;
-
-	for (uint32 sprite_instance_index = 0; sprite_instance_index < sprite_instance_count; sprite_instance_index++)
-    {
-        Sprite* sprite = &sprite_instances[sprite_instance_index];
-
-        if ((int32)sprite->asset_index != last_sprite_asset)
-        {
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.graphics_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[sprite->asset_index], 0, 0);
-            last_sprite_asset = (int32)sprite->asset_index;
-        }
-
-        float model_matrix[16];
-        Vec4 identity_quaternion = { 0, 0, 0, 1}; // TODO: make global
-        mat4BuildTRS(model_matrix, sprite->coords, identity_quaternion, sprite->size);
-
-        PushConstants push_constants = {0};
-        memcpy(push_constants.model, model_matrix, sizeof(push_constants.model));
-        memcpy(push_constants.view,  view2d, 	   sizeof(push_constants.view));
-        memcpy(push_constants.proj,  ortho, 	   sizeof(push_constants.proj));
-        push_constants.uv_rect = sprite->uv;
-        push_constants.alpha = sprite->alpha;
-
-        vkCmdPushConstants(command_buffer, vulkan_state.graphics_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &push_constants);
-
-        vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
-    }
-
     vkCmdEndRenderPass(command_buffer);
 
     // transition depth from attachment to shader read
@@ -3210,7 +3197,7 @@ void vulkanDraw(void)
 
     vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, 0, 0, 0, 0, 0, 1, &depth_to_attachment);
 
-    // overlay pass: lasers
+    // overlay pass: lasers (outline + fill)
     {
         VkRenderPassBeginInfo overlay_rp_begin = {0};
         overlay_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -3274,6 +3261,47 @@ void vulkanDraw(void)
                 vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &push_constants);
                 vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
             }
+        }
+    }
+
+    // overlay pass: sprites
+    {
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_handle); 
+
+        VkDeviceSize sprite_vb_offset = 0;
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &sprite_vb_offset);
+        vkCmdBindIndexBuffer(command_buffer, vulkan_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+        float ortho[16], view2d[16];
+        mat4BuildOrtho(ortho, 0.0f, (float)vulkan_state.swapchain_extent.width, 0.0f, (float)vulkan_state.swapchain_extent.height, 0.0f, 1.0f);
+        mat4Identity(view2d);
+
+        int32 last_sprite_asset = -1;
+
+        for (uint32 sprite_instance_index = 0; sprite_instance_index < sprite_instance_count; sprite_instance_index++)
+        {
+            Sprite* sprite = &sprite_instances[sprite_instance_index];
+
+            if ((int32)sprite->asset_index != last_sprite_asset)
+            {
+                vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[sprite->asset_index], 0, 0);
+                last_sprite_asset = (int32)sprite->asset_index;
+            }
+
+            float model_matrix[16];
+            Vec4 identity_quaternion = { 0, 0, 0, 1}; // TODO: make global
+            mat4BuildTRS(model_matrix, sprite->coords, identity_quaternion, sprite->size);
+
+            PushConstants push_constants = {0};
+            memcpy(push_constants.model, model_matrix, sizeof(push_constants.model));
+            memcpy(push_constants.view,  view2d, 	   sizeof(push_constants.view));
+            memcpy(push_constants.proj,  ortho, 	   sizeof(push_constants.proj));
+            push_constants.uv_rect = sprite->uv;
+            push_constants.alpha = sprite->alpha;
+
+            vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &push_constants);
+
+            vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
         }
     }
 
