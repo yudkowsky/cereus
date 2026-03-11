@@ -152,8 +152,6 @@ typedef struct
     VkImageView* swapchain_image_views;
 	VkFormat swapchain_format;
     VkExtent2D swapchain_extent;
-    VkRenderPass render_pass_handle;
-    VkFramebuffer* swapchain_framebuffers;
 
     VkCommandPool graphics_command_pool_handle;
     VkCommandBuffer* swapchain_command_buffers;
@@ -165,6 +163,9 @@ typedef struct
     VkFence* in_flight_fences; 
     VkFence* images_in_flight;
 
+    // first render pass (models, cubes, TODO: sprites)
+    VkRenderPass render_pass_handle;
+    VkFramebuffer* swapchain_framebuffers;
     VkPipelineLayout graphics_pipeline_layout; // TODO: clean this up
     VkPipeline sprite_pipeline_handle;
     VkPipeline cube_pipeline_handle;
@@ -175,16 +176,21 @@ typedef struct
     VkPipeline model_blackline_pipeline_handle;
     VkPipeline model_stencil_clear_pipeline_handle;
     VkPipelineLayout model_pipeline_layout;
-    VkPipeline laser_fill_pipeline_handle;
-    VkPipeline laser_outline_pipeline_handle;
-    VkPipelineLayout laser_pipeline_layout;
 
+    // second render pass (outlines, based on depth and normal)
     VkRenderPass outline_post_render_pass;
     VkFramebuffer* outline_post_framebuffers;
     VkPipeline outline_post_pipeline;
     VkPipelineLayout outline_post_pipeline_layout;
     VkDescriptorSet depth_descriptor_set;
     VkImageView depth_sampled_view; // separate view without stencil aspect
+
+    // third render pass (lasers, which affect the outlines, TODO: add sprites here, to be unaffected by the outlines)
+    VkRenderPass overlay_render_pass;
+    VkFramebuffer* overlay_framebuffers;
+    VkPipeline laser_fill_pipeline_handle;
+    VkPipeline laser_outline_pipeline_handle;
+    VkPipelineLayout laser_pipeline_layout;
 
     VkSampler pixel_art_sampler;
     CachedAsset asset_cache[256];
@@ -1319,69 +1325,87 @@ void createSwapchainResources(void)
     vulkan_state.images_in_flight = calloc(vulkan_state.swapchain_image_count, sizeof(VkFence));
 
     // depth-only view for sampling
+    VkImageViewCreateInfo depth_sampled_view_ci = {0};
+    depth_sampled_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    depth_sampled_view_ci.image = vulkan_state.depth_image;
+    depth_sampled_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    depth_sampled_view_ci.format = vulkan_state.depth_format;
+    depth_sampled_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    depth_sampled_view_ci.subresourceRange.baseMipLevel = 0;
+    depth_sampled_view_ci.subresourceRange.levelCount = 1;
+    depth_sampled_view_ci.subresourceRange.baseArrayLayer = 0;
+    depth_sampled_view_ci.subresourceRange.layerCount = 1;
+
+    vkCreateImageView(vulkan_state.logical_device_handle, &depth_sampled_view_ci, 0, &vulkan_state.depth_sampled_view);
+
+    VkDescriptorImageInfo depth_desc_info = {0};
+    depth_desc_info.sampler = vulkan_state.pixel_art_sampler;
+    depth_desc_info.imageView = vulkan_state.depth_sampled_view;
+    depth_desc_info.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet depth_desc_write = {0};
+    depth_desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    depth_desc_write.dstSet = vulkan_state.depth_descriptor_set;
+    depth_desc_write.dstBinding = 0;
+    depth_desc_write.descriptorCount = 1;
+    depth_desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    depth_desc_write.pImageInfo = &depth_desc_info;
+
+    vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &depth_desc_write, 0, 0);
+
+    VkDescriptorImageInfo normal_desc_info = {0};
+    normal_desc_info.sampler = vulkan_state.pixel_art_sampler;
+    normal_desc_info.imageView = vulkan_state.normal_image_view;
+    normal_desc_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet normal_desc_write = {0};
+    normal_desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    normal_desc_write.dstSet = vulkan_state.normal_descriptor_set;
+    normal_desc_write.dstBinding = 0;
+    normal_desc_write.descriptorCount = 1;
+    normal_desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    normal_desc_write.pImageInfo = &normal_desc_info;
+
+    vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &normal_desc_write, 0, 0);
+
+    // post-process framebuffers
+    vulkan_state.outline_post_framebuffers = realloc(vulkan_state.outline_post_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
+
+    for (uint32 i = 0; i < vulkan_state.swapchain_image_count; i++)
     {
-        VkImageViewCreateInfo depth_sampled_view_ci = {0};
-        depth_sampled_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        depth_sampled_view_ci.image = vulkan_state.depth_image;
-        depth_sampled_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        depth_sampled_view_ci.format = vulkan_state.depth_format;
-        depth_sampled_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-        depth_sampled_view_ci.subresourceRange.baseMipLevel = 0;
-        depth_sampled_view_ci.subresourceRange.levelCount = 1;
-        depth_sampled_view_ci.subresourceRange.baseArrayLayer = 0;
-        depth_sampled_view_ci.subresourceRange.layerCount = 1;
+        VkImageView attachment = vulkan_state.swapchain_image_views[i];
 
-        vkCreateImageView(vulkan_state.logical_device_handle, &depth_sampled_view_ci, 0, &vulkan_state.depth_sampled_view);
+        VkFramebufferCreateInfo fb_ci = {0};
+        fb_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fb_ci.renderPass = vulkan_state.outline_post_render_pass;
+        fb_ci.attachmentCount = 1;
+        fb_ci.pAttachments = &attachment;
+        fb_ci.width = vulkan_state.swapchain_extent.width;
+        fb_ci.height = vulkan_state.swapchain_extent.height;
+        fb_ci.layers = 1;
 
-        VkDescriptorImageInfo depth_desc_info = {0};
-        depth_desc_info.sampler = vulkan_state.pixel_art_sampler;
-        depth_desc_info.imageView = vulkan_state.depth_sampled_view;
-        depth_desc_info.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-
-        VkWriteDescriptorSet depth_desc_write = {0};
-        depth_desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        depth_desc_write.dstSet = vulkan_state.depth_descriptor_set;
-        depth_desc_write.dstBinding = 0;
-        depth_desc_write.descriptorCount = 1;
-        depth_desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        depth_desc_write.pImageInfo = &depth_desc_info;
-
-        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &depth_desc_write, 0, 0);
-
-        VkDescriptorImageInfo normal_desc_info = {0};
-        normal_desc_info.sampler = vulkan_state.pixel_art_sampler;
-        normal_desc_info.imageView = vulkan_state.normal_image_view;
-        normal_desc_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        VkWriteDescriptorSet normal_desc_write = {0};
-        normal_desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        normal_desc_write.dstSet = vulkan_state.normal_descriptor_set;
-        normal_desc_write.dstBinding = 0;
-        normal_desc_write.descriptorCount = 1;
-        normal_desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        normal_desc_write.pImageInfo = &normal_desc_info;
-
-        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &normal_desc_write, 0, 0);
-
-        // post-process framebuffers
-        vulkan_state.outline_post_framebuffers = realloc(vulkan_state.outline_post_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
-
-        for (uint32 i = 0; i < vulkan_state.swapchain_image_count; i++)
-        {
-            VkImageView attachment = vulkan_state.swapchain_image_views[i];
-
-            VkFramebufferCreateInfo fb_ci = {0};
-            fb_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-            fb_ci.renderPass = vulkan_state.outline_post_render_pass;
-            fb_ci.attachmentCount = 1;
-            fb_ci.pAttachments = &attachment;
-            fb_ci.width = vulkan_state.swapchain_extent.width;
-            fb_ci.height = vulkan_state.swapchain_extent.height;
-            fb_ci.layers = 1;
-
-            vkCreateFramebuffer(vulkan_state.logical_device_handle, &fb_ci, 0, &vulkan_state.outline_post_framebuffers[i]);
-        }
+        vkCreateFramebuffer(vulkan_state.logical_device_handle, &fb_ci, 0, &vulkan_state.outline_post_framebuffers[i]);
     }
+
+    // third render pass fbs
+    vulkan_state.overlay_framebuffers = realloc(vulkan_state.overlay_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
+
+    for (uint32 i = 0; i < vulkan_state.swapchain_image_count; i++)
+    {
+        VkImageView overlay_fb_attachments[2] = { vulkan_state.swapchain_image_views[i], vulkan_state.depth_image_view };
+
+        VkFramebufferCreateInfo overlay_fb_ci = {0};
+        overlay_fb_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        overlay_fb_ci.renderPass = vulkan_state.overlay_render_pass;
+        overlay_fb_ci.attachmentCount = 2;
+        overlay_fb_ci.pAttachments = overlay_fb_attachments;
+        overlay_fb_ci.width = vulkan_state.swapchain_extent.width;
+        overlay_fb_ci.height = vulkan_state.swapchain_extent.height;
+        overlay_fb_ci.layers = 1;
+
+        vkCreateFramebuffer(vulkan_state.logical_device_handle, &overlay_fb_ci, 0, &vulkan_state.overlay_framebuffers[i]);
+    }
+
 }
 
 void resetPipelineStates(VkPipelineColorBlendAttachmentState* blend, VkPipelineDepthStencilStateCreateInfo* depth_stencil, VkPipelineRasterizationStateCreateInfo* raster)
@@ -1649,118 +1673,178 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     // TODO: organise this better. the normal attachment is under 'first render pass' here.
     // first render pass
-	VkAttachmentDescription color_attachment = {0};
-    color_attachment.format = chosen_surface_format.format;
-    color_attachment.samples = VK_SAMPLE_COUNT_1_BIT; // no multi-sampling anti-aliasing, so only one color sample
-	color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; // start each frame by clearing the swapchain image to a solid color
-	color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; // we want the image to be read by the present engine after the render pass
-	color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; // don't care about previous layout of swapchain image
-	color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-	
-	VkAttachmentReference color_attachment_reference = {0}; // tells the subpass which attachment slot and in what layout during the subpass.
-	color_attachment_reference.attachment = 0; // to be explicit about that we are getting the first attachment
-    color_attachment_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // write color layout in optimal layout for color output
-	
-	VkAttachmentDescription depth_attachment = {0};
-    depth_attachment.format = vulkan_state.depth_format;
-    depth_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; // store for second render pass
-	depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; 
-    depth_attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    {
+        VkAttachmentDescription color_attachment = {0};
+        color_attachment.format = chosen_surface_format.format;
+        color_attachment.samples = VK_SAMPLE_COUNT_1_BIT; // no multi-sampling anti-aliasing, so only one color sample
+        color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; // start each frame by clearing the swapchain image to a solid color
+        color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; // we want the image to be read by the present engine after the render pass
+        color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; // don't care about previous layout of swapchain image
+        color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        
+        VkAttachmentReference color_attachment_reference = {0}; // tells the subpass which attachment slot and in what layout during the subpass.
+        color_attachment_reference.attachment = 0; // to be explicit about that we are getting the first attachment
+        color_attachment_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // write color layout in optimal layout for color output
+        
+        VkAttachmentDescription depth_attachment = {0};
+        depth_attachment.format = vulkan_state.depth_format;
+        depth_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; // store for second render pass
+        depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; 
+        depth_attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-    VkAttachmentReference depth_attachment_reference = {0};
-    depth_attachment_reference.attachment = 1; // second attachment in array
-    depth_attachment_reference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        VkAttachmentReference depth_attachment_reference = {0};
+        depth_attachment_reference.attachment = 1; // second attachment in array
+        depth_attachment_reference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-    VkSubpassDescription color_output_subpass = {0}; // only one subpass per frame for our minimal setup
-	color_output_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    color_output_subpass.colorAttachmentCount = 1;
-    color_output_subpass.pColorAttachments = &color_attachment_reference;
-    color_output_subpass.pDepthStencilAttachment = &depth_attachment_reference;
-    
-    VkSubpassDependency color_output_subpass_dependency = {0}; // encodes memory + exectution ordering between stages outside the render pass and stages inside the subpass
-	color_output_subpass_dependency.srcSubpass = VK_SUBPASS_EXTERNAL; // declares source as 'outside the render pass' - there's only one subpass so the source has to be external here
-	color_output_subpass_dependency.dstSubpass = 0; // set first (and only) subpass as destination of the dependency
-	color_output_subpass_dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // some ordering shenanigans
-    color_output_subpass_dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-	color_output_subpass_dependency.srcAccessMask = 0; // we don't rely on any prior contents
-	color_output_subpass_dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT; // we want to protect the attachment at the destination
+        VkSubpassDescription color_output_subpass = {0}; // only one subpass per frame for our minimal setup
+        color_output_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        color_output_subpass.colorAttachmentCount = 1;
+        color_output_subpass.pColorAttachments = &color_attachment_reference;
+        color_output_subpass.pDepthStencilAttachment = &depth_attachment_reference;
+        
+        VkSubpassDependency color_output_subpass_dependency = {0}; // encodes memory + exectution ordering between stages outside the render pass and stages inside the subpass
+        color_output_subpass_dependency.srcSubpass = VK_SUBPASS_EXTERNAL; // declares source as 'outside the render pass' - there's only one subpass so the source has to be external here
+        color_output_subpass_dependency.dstSubpass = 0; // set first (and only) subpass as destination of the dependency
+        color_output_subpass_dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; // some ordering shenanigans
+        color_output_subpass_dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        color_output_subpass_dependency.srcAccessMask = 0; // we don't rely on any prior contents
+        color_output_subpass_dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT; // we want to protect the attachment at the destination
 
-    VkAttachmentDescription normal_attachment = {0};
-    normal_attachment.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    normal_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    normal_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    normal_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    normal_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    normal_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    normal_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    normal_attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkAttachmentDescription normal_attachment = {0};
+        normal_attachment.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+        normal_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        normal_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        normal_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        normal_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        normal_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        normal_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        normal_attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkAttachmentReference normal_attachment_reference = {0};
-    normal_attachment_reference.attachment = 2;
-    normal_attachment_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        VkAttachmentReference normal_attachment_reference = {0};
+        normal_attachment_reference.attachment = 2;
+        normal_attachment_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-    VkAttachmentReference color_attachment_references[2] = { color_attachment_reference, normal_attachment_reference };
+        VkAttachmentReference color_attachment_references[2] = { color_attachment_reference, normal_attachment_reference };
 
-    color_output_subpass.colorAttachmentCount = 2;
-    color_output_subpass.pColorAttachments = color_attachment_references;
+        color_output_subpass.colorAttachmentCount = 2;
+        color_output_subpass.pColorAttachments = color_attachment_references;
 
-    VkAttachmentDescription attachments[3] = { color_attachment, depth_attachment, normal_attachment };
+        VkAttachmentDescription attachments[3] = { color_attachment, depth_attachment, normal_attachment };
 
-    VkRenderPassCreateInfo render_pass_creation_info = {0}; // container that ties attachment(s), subpass(es), and dependency(ies) into a single render pass object.
-	render_pass_creation_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    render_pass_creation_info.attachmentCount = 3;
-    render_pass_creation_info.pAttachments = attachments;
-    render_pass_creation_info.subpassCount = 1;
-	render_pass_creation_info.pSubpasses = &color_output_subpass;
-    render_pass_creation_info.dependencyCount = 1;
-    render_pass_creation_info.pDependencies = &color_output_subpass_dependency; // same story here - just a pointer to our one dependency, rather than an array.
+        VkRenderPassCreateInfo render_pass_creation_info = {0}; // container that ties attachment(s), subpass(es), and dependency(ies) into a single render pass object.
+        render_pass_creation_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        render_pass_creation_info.attachmentCount = 3;
+        render_pass_creation_info.pAttachments = attachments;
+        render_pass_creation_info.subpassCount = 1;
+        render_pass_creation_info.pSubpasses = &color_output_subpass;
+        render_pass_creation_info.dependencyCount = 1;
+        render_pass_creation_info.pDependencies = &color_output_subpass_dependency; // same story here - just a pointer to our one dependency, rather than an array.
 
-    vkCreateRenderPass(vulkan_state.logical_device_handle, &render_pass_creation_info, 0, &vulkan_state.render_pass_handle);
+        vkCreateRenderPass(vulkan_state.logical_device_handle, &render_pass_creation_info, 0, &vulkan_state.render_pass_handle);
+    }
 
     // second render pass for outlines
-    VkAttachmentDescription post_color_attachment = {0};
-    post_color_attachment.format = vulkan_state.swapchain_format;
-    post_color_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    post_color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // keep scene contents
-    post_color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    post_color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    post_color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    post_color_attachment.initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    post_color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    {
+        VkAttachmentDescription post_color_attachment = {0};
+        post_color_attachment.format = vulkan_state.swapchain_format;
+        post_color_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        post_color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // keep scene contents
+        post_color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        post_color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        post_color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        post_color_attachment.initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        post_color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-    VkAttachmentReference post_color_reference = {0};
-    post_color_reference.attachment = 0;
-    post_color_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        VkAttachmentReference post_color_reference = {0};
+        post_color_reference.attachment = 0;
+        post_color_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-    VkSubpassDescription post_subpass = {0};
-    post_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    post_subpass.colorAttachmentCount = 1;
-    post_subpass.pColorAttachments = &post_color_reference;
+        VkSubpassDescription post_subpass = {0};
+        post_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        post_subpass.colorAttachmentCount = 1;
+        post_subpass.pColorAttachments = &post_color_reference;
 
-    VkSubpassDependency post_dependency = {0};
-    post_dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    post_dependency.dstSubpass = 0;
-    post_dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    post_dependency.dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    post_dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    post_dependency.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        VkSubpassDependency post_dependency = {0};
+        post_dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+        post_dependency.dstSubpass = 0;
+        post_dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        post_dependency.dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        post_dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        post_dependency.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
-    VkRenderPassCreateInfo post_render_pass_ci = {0};
-    post_render_pass_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    post_render_pass_ci.attachmentCount = 1;
-    post_render_pass_ci.pAttachments = &post_color_attachment;
-    post_render_pass_ci.subpassCount = 1;
-    post_render_pass_ci.pSubpasses = &post_subpass;
-    post_render_pass_ci.dependencyCount = 1;
-    post_render_pass_ci.pDependencies = &post_dependency;
+        VkRenderPassCreateInfo post_render_pass_ci = {0};
+        post_render_pass_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        post_render_pass_ci.attachmentCount = 1;
+        post_render_pass_ci.pAttachments = &post_color_attachment;
+        post_render_pass_ci.subpassCount = 1;
+        post_render_pass_ci.pSubpasses = &post_subpass;
+        post_render_pass_ci.dependencyCount = 1;
+        post_render_pass_ci.pDependencies = &post_dependency;
 
-    vkCreateRenderPass(vulkan_state.logical_device_handle, &post_render_pass_ci, 0, &vulkan_state.outline_post_render_pass);
+        vkCreateRenderPass(vulkan_state.logical_device_handle, &post_render_pass_ci, 0, &vulkan_state.outline_post_render_pass);
+    }
+
+    // third render pass for lasers
+    {
+        VkAttachmentDescription overlay_attachments[2] = {0};
+
+        overlay_attachments[0].format = vulkan_state.swapchain_format;
+        overlay_attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+        overlay_attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        overlay_attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        overlay_attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        overlay_attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        overlay_attachments[0].initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        overlay_attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+        overlay_attachments[1].format = vulkan_state.depth_format;
+        overlay_attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+        overlay_attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        overlay_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        overlay_attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        overlay_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        overlay_attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        overlay_attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentReference overlay_color_reference = {0};
+        overlay_color_reference.attachment = 0;
+        overlay_color_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentReference overlay_depth_reference = {0};
+        overlay_depth_reference.attachment = 1;
+        overlay_depth_reference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        VkSubpassDescription overlay_subpass = {0};
+        overlay_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        overlay_subpass.colorAttachmentCount = 1;
+        overlay_subpass.pColorAttachments = &overlay_color_reference;
+        overlay_subpass.pDepthStencilAttachment = &overlay_depth_reference;
+
+        VkSubpassDependency overlay_dependency = {0};
+        overlay_dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+        overlay_dependency.dstSubpass = 0;
+        overlay_dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        overlay_dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        overlay_dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        overlay_dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+        VkRenderPassCreateInfo overlay_rp_ci = {0};
+        overlay_rp_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        overlay_rp_ci.attachmentCount = 2;
+        overlay_rp_ci.pAttachments = overlay_attachments;
+        overlay_rp_ci.subpassCount = 1;
+        overlay_rp_ci.pSubpasses = &overlay_subpass;
+        overlay_rp_ci.dependencyCount = 1;
+        overlay_rp_ci.pDependencies = &overlay_dependency;
+
+        vkCreateRenderPass(vulkan_state.logical_device_handle, &overlay_rp_ci, 0, &vulkan_state.overlay_render_pass);
+    }
 
 	// a framebuffer is the binding of the render pass' attachment slots to specific image views, with a fixed size (width/height) and layer count. 
     // it doesn't allocate memory, it just ties the render pass to the actual image 
@@ -2338,21 +2422,17 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &outline_ci, 0, &vulkan_state.outline_pipeline_handle);
     }
 
-    // define laser fill pipeline
+    // define laser fill pipeline (overlay render pass, after outlines)
     {
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
-        // additive blending
         color_blend_attachment_state.blendEnable = VK_TRUE;
         color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE; 
+        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
         color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
-
-        blend_attachments[0] = color_blend_attachment_state;
-        blend_attachments[1] = color_blend_attachment_state;
 
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
@@ -2366,33 +2446,36 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
 
+        VkPipelineColorBlendAttachmentState laser_blend = color_blend_attachment_state;
+        VkPipelineColorBlendStateCreateInfo laser_blend_ci = {0};
+        laser_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        laser_blend_ci.attachmentCount = 1;
+        laser_blend_ci.pAttachments = &laser_blend;
+
         VkGraphicsPipelineCreateInfo laser_ci = base_graphics_pipeline_creation_info;
         laser_ci.pStages = laser_shader_stages;
         laser_ci.layout = vulkan_state.laser_pipeline_layout;
+        laser_ci.renderPass = vulkan_state.overlay_render_pass;
+        laser_ci.pColorBlendState = &laser_blend_ci;
 
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &laser_ci, 0, &vulkan_state.laser_fill_pipeline_handle);
     }
 
-    // define laser outline pipeline
+    // define laser outline pipeline (overlay render pass, after outlines)
     {
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
-        //color_blend_attachment_state.blendEnable = VK_FALSE;
         color_blend_attachment_state.blendEnable = VK_TRUE;
         color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE; 
+        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
         color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
 
-        blend_attachments[0] = color_blend_attachment_state;
-        blend_attachments[1] = color_blend_attachment_state;
-
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
-        // only draw where stencil is zero
         depth_stencil_state_creation_info.stencilTestEnable = VK_TRUE;
         depth_stencil_state_creation_info.front.failOp = VK_STENCIL_OP_KEEP;
         depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_KEEP;
@@ -2406,9 +2489,17 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
         rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_FILL;
 
+        VkPipelineColorBlendAttachmentState laser_outline_blend = color_blend_attachment_state;
+        VkPipelineColorBlendStateCreateInfo laser_outline_blend_ci = {0};
+        laser_outline_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        laser_outline_blend_ci.attachmentCount = 1;
+        laser_outline_blend_ci.pAttachments = &laser_outline_blend;
+
         VkGraphicsPipelineCreateInfo laser_outline_ci = base_graphics_pipeline_creation_info;
         laser_outline_ci.pStages = laser_outline_shader_stages;
         laser_outline_ci.layout = vulkan_state.laser_pipeline_layout;
+        laser_outline_ci.renderPass = vulkan_state.overlay_render_pass;
+        laser_outline_ci.pColorBlendState = &laser_outline_blend_ci;
 
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &laser_outline_ci, 0, &vulkan_state.laser_outline_pipeline_handle);
     }
@@ -2903,6 +2994,37 @@ void vulkanDraw(void)
         }
     }
 
+    // MODEL SELECTED OUTLINES
+
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_pipeline_handle);
+
+    for (uint32 outline_index = 0; outline_index < model_selected_outline_instance_count; outline_index++)
+    {
+        Model* model = &model_selected_outline_instances[outline_index];
+        LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
+        if (model_data->index_count == 0) continue;
+
+        VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
+        vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+        float model_matrix[16];
+        mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
+
+        PushConstants pc = {0};
+        memcpy(pc.model, model_matrix,      sizeof(pc.model));
+        memcpy(pc.view,  view_matrix,       sizeof(pc.view));
+        memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
+        pc.uv_rect = (Vec4){0, 0, 1, 1};
+
+        vkCmdPushConstants(command_buffer, vulkan_state.outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+
+		vkCmdSetDepthBias(command_buffer, -0.1f, 0.0f, -0.1f);
+        vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
+		vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
+    }
+
+    /*
     // LASER PASSES
 
     LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
@@ -2962,37 +3084,7 @@ void vulkanDraw(void)
             vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
         }
     }
-
-
-    // MODEL SELECTED OUTLINES
-
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_pipeline_handle);
-
-    for (uint32 outline_index = 0; outline_index < model_selected_outline_instance_count; outline_index++)
-    {
-        Model* model = &model_selected_outline_instances[outline_index];
-        LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
-        if (model_data->index_count == 0) continue;
-
-        VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
-        vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-
-        float model_matrix[16];
-        mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
-
-        PushConstants pc = {0};
-        memcpy(pc.model, model_matrix,      sizeof(pc.model));
-        memcpy(pc.view,  view_matrix,       sizeof(pc.view));
-        memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
-        pc.uv_rect = (Vec4){0, 0, 1, 1};
-
-        vkCmdPushConstants(command_buffer, vulkan_state.outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
-
-		vkCmdSetDepthBias(command_buffer, -0.1f, 0.0f, -0.1f);
-        vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
-		vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
-    }
+    */
 
 	// SPRITE PIPELINE
 
@@ -3037,6 +3129,7 @@ void vulkanDraw(void)
     vkCmdEndRenderPass(command_buffer);
 
     // transition depth from attachment to shader read
+
     VkImageMemoryBarrier depth_to_read = {0};
     depth_to_read.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     depth_to_read.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -3088,12 +3181,100 @@ void vulkanDraw(void)
         float post_pc[4] = {
             1.0f / (float)vulkan_state.swapchain_extent.width,
             1.0f / (float)vulkan_state.swapchain_extent.height,
-            0.01f, // depth threshold
+            0.0001f, // depth threshold
             0.1f // normal threshold
         };
         vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 4, post_pc);
 
         vkCmdDraw(command_buffer, 3, 1, 0, 0); // fullscreen triangle
+    }
+
+    vkCmdEndRenderPass(command_buffer);
+
+    // transition depth back to attachment for overlay pass (lasers, which affect outlines)
+
+    VkImageMemoryBarrier depth_to_attachment = {0};
+    depth_to_attachment.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    depth_to_attachment.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    depth_to_attachment.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depth_to_attachment.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    depth_to_attachment.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    depth_to_attachment.image = vulkan_state.depth_image;
+    depth_to_attachment.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+    depth_to_attachment.subresourceRange.baseMipLevel = 0;
+    depth_to_attachment.subresourceRange.levelCount = 1;
+    depth_to_attachment.subresourceRange.baseArrayLayer = 0;
+    depth_to_attachment.subresourceRange.layerCount = 1;
+    depth_to_attachment.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    depth_to_attachment.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, 0, 0, 0, 0, 0, 1, &depth_to_attachment);
+
+    // overlay pass: lasers
+    {
+        VkRenderPassBeginInfo overlay_rp_begin = {0};
+        overlay_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        overlay_rp_begin.renderPass = vulkan_state.overlay_render_pass;
+        overlay_rp_begin.framebuffer = vulkan_state.overlay_framebuffers[swapchain_image_index];
+        overlay_rp_begin.renderArea.offset = (VkOffset2D){0, 0};
+        overlay_rp_begin.renderArea.extent = vulkan_state.swapchain_extent;
+        overlay_rp_begin.clearValueCount = 0;
+
+        vkCmdBeginRenderPass(command_buffer, &overlay_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+
+        vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+        vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+
+        LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
+        if (laser_mesh->index_count > 0)
+        {
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_fill_pipeline_handle);
+
+            VkDeviceSize laser_vb_offset = 0;
+            vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_vb_offset);
+            vkCmdBindIndexBuffer(command_buffer, laser_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+            for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
+            {
+                Laser* laser = &laser_instances[laser_index];
+                Vec3 laser_scale = { 1.0f, 1.0f, laser->length };
+
+                float model_matrix[16];
+                mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
+
+                LaserPushConstants pc = {0};
+                memcpy(pc.model, model_matrix, sizeof(pc.model));
+                memcpy(pc.view, view_matrix, sizeof(pc.view));
+                memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
+                pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 1.0f };
+
+                vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &pc);
+                vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
+            }
+
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_outline_pipeline_handle);
+
+            vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_vb_offset);
+            vkCmdBindIndexBuffer(command_buffer, laser_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+            for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
+            {
+                Laser* laser = &laser_instances[laser_index];
+                Vec3 laser_scale = { 1.0f, 1.0f, laser->length };
+
+                float model_matrix[16];
+                mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
+
+                LaserPushConstants push_constants = {0};
+                memcpy(push_constants.model, model_matrix, sizeof(push_constants.model));
+                memcpy(push_constants.view, view_matrix, sizeof(push_constants.view));
+                memcpy(push_constants.proj, projection_matrix, sizeof(push_constants.proj));
+                push_constants.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 1.0f };
+
+                vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &push_constants);
+                vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
+            }
+        }
     }
 
     vkCmdEndRenderPass(command_buffer);
@@ -3167,8 +3348,9 @@ void vulkanResize(uint32 width, uint32 height)
 
     for (uint32 image_index = 0; image_index < vulkan_state.swapchain_image_count; image_index++)
     {
-        vkDestroyFramebuffer(vulkan_state.logical_device_handle, vulkan_state.outline_post_framebuffers[image_index], 0);
         vkDestroyFramebuffer(vulkan_state.logical_device_handle, vulkan_state.swapchain_framebuffers[image_index], 0);
+        vkDestroyFramebuffer(vulkan_state.logical_device_handle, vulkan_state.outline_post_framebuffers[image_index], 0);
+        vkDestroyFramebuffer(vulkan_state.logical_device_handle, vulkan_state.overlay_framebuffers[image_index], 0);
         vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.swapchain_image_views[image_index], 0);
     }
     vkFreeCommandBuffers(vulkan_state.logical_device_handle, vulkan_state.graphics_command_pool_handle, vulkan_state.swapchain_image_count, vulkan_state.swapchain_command_buffers);

@@ -25,6 +25,9 @@ void main()
     vec2 step = pc.texel_size;
 
     vec3 n_center = texture(normal_texture, frag_uv).rgb;
+
+    if (dot(n_center, n_center) < 0.01) discard; // doesnt have outline fully at the clear color
+
     vec3 n_up     = texture(normal_texture, frag_uv + vec2(0.0, step.y)).rgb;
     vec3 n_down   = texture(normal_texture, frag_uv - vec2(0.0, step.y)).rgb;
     vec3 n_left   = texture(normal_texture, frag_uv - vec2(step.x, 0.0)).rgb;
@@ -53,7 +56,7 @@ void main()
     float laplacian = abs(up + down - 2.0 * center) + abs(left + right - 2.0 * center);
 
     // normalize by depth so it's distance-independent
-    float relative_laplacian = laplacian / center;
+    float relative_laplacian = laplacian / (center * center);
 
     if (relative_laplacian > pc.depth_threshold)
     {
