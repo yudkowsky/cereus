@@ -32,6 +32,8 @@ const char* ATLAS_3D_PATH 	= "data/sprites/atlas-3d.png";
 
 bool first_submit_since_draw = true;
 
+bool do_experimental_shaders = false;
+
 typedef struct 
 {
     float x, y, z;
@@ -103,7 +105,7 @@ typedef struct
     float view[16];
     float proj[16];
     Vec4 uv_rect;
-    float alpha; // used for text at the moment (2/28)
+    float alpha;
 }
 PushConstants; // TODO: rename
 
@@ -2693,9 +2695,11 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     loadAllEntities();
 }
 
-void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Camera game_camera)
+void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Camera game_camera, bool render_models)
 {  
     vulkan_camera = game_camera;
+
+    do_experimental_shaders = render_models;
 
     sprite_instance_count = 0;
     cube_instance_count = 0;
@@ -3001,23 +3005,6 @@ void vulkanDraw(void)
             vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
             vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
             vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
-
-            /*
-            // pass 2: blackline, only where stencil == 0
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_blackline_pipeline_handle);
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
-            vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
-            vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
-            vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
-
-            // pass 3: clear stencil back to 0 by redrawing fill with stencil write 0
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_stencil_clear_pipeline_handle);
-            vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
-            vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
-            vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
-            */
         }
     }
 
@@ -3051,132 +3038,73 @@ void vulkanDraw(void)
 		vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
     }
 
-    /*
-    // LASER PASSES
-
-    LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
-    if (laser_mesh->index_count > 0)
-    {
-        // fill color of laser
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_fill_pipeline_handle);
-
-        VkDeviceSize laser_vb_offset = 0;
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_vb_offset);
-        vkCmdBindIndexBuffer(command_buffer, laser_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-
-        for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
-        {
-            Laser* laser = &laser_instances[laser_index];
-
-            Vec3 laser_scale = { 1.0f, 1.0f, laser->length };
-
-            float model_matrix[16];
-            mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
-
-            LaserPushConstants pc = {0};
-            memcpy(pc.model, model_matrix, sizeof(pc.model));
-            memcpy(pc.view, view_matrix, sizeof(pc.view));
-            memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
-            pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 1.0f };
-
-            vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &pc);
-
-            vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
-        }
-
-        // stenciled exterior of laser
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_outline_pipeline_handle);
-
-        VkDeviceSize laser_outline_vb_offset = 0;
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_outline_vb_offset);
-        vkCmdBindIndexBuffer(command_buffer, laser_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-
-        for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
-        {
-            Laser* laser = &laser_instances[laser_index];
-
-            Vec3 laser_scale = { 1.0f, 1.0f, laser->length };
-
-            float model_matrix[16];
-            mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
-
-            LaserPushConstants pc = {0};
-            memcpy(pc.model, model_matrix, sizeof(pc.model));
-            memcpy(pc.view, view_matrix, sizeof(pc.view));
-            memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
-            pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 1.0f };
-
-            vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &pc);
-
-            vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
-        }
-    }
-    */
-
     vkCmdEndRenderPass(command_buffer);
 
-    // transition depth from attachment to shader read
 
-    VkImageMemoryBarrier depth_to_read = {0};
-    depth_to_read.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    depth_to_read.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    depth_to_read.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-    depth_to_read.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    depth_to_read.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    depth_to_read.image = vulkan_state.depth_image;
-    depth_to_read.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-    depth_to_read.subresourceRange.baseMipLevel = 0;
-    depth_to_read.subresourceRange.levelCount = 1;
-    depth_to_read.subresourceRange.baseArrayLayer = 0;
-    depth_to_read.subresourceRange.layerCount = 1;
-    depth_to_read.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    depth_to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &depth_to_read);
-
-    // outline post pass
+    if (do_experimental_shaders)
     {
-        VkRenderPassBeginInfo post_rp_begin = {0};
-        post_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        post_rp_begin.renderPass = vulkan_state.outline_post_render_pass;
-        post_rp_begin.framebuffer = vulkan_state.outline_post_framebuffers[swapchain_image_index];
-        post_rp_begin.renderArea.offset = (VkOffset2D){0, 0};
-        post_rp_begin.renderArea.extent = vulkan_state.swapchain_extent;
-        post_rp_begin.clearValueCount = 0;
+        // transition depth from attachment to shader read
+        VkImageMemoryBarrier depth_to_read = {0};
+        depth_to_read.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        depth_to_read.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        depth_to_read.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        depth_to_read.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        depth_to_read.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        depth_to_read.image = vulkan_state.depth_image;
+        depth_to_read.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        depth_to_read.subresourceRange.baseMipLevel = 0;
+        depth_to_read.subresourceRange.levelCount = 1;
+        depth_to_read.subresourceRange.baseArrayLayer = 0;
+        depth_to_read.subresourceRange.layerCount = 1;
+        depth_to_read.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        depth_to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-        vkCmdBeginRenderPass(command_buffer, &post_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &depth_to_read);
 
-        // use full window viewport for post pass, not letterboxed
-        VkViewport post_viewport = {0};
-        post_viewport.width = (float)vulkan_state.swapchain_extent.width;
-        post_viewport.height = (float)vulkan_state.swapchain_extent.height;
-        post_viewport.x = 0;
-        post_viewport.y = 0;
-        post_viewport.minDepth = 0.0f;
-        post_viewport.maxDepth = 1.0f;
+        // outline post pass
+        {
+            VkRenderPassBeginInfo post_rp_begin = {0};
+            post_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            post_rp_begin.renderPass = vulkan_state.outline_post_render_pass;
+            post_rp_begin.framebuffer = vulkan_state.outline_post_framebuffers[swapchain_image_index];
+            post_rp_begin.renderArea.offset = (VkOffset2D){0, 0};
+            post_rp_begin.renderArea.extent = vulkan_state.swapchain_extent;
+            post_rp_begin.clearValueCount = 0;
 
-        VkRect2D post_scissor = {0};
-        post_scissor.extent = vulkan_state.swapchain_extent;
+            vkCmdBeginRenderPass(command_buffer, &post_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
 
-        vkCmdSetViewport(command_buffer, 0, 1, &post_viewport);
-        vkCmdSetScissor(command_buffer, 0, 1, &post_scissor);
+            // use full window viewport for post pass, not letterboxed
+            VkViewport post_viewport = {0};
+            post_viewport.width = (float)vulkan_state.swapchain_extent.width;
+            post_viewport.height = (float)vulkan_state.swapchain_extent.height;
+            post_viewport.x = 0;
+            post_viewport.y = 0;
+            post_viewport.minDepth = 0.0f;
+            post_viewport.maxDepth = 1.0f;
 
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline);
-        VkDescriptorSet post_sets[2] = { vulkan_state.depth_descriptor_set, vulkan_state.normal_descriptor_set };
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline_layout, 0, 2, post_sets, 0, 0);
+            VkRect2D post_scissor = {0};
+            post_scissor.extent = vulkan_state.swapchain_extent;
 
-        float post_pc[4] = {
-            1.0f / (float)vulkan_state.swapchain_extent.width,
-            1.0f / (float)vulkan_state.swapchain_extent.height,
-            0.0001f, // depth threshold
-            0.1f // normal threshold
-        };
-        vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 4, post_pc);
+            vkCmdSetViewport(command_buffer, 0, 1, &post_viewport);
+            vkCmdSetScissor(command_buffer, 0, 1, &post_scissor);
 
-        vkCmdDraw(command_buffer, 3, 1, 0, 0); // fullscreen triangle
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline);
+            VkDescriptorSet post_sets[2] = { vulkan_state.depth_descriptor_set, vulkan_state.normal_descriptor_set };
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline_layout, 0, 2, post_sets, 0, 0);
+
+            float post_pc[4] = {
+                1.0f / (float)vulkan_state.swapchain_extent.width,
+                1.0f / (float)vulkan_state.swapchain_extent.height,
+                0.0001f, // depth threshold
+                0.1f // normal threshold
+            };
+            vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 4, post_pc);
+
+            vkCmdDraw(command_buffer, 3, 1, 0, 0); // fullscreen triangle
+        }
+
+        vkCmdEndRenderPass(command_buffer);
     }
-
-    vkCmdEndRenderPass(command_buffer);
 
     // transition depth back to attachment for overlay pass (lasers, which affect outlines)
 

@@ -5,5 +5,5 @@
 void gameInitialize(char*, DisplayInfo);
 void gameFrame(double, TickInput);
 void gameRedraw(DisplayInfo);
-void vulkanSubmitFrame(DrawCommand*, int32, Camera);
+void vulkanSubmitFrame(DrawCommand*, int32, Camera, bool);
 void vulkanDraw();

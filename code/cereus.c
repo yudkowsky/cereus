@@ -3352,7 +3352,8 @@ void gameRedraw(DisplayInfo display_from_platform)
     if (draw_command_count == 0) return;
     game_display = display_from_platform;
 	recalculateDebugStartCoords();
-    vulkanSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset);
+    vulkanSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset, render_models); // render models is temp passthrough here. toggles some shaders that apply to everything,
+                                                                                                // but that i only want on when working on rendering
     vulkanDraw();
 }
 
@@ -5937,6 +5938,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
     }
 
-    vulkanSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset);
+    vulkanSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset, render_models);
     vulkanDraw();
 }
