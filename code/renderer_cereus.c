@@ -2866,7 +2866,7 @@ void vulkanDraw(void)
 
     float aspect = target_aspect;
     float projection_matrix[16], view_matrix[16];
-    mat4BuildPerspective(projection_matrix, vulkan_camera.fov * (6.283185f / 360.0f), aspect, 0.1f, 300.0f);
+    mat4BuildPerspective(projection_matrix, vulkan_camera.fov * (6.283185f / 360.0f), aspect, 1.0f, 300.0f);
     mat4BuildViewFromQuat(view_matrix, vulkan_camera.coords, vulkan_camera.rotation);
 
 	// CUBE PIPELINE (INSTANCED)
@@ -3036,7 +3036,7 @@ void vulkanDraw(void)
             float post_pc[4] = {
                 1.0f / (float)vulkan_state.swapchain_extent.width,
                 1.0f / (float)vulkan_state.swapchain_extent.height,
-                0.0005f, // depth threshold
+                0.001f, // depth threshold
                 0.3f // normal threshold
             };
             vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 4, post_pc);

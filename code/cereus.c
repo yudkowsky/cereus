@@ -496,7 +496,7 @@ int32 draw_command_count = 0;
 
 static WorldState world_state = {0};
 static WorldState next_world_state = {0};
-static WorldState pending_undo_snapshot = {0}; // TODO: pending_undo_snapshot and leap_of_faith_snapshot don't change the buffer, so could save 4MB by using some EntitySnapshot struct
+static WorldState pending_undo_snapshot = {0}; // TODO: pending_undo_snapshot and leap_of_faith_snapshot don't change the buffer, so could save 4MB memory by using some EntitySnapshot struct
 static WorldState leap_of_faith_snapshot = {0};
 static WorldState overworld_zero = {0}; // TODO: probably don't have to carry this around, just read from zeroed overworld file when i need this (on restart in overworld)
 Int3 level_dim = {0};
@@ -507,12 +507,15 @@ bool pending_undo_was_teleport = false;
 bool pending_undo_was_reset = false;
 int32 undos_performed = 0;
 bool restart_last_turn = false;
-//bool silence_unlocks_due_to_restart_or_undo = false;
 
-int32 time_until_game_input = 0;
-int32 time_until_meta_input = 0;
+// controls how long until player is allowed to make action like movement. will rework when add buffered inputs
+int32 time_until_allow_game_input = 0;
+int32 time_until_allow_meta_input = 0;
+
 EditorState editor_state = {0};
 LaserBuffer laser_buffer[64] = {0};
+TrailingHitbox trailing_hitboxes[32]; 
+Animation animations[32];
 
 bool in_overworld = false;
 bool pack_detached = false;
@@ -523,9 +526,6 @@ bool cheating = false;
 bool player_will_fall_next_turn = false;
 bool bypass_player_fall;
 PackTurnState pack_turn_state = {0};
-
-TrailingHitbox trailing_hitboxes[32]; 
-Animation animations[32];
 
 // ghosts from tp
 Int3 player_ghost_coords = {0};
@@ -3029,7 +3029,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
         if (entity_in_stack->removed) return false; // should never happen, shouldn't have removed entity in the middle of a stack somewhere
         if (entity_in_stack->in_motion) return false; 
         if (entity_in_stack == &next_world_state.pack && !pack_detached && stack_fall_index != 0) return false;
-        if (entity_in_stack == &next_world_state.player && !next_world_state.player.hit_by_red) time_until_game_input = FALL_ANIMATION_TIME;
+        if (entity_in_stack == &next_world_state.player && !next_world_state.player.hit_by_red) time_until_allow_game_input = FALL_ANIMATION_TIME;
 
         // check if this is going to be first fall
         if (!entity_in_stack->first_fall_already_done)
@@ -3999,19 +3999,19 @@ void editorMode(TickInput *tick_input)
             }
             else if ((tick_input->middle_mouse_press || tick_input->g_press) && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
 
-            time_until_meta_input = PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT;
+            time_until_allow_meta_input = PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT;
         }
         if (tick_input->l_press)
         {
             editor_state.picked_tile++;
             if (editor_state.picked_tile == LADDER + 1) editor_state.picked_tile = VOID;
-            time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+            time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
         if (tick_input->m_press)
         {
             clearSolvedLevels();
             createDebugPopup("solved levels cleared", NO_TYPE);
-            time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+            time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
     }
 
@@ -4065,7 +4065,7 @@ void editorMode(TickInput *tick_input)
                     {
                         rb->reset_info[present_in_rb].id = -1;
                     }
-                    time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                    time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
                 }
                 // did not click on entity
             }
@@ -4089,7 +4089,7 @@ void editorMode(TickInput *tick_input)
                 if (wb->next_level[0] != 0)
                 {
                     levelChangePrep(wb->next_level);
-                    time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                    time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
                     gameInitializeState(wb->next_level);
                     writeSolvedLevelsToFile();
                 }
@@ -4208,13 +4208,13 @@ void gameFrame(double delta_time, TickInput tick_input)
     }
 
     // speed up / slow down physics tick
-    if (tick_input.dot_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+    if (tick_input.dot_press && time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
     {
         char timestep_text[256] = {0};
         if (physics_timestep > DEFAULT_PHYSICS_TIMESTEP)
         {
             physics_timestep /= 2;
-            time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+            time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
             snprintf(timestep_text, sizeof(timestep_text), "physics timestep increased (%f)", physics_timestep);
             createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
         }
@@ -4223,23 +4223,23 @@ void gameFrame(double delta_time, TickInput tick_input)
             createDebugPopup("physics timestep already at minimum!", PHYSICS_TIMESTEP_CHANGE);
         }
     }
-    else if (tick_input.comma_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+    else if (tick_input.comma_press && time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
     {
         physics_timestep *= 2;
-        time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+        time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
         char timestep_text[256] = {0};
         snprintf(timestep_text, sizeof(timestep_text), "physics timestep decreased (%f)", physics_timestep);
         createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
     }
 
-    if (tick_input.backspace_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+    if (tick_input.backspace_press && time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
     {
         camera = saved_main_camera;
         camera.rotation = buildCameraQuaternion(camera);
         camera_mode = MAIN_WAITING;
         camera_lerp_t = 0.0f;
         createDebugPopup("returned camera to saved position", NO_TYPE);
-        time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+        time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
     }
 
     while (physics_accumulator >= physics_timestep)
@@ -4252,7 +4252,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (editor_state.editor_mode == NO_MODE)
         {
             // assuming game undo and restart (still no undo in editor)
-            if (time_until_game_input == 0 && tick_input.z_press)
+            if (time_until_allow_game_input == 0 && tick_input.z_press)
             {
                 int32 undo_animation_time = 0;
                 if (undos_performed == 0) undo_animation_time = 10;
@@ -4268,9 +4268,9 @@ void gameFrame(double delta_time, TickInput tick_input)
                     undos_performed++;
                 }
                 silence_unlocks_due_to_restart_or_undo = true;
-                time_until_game_input = undo_animation_time;
+                time_until_allow_game_input = undo_animation_time;
             }
-            if (time_until_game_input == 0 && tick_input.r_press)
+            if (time_until_allow_game_input == 0 && tick_input.r_press)
             {
                 // restart
                 if (!restart_last_turn) 
@@ -4320,21 +4320,21 @@ void gameFrame(double delta_time, TickInput tick_input)
               	camera = save_camera; 
                 restart_last_turn = true;
                 silence_unlocks_due_to_restart_or_undo = true;
-                time_until_game_input = META_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_game_input = META_TIME_UNTIL_ALLOW_INPUT;
             }
-			if (time_until_game_input == 0 && tick_input.escape_press && !in_overworld)
+			if (time_until_allow_game_input == 0 && tick_input.escape_press && !in_overworld)
             {
                 // leave current level if not in overworld. TODO: why is saving solved levels required here?
                 char save_solved_levels[64][64] = {0};
                 memcpy(save_solved_levels, next_world_state.solved_levels, sizeof(save_solved_levels));
                 levelChangePrep("overworld");
-                time_until_game_input = META_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_game_input = META_TIME_UNTIL_ALLOW_INPUT;
                 gameInitializeState("overworld");
                 memcpy(next_world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
                 writeSolvedLevelsToFile();
             }
 
-            if (time_until_game_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && player->in_motion == 0 && player->in_motion == 0 && !player->removed)
+            if (time_until_allow_game_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && player->in_motion == 0 && player->in_motion == 0 && !player->removed)
             {
 				// MOVEMENT 
                 Direction input_direction = 0;
@@ -4387,12 +4387,12 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 }
                             }
                             // tp sends player ontop of themselves - should count as a successful tp, but no point changing state, and don't samve to undo buffer.
-                            time_until_game_input = SUCCESSFUL_TP_TIME;
+                            time_until_allow_game_input = SUCCESSFUL_TP_TIME;
                         }
                         else
                         {
                             // tp obstructed
-                            time_until_game_input = FAILED_TP_TIME;
+                            time_until_allow_game_input = FAILED_TP_TIME;
                         }
 
                         updateLaserBuffer();
@@ -4474,7 +4474,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             {
                                 if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
                                 doStandardMovement(input_direction, next_player_coords, animation_time, true);
-                                time_until_game_input = animation_time;
+                                time_until_allow_game_input = animation_time;
                             }
                             else
                             {
@@ -4514,13 +4514,13 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
                                     doStandardMovement(input_direction, next_player_coords, animation_time, true);
                                     bypass_player_fall = true; 
-                                    time_until_game_input = MOVE_OR_PUSH_ANIMATION_TIME;
+                                    time_until_allow_game_input = MOVE_OR_PUSH_ANIMATION_TIME;
                                 }
                                 else 
                                 {
                                     resetPlayerAndPackMotion();
                                     doFailedWalkAnimations(player->direction);
-                                    time_until_game_input = FAILED_ANIMATION_TIME;
+                                    time_until_allow_game_input = FAILED_ANIMATION_TIME;
                                     updateLaserBuffer();
                                 }
                             }
@@ -4581,19 +4581,19 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 pending_undo_record = true;
                                 memcpy(&pending_undo_snapshot, &world_state, sizeof(WorldState));
 
-                                time_until_game_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
+                                time_until_allow_game_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
                             }
                             else
                             {
                                 //doFailedClimbUpAnimation();
-                                //time_until_game_input = FAILED_CLIMB_TIME;
+                                //time_until_allow_game_input = FAILED_CLIMB_TIME;
                             }
                         }
 						else if (do_failed_animations) 
                         {
                             resetPlayerAndPackMotion();
                             doFailedWalkAnimations(player->direction);
-                            time_until_game_input = FAILED_ANIMATION_TIME;
+                            time_until_allow_game_input = FAILED_ANIMATION_TIME;
                         }
                     }
                 }
@@ -4771,7 +4771,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             }
                         }
                     }
-                    time_until_game_input = TURN_ANIMATION_TIME;
+                    time_until_allow_game_input = TURN_ANIMATION_TIME;
         		}
                 else if (input_direction == oppositeDirection(player->direction))
                 {
@@ -4842,20 +4842,20 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 pending_undo_record = true;
                                 pending_undo_snapshot = world_state;
 
-                                time_until_game_input = MOVE_OR_PUSH_ANIMATION_TIME;
+                                time_until_allow_game_input = MOVE_OR_PUSH_ANIMATION_TIME;
                             }
                             else
                             {
                                 resetPlayerAndPackMotion();
                                 doFailedWalkAnimations(oppositeDirection(player->direction));
-                                time_until_game_input = FAILED_ANIMATION_TIME;
+                                time_until_allow_game_input = FAILED_ANIMATION_TIME;
                             }
                         }
                         else
                         {
                             resetPlayerAndPackMotion();
                             doFailedWalkAnimations(oppositeDirection(player->direction));
-                            time_until_game_input = FAILED_ANIMATION_TIME;
+                            time_until_allow_game_input = FAILED_ANIMATION_TIME;
                         }
                     }
                 }
@@ -4863,7 +4863,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
         else
         {
-            if (time_until_meta_input == 0) editorMode(&tick_input);
+            if (time_until_allow_meta_input == 0) editorMode(&tick_input);
         }
 
         // pack turn sequence. numbers are magic and based on how long it takes for the pack to turn - but it's kind of hard to make a good looking generalization, e.g. just using 
@@ -4985,7 +4985,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 int32 animation_time = MOVE_OR_PUSH_ANIMATION_TIME;
                 if (do_push) pushAll(next_coords, player->direction, animation_time, true, false);
                 doStandardMovement(player->direction, next_coords, animation_time, false);
-                time_until_game_input = animation_time;
+                time_until_allow_game_input = animation_time;
             }
             else if (try_climb_more)
             {
@@ -5042,7 +5042,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         pack->in_motion = CLIMB_ANIMATION_TIME;
                         pack->moving_direction = UP;
                     }
-                    time_until_game_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
+                    time_until_allow_game_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
                 }
             }
             else
@@ -5050,7 +5050,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 // can't move or climb more
                 resetPlayerAndPackMotion();
                 doFailedWalkAnimations(player->direction);
-                time_until_game_input = FAILED_ANIMATION_TIME;
+                time_until_allow_game_input = FAILED_ANIMATION_TIME;
             }
         }
 
@@ -5140,7 +5140,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // LOGIC TO DO WITH WIN, RESET, AND LOCKED BLOCKS
 
         // win block logic
-        if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_game_input == 0) && editor_state.editor_mode == NO_MODE)
+        if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_allow_game_input == 0) && editor_state.editor_mode == NO_MODE)
         {
             Entity* wb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
             if (!pack_detached && !wb->locked)
@@ -5164,7 +5164,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         }
                     }
                     levelChangePrep(wb->next_level);
-                    time_until_game_input = META_TIME_UNTIL_ALLOW_INPUT;
+                    time_until_allow_game_input = META_TIME_UNTIL_ALLOW_INPUT;
                     gameInitializeState(wb->next_level);
                 }
             }
@@ -5173,7 +5173,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 // don't allow because pack is not attached, or win block is locked!
             }
         }
-        if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.f_press && time_until_game_input == 0) && editor_state.editor_mode == NO_MODE)
+        if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.f_press && time_until_allow_game_input == 0) && editor_state.editor_mode == NO_MODE)
         {
             Entity* wb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
 			if (findInSolvedLevels(wb->next_level) == -1)
@@ -5183,7 +5183,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             writeSolvedLevelsToFile();
             createDebugPopup("level solved!", NO_TYPE);
-            time_until_game_input = META_TIME_UNTIL_ALLOW_INPUT;
+            time_until_allow_game_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
 
 		// locked block logic
@@ -5225,7 +5225,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // reset block logic - probably won't be needed in final game due to ow changes.
         /*
-        if ((getTileType(getNextCoords(player->coords, DOWN)) == RESET_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_game_input == 0) && editor_state.editor_mode == NO_MODE)
+        if ((getTileType(getNextCoords(player->coords, DOWN)) == RESET_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_allow_game_input == 0) && editor_state.editor_mode == NO_MODE)
         {
             Entity* rb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
             
@@ -5264,7 +5264,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             pending_undo_was_reset = true; // disables interpolation
             recordActionForUndo(&world_state);
-            time_until_game_input = META_TIME_UNTIL_ALLOW_INPUT;
+            time_until_allow_game_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
         */
 
@@ -5305,18 +5305,18 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // EDITOR HOTKEYS
-        if (time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+        if (time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
         {
             // change camera fov for editor
             if (tick_input.n_press && editor_state.editor_mode != NO_MODE)
             {
                 camera.fov--;
-                time_until_meta_input = 4;
+                time_until_allow_meta_input = 4;
             }
             else if (tick_input.b_press && editor_state.editor_mode != NO_MODE)
             {
                 camera.fov++;
-                time_until_meta_input = 4;
+                time_until_allow_meta_input = 4;
             }
 
             // snap camera yaw to nearest axis
@@ -5332,14 +5332,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                 char yaw_text[256] = {0};
                 snprintf(yaw_text, sizeof(yaw_text), "camera yaw snapped to: %.3f", camera_snap_yaw);
                 createDebugPopup(yaw_text, NO_TYPE);
-                time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
             }
 
             // set camera fov to wide for editor
-            if (tick_input.j_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+            if (tick_input.j_press && time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
             {
                 editor_state.do_wide_camera = !editor_state.do_wide_camera;
-                time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
                 if (editor_state.do_wide_camera)
                 {
                     if (editor_state.editor_mode == NO_MODE)
@@ -5359,44 +5359,44 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (saved_main_camera.fov == camera.fov) camera.fov = 15.0f; // if working on a new level, and have saved camera as 60fov, then default to 15
                     else camera.fov = saved_main_camera.fov;
                 }
-                time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
             }
 
             // toggle drawing
-            if (tick_input.e_press && time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+            if (tick_input.e_press && time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
             {
                 render_models = !render_models;
-                time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
             }
 
             // get rid of debug text on press
-            if (time_until_meta_input == 0 && tick_input.y_press && !(editor_state.editor_mode == SELECT_WRITE)) 
+            if (time_until_allow_meta_input == 0 && tick_input.y_press && !(editor_state.editor_mode == SELECT_WRITE)) 
             {
                 do_debug_text = !do_debug_text;
                 if (do_debug_text) createDebugPopup("debug state visibility on", DEBUG_STATE_VISIBILITY_CHANGE);
                 else			   createDebugPopup("debug state visibility off", DEBUG_STATE_VISIBILITY_CHANGE);
-                time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
             }
 
             // toggle cheating
-            if (time_until_meta_input == 0 && tick_input.three_press && !(editor_state.editor_mode == SELECT_WRITE))
+            if (time_until_allow_meta_input == 0 && tick_input.three_press && !(editor_state.editor_mode == SELECT_WRITE))
             {
                 cheating = !cheating;
                 if (cheating) createDebugPopup("cheating", CHEAT_MODE_TOGGLE);
                 else createDebugPopup("not cheating", CHEAT_MODE_TOGGLE);
-                time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
             }
         }
 
         // alternative camera: switch modes on tab. defined as meta input, so can move player at same time as tab camera change.
-        if (tick_input.tab_press && time_until_meta_input == 0 && editor_state.editor_mode == NO_MODE) 
+        if (tick_input.tab_press && time_until_allow_meta_input == 0 && editor_state.editor_mode == NO_MODE) 
         {
             if (saved_alt_camera.fov != 0)
             {
                 if (camera_mode == MAIN_WAITING || camera_mode == ALT_TO_MAIN) camera_mode = MAIN_TO_ALT;
                 else camera_mode = ALT_TO_MAIN;
             }
-            time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+            time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
 
         // perform alt <-> main camera interpolation
@@ -5464,7 +5464,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             buildLevelPathFromName(overworld_zero_name, &overworld_zero_relative_path, false);
 
             // write camera to file on c press, alternative camera on v press
-            if (time_until_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && (tick_input.c_press || tick_input.v_press))
+            if (time_until_allow_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && (tick_input.c_press || tick_input.v_press))
             {
                 char tag[4] = {0};
                 bool write_alt_camera = false;
@@ -5519,7 +5519,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 else saved_alt_camera = camera;
             }
 
-            if (time_until_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE && tick_input.x_press) 
+            if (time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE && tick_input.x_press) 
             {
                 memset(&saved_alt_camera, 0, sizeof(Camera));
                 camera = saved_main_camera;
@@ -5545,7 +5545,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
 
             // write level to file on i press
-            if (time_until_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.i_press) 
+            if (time_until_allow_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.i_press) 
             {
                 saveLevelRewrite(level_path, true);
                 saveLevelRewrite(relative_level_path, true);
@@ -5676,7 +5676,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         physics_accumulator -= physics_timestep;
 
-        if (time_until_game_input > 0) time_until_game_input--;
+        if (time_until_allow_game_input > 0) time_until_allow_game_input--;
 	}
 
     // update camera for drawing (every display frame)
@@ -5785,12 +5785,12 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (!world_state.pack.removed) drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat, VEC3_0);
 
         // draw camera boundary lines
-		if (time_until_meta_input == 0 && tick_input.t_press && !(editor_state.editor_mode == SELECT_WRITE))
+		if (time_until_allow_meta_input == 0 && tick_input.t_press && !(editor_state.editor_mode == SELECT_WRITE))
         {
             draw_level_boundary = !draw_level_boundary;
             if (draw_level_boundary) createDebugPopup("level / camera boundary visibility on", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
             else			   		 createDebugPopup("level / camera boundary visibility off", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
-			time_until_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+			time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
         }
         if (draw_level_boundary)
         {
@@ -5903,7 +5903,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         while (timer_accumulator >= 1.0/60.0)
         {
             FOR(popup_index, MAX_DEBUG_POPUP_COUNT) if (debug_popups[popup_index].frames_left > 0) debug_popups[popup_index].frames_left--;
-            if (time_until_meta_input > 0) time_until_meta_input--;
+            if (time_until_allow_meta_input > 0) time_until_allow_meta_input--;
 
             timer_accumulator -= 1.0/60.0;
         }
