@@ -1099,7 +1099,7 @@ LoadedModel loadModel(char* path)
 
 void loadAllEntities()
 {
-    vulkan_state.loaded_models[MODEL_3D_WIN_BLOCK - MODEL_3D_VOID] = loadModel("data/assets/test.glb");
+    vulkan_state.loaded_models[MODEL_3D_WIN_BLOCK - MODEL_3D_VOID] = loadModel("data/assets/flower.glb");
 
 	vulkan_state.loaded_models[MODEL_3D_MIRROR 	- MODEL_3D_VOID] = loadModel("data/assets/mirror.glb");
 

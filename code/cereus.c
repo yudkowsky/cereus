@@ -3340,6 +3340,8 @@ void gameInitialize(char* level_name, DisplayInfo display_from_platform)
     game_display = display_from_platform;
 	recalculateDebugStartCoords();
 
+    initUndoBuffer();
+
     // read overworld-zero's world state from file on startup, so it's kept in memory. this is used on restart in the overworld.
     gameInitializeState("overworld-zero");
     memcpy(&overworld_zero, &world_state, sizeof(WorldState));
