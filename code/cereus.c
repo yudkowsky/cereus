@@ -388,7 +388,7 @@ const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 const float LASER_WIDTH = 0.25;
 const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
 
-const int32 META_TIME_UNTIL_ALLOW_INPUT= 9;
+const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT= 9;
 const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
 const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9;
 const int32 TURN_ANIMATION_TIME = 9; // somewhat hard coded, tied to PUSH_FROM_TURN...
@@ -791,6 +791,18 @@ Direction getTileDirection(Int3 coords)
     return next_world_state.buffer[coordsToBufferIndexDirection(coords)]; 
 }
 
+// sets coords and position of an entity to some values, and updates the buffer accordingly 
+void moveEntityInBufferAndState(Entity* e, Int3 end_coords, Direction end_direction)
+{
+    TileType type = getTileType(e->coords); // could also get from id
+    setTileType(NONE, e->coords);
+    setTileDirection(NO_DIRECTION, e->coords);
+	e->coords = end_coords;
+    e->direction = end_direction;
+    setTileType(type, end_coords);
+    setTileDirection(end_direction, end_coords);
+}
+
 bool isSource(TileType tile) 
 {
     return (tile == SOURCE_RED || tile == SOURCE_GREEN || tile == SOURCE_BLUE || tile == SOURCE_MAGENTA || tile == SOURCE_YELLOW || tile == SOURCE_CYAN|| tile == SOURCE_WHITE);
@@ -1069,14 +1081,21 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
     return 0;
 }
 
+// updates position_norm and rotation_quat to be float/quaternion versions of integer coords/direction enum
+void setEntityVecsFromInts(Entity* e)
+{
+    e->position_norm = intCoordsToNorm(e->coords);
+    e->rotation_quat = directionToQuaternion(e->direction, true);
+}
+
 // FILE I/O
 
 // .level file structure: 
 //
 // first byte is version. version 0 is a dense representation, like the buffer i have in memory. 
-// version 1 actually encodes buffer index, tile type, direction for every object, in a sparse representation, and so is much smaller
+// version 1 encodes buffer index, tile type, direction for every object, in a sparse representation, and so is much smaller, because >99% of a level is air
 // then 3 bytes: x,y,z of level dimensions
-// next x*y*z * 2 bytes: actual level buffer. this is still dense. takes up 2MB memory for the largest level (overworld)
+// next x*y*z * 2 bytes: actual level buffer. this is still dense. takes up 2MB memory for the largest level (overworld, which is 250*250*16 in dimension; 2 bytes, one for tile type, one for direction)
 
 // then chunking starts: 4 bytes for tag, 4 bytes for size (not including tag or size), and then data
 // camera: 	 		tag: CMRA, 	size: 24 (6 * 4b), 			data: x, y, z, fov, yaw, pitch (as floats)
@@ -4005,13 +4024,13 @@ void editorMode(TickInput *tick_input)
         {
             editor_state.picked_tile++;
             if (editor_state.picked_tile == LADDER + 1) editor_state.picked_tile = VOID;
-            time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
         if (tick_input->m_press)
         {
             clearSolvedLevels();
             createDebugPopup("solved levels cleared", NO_TYPE);
-            time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
     }
 
@@ -4065,7 +4084,7 @@ void editorMode(TickInput *tick_input)
                     {
                         rb->reset_info[present_in_rb].id = -1;
                     }
-                    time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                    time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 }
                 // did not click on entity
             }
@@ -4089,7 +4108,7 @@ void editorMode(TickInput *tick_input)
                 if (wb->next_level[0] != 0)
                 {
                     levelChangePrep(wb->next_level);
-                    time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                    time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                     gameInitializeState(wb->next_level);
                     writeSolvedLevelsToFile();
                 }
@@ -4214,7 +4233,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (physics_timestep > DEFAULT_PHYSICS_TIMESTEP)
         {
             physics_timestep /= 2;
-            time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             snprintf(timestep_text, sizeof(timestep_text), "physics timestep increased (%f)", physics_timestep);
             createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
         }
@@ -4226,7 +4245,7 @@ void gameFrame(double delta_time, TickInput tick_input)
     else if (tick_input.comma_press && time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
     {
         physics_timestep *= 2;
-        time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+        time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         char timestep_text[256] = {0};
         snprintf(timestep_text, sizeof(timestep_text), "physics timestep decreased (%f)", physics_timestep);
         createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
@@ -4239,7 +4258,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         camera_mode = MAIN_WAITING;
         camera_lerp_t = 0.0f;
         createDebugPopup("returned camera to saved position", NO_TYPE);
-        time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+        time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
     }
 
     while (physics_accumulator >= physics_timestep)
@@ -4293,34 +4312,24 @@ void gameFrame(double delta_time, TickInput tick_input)
                     memcpy(&next_world_state.solved_levels, &persist_solved_levels, sizeof(char) * 64 * 64);
                     memcpy(&next_world_state.level_name, "overworld", sizeof(char) * 64);
 
-                    // set player and pack position based on game progress
-                    setTileType(NONE, player->coords);
-                    setTileDirection(NORTH, player->coords);
-                    setTileType(NONE, pack->coords);
-                    setTileDirection(NORTH, pack->coords);
+                    // set player and pack position based on game progress. assumes pack is always attached and player always faces north after a restart in overworld
+
+                    Int3 player_restart_coords = {0};
                     switch (game_progress)
                 	{
-                        case WORLD_0: player->coords = (Int3){ 58, 2, 228 }; break;
-                        case WORLD_1: player->coords = (Int3){ 58, 2, 197 }; break;
-                        case GATE_1:  player->coords = (Int3){ 58, 2, 189 }; break;
+                        case WORLD_0: player_restart_coords = (Int3){ 58, 2, 232 }; break;
+                        case WORLD_1: player_restart_coords = (Int3){ 58, 2, 197 }; break;
+                        case GATE_1:  player_restart_coords = (Int3){ 58, 2, 189 }; break;
                     }
-                    player->position_norm = intCoordsToNorm(player->coords);
-                    player->direction = NORTH;
-                    player->rotation_quat = directionToQuaternion(NORTH, false);
-                    // assume pack is always attached after a restart
-                    pack->coords = getNextCoords(player->coords, SOUTH);
-                    pack->position_norm = intCoordsToNorm(pack->coords);
-                    pack->direction = NORTH;
-                    pack->rotation_quat = directionToQuaternion(NORTH, false);
-                    setTileType(PLAYER, player->coords);
-                    setTileDirection(NORTH, player->coords);
-                    setTileType(PACK, pack->coords);
-                    setTileDirection(NORTH, pack->coords);
+                    moveEntityInBufferAndState(player, player_restart_coords, NORTH);
+                    setEntityVecsFromInts(player);
+                    moveEntityInBufferAndState(pack, getNextCoords(player->coords, SOUTH), NORTH);
+                    setEntityVecsFromInts(pack);
                 }
               	camera = save_camera; 
                 restart_last_turn = true;
                 silence_unlocks_due_to_restart_or_undo = true;
-                time_until_allow_game_input = META_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_game_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 			if (time_until_allow_game_input == 0 && tick_input.escape_press && !in_overworld)
             {
@@ -4328,7 +4337,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 char save_solved_levels[64][64] = {0};
                 memcpy(save_solved_levels, next_world_state.solved_levels, sizeof(save_solved_levels));
                 levelChangePrep("overworld");
-                time_until_allow_game_input = META_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_game_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 gameInitializeState("overworld");
                 memcpy(next_world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
                 writeSolvedLevelsToFile();
@@ -4363,27 +4372,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 pending_undo_was_teleport = true;
                                 recordActionForUndo(&world_state);
 
-                                setTileType(NONE, player->coords);
-                                setTileDirection(NORTH, player->coords);
+                                moveEntityInBufferAndState(player, player_ghost_coords, player_ghost_direction);
+                                setEntityVecsFromInts(player);
                                 zeroAnimations(PLAYER_ID);
-                                player->coords = player_ghost_coords;
-                                player->position_norm = intCoordsToNorm(player_ghost_coords);
-                                player->direction = player_ghost_direction;
-                                player->rotation_quat = directionToQuaternion(player_ghost_direction, true);
-                                setTileType(PLAYER, player_ghost_coords);
-                                setTileDirection(player_ghost_direction, player_ghost_coords);
                                 if (!pack_detached)
                                 {
-                                    Int3 pack_coords = getNextCoords(player_ghost_coords, oppositeDirection(pack_ghost_direction));
-                                    setTileType(NONE, pack->coords);
-                                    setTileDirection(NORTH, pack->coords);
+                                    moveEntityInBufferAndState(pack, pack_ghost_coords, pack_ghost_direction);
+                                    setEntityVecsFromInts(pack);
                                     zeroAnimations(PACK_ID);
-                                    pack->coords = pack_coords; 
-                                    pack->position_norm = intCoordsToNorm(pack_coords);
-                                    pack->direction = pack_ghost_direction;
-                                    pack->rotation_quat = directionToQuaternion(pack_ghost_direction, true);
-                                    setTileType(PACK, pack_coords);
-                                    setTileDirection(pack_ghost_direction, pack_coords);
                                 }
                             }
                             // tp sends player ontop of themselves - should count as a successful tp, but no point changing state, and don't samve to undo buffer.
@@ -4483,24 +4479,20 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                                 if (do_push) pushAll(next_player_coords, input_direction, 0, false, false);
 
-                                bool animations_on = false;
-
                                 if (!player->hit_by_blue)
                                 {
+                                    bool animations_on = false;
                                     doFallingObjects(animations_on);
                                     if (pack_detached) doFallingEntity(pack, animations_on);
                                     doHeadMovement(input_direction, animations_on, 1);
                                 }
 
-                                setTileType(NONE, player->coords);
-                                player->coords = next_player_coords;
-                                setTileType(PLAYER, player->coords);	
+                                moveEntityInBufferAndState(player, next_player_coords, player->direction);
 
                                 if (!pack_detached)
                                 {
-                                    setTileType(NONE, pack->coords);
-                                    pack->coords = getNextCoords(next_player_coords, oppositeDirection(input_direction));
-                                    setTileType(PACK, pack->coords);
+                                    Int3 next_pack_coords = getNextCoords(next_player_coords, oppositeDirection(input_direction));
+                                    moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
                                 }
 
                                 updateLaserBuffer();
@@ -4545,11 +4537,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                             if (can_climb)
                             {
-                                setTileType(NONE, player->coords);
-                                setTileDirection(NORTH, player->coords);
-                                player->coords = coords_above;
-                                setTileType(PLAYER, player->coords);
-                                setTileDirection(player->direction, player->coords);
+                                moveEntityInBufferAndState(player, coords_above, player->direction);
 			
                                 createInterpolationAnimation(intCoordsToNorm(getNextCoords(player->coords, DOWN)),
                                                              intCoordsToNorm(player->coords),
@@ -4562,11 +4550,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                                 if (!pack_detached)
                                 {
-                                    setTileType(NONE, pack->coords);
-                                    setTileDirection(NORTH, pack->coords);
-                                    pack->coords = getNextCoords(pack->coords, UP);
-                                    setTileType(PACK, pack->coords);
-                                    setTileDirection(pack->direction, pack->coords);
+                                    moveEntityInBufferAndState(pack, getNextCoords(pack->coords, UP), pack->direction);
 
                                     createInterpolationAnimation(intCoordsToNorm(getNextCoords(pack->coords, DOWN)),
                                                                  intCoordsToNorm(pack->coords),
@@ -4623,6 +4607,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                                          directionToQuaternion(input_direction, true), 
                                                          &player->rotation_quat,
                                                          1, TURN_ANIMATION_TIME); 
+
                             player->direction = input_direction;
                             setTileDirection(player->direction, player->coords);
                             player->moving_direction = NO_DIRECTION;
@@ -4804,13 +4789,11 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 }
                                 if (!player->hit_by_blue) doHeadMovement(backwards_direction, true, MOVE_OR_PUSH_ANIMATION_TIME);
             
+                                // since moving backwards, move pack first so no accidental overlap during movement
                                 if (!pack_detached)
                                 {
-                                    setTileType(NONE, pack->coords);
-                                    setTileDirection(NORTH, pack->coords);
-                                    pack->coords = getNextCoords(pack->coords, backwards_direction);
-                                    setTileType(PACK, pack->coords);
-                                    setTileDirection(pack->direction, pack->coords);
+                                    Int3 next_pack_coords = getNextCoords(pack->coords, backwards_direction);
+                                    moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
 
                                     createInterpolationAnimation(intCoordsToNorm(getNextCoords(pack->coords, player->direction)),
                                                                  intCoordsToNorm(pack->coords),
@@ -4820,12 +4803,11 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                                     pack->in_motion = MOVE_OR_PUSH_ANIMATION_TIME;
                                     pack->moving_direction = backwards_direction;
+                                    pack->first_fall_already_done = true;
                                 }
-                                setTileType(NONE, player->coords);
-                                setTileDirection(NORTH, player->coords);
-                                player->coords = getNextCoords(player->coords, backwards_direction);
-                                setTileType(PLAYER, player->coords);
-                                setTileDirection(player->direction, player->coords);
+
+                                next_player_coords = getNextCoords(player->coords, backwards_direction);
+                                moveEntityInBufferAndState(player, next_player_coords, player->direction);
 
                                 createInterpolationAnimation(intCoordsToNorm(getNextCoords(player->coords, player->direction)),
                                                              intCoordsToNorm(player->coords),
@@ -4835,9 +4817,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                                 player->in_motion = MOVE_OR_PUSH_ANIMATION_TIME;
                                 player->moving_direction = backwards_direction;
-
                                 player->first_fall_already_done = true;
-                                if (!pack_detached) pack->first_fall_already_done = true;
 
                                 pending_undo_record = true;
                                 pending_undo_snapshot = world_state;
@@ -4863,11 +4843,13 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
         else
         {
+            // if not in editor mode NO_MODE, go into editor mode fn
             if (time_until_allow_meta_input == 0) editorMode(&tick_input);
         }
 
-        // pack turn sequence. numbers are magic and based on how long it takes for the pack to turn - but it's kind of hard to make a good looking generalization, e.g. just using 
+        // pack turn sequence. numbers are magic and based on how long it takes for the pack to turn. this is because it's kind of hard to make a good looking generalization, e.g. just using 
         // fractions of TURN_ANIMATION_TIME because it looks awkward for small values of the animation (anything less than 20) so i just hard code these numbers.
+        // they control when during a turn does the backpack push things, and what tile(s) does the backpack occupy for the purposes of laser passthrough
         if (pack_turn_state.pack_intermediate_states_timer > 0)
         {
             if (pack_turn_state.pack_intermediate_states_timer == 7)
@@ -5010,11 +4992,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     {
 						pushUp(coords_above, CLIMB_ANIMATION_TIME);
                     }
-                    setTileType(NONE, player->coords);
-                    setTileDirection(NORTH, player->coords);
-                    player->coords = coords_above;
-                    setTileType(PLAYER, player->coords);
-                    setTileDirection(player->direction, player->coords);
+                    moveEntityInBufferAndState(player, coords_above, player->direction);
 
                     createInterpolationAnimation(intCoordsToNorm(getNextCoords(player->coords, DOWN)),
                                                  intCoordsToNorm(player->coords),
@@ -5027,11 +5005,8 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                     if (!pack_detached)
                     {
-                        setTileType(NONE, pack->coords);
-                        setTileDirection(NORTH, pack->coords);
-                        pack->coords = getNextCoords(pack->coords, UP);
-                        setTileType(PACK, pack->coords);
-                        setTileDirection(pack->direction, pack->coords);
+                        Int3 coords_above_pack = getNextCoords(pack->coords, UP);
+                        moveEntityInBufferAndState(pack, coords_above_pack, pack->direction);
 
                         createInterpolationAnimation(intCoordsToNorm(getNextCoords(pack->coords, DOWN)),
                                                      intCoordsToNorm(pack->coords),
@@ -5060,22 +5035,27 @@ void gameFrame(double delta_time, TickInput tick_input)
         else if (pack_detached && tile_behind_player == PACK) pack_detached = false;
 
         // do animations
+        // the animation system is just an array, where the frames_left decrement each frame. 
+        // animations[index].position[frames left of animation] is the position that writes to animations[index].position_to_change, which is a pointer to the position_norm field of an entity.
+        // same goes for rotation. this whole system will be changed when i have more sophisticated animations
 		for (int animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
         {
-			if (animations[animation_index].frames_left == 0) continue;
-			if (animations[animation_index].position_to_change != 0) 
+            Animation* a = &animations[animation_index];
+			if (a->frames_left == 0) continue;
+			if (a->position_to_change != 0) 
             {
-                Vec3 next_pos = animations[animation_index].position[animations[animation_index].frames_left-1];
-                if (!vec3IsZero(next_pos)) *animations[animation_index].position_to_change = next_pos; 
+                Vec3 next_pos = a->position[a->frames_left-1];
+                if (!vec3IsZero(next_pos)) *a->position_to_change = next_pos; 
+                //*a->position_to_change = a->position[a->frames_left-1];
             }
-			if (animations[animation_index].rotation_to_change != 0) 
+			if (a->rotation_to_change != 0) 
             {
-				*animations[animation_index].rotation_to_change = animations[animation_index].rotation[animations[animation_index].frames_left-1];
+				*a->rotation_to_change = a->rotation[a->frames_left-1];
             }
             animations[animation_index].frames_left--;
         }
 
-        // decrement in_motion / moving_direction and reset first_fall_already_done
+        // decrement in_motion / moving_direction and reset first_fall_already_done for pushable entities, if they should be reset
         Entity* falling_entity_groups[6] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.glass_blocks, next_world_state.sources, next_world_state.win_blocks, next_world_state.reset_blocks };
         FOR(falling_object_index, 6)
         {
@@ -5140,12 +5120,19 @@ void gameFrame(double delta_time, TickInput tick_input)
         // LOGIC TO DO WITH WIN, RESET, AND LOCKED BLOCKS
 
         // win block logic
-        if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_allow_game_input == 0) && editor_state.editor_mode == NO_MODE)
+        if (getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK)
         {
-            Entity* wb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
-            if (!pack_detached && !wb->locked)
+            if (tick_input.q_press && time_until_allow_game_input == 0)
             {
-                if (wb->next_level[0] != 0)
+                // go to win_block.next_level if conditions are met
+                Entity* wb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
+                bool do_win_block_usage = true;
+                if (editor_state.editor_mode != NO_MODE) do_win_block_usage = false;
+                if (pack_detached) do_win_block_usage = false;
+                if (wb->locked) do_win_block_usage = false;
+                if (wb->next_level[0] == 0) do_win_block_usage = false; // don't go through if there is no next level here yet
+
+                if (do_win_block_usage)
                 {
                     if (in_overworld) 
                     {
@@ -5163,30 +5150,36 @@ void gameFrame(double delta_time, TickInput tick_input)
                             saved_overworld_camera_mode = MAIN_WAITING;
                         }
                     }
+					zeroAnimations(PLAYER_ID);
+                    zeroAnimations(PACK_ID);
                     levelChangePrep(wb->next_level);
-                    time_until_allow_game_input = META_TIME_UNTIL_ALLOW_INPUT;
+                    time_until_allow_game_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                     gameInitializeState(wb->next_level);
                 }
             }
-            else
+            else if (tick_input.f_press && time_until_allow_game_input == 0)
             {
-                // don't allow because pack is not attached, or win block is locked!
-            }
-        }
-        if ((getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.f_press && time_until_allow_game_input == 0) && editor_state.editor_mode == NO_MODE)
-        {
-            Entity* wb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
-			if (findInSolvedLevels(wb->next_level) == -1)
-            {
-                int32 next_free = nextFreeInSolvedLevels(&next_world_state.solved_levels);
-                strcpy(next_world_state.solved_levels[next_free], wb->next_level);
-            }
-            writeSolvedLevelsToFile();
-            createDebugPopup("level solved!", NO_TYPE);
-            time_until_allow_game_input = META_TIME_UNTIL_ALLOW_INPUT;
-        }
+                // add win_block.next_level to solved_levels. this is a debug bind
+                bool solve_level = true;
+                if (editor_state.editor_mode != NO_MODE) solve_level = false;
 
+                if (solve_level)
+                {
+                    Entity* wb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
+                    if (findInSolvedLevels(wb->next_level) == -1)
+                    {
+                        int32 next_free = nextFreeInSolvedLevels(&next_world_state.solved_levels);
+                        strcpy(next_world_state.solved_levels[next_free], wb->next_level);
+                    }
+                    writeSolvedLevelsToFile();
+                    createDebugPopup("level solved!", NO_TYPE);
+                    time_until_allow_game_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                }
+            }
+        }
+        
 		// locked block logic
+        // TODO: currently iterating this every frame on every entity, which is pretty wasteful. should instead just change this if some action that could impact locked-ness happened that frame.
         Entity* entity_group[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.win_blocks, next_world_state.sources };
         FOR(group_index, 4)
         {
@@ -5264,7 +5257,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             pending_undo_was_reset = true; // disables interpolation
             recordActionForUndo(&world_state);
-            time_until_allow_game_input = META_TIME_UNTIL_ALLOW_INPUT;
+            time_until_allow_game_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
         */
 
@@ -5286,9 +5279,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (!pack_detached) do_pack_ghost = true;
         }
 
-        // final redo of laser buffer, after all logic is complete, for drawing // TODO: which of these calls throughout the code are now needed?
-		updateLaserBuffer();
-
         // update gameProgress based on which levels are solved, and current coords of the player
         if (findInSolvedLevels("red-last") != -1)
         {
@@ -5304,7 +5294,10 @@ void gameFrame(double delta_time, TickInput tick_input)
             recordActionForUndo(&pending_undo_snapshot);
         }
 
-        // EDITOR HOTKEYS
+        // final redo of laser buffer, after all logic is complete, for drawing // TODO: which of these calls throughout the code are now needed?
+		updateLaserBuffer();
+
+        // handle debug hotkeys which don't only work when in editor mode
         if (time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
         {
             // change camera fov for editor
@@ -5332,14 +5325,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                 char yaw_text[256] = {0};
                 snprintf(yaw_text, sizeof(yaw_text), "camera yaw snapped to: %.3f", camera_snap_yaw);
                 createDebugPopup(yaw_text, NO_TYPE);
-                time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 
             // set camera fov to wide for editor
             if (tick_input.j_press && time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
             {
                 editor_state.do_wide_camera = !editor_state.do_wide_camera;
-                time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 if (editor_state.do_wide_camera)
                 {
                     if (editor_state.editor_mode == NO_MODE)
@@ -5359,14 +5352,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                     if (saved_main_camera.fov == camera.fov) camera.fov = 15.0f; // if working on a new level, and have saved camera as 60fov, then default to 15
                     else camera.fov = saved_main_camera.fov;
                 }
-                time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 
             // toggle drawing
             if (tick_input.e_press && time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
             {
                 render_models = !render_models;
-                time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 
             // get rid of debug text on press
@@ -5375,7 +5368,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 do_debug_text = !do_debug_text;
                 if (do_debug_text) createDebugPopup("debug state visibility on", DEBUG_STATE_VISIBILITY_CHANGE);
                 else			   createDebugPopup("debug state visibility off", DEBUG_STATE_VISIBILITY_CHANGE);
-                time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 
             // toggle cheating
@@ -5384,7 +5377,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 cheating = !cheating;
                 if (cheating) createDebugPopup("cheating", CHEAT_MODE_TOGGLE);
                 else createDebugPopup("not cheating", CHEAT_MODE_TOGGLE);
-                time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
         }
 
@@ -5396,7 +5389,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (camera_mode == MAIN_WAITING || camera_mode == ALT_TO_MAIN) camera_mode = MAIN_TO_ALT;
                 else camera_mode = ALT_TO_MAIN;
             }
-            time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
 
         // perform alt <-> main camera interpolation
@@ -5679,6 +5672,17 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (time_until_allow_game_input > 0) time_until_allow_game_input--;
 	}
 
+    // now out of the fixed physics-time loop; stuff out here happens every draw call, not just every physics frame. e.g., camera movement is smooth at whatever framerate game is runinng at
+    // draw calls are also out here, but position_norm and rotation_quat for entites is only updated every physics frame anyway, so even if they're drawn 2-3 times per physics frame 
+    // on a 144hz monitor, they're still at the same positions. next step here would be to add interpolations between these states, but i'm waiting until i've got a more sophisticated animation
+    // system before doing that. 
+    // 
+    // also, i don't want to sacrifice the already maybe-very-bad game feel here, and interpolating between states seems to mean that i have to run 1 physics frame, or 16ms, behind, 
+    // to have something to interpolate against. there's probably some cheating you can do by predicting the next position and interpolating against that when in the middle of an animation, 
+    // but that doesn't solve the problem of an action happening after some delay when pressing a button, which i don't want. 
+    // so i also want to set up buffered inputs before setting this up, so i can see if this is actually a problem, and if there's any solution within my current system, or if i can find some 
+    // other solution, e.g. just running physics at 120hz.
+
     // update camera for drawing (every display frame)
     camera_with_ow_offset = camera;
     if (in_overworld)
@@ -5718,7 +5722,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         /*
-        // show start points
+        // debug: write laser start and end coords
         FOR(lb_index, 64)
         {
             LaserBuffer lb = laser_buffer[lb_index];
@@ -5732,7 +5736,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // clear laser buffer 
         memset(laser_buffer, 0, sizeof(laser_buffer));
 
-        // draw most things (not player or pack) TODO: after models can include pack here because can be DEFAULT_SCALE
+        // draw most things (not player or pack) TODO: after models can include pack here because can be DEFAULT_SCALE. after actual shaders for the color of the player can also include player here
         for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
         {
             TileType draw_tile = world_state.buffer[tile_index];
@@ -5790,7 +5794,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             draw_level_boundary = !draw_level_boundary;
             if (draw_level_boundary) createDebugPopup("level / camera boundary visibility on", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
             else			   		 createDebugPopup("level / camera boundary visibility off", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
-			time_until_allow_meta_input = META_TIME_UNTIL_ALLOW_INPUT;
+			time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
         if (draw_level_boundary)
         {
