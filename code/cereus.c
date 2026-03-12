@@ -502,8 +502,6 @@ static WorldState overworld_zero = {0}; // TODO: probably don't have to carry th
 Int3 level_dim = {0};
 
 UndoBuffer undo_buffer = {0};
-bool pending_undo_was_teleport = false;
-bool pending_undo_was_reset = false;
 int32 undos_performed = 0;
 bool restart_last_turn = false;
 
@@ -3421,7 +3419,8 @@ void evictOldestUndoAction()
 
 // called after a noraml (non-level-change) action
 // diffs world_state vs. next_world_state and stores deltas for every entity that changed
-void recordActionForUndo(WorldState* old_state)
+// was_reset and was_teleport currently do the same thing: cancel interpolation animations for the player (and pack if attached) for that action.
+void recordActionForUndo(WorldState* old_state, bool action_was_reset, bool action_was_teleport)
 {
     if (undo_buffer.header_count >= MAX_UNDO_ACTIONS) evictOldestUndoAction();
 
@@ -3450,10 +3449,8 @@ void recordActionForUndo(WorldState* old_state)
     undo_buffer.headers[header_index].entity_count = (uint8)entity_count;
     undo_buffer.headers[header_index].delta_start_pos = delta_start;
     undo_buffer.headers[header_index].level_changed = false;
-    undo_buffer.headers[header_index].was_teleport = pending_undo_was_teleport;
-    undo_buffer.headers[header_index].was_reset = pending_undo_was_reset;
-    pending_undo_was_teleport = false;
-    pending_undo_was_reset = false;
+    undo_buffer.headers[header_index].was_teleport = action_was_teleport;
+    undo_buffer.headers[header_index].was_reset = action_was_reset;
     undo_buffer.level_change_indices[header_index] = 0xFF;
     undo_buffer.header_write_pos = (header_index + 1) % MAX_UNDO_ACTIONS;
     undo_buffer.header_count++;
@@ -3857,7 +3854,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
         changeMoving(pack);
     }
 
-    if (record_for_undo) recordActionForUndo(&world_state);
+    if (record_for_undo) recordActionForUndo(&world_state, false, false);
 }
 
 void updatePackDetached()
@@ -4276,8 +4273,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 // restart
                 if (!restart_last_turn) 
                 {
-                    pending_undo_was_reset = true; // disables interpolation
-                    recordActionForUndo(&world_state);
+                    recordActionForUndo(&world_state, true, false);
                 }
                 createDebugPopup("level restarted", NO_TYPE);
                 memset(animations, 0, sizeof(animations));
@@ -4351,8 +4347,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         {
                             if (!int3IsEqual(player_ghost_coords, player->coords))
                             {
-                                pending_undo_was_teleport = true;
-                                recordActionForUndo(&world_state);
+                                recordActionForUndo(&world_state, false, true);
 
                                 moveEntityInBufferAndState(player, player_ghost_coords, player_ghost_direction);
                                 setEntityVecsFromInts(player);
@@ -4544,7 +4539,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     pack->moving_direction = UP;
                                 }
 
-                                recordActionForUndo(&world_state);
+                                recordActionForUndo(&world_state, false, false);
 
                                 time_until_allow_game_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
                             }
@@ -4593,7 +4588,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             setTileDirection(player->direction, player->coords);
                             player->moving_direction = NO_DIRECTION;
 
-                            recordActionForUndo(&world_state);
+                            recordActionForUndo(&world_state, false, false);
                         }
                         else
                         {
@@ -4687,14 +4682,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     {
                                         if (push_diagonal) 
                                         {
-                                            recordActionForUndo(&world_state);
+                                            recordActionForUndo(&world_state, false, false);
                                             pushAll(diagonal_coords, oppositeDirection(input_direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false);
                                         }
                                         doFailedTurnAnimations(input_direction, clockwise);
                                     }
                                     else
                                     {
-                                        recordActionForUndo(&world_state);
+                                        recordActionForUndo(&world_state, false, false);
 
                                         createTrailingHitbox(pack->coords, input_direction, NO_DIRECTION, FIRST_TRAILING_PACK_TURN_HITBOX_TIME, PACK);
 
@@ -4798,7 +4793,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 player->moving_direction = backwards_direction;
                                 player->first_fall_already_done = true;
 
-                                recordActionForUndo(&world_state);
+                                recordActionForUndo(&world_state, false, false);
 
                                 time_until_allow_game_input = MOVE_OR_PUSH_ANIMATION_TIME;
                             }
@@ -5090,8 +5085,6 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
         }
 
-        // LOGIC TO DO WITH WIN, RESET, AND LOCKED BLOCKS
-
         // win block logic
         if (getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK)
         {
@@ -5188,51 +5181,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 setTileDirection(NORTH, lb->coords);
             }
         }
-
-        // reset block logic - probably won't be needed in final game due to ow changes.
-        /*
-        if ((getTileType(getNextCoords(player->coords, DOWN)) == RESET_BLOCK && !presentInAnimations(PLAYER_ID)) && (tick_input.q_press && time_until_allow_game_input == 0) && editor_state.editor_mode == NO_MODE)
-        {
-            Entity* rb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
-            
-            // clear current positions
-            FOR(to_reset_index, MAX_RESET_COUNT)
-            {
-                ResetInfo ri = rb->reset_info[to_reset_index];
-                if (ri.id == -1) continue;
-                Entity* reset_e = getEntityFromId(ri.id);
-                if (reset_e != 0 && !reset_e->removed)
-                {
-                    //zeroAnimations(reset_e->id);
-                    setTileType(NONE, reset_e->coords);
-                    setTileDirection(NORTH, reset_e->coords);
-                }
-            }
-
-            // place at start positions
-            FOR(to_reset_index, MAX_RESET_COUNT)
-            {
-                ResetInfo ri = rb->reset_info[to_reset_index];
-                if (ri.id == -1) continue;
-                Entity* reset_e = getEntityFromId(ri.id);
-                if (reset_e != 0)
-                {
-                    reset_e->coords = ri.start_coords;
-                    reset_e->position_norm = intCoordsToNorm(reset_e->coords);
-                    reset_e->direction = ri.start_direction;
-                    reset_e->rotation_quat = directionToQuaternion(ri.start_direction, true);
-                    reset_e->removed = false;
-
-                    TileType type = getTileTypeFromId(ri.id);
-                    setTileType(type, ri.start_coords);
-                    setTileDirection(ri.start_direction, ri.start_coords);
-                }
-            }
-            pending_undo_was_reset = true; // disables interpolation
-            recordActionForUndo(&world_state);
-            time_until_allow_game_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
-        */
 
         // MISC STUFF
 
