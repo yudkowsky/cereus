@@ -489,20 +489,19 @@ bool draw_level_boundary = false;
 
 float camera_lerp_t = 0.0f;
 const float CAMERA_T_TIMESTEP = 0.05f;
-int32 camera_target_plane = 0; // y level of xz plane targeted during camera interpolation function TODO: should probably be something defined by level, not just player coords at startup
+int32 camera_target_plane = 0; // y level of xz plane which calculates targeted point during camera interpolation function 
+                               // TODO: should probably be something defined by level, not just player coords at startup
 
 DrawCommand draw_commands[8192] = {0};
 int32 draw_command_count = 0;
 
 static WorldState world_state = {0};
 static WorldState next_world_state = {0};
-static WorldState pending_undo_snapshot = {0}; // TODO: pending_undo_snapshot and leap_of_faith_snapshot don't change the buffer, so could save 4MB memory by using some EntitySnapshot struct
-static WorldState leap_of_faith_snapshot = {0};
+static WorldState leap_of_faith_snapshot = {0}; // TODO: doesn't change the buffer, so could save 2MB memory by using some EntitySnapshot struct
 static WorldState overworld_zero = {0}; // TODO: probably don't have to carry this around, just read from zeroed overworld file when i need this (on restart in overworld)
 Int3 level_dim = {0};
 
 UndoBuffer undo_buffer = {0};
-bool pending_undo_record = false;
 bool pending_undo_was_teleport = false;
 bool pending_undo_was_reset = false;
 int32 undos_performed = 0;
@@ -3380,6 +3379,17 @@ void gameRedraw(DisplayInfo display_from_platform)
 
 // UNDO / RESTART
 
+// the undo system uses three circular buffers:
+// 1. deltas: records id, coords, direction for individual entities
+// 2. headers: groups deltas
+// 3. level_changes: stores extra data which is required when an action changes the current level.
+//
+// every action taken in the game that wants to be able to be undone records the old state of every entity before the action happened. 
+// note, this is pretty lazy; could be smarter about exactly what enities need a delta, and only store those, and that would be supported in this system, but it's sometimes pretty 
+// difficult to know what entities will be affected by an action and thus need a delta without just simulating forward. this is a solveable problem, but for now i'm just storing deltas for every entity.
+//
+//
+
 // writes one delta into the circular buffer
 void recordEntityDelta(Entity* e)
 {
@@ -3793,9 +3803,7 @@ void doHeadRotation(bool clockwise)
 
         // for mirror
         if (!up_or_down) createInterpolationAnimation(VEC3_0, VEC3_0, 0, 
-                                                     directionToQuaternion(current_direction, true), 
-                                                     directionToQuaternion(next_direction, true), 
-                                                     &entity->rotation_quat,
+                                                     directionToQuaternion(current_direction, true), directionToQuaternion(next_direction, true), &entity->rotation_quat,
                                                      id, TURN_ANIMATION_TIME);
         else 
         {
@@ -3828,54 +3836,28 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
 
     if (!player->hit_by_blue) doHeadMovement(input_direction, true, animation_time);
 
-    createInterpolationAnimation(intCoordsToNorm(player->coords), 
-                                 intCoordsToNorm(next_player_coords), 
-                                 &player->position_norm,
+    createInterpolationAnimation(intCoordsToNorm(player->coords), intCoordsToNorm(next_player_coords), &player->position_norm,
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                  PLAYER_ID, animation_time);
+    createTrailingHitbox(player->coords, input_direction, NO_DIRECTION, TRAILING_HITBOX_TIME, PLAYER);
+    moveEntityInBufferAndState(player, next_player_coords, player->direction);
+    player->moving_direction = input_direction;
+    changeMoving(player);
 
-    int32 trailing_hitbox_time = TRAILING_HITBOX_TIME;
-    createTrailingHitbox(player->coords, input_direction, NO_DIRECTION, trailing_hitbox_time, PLAYER);
-
-    // move pack also maybe
-    if (pack_detached) 
+    // move pack also if pack is attached
+    if (!pack_detached)
     {
-        setTileType(NONE, player->coords);
-        setTileDirection(NORTH, player->coords);
-    }
-    else 
-    {
-        setTileType(NONE, pack->coords);
-        setTileDirection(NORTH, pack->coords);
-        setTileType(PACK, player->coords);
-        createInterpolationAnimation(intCoordsToNorm(pack->coords),
-                                     intCoordsToNorm(player->coords),
-                                     &pack->position_norm,
+        Int3 next_pack_coords = getNextCoords(pack->coords, input_direction);
+        createInterpolationAnimation(intCoordsToNorm(pack->coords), intCoordsToNorm(next_pack_coords), &pack->position_norm,
                                      IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                      PACK_ID, animation_time);
-
-        createTrailingHitbox(pack->coords, input_direction, NO_DIRECTION, trailing_hitbox_time, PACK);
-
-        pack->coords = player->coords;
-        setTileDirection(pack->direction, pack->coords);
-
+        createTrailingHitbox(pack->coords, input_direction, NO_DIRECTION, TRAILING_HITBOX_TIME, PACK);
+        moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
         pack->moving_direction = input_direction;
+        changeMoving(pack);
     }
 
-    player->coords = next_player_coords;
-    setTileType(PLAYER, player->coords);	
-    setTileDirection(player->direction, player->coords);
-
-    player->moving_direction = input_direction;
-
-    changeMoving(player);
-    changeMoving(pack);
-
-    if (record_for_undo)
-    {
-        pending_undo_record = true;
-        memcpy(&pending_undo_snapshot, &world_state, sizeof(WorldState));
-    }
+    if (record_for_undo) recordActionForUndo(&world_state);
 }
 
 void updatePackDetached()
@@ -4562,8 +4544,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     pack->moving_direction = UP;
                                 }
 
-                                pending_undo_record = true;
-                                memcpy(&pending_undo_snapshot, &world_state, sizeof(WorldState));
+                                recordActionForUndo(&world_state);
 
                                 time_until_allow_game_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
                             }
@@ -4612,8 +4593,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             setTileDirection(player->direction, player->coords);
                             player->moving_direction = NO_DIRECTION;
 
-                            pending_undo_record = true;
-                            pending_undo_snapshot = world_state;
+                            recordActionForUndo(&world_state);
                         }
                         else
                         {
@@ -4714,8 +4694,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     }
                                     else
                                     {
-                                        pending_undo_record = true;
-                                        pending_undo_snapshot = world_state;
+                                        recordActionForUndo(&world_state);
 
                                         createTrailingHitbox(pack->coords, input_direction, NO_DIRECTION, FIRST_TRAILING_PACK_TURN_HITBOX_TIME, PACK);
 
@@ -4819,8 +4798,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 player->moving_direction = backwards_direction;
                                 player->first_fall_already_done = true;
 
-                                pending_undo_record = true;
-                                pending_undo_snapshot = world_state;
+                                recordActionForUndo(&world_state);
 
                                 time_until_allow_game_input = MOVE_OR_PUSH_ANIMATION_TIME;
                             }
@@ -4847,9 +4825,12 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (time_until_allow_meta_input == 0) editorMode(&tick_input);
         }
 
-        // pack turn sequence. numbers are magic and based on how long it takes for the pack to turn. this is because it's kind of hard to make a good looking generalization, e.g. just using 
+        // pack turn sequence
+        // the pack_intermediate_states_timer numbers control when during a turn does the backpack push things, and what tile(s) does the backpack occupy for the purposes of laser passthrough
+
+        // numbers are magic and based on how long it takes for the pack to turn. this is because it's kind of hard to make a good looking generalization, e.g. just using 
         // fractions of TURN_ANIMATION_TIME because it looks awkward for small values of the animation (anything less than 20) so i just hard code these numbers.
-        // they control when during a turn does the backpack push things, and what tile(s) does the backpack occupy for the purposes of laser passthrough
+
         if (pack_turn_state.pack_intermediate_states_timer > 0)
         {
             if (pack_turn_state.pack_intermediate_states_timer == 7)
@@ -4878,14 +4859,6 @@ void gameFrame(double delta_time, TickInput tick_input)
                 setTileType(PACK, pack->coords);
                 setTileDirection(pack->direction, pack->coords);
                 createTrailingHitbox(pack_turn_state.pack_intermediate_coords, pack->direction, NO_DIRECTION, 3, PACK);
-            }
-            else if (pack_turn_state.pack_intermediate_states_timer == 1)
-            { 
-                if (pending_undo_record)
-                {
-                    pending_undo_record = false;
-                    recordActionForUndo(&pending_undo_snapshot);
-                }
             }
             pack_turn_state.pack_intermediate_states_timer--;
         }
@@ -5286,13 +5259,6 @@ void gameFrame(double delta_time, TickInput tick_input)
 			else game_progress = WORLD_1;
         }
         else game_progress = WORLD_0;
-
-        // record undo if this is pushed to later, most likely due to pack turn
-        if (pending_undo_record)
-        {
-            pending_undo_record = false;
-            recordActionForUndo(&pending_undo_snapshot);
-        }
 
         // final redo of laser buffer, after all logic is complete, for drawing // TODO: which of these calls throughout the code are now needed?
 		updateLaserBuffer();
