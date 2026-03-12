@@ -2453,67 +2453,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &model_ci, 0, &vulkan_state.model_pipeline_handle);
     }
 
-    /*
-    // define model blackline pipeline: 
-    {
-        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
-
-        color_blend_attachment_state.blendEnable = VK_FALSE;
-
-        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
-        depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
-        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
-
-        depth_stencil_state_creation_info.stencilTestEnable = VK_TRUE;
-        depth_stencil_state_creation_info.front.failOp = VK_STENCIL_OP_KEEP;
-        depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_KEEP;
-        depth_stencil_state_creation_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
-        depth_stencil_state_creation_info.front.compareOp = VK_COMPARE_OP_NOT_EQUAL;
-        depth_stencil_state_creation_info.front.compareMask = 0xFF;
-        depth_stencil_state_creation_info.front.writeMask = 0x00;
-        depth_stencil_state_creation_info.front.reference = 2;
-        depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
-
-        rasterization_state_creation_info.cullMode = VK_CULL_MODE_FRONT_BIT;
-
-        VkGraphicsPipelineCreateInfo model_blackline_ci = base_graphics_pipeline_creation_info;
-        model_blackline_ci.pStages = model_blackline_shader_stages;
-        model_blackline_ci.layout = vulkan_state.model_pipeline_layout;
-
-        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &model_blackline_ci, 0, &vulkan_state.model_blackline_pipeline_handle);
-    }
-
-    // define model outline stencil clear pipeline
-    {
-        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
-
-        color_blend_attachment_state.colorWriteMask = 0; // write nothing to color
-
-        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
-        depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
-        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-
-        depth_stencil_state_creation_info.stencilTestEnable = VK_TRUE;
-        depth_stencil_state_creation_info.front.failOp = VK_STENCIL_OP_ZERO;
-        depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_ZERO;
-        depth_stencil_state_creation_info.front.depthFailOp = VK_STENCIL_OP_ZERO;
-        depth_stencil_state_creation_info.front.compareOp = VK_COMPARE_OP_ALWAYS;
-        depth_stencil_state_creation_info.front.compareMask = 0xFF;
-        depth_stencil_state_creation_info.front.writeMask = 0xFF;
-        depth_stencil_state_creation_info.front.reference = 0;
-        depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
-
-        rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
-        rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-
-        VkGraphicsPipelineCreateInfo clear_ci = base_graphics_pipeline_creation_info;
-        clear_ci.pStages = model_shader_stages; // reuse fill shaders, doesn't matter since color write is off
-        clear_ci.layout = vulkan_state.model_pipeline_layout;
-
-        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &clear_ci, 0, &vulkan_state.model_stencil_clear_pipeline_handle);
-    }
-    */
-
     // define outline post pipeline. different enough that we might as well set up an entirely new creation info. sets up state first, then assigns TODO: see if i can do some cleanup here
     {
         VkPipelineInputAssemblyStateCreateInfo post_input_assembly_state_ci = {0};
@@ -2620,13 +2559,15 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     {
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
-        color_blend_attachment_state.blendEnable = VK_TRUE;
+        color_blend_attachment_state.blendEnable = VK_FALSE;
+        /*
         color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
         color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
+        */
 
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
@@ -2636,7 +2577,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_KEEP;
         depth_stencil_state_creation_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
         depth_stencil_state_creation_info.front.compareOp = VK_COMPARE_OP_EQUAL;
-        depth_stencil_state_creation_info.front.compareMask = 0xFF;
+        depth_stencil_state_creation_info.front.compareMask = 0x01;
         depth_stencil_state_creation_info.front.writeMask = 0x00;
         depth_stencil_state_creation_info.front.reference = 0;
         depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
