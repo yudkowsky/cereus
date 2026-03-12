@@ -197,7 +197,7 @@ Push;
 
 // this is a bunch of state to do with handling what gets pushed when during the turn. pack_intermediate_states_timer is the main thing: it just ticks down while the player is turning.
 // later there is a loop with some numbers that look nice for when things should be turning, based on this timer. the objects don't get pushed the same frame the player turns,
-// so we need to store the coords of what to push, and what direction to push it (if we are pushing during this turn)
+// so need to store the coords of what to push, and what direction to push it (if it is pushing during this turn)
 typedef struct
 {
     int32 pack_intermediate_states_timer;
@@ -2489,19 +2489,12 @@ void pushUp(Int3 coords, int32 animation_time)
         TileType tile = getTileType(current_coords);
         Direction dir = getTileDirection(current_coords);
         Entity* e = getEntityAtCoords(current_coords);
-        setTileType(NONE, current_coords);
-        setTileDirection(NORTH, current_coords);
         Int3 coords_above = getNextCoords(current_coords, UP);
-        setTileType(tile, coords_above);
-        setTileDirection(dir, coords_above);
-        e->coords = coords_above;
-        createInterpolationAnimation(intCoordsToNorm(current_coords),
-                					 intCoordsToNorm(coords_above),
-                                     &e->position_norm,
+        moveEntityInBufferAndState(e, coords_above, dir);
+        createInterpolationAnimation(intCoordsToNorm(current_coords), intCoordsToNorm(coords_above), &e->position_norm,
                 					 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                      e->id, animation_time);
     	createTrailingHitbox(current_coords, UP, NO_DIRECTION, (animation_time / 2) + 1, tile);
-
         current_coords = getNextCoords(current_coords, DOWN);
     }
 }
@@ -2665,7 +2658,7 @@ int32 findNextFreeInLaserBuffer()
 // 
 
 // TODO: - need guard on offset_magnitude in the mirrors: if too close to edge, don't want to allow reflection
-// 		 - look if we need to round from position_norm instead of checking if player is turning for some calculations; does this handle first falls vs. other falls correctly..?
+// 		 - look if need to round from position_norm instead of checking if player is turning for some calculations; does this handle first falls vs. other falls correctly..?
 // 		 - figure out moving sources and their lasers
 // 		 - two mirrors moving at once isnt handled.
 // 		 - looks weird during some undo interpolation edge cases, because i don't write moving_direction correctly sometimes.
@@ -2735,7 +2728,7 @@ void updateLaserBuffer(void)
             // TODO: moving sources should emit their laser based on position_norm, not on integer coords. but i haven't designed these levels yet anyway.
         }
 
-        int32 skip_mirror_id = 0; // because lasers will sometimes be 'between' integer coordinates, it can sometimes hit mirrors twice. so just store the id of the mirror we hit, and don't let the laser hit it (immediately) again
+        int32 skip_mirror_id = 0; // because lasers will sometimes be 'between' integer coordinates, it can sometimes hit mirrors twice. so just store the id of the mirror that was hit, and don't let the laser hit it (immediately) again
         int32 skip_next_mirror = 0;
         int32 laser_buffer_start_index = findNextFreeInLaserBuffer();
 
@@ -3075,11 +3068,8 @@ bool doFallingEntity(Entity* entity, bool do_animation)
             entity_in_stack->moving_direction = DOWN; 
         }
 
-        setTileType(getTileType(current_start_coords), current_end_coords); 
-        setTileDirection(entity_in_stack->direction, current_end_coords);
-        setTileType(NONE, current_start_coords);
-        setTileDirection(NORTH, current_start_coords);
-        entity_in_stack->coords = current_end_coords;
+		moveEntityInBufferAndState(entity_in_stack, current_end_coords, entity_in_stack->direction);
+
         current_end_coords = current_start_coords;
         current_start_coords = getNextCoords(current_start_coords, UP);
     }
@@ -3386,7 +3376,11 @@ void gameRedraw(DisplayInfo display_from_platform)
 // note, this is pretty lazy; could be smarter about exactly what enities need a delta, and only store those, and that would be supported in this system, but it's sometimes pretty 
 // difficult to know what entities will be affected by an action and thus need a delta without just simulating forward. this is a solveable problem, but for now i'm just storing deltas for every entity.
 //
-//
+// on undo, restore the old states and create interpolation animations from the current position_norm of the entities. the longer port of the performUndo function is dealing with
+// edge cases based on the start / end coords. for example, if a box has travelled down and right in one action, it must have been pushed and then fallen - it cannot have fallen and been moved on one
+// action. so i split the interpolation animation into two parts, and always do the up movement first, then the left movement, since the box will have gone right->down in every such case.
+// 
+// actions that shouldn't interpolate on undo (teleports and resets) don't get interpolated.
 
 // writes one delta into the circular buffer
 void recordEntityDelta(Entity* e)
@@ -3429,7 +3423,7 @@ void recordActionForUndo(WorldState* old_state, bool action_was_reset, bool acti
     uint32 entity_count = 0;
 
     recordEntityDelta(&old_state->player);
-    recordEntityDelta(&old_state->pack); // could potentially check on detach here, and then if detach only store if delta check is passed. if we need the deltas.
+    recordEntityDelta(&old_state->pack);
     entity_count += 2;
 
 	// other entities
@@ -3607,7 +3601,7 @@ bool performUndo(int32 undo_animation_time)
                     int32 dy = (int32)roundf(e->position_norm.y - old_position.y);
                     int32 dz = (int32)roundf(e->position_norm.z - old_position.z);
 
-                    if (dx != 0 || dy != 0 || dz != 0 || was_at_different_direction) // only do any sort of interpolation if the object moved / changed orientation
+                    if (dx != 0 || dy != 0 || dz != 0 || was_at_different_direction) // only do any sort of interpolation if the object moved / changed direction 
                     {
                         if (dx != 0 && dy != 0 && dz != 0) e->in_motion = undo_animation_time;
                         // moving direction is updated later. TODO: note that this doesn't work with the 2-step animations (it just assumes whatever diff coord direction function returns as direction) - but should work for all 'normal' animations
@@ -3751,6 +3745,7 @@ void levelChangePrep(char next_level[64])
 
 // HEAD ROTATION / MOVEMENT
 
+// handles situation when an object is on top of your head, in which case it moves and rotates with you.
 void doHeadRotation(bool clockwise)
 {
     int32 stack_size = getPushableStackSize(getNextCoords(next_world_state.player.coords, UP));
@@ -4835,12 +4830,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             else if (pack_turn_state.pack_intermediate_states_timer == 5)
             {
-                setTileType(NONE, pack->coords);
-                setTileDirection(NORTH, pack->coords);
-                pack->coords = pack_turn_state.pack_intermediate_coords;
-                pack->direction = player->direction;
-                setTileType(PACK, pack->coords);
-                setTileDirection(pack->direction, pack->coords);
+                moveEntityInBufferAndState(pack, pack_turn_state.pack_intermediate_coords, player->direction);
             }
             else if (pack_turn_state.pack_intermediate_states_timer == 4)
             {
@@ -4848,11 +4838,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             else if (pack_turn_state.pack_intermediate_states_timer == 3)
             {
-                setTileType(NONE, pack->coords);
-                setTileDirection(NORTH, pack->coords);
-				pack->coords = pack_turn_state.pack_hitbox_turning_to_coords;
-                setTileType(PACK, pack->coords);
-                setTileDirection(pack->direction, pack->coords);
+                moveEntityInBufferAndState(pack, pack_turn_state.pack_hitbox_turning_to_coords, pack->direction);
                 createTrailingHitbox(pack_turn_state.pack_intermediate_coords, pack->direction, NO_DIRECTION, 3, PACK);
             }
             pack_turn_state.pack_intermediate_states_timer--;
