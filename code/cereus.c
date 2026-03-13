@@ -341,6 +341,7 @@ typedef struct
     bool level_changed;
     bool was_teleport;
     bool was_reset;
+    bool was_climb;
 }
 UndoActionHeader;
 
@@ -393,7 +394,7 @@ const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
 const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9;
 const int32 TURN_ANIMATION_TIME = 9; // somewhat hard coded, tied to PUSH_FROM_TURN...
 const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
-const int32 CLIMB_ANIMATION_TIME = 10;
+const int32 CLIMB_ANIMATION_TIME = 9;
 const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6;
 const int32 FAILED_ANIMATION_TIME = 8;
 const int32 STANDARD_IN_MOTION_TIME = 7;
@@ -612,7 +613,7 @@ Vec4 quaternionNormalize(Vec4 quaternion)
     return quaternionScalarMultiply(quaternion, inverse_length);
 }
 
-Vec3 vec3CrossProduct(Vec3 a, Vec3 b)
+Vec3 vec3OuterProduct(Vec3 a, Vec3 b)
 {
     return (Vec3){ a.y*b.z - a.z*b.y, a.z*b.x - a.x*b.z, a.x*b.y - a.y*b.x };
 }
@@ -621,11 +622,11 @@ Vec3 vec3RotateByQuaternion(Vec3 input_vector, Vec4 quaternion)
 {
     Vec3 quaternion_vector_part = (Vec3){ quaternion.x, quaternion.y, quaternion.z };
     float quaternion_scalar_part = quaternion.w;
-    Vec3 q_cross_v = vec3CrossProduct(quaternion_vector_part, input_vector);
+    Vec3 q_cross_v = vec3OuterProduct(quaternion_vector_part, input_vector);
     Vec3 temp_vector = (Vec3){ q_cross_v.x + quaternion_scalar_part * input_vector.x,
     q_cross_v.y + quaternion_scalar_part * input_vector.y,
     q_cross_v.z + quaternion_scalar_part * input_vector.z};
-    Vec3 q_cross_t = vec3CrossProduct(quaternion_vector_part, temp_vector);
+    Vec3 q_cross_t = vec3OuterProduct(quaternion_vector_part, temp_vector);
     return (Vec3){ input_vector.x + 2.0f * q_cross_t.x,
     input_vector.y + 2.0f * q_cross_t.y,
     input_vector.z + 2.0f * q_cross_t.z};
@@ -726,13 +727,6 @@ float vec3Inner(Vec3 a, Vec3 b)
 float vec3Length(Vec3 v)
 {
     return sqrtf(v.x*v.x + v.y*v.y + v.z*v.z);
-}
-
-float vec3SignedLength(Vec3 v)
-{
-    float len = vec3Length(v);
-    if (vec3IsEqual(vec3Abs(v), v)) return len;
-    else return -len;
 }
 
 Vec3 vec3Normalize(Vec3 v)
@@ -2017,13 +2011,6 @@ int32 getPushableStackSize(Int3 first_entity_coords)
         stack_size++;
     }
     return stack_size;
-}
-
-Vec3 rollingAxis(Direction direction)
-{
-    Vec3 up = { 0.0f, 1.0f, 0.0f };
-    Vec3 rolling = intCoordsToNorm(getNextCoords(normCoordsToInt(VEC3_0), direction));
-    return vec3CrossProduct(up, rolling);
 }
 
 // TRAILING HITBOXES
@@ -3414,7 +3401,7 @@ void evictOldestUndoAction()
 // called after a noraml (non-level-change) action
 // diffs world_state vs. next_world_state and stores deltas for every entity that changed
 // was_reset and was_teleport currently do the same thing: cancel interpolation animations for the player (and pack if attached) for that action.
-void recordActionForUndo(WorldState* old_state, bool action_was_reset, bool action_was_teleport)
+void recordActionForUndo(WorldState* old_state, bool action_was_reset, bool action_was_teleport, bool action_was_climb)
 {
     if (undo_buffer.header_count >= MAX_UNDO_ACTIONS) evictOldestUndoAction();
 
@@ -3445,6 +3432,7 @@ void recordActionForUndo(WorldState* old_state, bool action_was_reset, bool acti
     undo_buffer.headers[header_index].level_changed = false;
     undo_buffer.headers[header_index].was_teleport = action_was_teleport;
     undo_buffer.headers[header_index].was_reset = action_was_reset;
+    undo_buffer.headers[header_index].was_climb = action_was_climb;
     undo_buffer.level_change_indices[header_index] = 0xFF;
     undo_buffer.header_write_pos = (header_index + 1) % MAX_UNDO_ACTIONS;
     undo_buffer.header_count++;
@@ -3584,7 +3572,7 @@ bool performUndo(int32 undo_animation_time)
             bool was_at_different_direction = (e->direction != delta->old_direction);
 
             e->coords = delta->old_coords;
-            e->position_norm = intCoordsToNorm(e->coords);
+            e->position_norm = intCoordsToNorm(e->coords); // TODO: this gets overwritten later, but is used as endpoint for queued animations. a bit messy, maybe fix
             e->direction = delta->old_direction;
             e->rotation_quat = directionToQuaternion(e->direction, true);
             e->removed = delta->was_removed;
@@ -3609,7 +3597,17 @@ bool performUndo(int32 undo_animation_time)
                         // a lot of edge case handling for how to interpolate undos
                         if (e->id == PLAYER_ID)
                         {
-                            if (dy != 0 && was_at_different_direction)
+                            if (header->was_climb)
+                            {
+                                // player climb
+                                Vec3 mid_position = { e->position_norm.x, old_position.y, e->position_norm.z };
+                                int32 first_animation_time = undo_animation_time / 2;
+                                int32 second_animation_time = undo_animation_time - first_animation_time;
+                                createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, first_animation_time);
+                                createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, second_animation_time);
+                                e->moving_direction = NO_DIRECTION;
+                            }
+                            else if (dy != 0 && was_at_different_direction)
                             {
                                 // player turn and fall
                                 Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
@@ -3656,12 +3654,21 @@ bool performUndo(int32 undo_animation_time)
                             int32 clockwise_calculation = player_to_new_pack_dir - player_to_old_pack_dir;
                             bool clockwise = (clockwise_calculation == -1 || clockwise_calculation == 3);
 
-                            if (dy == 0 && dx != 0 && dz != 0) // if dx and dz != 0 this must be a turn
+                            if (dy == 0 && dx != 0 && dz != 0) // if both dx and dz != 0 this must be a turn
                             {
                                 createPackRotationAnimation(intCoordsToNorm(old_player_coords), old_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, undo_animation_time);
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
                             }
-                            else if (dy != 0 && dx != 0 && dz != 0) // if dx and dz != 0 this must be a turn
+                            else if (header->was_climb)
+                            {
+                                Vec3 mid_position = { e->position_norm.x, old_position.y, e->position_norm.z };
+                                int32 first_animation_time = undo_animation_time / 2;
+                                int32 second_animation_time = undo_animation_time - first_animation_time;
+                                createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PACK_ID, first_animation_time);
+                                createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PACK_ID, second_animation_time);
+                                e->moving_direction = NO_DIRECTION;
+                            }
+                            else if (dy != 0 && dx != 0 && dz != 0) // if both dx and dz != 0 this must be a turn
                             {
                                 Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
                                 int32 first_animation_time = undo_animation_time / 2;
@@ -3849,7 +3856,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
         changeMoving(pack);
     }
 
-    if (record_for_undo) recordActionForUndo(&world_state, false, false);
+    if (record_for_undo) recordActionForUndo(&world_state, false, false, false);
 }
 
 void updatePackDetached()
@@ -4268,7 +4275,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 // restart
                 if (!restart_last_turn) 
                 {
-                    recordActionForUndo(&world_state, true, false);
+                    recordActionForUndo(&world_state, true, false, false);
                 }
                 createDebugPopup("level restarted", NO_TYPE);
                 memset(animations, 0, sizeof(animations));
@@ -4342,7 +4349,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         {
                             if (!int3IsEqual(player_ghost_coords, player->coords))
                             {
-                                recordActionForUndo(&world_state, false, true);
+                                recordActionForUndo(&world_state, false, true, false);
 
                                 moveEntityInBufferAndState(player, player_ghost_coords, player_ghost_direction);
                                 setEntityVecsFromInts(player);
@@ -4534,7 +4541,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     pack->moving_direction = UP;
                                 }
 
-                                recordActionForUndo(&world_state, false, false);
+                                recordActionForUndo(&world_state, false, false, true);
 
                                 time_until_allow_game_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
                             }
@@ -4583,7 +4590,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                             setTileDirection(player->direction, player->coords);
                             player->moving_direction = NO_DIRECTION;
 
-                            recordActionForUndo(&world_state, false, false);
+                            recordActionForUndo(&world_state, false, false, false);
                         }
                         else
                         {
@@ -4677,14 +4684,14 @@ void gameFrame(double delta_time, TickInput tick_input)
                                     {
                                         if (push_diagonal) 
                                         {
-                                            recordActionForUndo(&world_state, false, false);
+                                            recordActionForUndo(&world_state, false, false, false);
                                             pushAll(diagonal_coords, oppositeDirection(input_direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false);
                                         }
                                         doFailedTurnAnimations(input_direction, clockwise);
                                     }
                                     else
                                     {
-                                        recordActionForUndo(&world_state, false, false);
+                                        recordActionForUndo(&world_state, false, false, false);
 
                                         createTrailingHitbox(pack->coords, input_direction, NO_DIRECTION, FIRST_TRAILING_PACK_TURN_HITBOX_TIME, PACK);
 
@@ -4788,7 +4795,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                                 player->moving_direction = backwards_direction;
                                 player->first_fall_already_done = true;
 
-                                recordActionForUndo(&world_state, false, false);
+                                recordActionForUndo(&world_state, false, false, false);
 
                                 time_until_allow_game_input = MOVE_OR_PUSH_ANIMATION_TIME;
                             }
