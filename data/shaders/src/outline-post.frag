@@ -11,6 +11,7 @@ layout(push_constant) uniform PushConstants
     vec2 texel_size;
     float depth_threshold;
     float normal_threshold;
+    float debug_mode;
 }
 pc;
 
@@ -25,15 +26,18 @@ void main()
 {
     vec2 step = pc.texel_size;
 
+    bool is_depth_edge  = false;
+    bool is_normal_edge = false;
+
     vec3 n_center = texture(normal_texture, frag_uv).rgb;
     bool has_normal = dot(n_center, n_center) > 0.01;
 
     if (has_normal)
     {
-        vec3 n_up     = texture(normal_texture, frag_uv + vec2(0.0, step.y)).rgb;
-        vec3 n_down   = texture(normal_texture, frag_uv - vec2(0.0, step.y)).rgb;
-        vec3 n_left   = texture(normal_texture, frag_uv - vec2(step.x, 0.0)).rgb;
-        vec3 n_right  = texture(normal_texture, frag_uv + vec2(step.x, 0.0)).rgb;
+        vec3 n_up    = texture(normal_texture, frag_uv + vec2(0.0,    step.y)).rgb;
+        vec3 n_down  = texture(normal_texture, frag_uv - vec2(0.0,    step.y)).rgb;
+        vec3 n_left  = texture(normal_texture, frag_uv - vec2(step.x, 0.0)).rgb;
+        vec3 n_right = texture(normal_texture, frag_uv + vec2(step.x, 0.0)).rgb;
 
         float max_normal_diff = max(
             max(1.0 - dot(n_center, n_up),   1.0 - dot(n_center, n_down)),
@@ -42,14 +46,13 @@ void main()
 
         if (max_normal_diff > pc.normal_threshold)
         {
-            out_color = vec4(0.0, 0.0, 0.0, 1.0);
-            return;
+            is_normal_edge = true;
         }
     }
 
     float center = linearize(texture(depth_texture, frag_uv).r);
-    float up     = linearize(texture(depth_texture, frag_uv + vec2(0.0, step.y)).r);
-    float down   = linearize(texture(depth_texture, frag_uv - vec2(0.0, step.y)).r);
+    float up     = linearize(texture(depth_texture, frag_uv + vec2(0.0,    step.y)).r);
+    float down   = linearize(texture(depth_texture, frag_uv - vec2(0.0,    step.y)).r);
     float left   = linearize(texture(depth_texture, frag_uv - vec2(step.x, 0.0)).r);
     float right  = linearize(texture(depth_texture, frag_uv + vec2(step.x, 0.0)).r);
 
@@ -58,9 +61,30 @@ void main()
 
     if (relative_laplacian > pc.depth_threshold)
     {
-        out_color = vec4(0.0, 0.0, 0.0, 1.0);
-        return;
+        is_depth_edge = true;
     }
 
-    discard;
+    if (!is_depth_edge && !is_normal_edge)
+    {
+        if (pc.debug_mode > 0.9)
+        {
+			out_color = vec4(vec3(0.0), 1.0);
+        }
+        else
+        {
+            discard;
+        }
+    }
+
+    if (pc.debug_mode > 0.9)
+    {
+        vec3 color = vec3(0.0);
+        if (is_depth_edge)  color.r = 1.0;
+        if (is_normal_edge) color.b = 1.0;
+        out_color = vec4(color, 1.0);
+    }
+    else
+    {
+        out_color = vec4(0.0, 0.0, 0.0, 1.0);
+    }
 }

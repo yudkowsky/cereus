@@ -32,7 +32,7 @@ const char* ATLAS_3D_PATH 	= "data/sprites/atlas-3d.png";
 
 bool first_submit_since_draw = true;
 
-bool do_experimental_shaders = false;
+ShaderMode shader_mode = OLD;
 
 typedef struct 
 {
@@ -1952,8 +1952,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkShaderModule sprite_frag_smh = {0};
     VkShaderModule model_vert_smh = {0};
     VkShaderModule model_frag_smh = {0};
-    //VkShaderModule model_blackline_vert_smh = {0};
-    //VkShaderModule model_blackline_frag_smh = {0};
     VkShaderModule outline_post_vert_smh = {0};
     VkShaderModule outline_post_frag_smh = {0};
 
@@ -1969,8 +1967,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 	VkPipelineShaderStageCreateInfo sprite_frag_shader_stage_ci  	     = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  	  &sprite_frag_smh,  		 VK_SHADER_STAGE_FRAGMENT_BIT);
 	VkPipelineShaderStageCreateInfo model_vert_shader_stage_ci 	 	     = loadShaderStage("data/shaders/spirv/model.vert.spv",   	  	  &model_vert_smh,   		 VK_SHADER_STAGE_VERTEX_BIT);
 	VkPipelineShaderStageCreateInfo model_frag_shader_stage_ci 	 	     = loadShaderStage("data/shaders/spirv/model.frag.spv",   	  	  &model_frag_smh,   		 VK_SHADER_STAGE_FRAGMENT_BIT);
-    //VkPipelineShaderStageCreateInfo model_blackline_vert_shader_stage_ci = loadShaderStage("data/shaders/spirv/model-blackline.vert.spv", &model_blackline_vert_smh, VK_SHADER_STAGE_VERTEX_BIT);
-    //VkPipelineShaderStageCreateInfo model_blackline_frag_shader_stage_ci = loadShaderStage("data/shaders/spirv/model-blackline.frag.spv", &model_blackline_frag_smh, VK_SHADER_STAGE_FRAGMENT_BIT);
     VkPipelineShaderStageCreateInfo outline_post_vert_stage_ci           = loadShaderStage("data/shaders/spirv/outline-post.vert.spv",    &outline_post_vert_smh,    VK_SHADER_STAGE_VERTEX_BIT);
     VkPipelineShaderStageCreateInfo outline_post_frag_stage_ci           = loadShaderStage("data/shaders/spirv/outline-post.frag.spv",    &outline_post_frag_smh,    VK_SHADER_STAGE_FRAGMENT_BIT);
 
@@ -1980,7 +1976,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkPipelineShaderStageCreateInfo laser_outline_shader_stages[2]   = { laser_outline_vert_shader_stage_ci,   laser_outline_frag_shader_stage_ci };
     VkPipelineShaderStageCreateInfo sprite_shader_stages[2]  	     = { sprite_vert_shader_stage_ci,  	   	   sprite_frag_shader_stage_ci };
    	VkPipelineShaderStageCreateInfo model_shader_stages[2]   	     = { model_vert_shader_stage_ci,   	       model_frag_shader_stage_ci };
-    //VkPipelineShaderStageCreateInfo model_blackline_shader_stages[2] = { model_blackline_vert_shader_stage_ci, model_blackline_frag_shader_stage_ci };
     VkPipelineShaderStageCreateInfo outline_post_shader_stages[2]    = { outline_post_vert_stage_ci,           outline_post_frag_stage_ci };
 
     // vertex input
@@ -2303,7 +2298,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         VkPushConstantRange push_constant_range = {0};
         push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         push_constant_range.offset = 0;
-        push_constant_range.size = sizeof(float) * 4; // texel_size, depth threshold, padding
+        push_constant_range.size = sizeof(float) * 5; // texel_size, depth threshold, padding
 
         VkDescriptorSetLayout post_layouts[2] = { vulkan_state.descriptor_set_layout, vulkan_state.descriptor_set_layout };
 
@@ -2636,11 +2631,11 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     loadAllEntities();
 }
 
-void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Camera game_camera, bool render_models)
+void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Camera game_camera, ShaderMode shader_mode_from_game)
 {  
     vulkan_camera = game_camera;
 
-    do_experimental_shaders = render_models;
+    shader_mode = shader_mode_from_game;
 
     sprite_instance_count = 0;
     cube_instance_count = 0;
@@ -2981,8 +2976,7 @@ void vulkanDraw(void)
 
     vkCmdEndRenderPass(command_buffer);
 
-
-    if (do_experimental_shaders)
+    if (shader_mode != OLD)
     {
         // transition depth from attachment to shader read
         VkImageMemoryBarrier depth_to_read = {0};
@@ -3033,13 +3027,14 @@ void vulkanDraw(void)
             VkDescriptorSet post_sets[2] = { vulkan_state.depth_descriptor_set, vulkan_state.normal_descriptor_set };
             vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline_layout, 0, 2, post_sets, 0, 0);
 
-            float post_pc[4] = {
+            float post_pc[5] = {
                 1.0f / (float)vulkan_state.swapchain_extent.width,
                 1.0f / (float)vulkan_state.swapchain_extent.height,
-                0.001f, // depth threshold
-                0.3f // normal threshold
+                0.00001f, // depth threshold
+                0.2f, // normal threshold
+                (shader_mode == OUTLINE_TEST) ? 1.0f : 0.0f
             };
-            vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 4, post_pc);
+            vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 5, post_pc);
 
             vkCmdDraw(command_buffer, 3, 1, 0, 0); // fullscreen triangle
         }

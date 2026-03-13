@@ -291,6 +291,7 @@ typedef enum
     ALT_CAMERA_SAVE,
     PHYSICS_TIMESTEP_CHANGE,
     CHEAT_MODE_TOGGLE,
+    SHADER_MODE_CHANGE,
 }
 PopupType;
 
@@ -463,7 +464,7 @@ double physics_timestep = 1.0/60.0;
 double physics_accumulator = 0;
 double timer_accumulator = 0;
 
-const char debug_level_name[64] = "wookash";
+const char debug_level_name[64] = "red-last";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
@@ -496,10 +497,10 @@ int32 camera_target_plane = 0; // y level of xz plane which calculates targeted 
 DrawCommand draw_commands[8192] = {0};
 int32 draw_command_count = 0;
 
-static WorldState world_state = {0};
-static WorldState next_world_state = {0};
-static WorldState leap_of_faith_snapshot = {0}; // TODO: doesn't change the buffer, so could save 2MB memory by using some EntitySnapshot struct
-static WorldState overworld_zero = {0}; // TODO: probably don't have to carry this around, just read from zeroed overworld file when i need this (on restart in overworld)
+WorldState world_state = {0};
+WorldState next_world_state = {0};
+WorldState leap_of_faith_snapshot = {0}; // TODO: doesn't change the buffer, so could save 2MB memory by using some EntitySnapshot struct
+WorldState overworld_zero = {0}; // TODO: probably don't have to carry this around, just read from zeroed overworld file when i need this (on restart in overworld)
 Int3 level_dim = {0};
 
 UndoBuffer undo_buffer = {0};
@@ -517,7 +518,7 @@ Animation animations[32];
 
 bool in_overworld = false;
 bool pack_detached = false;
-bool render_models = false;
+ShaderMode game_shader_mode = OLD;
 GameProgress game_progress = WORLD_0;
 bool cheating = false;
 
@@ -3347,7 +3348,7 @@ void gameRedraw(DisplayInfo display_from_platform)
     if (draw_command_count == 0) return;
     game_display = display_from_platform;
 	recalculateDebugStartCoords();
-    vulkanSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset, render_models); // render models is temp passthrough here. toggles some shaders that apply to everything,
+    vulkanSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset, game_shader_mode); // render models is temp passthrough here. toggles some shaders that apply to everything,
                                                                                                 // but that i only want on when working on rendering
     vulkanDraw();
 }
@@ -5236,7 +5237,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
 
             // set camera fov to wide for editor
-            if (tick_input.j_press && time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+            if (tick_input.j_press)
             {
                 editor_state.do_wide_camera = !editor_state.do_wide_camera;
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
@@ -5262,15 +5263,28 @@ void gameFrame(double delta_time, TickInput tick_input)
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 
-            // toggle drawing
-            if (tick_input.e_press && time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+            // change model states
+            if (tick_input.nine_press)
             {
-                render_models = !render_models;
+               	game_shader_mode = OLD; 
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                createDebugPopup("shader mode: old", SHADER_MODE_CHANGE);
+            }
+            if (tick_input.eight_press)
+            {
+                game_shader_mode = OUTLINE;
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                createDebugPopup("shader mode: outlines", SHADER_MODE_CHANGE);
+            }
+            if (tick_input.seven_press)
+            {
+                game_shader_mode = OUTLINE_TEST;
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                createDebugPopup("shader mode: testing outlines", SHADER_MODE_CHANGE);
             }
 
             // get rid of debug text on press
-            if (time_until_allow_meta_input == 0 && tick_input.y_press && !(editor_state.editor_mode == SELECT_WRITE)) 
+            if (tick_input.y_press)
             {
                 do_debug_text = !do_debug_text;
                 if (do_debug_text) createDebugPopup("debug state visibility on", DEBUG_STATE_VISIBILITY_CHANGE);
@@ -5279,7 +5293,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
 
             // toggle cheating
-            if (time_until_allow_meta_input == 0 && tick_input.three_press && !(editor_state.editor_mode == SELECT_WRITE))
+            if (tick_input.three_press)
             {
                 cheating = !cheating;
                 if (cheating) createDebugPopup("cheating", CHEAT_MODE_TOGGLE);
@@ -5659,13 +5673,13 @@ void gameFrame(double delta_time, TickInput tick_input)
                     else if (!in_overworld && findInSolvedLevels(next_world_state.level_name) != -1) draw_tile = WON_BLOCK;
                 }
 
-                if (render_models)
+                if (game_shader_mode == OLD)
                 {
-                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0);
+                    drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0); 
                 }
                 else
                 {
-                    drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0); 
+                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0);
                 }
             }
             else
@@ -5788,7 +5802,7 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
             {
                 SpriteId selected_id = getCube3DId(MIRROR);
-                if (render_models) selected_id = getModelId(getTileTypeFromId(editor_state.selected_id));
+                if (game_shader_mode != OLD) selected_id = getModelId(getTileTypeFromId(editor_state.selected_id));
                 Entity* selected_e = 0;
                 if (editor_state.selected_id > 0) selected_e = getEntityFromId(editor_state.selected_id);
                 if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position_norm, DEFAULT_SCALE, selected_e->rotation_quat, VEC3_0);
@@ -5802,7 +5816,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         if (ri.id == -1) continue;
                         Entity* to_reset_e = getEntityFromId(ri.id);
                         SpriteId to_reset_id = getCube3DId(MIRROR);
-                        if (render_models) to_reset_id = getModelId(getTileTypeFromId(to_reset_e->id));
+                        if (game_shader_mode != OLD) to_reset_id = getModelId(getTileTypeFromId(to_reset_e->id));
                         drawAsset(to_reset_id, OUTLINE_3D, to_reset_e->position_norm, DEFAULT_SCALE, to_reset_e->rotation_quat, VEC3_0);
                     }
                 }
@@ -5851,6 +5865,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
     }
 
-    vulkanSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset, render_models);
+    vulkanSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset, game_shader_mode);
     vulkanDraw();
 }

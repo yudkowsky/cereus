@@ -237,3 +237,11 @@ typedef struct TickInput
     TextInput text;
 }	
 TickInput;
+
+typedef enum ShaderMode
+{
+    OLD,
+    OUTLINE,
+    OUTLINE_TEST,
+}
+ShaderMode;
