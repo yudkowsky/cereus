@@ -1105,6 +1105,8 @@ void loadAllEntities()
 
     vulkan_state.loaded_models[MODEL_3D_BOX - MODEL_3D_VOID] = loadModel("data/assets/rock.glb");
 
+    vulkan_state.loaded_models[MODEL_3D_GLASS - MODEL_3D_VOID] = loadModel("data/assets/glass.glb");
+
     vulkan_state.loaded_models[MODEL_3D_SOURCE_RED     - MODEL_3D_VOID] = loadModel("data/assets/red-source.glb");
     vulkan_state.loaded_models[MODEL_3D_SOURCE_GREEN   - MODEL_3D_VOID] = loadModel("data/assets/green-source.glb");
     vulkan_state.loaded_models[MODEL_3D_SOURCE_BLUE    - MODEL_3D_VOID] = loadModel("data/assets/blue-source.glb");
@@ -2298,7 +2300,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         VkPushConstantRange push_constant_range = {0};
         push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
         push_constant_range.offset = 0;
-        push_constant_range.size = sizeof(float) * 5; // texel_size, depth threshold, padding
+        push_constant_range.size = sizeof(float) * 6; // texel_size, depth threshold, normal_threshold, experimental shaders
 
         VkDescriptorSetLayout post_layouts[2] = { vulkan_state.descriptor_set_layout, vulkan_state.descriptor_set_layout };
 
@@ -3027,14 +3029,17 @@ void vulkanDraw(void)
             VkDescriptorSet post_sets[2] = { vulkan_state.depth_descriptor_set, vulkan_state.normal_descriptor_set };
             vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline_layout, 0, 2, post_sets, 0, 0);
 
-            float post_pc[5] = {
+            float focal_length = (float)vulkan_state.swapchain_extent.height / ((2 * 3.141592653f) * tanf(vulkan_camera.fov / 360.0f));
+
+            float post_pc[6] = {
                 1.0f / (float)vulkan_state.swapchain_extent.width,
                 1.0f / (float)vulkan_state.swapchain_extent.height,
-                0.00001f, // depth threshold
+                2.0f, // depth threshold
                 0.2f, // normal threshold
+                focal_length,
                 (shader_mode == OUTLINE_TEST) ? 1.0f : 0.0f
             };
-            vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 5, post_pc);
+            vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 6, post_pc);
 
             vkCmdDraw(command_buffer, 3, 1, 0, 0); // fullscreen triangle
         }
@@ -3085,45 +3090,48 @@ void vulkanDraw(void)
             vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_vb_offset);
             vkCmdBindIndexBuffer(command_buffer, laser_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-            for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
+            if (shader_mode != OUTLINE_TEST)
             {
-                Laser* laser = &laser_instances[laser_index];
-                Vec3 laser_scale = { 1.0f, 1.0f, laser->length };
+                for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
+                {
+                    Laser* laser = &laser_instances[laser_index];
+                    Vec3 laser_scale = { 1.0f, 1.0f, laser->length };
 
-                float model_matrix[16];
-                mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
+                    float model_matrix[16];
+                    mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
 
-                LaserPushConstants pc = {0};
-                memcpy(pc.model, model_matrix, sizeof(pc.model));
-                memcpy(pc.view, view_matrix, sizeof(pc.view));
-                memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
-                pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 1.0f };
+                    LaserPushConstants pc = {0};
+                    memcpy(pc.model, model_matrix, sizeof(pc.model));
+                    memcpy(pc.view, view_matrix, sizeof(pc.view));
+                    memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
+                    pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 1.0f };
 
-                vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &pc);
-                vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
-            }
+                    vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &pc);
+                    vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
+                }
 
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_outline_pipeline_handle);
+                vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_outline_pipeline_handle);
 
-            vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_vb_offset);
-            vkCmdBindIndexBuffer(command_buffer, laser_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_vb_offset);
+                vkCmdBindIndexBuffer(command_buffer, laser_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-            for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
-            {
-                Laser* laser = &laser_instances[laser_index];
-                Vec3 laser_scale = { 1.0f, 1.0f, laser->length };
+                for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
+                {
+                    Laser* laser = &laser_instances[laser_index];
+                    Vec3 laser_scale = { 1.0f, 1.0f, laser->length };
 
-                float model_matrix[16];
-                mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
+                    float model_matrix[16];
+                    mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
 
-                LaserPushConstants push_constants = {0};
-                memcpy(push_constants.model, model_matrix, sizeof(push_constants.model));
-                memcpy(push_constants.view, view_matrix, sizeof(push_constants.view));
-                memcpy(push_constants.proj, projection_matrix, sizeof(push_constants.proj));
-                push_constants.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 1.0f };
+                    LaserPushConstants push_constants = {0};
+                    memcpy(push_constants.model, model_matrix, sizeof(push_constants.model));
+                    memcpy(push_constants.view, view_matrix, sizeof(push_constants.view));
+                    memcpy(push_constants.proj, projection_matrix, sizeof(push_constants.proj));
+                    push_constants.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 1.0f };
 
-                vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &push_constants);
-                vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
+                    vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &push_constants);
+                    vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
+                }
             }
         }
     }

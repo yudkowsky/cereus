@@ -380,9 +380,9 @@ typedef struct UndoBuffer
 UndoBuffer;
 
 // CONSTS AND GLOBALS
-const float TAU = 6.2831853071f;
-
 DisplayInfo game_display = {0};
+
+const float TAU = 6.2831853071f;
 
 const Vec3 DEFAULT_SCALE = { 1.0f,  1.0f,  1.0f  };
 const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
