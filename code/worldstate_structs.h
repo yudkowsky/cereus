@@ -143,6 +143,7 @@ typedef enum SpriteId
     MODEL_3D_RESET_BLOCK,
     MODEL_3D_LADDER,
     MODEL_3D_WON_BLOCK,
+    MODEL_3D_WATER_BOTTOM,
 
     ASSET_COUNT
 }

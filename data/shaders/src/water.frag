@@ -5,21 +5,23 @@ layout(location = 0) in vec3 frag_world_pos;
 layout(location = 0) out vec4 out_color;
 layout(location = 1) out vec4 out_normal;
 
-layout(push_constant) uniform PushConstants
-{
+layout(set = 1, binding = 0) uniform sampler2D scene_color_texture;
+
+layout(push_constant) uniform PushConstants {
     mat4 model;
     mat4 view;
     mat4 proj;
-	float time;
+    float time;
 }
 pc;
 
-void main()
+void main() 
 {
-	float dx = 2.0 * cos(frag_world_pos.x * 3.0 + pc.time * 1.5) * 0.05;
-    float dz = 3.0 * cos(frag_world_pos.z * 2.0 + pc.time * 1.1) * 0.03;
-    vec3 normal = normalize(vec3(-dx, 1.0, -dz));
+	vec2 screen_uv = gl_FragCoord.xy / vec2(textureSize(scene_color_texture, 0));
+    vec3 scene = texture(scene_color_texture, screen_uv).rgb;
 
-    out_color = vec4(0.1, 0.3, 0.6, 1.0);
-    out_normal = vec4(normal, 1.0);
+    vec3 water_color = vec3(0.1, 0.3, 0.6);
+    float blend = 0.4; // how much water tint vs scene shows through
+
+    out_color = vec4(mix(scene, water_color, blend), 1.0);
 }

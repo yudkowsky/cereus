@@ -175,6 +175,8 @@ typedef struct
 	VkFormat swapchain_format;
     VkExtent2D swapchain_extent;
 
+    VkImage* swapchain_images;
+
     // depth + normal (shared attachments)
     VkFormat depth_format;
     VkImage depth_image;
@@ -187,6 +189,12 @@ typedef struct
     VkDeviceMemory normal_image_memory;
     VkImageView normal_image_view;
     VkDescriptorSet normal_descriptor_set;
+
+    // scene color copy for water shader
+    VkImage scene_color_image;
+    VkDeviceMemory scene_color_image_memory;
+    VkImageView scene_color_image_view;
+    VkDescriptorSet scene_color_descriptor_set;
 
     // commands + sync
     VkCommandPool graphics_command_pool_handle;
@@ -1128,6 +1136,7 @@ void loadAllEntities()
     vulkan_state.loaded_models[MODEL_3D_WIN_BLOCK - MODEL_3D_VOID] = loadModel("data/assets/flower.glb");
 
     vulkan_state.loaded_models[MODEL_3D_WATER - MODEL_3D_VOID] = loadModel("data/assets/water.glb");
+    vulkan_state.loaded_models[MODEL_3D_WATER_BOTTOM - MODEL_3D_VOID] = loadModel("data/assets/water-bottom.glb");
 
     vulkan_state.loaded_models[MODEL_3D_SOURCE_RED     - MODEL_3D_VOID] = loadModel("data/assets/red-source.glb");
     vulkan_state.loaded_models[MODEL_3D_SOURCE_GREEN   - MODEL_3D_VOID] = loadModel("data/assets/green-source.glb");
@@ -1226,8 +1235,8 @@ void createSwapchainResources(void)
 
     // swapchain image views
     vkGetSwapchainImagesKHR(vulkan_state.logical_device_handle, vulkan_state.swapchain_handle, &vulkan_state.swapchain_image_count, 0);
-    VkImage* swapchain_images = malloc(sizeof(VkImage) * vulkan_state.swapchain_image_count);
-    vkGetSwapchainImagesKHR(vulkan_state.logical_device_handle, vulkan_state.swapchain_handle, &vulkan_state.swapchain_image_count, swapchain_images);
+    vulkan_state.swapchain_images = malloc(sizeof(VkImage) * vulkan_state.swapchain_image_count);
+    vkGetSwapchainImagesKHR(vulkan_state.logical_device_handle, vulkan_state.swapchain_handle, &vulkan_state.swapchain_image_count, vulkan_state.swapchain_images);
 
     vulkan_state.swapchain_image_views = realloc(vulkan_state.swapchain_image_views, sizeof(VkImageView) * vulkan_state.swapchain_image_count);
 
@@ -1247,10 +1256,9 @@ void createSwapchainResources(void)
 
     for (uint32 image_index = 0; image_index < vulkan_state.swapchain_image_count; image_index++)
     {
-        view_ci.image = swapchain_images[image_index];
+        view_ci.image = vulkan_state.swapchain_images[image_index];
         vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.swapchain_image_views[image_index]);
     }
-    free(swapchain_images);
 
     // depth image + view
     VkImageCreateInfo depth_image_ci = {0};
@@ -1336,6 +1344,48 @@ void createSwapchainResources(void)
 
     vkCreateImageView(vulkan_state.logical_device_handle, &normal_view_ci, 0, &vulkan_state.normal_image_view);
 
+    // scene color image + view
+    VkImageCreateInfo scene_color_image_ci = {0};
+    scene_color_image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    scene_color_image_ci.imageType = VK_IMAGE_TYPE_2D;
+    scene_color_image_ci.extent.width = vulkan_state.swapchain_extent.width;
+    scene_color_image_ci.extent.height = vulkan_state.swapchain_extent.height;
+    scene_color_image_ci.extent.depth = 1;
+    scene_color_image_ci.mipLevels = 1;
+    scene_color_image_ci.arrayLayers = 1;
+    scene_color_image_ci.format = vulkan_state.swapchain_format;
+    scene_color_image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+    scene_color_image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    scene_color_image_ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    scene_color_image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
+    scene_color_image_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    vkCreateImage(vulkan_state.logical_device_handle, &scene_color_image_ci, 0, &vulkan_state.scene_color_image);
+
+    VkMemoryRequirements scene_color_memory_requirements = {0};
+    vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.scene_color_image, &scene_color_memory_requirements);
+
+    VkMemoryAllocateInfo scene_color_alloc = {0};
+    scene_color_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    scene_color_alloc.allocationSize = scene_color_memory_requirements.size;
+    scene_color_alloc.memoryTypeIndex = findMemoryType(scene_color_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    vkAllocateMemory(vulkan_state.logical_device_handle, &scene_color_alloc, 0, &vulkan_state.scene_color_image_memory);
+    vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.scene_color_image, vulkan_state.scene_color_image_memory, 0);
+
+    VkImageViewCreateInfo scene_color_view_ci = {0};
+    scene_color_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    scene_color_view_ci.image = vulkan_state.scene_color_image;
+    scene_color_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    scene_color_view_ci.format = vulkan_state.swapchain_format;
+    scene_color_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    scene_color_view_ci.subresourceRange.baseMipLevel = 0;
+    scene_color_view_ci.subresourceRange.levelCount = 1;
+    scene_color_view_ci.subresourceRange.baseArrayLayer = 0;
+    scene_color_view_ci.subresourceRange.layerCount = 1;
+
+    vkCreateImageView(vulkan_state.logical_device_handle, &scene_color_view_ci, 0, &vulkan_state.scene_color_image_view);
+
     // main scene framebuffers
     vulkan_state.swapchain_framebuffers = realloc(vulkan_state.swapchain_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
 
@@ -1384,6 +1434,7 @@ void createSwapchainResources(void)
 
     vkCreateImageView(vulkan_state.logical_device_handle, &depth_sampled_view_ci, 0, &vulkan_state.depth_sampled_view);
 
+    // update depth descriptor sets
     VkDescriptorImageInfo depth_desc_info = {0};
     depth_desc_info.sampler = vulkan_state.pixel_art_sampler;
     depth_desc_info.imageView = vulkan_state.depth_sampled_view;
@@ -1399,6 +1450,7 @@ void createSwapchainResources(void)
 
     vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &depth_desc_write, 0, 0);
 
+    // update normal descriptor sets
     VkDescriptorImageInfo normal_desc_info = {0};
     normal_desc_info.sampler = vulkan_state.pixel_art_sampler;
     normal_desc_info.imageView = vulkan_state.normal_image_view;
@@ -1413,6 +1465,22 @@ void createSwapchainResources(void)
     normal_desc_write.pImageInfo = &normal_desc_info;
 
     vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &normal_desc_write, 0, 0);
+
+    // update scene color descriptor sets
+    VkDescriptorImageInfo scene_color_desc_info = {0};
+    scene_color_desc_info.sampler = vulkan_state.pixel_art_sampler;
+    scene_color_desc_info.imageView = vulkan_state.scene_color_image_view;
+    scene_color_desc_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet scene_color_desc_write = {0};
+    scene_color_desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    scene_color_desc_write.dstSet = vulkan_state.scene_color_descriptor_set;
+    scene_color_desc_write.dstBinding = 0;
+    scene_color_desc_write.descriptorCount = 1;
+    scene_color_desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    scene_color_desc_write.pImageInfo = &scene_color_desc_info;
+
+    vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &scene_color_desc_write, 0, 0);
 
     // post-process framebuffers
     vulkan_state.outline_post_framebuffers = realloc(vulkan_state.outline_post_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
@@ -2265,6 +2333,13 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     normal_descriptor_set_alloc.pSetLayouts = &vulkan_state.descriptor_set_layout;
     vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &normal_descriptor_set_alloc, &vulkan_state.normal_descriptor_set);
 
+	VkDescriptorSetAllocateInfo scene_color_descriptor_set_alloc = {0};
+    scene_color_descriptor_set_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    scene_color_descriptor_set_alloc.descriptorPool = vulkan_state.descriptor_pool;
+    scene_color_descriptor_set_alloc.descriptorSetCount = 1;
+    scene_color_descriptor_set_alloc.pSetLayouts = &vulkan_state.descriptor_set_layout;
+    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &scene_color_descriptor_set_alloc, &vulkan_state.scene_color_descriptor_set);
+
 	createSwapchainResources();
 
 	// CREATE CUBE (INSTANCED) PIPELINE LAYOUT
@@ -2329,10 +2404,12 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         push_constant_range.offset = 0;
         push_constant_range.size = (uint32)sizeof(WaterPushConstants);
 
+        VkDescriptorSetLayout water_set_layouts[2] = { vulkan_state.descriptor_set_layout, vulkan_state.descriptor_set_layout };
+
         VkPipelineLayoutCreateInfo water_pipeline_layout_ci = {0};
         water_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        water_pipeline_layout_ci.setLayoutCount = 1;
-        water_pipeline_layout_ci.pSetLayouts = &vulkan_state.descriptor_set_layout;
+        water_pipeline_layout_ci.setLayoutCount = 2;
+        water_pipeline_layout_ci.pSetLayouts = water_set_layouts;
         water_pipeline_layout_ci.pushConstantRangeCount = 1;
         water_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
 
@@ -3061,37 +3138,6 @@ void vulkanDraw(void)
 		vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
     }
 
-    // WATER
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_handle);
-    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
-
-    for (uint32 water_index = 0; water_index < water_instance_count; water_index++)
-    {
-        Water* water = &water_instances[water_index];
-        LoadedModel* water_data = &vulkan_state.loaded_models[MODEL_3D_WATER - MODEL_3D_VOID];
-        if (water_data->index_count == 0) continue;
-
-        VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &water_data->vertex_buffer, &offset);
-        vkCmdBindIndexBuffer(command_buffer, water_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-
-        Vec4 rotation = { 0, 0, 0, 1 };
-        Vec3 scale = { 1, 1, 1 };
-
-        float model_matrix[16];
-        mat4BuildTRS(model_matrix, water->coords, rotation, scale);
-
-        WaterPushConstants pc = {0};
-        memcpy(pc.model, model_matrix,      sizeof(pc.model));
-        memcpy(pc.view,  view_matrix,       sizeof(pc.view));
-        memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
-        pc.time = water_time;
-        LOG("water time: %f\n", water_time);
-
-        vkCmdPushConstants(command_buffer, vulkan_state.water_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &pc);
-        vkCmdDrawIndexed(command_buffer, water_data->index_count, 1, 0, 0, 0);
-    }
-
     vkCmdEndRenderPass(command_buffer);
 
     if (shader_mode != OLD)
@@ -3163,6 +3209,91 @@ void vulkanDraw(void)
         vkCmdEndRenderPass(command_buffer);
     }
 
+    // COPY SWAPCHAIN COLOR TO SCENE COLOR IMAGE FOR WATER SAMPLING
+
+    {
+        VkImageMemoryBarrier pre_copy_barriers[2] = {0};
+
+        // swapchain: PRESENT_SRC -> TRANSFER_SRC
+        pre_copy_barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        pre_copy_barriers[0].oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        pre_copy_barriers[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        pre_copy_barriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        pre_copy_barriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        pre_copy_barriers[0].image = vulkan_state.swapchain_images[swapchain_image_index];
+        pre_copy_barriers[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        pre_copy_barriers[0].subresourceRange.baseMipLevel = 0;
+        pre_copy_barriers[0].subresourceRange.levelCount = 1;
+        pre_copy_barriers[0].subresourceRange.baseArrayLayer = 0;
+        pre_copy_barriers[0].subresourceRange.layerCount = 1;
+        pre_copy_barriers[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        pre_copy_barriers[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+        // scene color: UNDEFINED -> TRANSFER_DST
+        pre_copy_barriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        pre_copy_barriers[1].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        pre_copy_barriers[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        pre_copy_barriers[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        pre_copy_barriers[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        pre_copy_barriers[1].image = vulkan_state.scene_color_image;
+        pre_copy_barriers[1].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        pre_copy_barriers[1].subresourceRange.baseMipLevel = 0;
+        pre_copy_barriers[1].subresourceRange.levelCount = 1;
+        pre_copy_barriers[1].subresourceRange.baseArrayLayer = 0;
+        pre_copy_barriers[1].subresourceRange.layerCount = 1;
+        pre_copy_barriers[1].srcAccessMask = 0;
+        pre_copy_barriers[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 2, pre_copy_barriers);
+
+        // the actual copy
+        VkImageCopy copy_region = {0};
+        copy_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        copy_region.srcSubresource.layerCount = 1;
+        copy_region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        copy_region.dstSubresource.layerCount = 1;
+        copy_region.extent.width = vulkan_state.swapchain_extent.width;
+        copy_region.extent.height = vulkan_state.swapchain_extent.height;
+        copy_region.extent.depth = 1;
+
+        vkCmdCopyImage(command_buffer, vulkan_state.swapchain_images[swapchain_image_index], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, vulkan_state.scene_color_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
+
+        // post-copy transitions
+        VkImageMemoryBarrier post_copy_barriers[2] = {0};
+
+        // swapchain: TRANSFER_SRC -> PRESENT_SRC (overlay pass expects this)
+        post_copy_barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        post_copy_barriers[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        post_copy_barriers[0].newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        post_copy_barriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        post_copy_barriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        post_copy_barriers[0].image = vulkan_state.swapchain_images[swapchain_image_index];
+        post_copy_barriers[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        post_copy_barriers[0].subresourceRange.baseMipLevel = 0;
+        post_copy_barriers[0].subresourceRange.levelCount = 1;
+        post_copy_barriers[0].subresourceRange.baseArrayLayer = 0;
+        post_copy_barriers[0].subresourceRange.layerCount = 1;
+        post_copy_barriers[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        post_copy_barriers[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+        // scene color: TRANSFER_DST -> SHADER_READ_ONLY
+        post_copy_barriers[1].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        post_copy_barriers[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        post_copy_barriers[1].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        post_copy_barriers[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        post_copy_barriers[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        post_copy_barriers[1].image = vulkan_state.scene_color_image;
+        post_copy_barriers[1].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        post_copy_barriers[1].subresourceRange.baseMipLevel = 0;
+        post_copy_barriers[1].subresourceRange.levelCount = 1;
+        post_copy_barriers[1].subresourceRange.baseArrayLayer = 0;
+        post_copy_barriers[1].subresourceRange.layerCount = 1;
+        post_copy_barriers[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        post_copy_barriers[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 2, post_copy_barriers);
+    }
+
     // transition depth back to attachment for overlay pass (lasers, which affect outlines)
 
     VkImageMemoryBarrier depth_to_attachment = {0};
@@ -3182,7 +3313,7 @@ void vulkanDraw(void)
 
     vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT, 0, 0, 0, 0, 0, 1, &depth_to_attachment);
 
-    // overlay pass: lasers (outline + fill)
+    // overlay pass: water and lasers (outline + fill)
     {
         VkRenderPassBeginInfo overlay_rp_begin = {0};
         overlay_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -3197,6 +3328,42 @@ void vulkanDraw(void)
         vkCmdSetViewport(command_buffer, 0, 1, &viewport);
         vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
+        // WATER
+        if (shader_mode != OUTLINE_TEST)
+        {
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_handle);
+            VkDescriptorSet water_sets[2] = { vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], vulkan_state.scene_color_descriptor_set };
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_layout, 0, 2, water_sets, 0, 0);
+
+            for (uint32 water_index = 0; water_index < water_instance_count; water_index++)
+            {
+                Water* water = &water_instances[water_index];
+                LoadedModel* water_data = &vulkan_state.loaded_models[MODEL_3D_WATER - MODEL_3D_VOID];
+                if (water_data->index_count == 0) continue;
+
+                VkDeviceSize offset = 0;
+                vkCmdBindVertexBuffers(command_buffer, 0, 1, &water_data->vertex_buffer, &offset);
+                vkCmdBindIndexBuffer(command_buffer, water_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+                Vec4 rotation = { 0, 0, 0, 1 };
+                Vec3 scale = { 1, 1, 1 };
+
+                float model_matrix[16];
+                mat4BuildTRS(model_matrix, water->coords, rotation, scale);
+
+                WaterPushConstants pc = {0};
+                memcpy(pc.model, model_matrix,      sizeof(pc.model));
+                memcpy(pc.view,  view_matrix,       sizeof(pc.view));
+                memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
+                pc.time = water_time;
+                LOG("water time: %f\n", water_time);
+
+                vkCmdPushConstants(command_buffer, vulkan_state.water_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &pc);
+                vkCmdDrawIndexed(command_buffer, water_data->index_count, 1, 0, 0, 0);
+            }
+        }
+
+        // LASERS
         LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
         if (laser_mesh->index_count > 0)
         {
@@ -3380,6 +3547,11 @@ void vulkanResize(uint32 width, uint32 height)
     vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.normal_image_view, 0);
     vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.normal_image, 0);
     vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.normal_image_memory, 0);
+
+    // destroy scene color view + image
+    vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.scene_color_image_view, 0);
+    vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.scene_color_image, 0);
+    vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.scene_color_image_memory, 0);
 
     // old swapchain is destroyed inside createSwapchainResources
     createSwapchainResources();
