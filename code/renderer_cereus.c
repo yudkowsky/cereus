@@ -34,6 +34,8 @@ bool first_submit_since_draw = true;
 
 ShaderMode shader_mode = OLD;
 
+float water_time = 0.0f;
+
 typedef struct 
 {
     float x, y, z;
@@ -71,6 +73,12 @@ typedef struct
     Vec4 rotation;
 }
 Model;
+
+typedef struct
+{
+    Vec3 coords;
+}
+Water;
 
 // for instancing of cubes
 typedef struct 
@@ -124,6 +132,15 @@ typedef struct
     float proj[16];
 }
 InstancedPushConstants;
+
+typedef struct
+{
+    float model[16];
+    float view[16];
+    float proj[16];
+    float time;
+}
+WaterPushConstants;
 
 typedef struct
 {
@@ -208,6 +225,9 @@ typedef struct
 
     VkPipeline model_pipeline_handle;
     VkPipelineLayout model_pipeline_layout;
+
+    VkPipeline water_pipeline_handle;
+    VkPipelineLayout water_pipeline_layout;
 
     // second render pass (outlines, based on depth and normal)
     VkPipeline outline_post_pipeline;
@@ -346,6 +366,9 @@ uint32 model_instance_count = 0;
 
 Model model_selected_outline_instances[1024];
 uint32 model_selected_outline_instance_count = 0;
+
+Water water_instances[1024];
+uint32 water_instance_count = 0;
 
 Camera vulkan_camera = {0};
 
@@ -1099,13 +1122,12 @@ LoadedModel loadModel(char* path)
 
 void loadAllEntities()
 {
+    vulkan_state.loaded_models[MODEL_3D_BOX - MODEL_3D_VOID] = loadModel("data/assets/rock.glb");
+	vulkan_state.loaded_models[MODEL_3D_MIRROR 	- MODEL_3D_VOID] = loadModel("data/assets/mirror.glb");
+    vulkan_state.loaded_models[MODEL_3D_GLASS - MODEL_3D_VOID] = loadModel("data/assets/glass.glb");
     vulkan_state.loaded_models[MODEL_3D_WIN_BLOCK - MODEL_3D_VOID] = loadModel("data/assets/flower.glb");
 
-	vulkan_state.loaded_models[MODEL_3D_MIRROR 	- MODEL_3D_VOID] = loadModel("data/assets/mirror.glb");
-
-    vulkan_state.loaded_models[MODEL_3D_BOX - MODEL_3D_VOID] = loadModel("data/assets/rock.glb");
-
-    vulkan_state.loaded_models[MODEL_3D_GLASS - MODEL_3D_VOID] = loadModel("data/assets/glass.glb");
+    vulkan_state.loaded_models[MODEL_3D_WATER - MODEL_3D_VOID] = loadModel("data/assets/water.glb");
 
     vulkan_state.loaded_models[MODEL_3D_SOURCE_RED     - MODEL_3D_VOID] = loadModel("data/assets/red-source.glb");
     vulkan_state.loaded_models[MODEL_3D_SOURCE_GREEN   - MODEL_3D_VOID] = loadModel("data/assets/green-source.glb");
@@ -1956,29 +1978,34 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkShaderModule model_frag_smh = {0};
     VkShaderModule outline_post_vert_smh = {0};
     VkShaderModule outline_post_frag_smh = {0};
+    VkShaderModule water_vert_smh = {0};
+    VkShaderModule water_frag_smh = {0};
 
-    VkPipelineShaderStageCreateInfo cube_vert_shader_stage_ci 	 	     = loadShaderStage("data/shaders/spirv/tri.vert.spv", 	  	  	  &cube_vert_smh, 	  		 VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo cube_frag_shader_stage_ci 	 	     = loadShaderStage("data/shaders/spirv/tri.frag.spv", 	  	  	  &cube_frag_smh, 	  		 VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo outline_vert_shader_stage_ci 	     = loadShaderStage("data/shaders/spirv/outline.vert.spv", 	  	  &outline_vert_smh, 		 VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo outline_frag_shader_stage_ci 	     = loadShaderStage("data/shaders/spirv/outline.frag.spv", 	  	  &outline_frag_smh, 		 VK_SHADER_STAGE_FRAGMENT_BIT);
-	VkPipelineShaderStageCreateInfo laser_fill_vert_shader_stage_ci      = loadShaderStage("data/shaders/spirv/laser-fill.vert.spv",      &laser_fill_vert_smh,   	 VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo laser_fill_frag_shader_stage_ci      = loadShaderStage("data/shaders/spirv/laser-fill.frag.spv",      &laser_fill_frag_smh,   	 VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo laser_outline_vert_shader_stage_ci   = loadShaderStage("data/shaders/spirv/laser-outline.vert.spv",   &laser_outline_vert_smh,   VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo laser_outline_frag_shader_stage_ci   = loadShaderStage("data/shaders/spirv/laser-outline.frag.spv",   &laser_outline_frag_smh,   VK_SHADER_STAGE_FRAGMENT_BIT);
-	VkPipelineShaderStageCreateInfo sprite_vert_shader_stage_ci  	     = loadShaderStage("data/shaders/spirv/sprite.vert.spv",  	  	  &sprite_vert_smh,  		 VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo sprite_frag_shader_stage_ci  	     = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  	  &sprite_frag_smh,  		 VK_SHADER_STAGE_FRAGMENT_BIT);
-	VkPipelineShaderStageCreateInfo model_vert_shader_stage_ci 	 	     = loadShaderStage("data/shaders/spirv/model.vert.spv",   	  	  &model_vert_smh,   		 VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo model_frag_shader_stage_ci 	 	     = loadShaderStage("data/shaders/spirv/model.frag.spv",   	  	  &model_frag_smh,   		 VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo outline_post_vert_stage_ci           = loadShaderStage("data/shaders/spirv/outline-post.vert.spv",    &outline_post_vert_smh,    VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo outline_post_frag_stage_ci           = loadShaderStage("data/shaders/spirv/outline-post.frag.spv",    &outline_post_frag_smh,    VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo cube_vert_stage_ci 	 	     = loadShaderStage("data/shaders/spirv/tri.vert.spv", 	  	  	  &cube_vert_smh, 	  		 VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo cube_frag_stage_ci 	 	     = loadShaderStage("data/shaders/spirv/tri.frag.spv", 	  	  	  &cube_frag_smh, 	  		 VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo outline_vert_stage_ci 	     = loadShaderStage("data/shaders/spirv/outline.vert.spv", 	  	  &outline_vert_smh, 		 VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo outline_frag_stage_ci 	     = loadShaderStage("data/shaders/spirv/outline.frag.spv", 	  	  &outline_frag_smh, 		 VK_SHADER_STAGE_FRAGMENT_BIT);
+	VkPipelineShaderStageCreateInfo laser_fill_vert_stage_ci     = loadShaderStage("data/shaders/spirv/laser-fill.vert.spv",      &laser_fill_vert_smh,   	 VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo laser_fill_frag_stage_ci     = loadShaderStage("data/shaders/spirv/laser-fill.frag.spv",      &laser_fill_frag_smh,   	 VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo laser_outline_vert_stage_ci  = loadShaderStage("data/shaders/spirv/laser-outline.vert.spv",   &laser_outline_vert_smh,   VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo laser_outline_frag_stage_ci  = loadShaderStage("data/shaders/spirv/laser-outline.frag.spv",   &laser_outline_frag_smh,   VK_SHADER_STAGE_FRAGMENT_BIT);
+	VkPipelineShaderStageCreateInfo sprite_vert_stage_ci  	     = loadShaderStage("data/shaders/spirv/sprite.vert.spv",  	  	  &sprite_vert_smh,  		 VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo sprite_frag_stage_ci  	     = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  	  &sprite_frag_smh,  		 VK_SHADER_STAGE_FRAGMENT_BIT);
+	VkPipelineShaderStageCreateInfo model_vert_stage_ci 	 	 = loadShaderStage("data/shaders/spirv/model.vert.spv",   	  	  &model_vert_smh,   		 VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo model_frag_stage_ci 	 	 = loadShaderStage("data/shaders/spirv/model.frag.spv",   	  	  &model_frag_smh,   		 VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo outline_post_vert_stage_ci   = loadShaderStage("data/shaders/spirv/outline-post.vert.spv",    &outline_post_vert_smh,    VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo outline_post_frag_stage_ci   = loadShaderStage("data/shaders/spirv/outline-post.frag.spv",    &outline_post_frag_smh,    VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo water_vert_stage_ci          = loadShaderStage("data/shaders/spirv/water.vert.spv",           &water_vert_smh,           VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo water_frag_stage_ci          = loadShaderStage("data/shaders/spirv/water.frag.spv",           &water_frag_smh,           VK_SHADER_STAGE_FRAGMENT_BIT);
 
-    VkPipelineShaderStageCreateInfo cube_shader_stages[2]  	 	     = { cube_vert_shader_stage_ci,    	       cube_frag_shader_stage_ci }; 
-    VkPipelineShaderStageCreateInfo outline_shader_stages[2] 	     = { outline_vert_shader_stage_ci, 	       outline_frag_shader_stage_ci }; 
-    VkPipelineShaderStageCreateInfo laser_shader_stages[2]   	     = { laser_fill_vert_shader_stage_ci,      laser_fill_frag_shader_stage_ci };
-    VkPipelineShaderStageCreateInfo laser_outline_shader_stages[2]   = { laser_outline_vert_shader_stage_ci,   laser_outline_frag_shader_stage_ci };
-    VkPipelineShaderStageCreateInfo sprite_shader_stages[2]  	     = { sprite_vert_shader_stage_ci,  	   	   sprite_frag_shader_stage_ci };
-   	VkPipelineShaderStageCreateInfo model_shader_stages[2]   	     = { model_vert_shader_stage_ci,   	       model_frag_shader_stage_ci };
-    VkPipelineShaderStageCreateInfo outline_post_shader_stages[2]    = { outline_post_vert_stage_ci,           outline_post_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo cube_shader_stages[2]  	 	     = { cube_vert_stage_ci,    	  cube_frag_stage_ci }; 
+    VkPipelineShaderStageCreateInfo outline_shader_stages[2] 	     = { outline_vert_stage_ci, 	  outline_frag_stage_ci }; 
+    VkPipelineShaderStageCreateInfo laser_shader_stages[2]   	     = { laser_fill_vert_stage_ci,    laser_fill_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo laser_outline_shader_stages[2]   = { laser_outline_vert_stage_ci, laser_outline_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo sprite_shader_stages[2]  	     = { sprite_vert_stage_ci,  	  sprite_frag_stage_ci };
+   	VkPipelineShaderStageCreateInfo model_shader_stages[2]   	     = { model_vert_stage_ci,   	  model_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo outline_post_shader_stages[2]    = { outline_post_vert_stage_ci,  outline_post_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo water_shader_stages[2]           = { water_vert_stage_ci,         water_frag_stage_ci };
 
     // vertex input
     // per-vertex data: used for individually drawn meshes (sprites, models (currently), lasers, etc.)
@@ -2294,6 +2321,24 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &model_pipeline_layout_ci, 0, &vulkan_state.model_pipeline_layout);
     }
 
+    // CREATE WATER PIPELINE LAYOUT
+
+    {
+        VkPushConstantRange push_constant_range = {0};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = (uint32)sizeof(WaterPushConstants);
+
+        VkPipelineLayoutCreateInfo water_pipeline_layout_ci = {0};
+        water_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        water_pipeline_layout_ci.setLayoutCount = 1;
+        water_pipeline_layout_ci.pSetLayouts = &vulkan_state.descriptor_set_layout;
+        water_pipeline_layout_ci.pushConstantRangeCount = 1;
+        water_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
+
+        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &water_pipeline_layout_ci, 0, &vulkan_state.water_pipeline_layout);
+    }
+
     // OUTLINE POST PIPELINE LAYOUT
 
     {
@@ -2363,7 +2408,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 	base_graphics_pipeline_creation_info.pMultisampleState = &multisample_state_creation_info; // multisampling disabled (1x MSAA)
 	base_graphics_pipeline_creation_info.pDepthStencilState = &depth_stencil_state_creation_info;
 	base_graphics_pipeline_creation_info.pColorBlendState = &color_blend_state_creation_info; // one color attachment; no blending
-	base_graphics_pipeline_creation_info.pDynamicState = &dynamic_state_creation_info; // declares that viewport / scissor are dynamic
+	base_graphics_pipeline_creation_info.pDynamicState = &dynamic_state_creation_info;
 	base_graphics_pipeline_creation_info.layout = 0; // will be set by each individual pipeline
 	base_graphics_pipeline_creation_info.renderPass = vulkan_state.render_pass_handle;
 	base_graphics_pipeline_creation_info.subpass = 0; // first (and only) subpass
@@ -2448,6 +2493,39 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         model_ci.layout = vulkan_state.model_pipeline_layout;
 
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &model_ci, 0, &vulkan_state.model_pipeline_handle);
+    }
+
+    // define water pipeline
+    {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
+        color_blend_attachment_state.blendEnable = VK_FALSE;
+
+        blend_attachments[0] = color_blend_attachment_state;
+        blend_attachments[1] = color_blend_attachment_state;
+
+        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
+
+        depth_stencil_state_creation_info.stencilTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.front.failOp = VK_STENCIL_OP_KEEP;
+        depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_REPLACE;
+        depth_stencil_state_creation_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
+        depth_stencil_state_creation_info.front.compareOp = VK_COMPARE_OP_ALWAYS;
+        depth_stencil_state_creation_info.front.compareMask = 0xFF;
+        depth_stencil_state_creation_info.front.writeMask = 0xFF;
+        depth_stencil_state_creation_info.front.reference = 2;
+        depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
+
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
+        rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+        VkGraphicsPipelineCreateInfo water_ci = base_graphics_pipeline_creation_info;
+        water_ci.pStages = water_shader_stages;
+        water_ci.layout = vulkan_state.water_pipeline_layout;
+
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &water_ci, 0, &vulkan_state.water_pipeline_handle);
     }
 
     // define outline post pipeline. different enough that we might as well set up an entirely new creation info. sets up state first, then assigns TODO: see if i can do some cleanup here
@@ -2633,11 +2711,13 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     loadAllEntities();
 }
 
-void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Camera game_camera, ShaderMode shader_mode_from_game)
+void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, float global_time, Camera game_camera, ShaderMode shader_mode_from_game)
 {  
     vulkan_camera = game_camera;
 
     shader_mode = shader_mode_from_game;
+
+    water_time = global_time;
 
     sprite_instance_count = 0;
     cube_instance_count = 0;
@@ -2645,6 +2725,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Cam
     laser_instance_count = 0;
     model_instance_count = 0;
     model_selected_outline_instance_count = 0;
+    water_instance_count = 0;
 
     for (int asset_index = 0; asset_index < draw_command_count; asset_index++)
     {
@@ -2691,6 +2772,11 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Cam
             model->coords   = command->coords;
             model->scale    = command->scale;
             model->rotation = command->rotation;
+        }
+        else if (type == WATER_3D)
+		{
+            Water* water = &water_instances[water_instance_count++];
+            water->coords = command->coords;
         }
         else if (type == SPRITE_2D)
         {
@@ -2936,7 +3022,6 @@ void vulkanDraw(void)
             memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
             pc.uv_rect = (Vec4){0, 0, 1, 1};
 
-            // pass 1: fill, write stencil = 2
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_handle);
             vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
             vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
@@ -2974,6 +3059,37 @@ void vulkanDraw(void)
 		vkCmdSetDepthBias(command_buffer, -0.1f, 0.0f, -0.1f);
         vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
 		vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
+    }
+
+    // WATER
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_handle);
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
+
+    for (uint32 water_index = 0; water_index < water_instance_count; water_index++)
+    {
+        Water* water = &water_instances[water_index];
+        LoadedModel* water_data = &vulkan_state.loaded_models[MODEL_3D_WATER - MODEL_3D_VOID];
+        if (water_data->index_count == 0) continue;
+
+        VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &water_data->vertex_buffer, &offset);
+        vkCmdBindIndexBuffer(command_buffer, water_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+        Vec4 rotation = { 0, 0, 0, 1 };
+        Vec3 scale = { 1, 1, 1 };
+
+        float model_matrix[16];
+        mat4BuildTRS(model_matrix, water->coords, rotation, scale);
+
+        WaterPushConstants pc = {0};
+        memcpy(pc.model, model_matrix,      sizeof(pc.model));
+        memcpy(pc.view,  view_matrix,       sizeof(pc.view));
+        memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
+        pc.time = water_time;
+        LOG("water time: %f\n", water_time);
+
+        vkCmdPushConstants(command_buffer, vulkan_state.water_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &pc);
+        vkCmdDrawIndexed(command_buffer, water_data->index_count, 1, 0, 0, 0);
     }
 
     vkCmdEndRenderPass(command_buffer);

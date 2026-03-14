@@ -20,6 +20,8 @@ glslc model-blackline.vert -g -o ..\spirv\model-blackline.vert.spv
 glslc model-blackline.frag -g -o ..\spirv\model-blackline.frag.spv
 glslc outline-post.vert -g -o ..\spirv\outline-post.vert.spv
 glslc outline-post.frag -g -o ..\spirv\outline-post.frag.spv
+glslc water.vert -g -o ..\spirv\water.vert.spv
+glslc water.frag -g -o ..\spirv\water.frag.spv
 popd
 
 IF EXIST ..\..\build_cereus rmdir \S \Q ..\..\build_cereus 2>nul

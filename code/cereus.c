@@ -39,7 +39,7 @@ typedef enum
     GLASS,
     PACK,
     PERM_MIRROR,
-    NOT_VOID,
+    WATER,
     WIN_BLOCK,
 
     SOURCE_RED,
@@ -463,6 +463,7 @@ const double DEFAULT_PHYSICS_TIMESTEP = 1.0/60.0;
 double physics_timestep = 1.0/60.0;
 double physics_accumulator = 0;
 double timer_accumulator = 0;
+double global_time = 0;
 
 const char debug_level_name[64] = "red-last";
 const char relative_start_level_path_buffer[64] = "data/levels/";
@@ -1634,7 +1635,7 @@ SpriteId getSprite2DId(TileType tile)
         case MIRROR:       return SPRITE_2D_MIRROR;
         case GLASS:        return SPRITE_2D_GLASS;
         case PACK:    	   return SPRITE_2D_PACK;
-        case NOT_VOID:     return SPRITE_2D_NOT_VOID;
+        case WATER:        return SPRITE_2D_WATER;
         case WIN_BLOCK:    return SPRITE_2D_WIN_BLOCK;
         case LOCKED_BLOCK: return SPRITE_2D_LOCKED_BLOCK;
         case RESET_BLOCK:  return SPRITE_2D_RESET_BLOCK;
@@ -1664,7 +1665,7 @@ SpriteId getCube3DId(TileType tile)
         case MIRROR:       return CUBE_3D_MIRROR;
         case GLASS:        return CUBE_3D_GLASS;
         case PACK:    	   return CUBE_3D_PACK;
-        case NOT_VOID:     return CUBE_3D_NOT_VOID;
+        case WATER:        return CUBE_3D_WATER;
         case WIN_BLOCK:    return CUBE_3D_WIN_BLOCK;
         case LOCKED_BLOCK: return CUBE_3D_LOCKED_BLOCK;
         case RESET_BLOCK:  return CUBE_3D_RESET_BLOCK;
@@ -1703,7 +1704,7 @@ SpriteId getModelId(TileType tile)
         case MIRROR:       return MODEL_3D_MIRROR;
         case GLASS:        return MODEL_3D_GLASS;
         case PACK:    	   return MODEL_3D_PACK;
-        case NOT_VOID:     return MODEL_3D_NOT_VOID;
+        case WATER:        return MODEL_3D_WATER;
         case WIN_BLOCK:    return MODEL_3D_WIN_BLOCK;
         case LOCKED_BLOCK: return MODEL_3D_LOCKED_BLOCK;
         case RESET_BLOCK:  return MODEL_3D_RESET_BLOCK;
@@ -3348,8 +3349,8 @@ void gameRedraw(DisplayInfo display_from_platform)
     if (draw_command_count == 0) return;
     game_display = display_from_platform;
 	recalculateDebugStartCoords();
-    vulkanSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset, game_shader_mode); // render models is temp passthrough here. toggles some shaders that apply to everything,
-                                                                                                // but that i only want on when working on rendering
+    vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, camera_with_ow_offset, game_shader_mode); // render models is temp passthrough here. toggles some shaders that apply to everything,
+                                                                          						                       // but that i only want on when working on rendering
     vulkanDraw();
 }
 
@@ -3964,7 +3965,7 @@ void editorMode(TickInput *tick_input)
                     if (entity_group != 0) setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
                     setTileType(editor_state.picked_tile, raycast_output.place_coords);
 
-                    if (editor_state.picked_tile != VOID && editor_state.picked_tile != NOT_VOID && editor_state.picked_tile != GRID) 
+                    if (editor_state.picked_tile != VOID && editor_state.picked_tile != WATER && editor_state.picked_tile != GRID) 
                     {
                         setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
                     }
@@ -3977,7 +3978,7 @@ void editorMode(TickInput *tick_input)
             else if (tick_input->r_press && raycast_output.hit)
             {   
                 TileType tile = getTileType(raycast_output.hit_coords);
-                if (isEntity(tile) && tile != VOID && tile != NOT_VOID)
+                if (isEntity(tile) && tile != VOID && tile != WATER)
                 {
                     Direction direction = getTileDirection(raycast_output.hit_coords);
                     if (direction == DOWN) direction = NORTH;
@@ -5047,7 +5048,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // delete player / pack if above void
         if (!player->hit_by_red)
         {
-            if ((getTileType(getNextCoords(player->coords, DOWN)) == VOID || getTileType(getNextCoords(player->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PLAYER_ID)) 
+            if ((getTileType(getNextCoords(player->coords, DOWN)) == VOID || getTileType(getNextCoords(player->coords, DOWN)) == WATER) && !presentInAnimations(PLAYER_ID)) 
             {
                 setTileType(NONE, player->coords);
                 setTileDirection(NORTH, player->coords);
@@ -5058,7 +5059,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             if (!player->hit_by_blue)
             {
-                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PACK_ID)) 
+                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID || getTileType(getNextCoords(pack->coords, DOWN)) == WATER) && !presentInAnimations(PACK_ID)) 
                 {
                     setTileType(NONE, pack->coords);
                     setTileDirection(NORTH, pack->coords);
@@ -5070,7 +5071,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         {
             if (!player->hit_by_red)
             {
-                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID || getTileType(getNextCoords(pack->coords, DOWN)) == NOT_VOID) && !presentInAnimations(PACK_ID))
+                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID || getTileType(getNextCoords(pack->coords, DOWN)) == WATER) && !presentInAnimations(PACK_ID))
                 {
                     setTileType(NONE, pack->coords);
                     setTileDirection(NORTH, pack->coords);
@@ -5593,7 +5594,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (time_until_allow_game_input > 0) time_until_allow_game_input--;
 	}
 
-    // now out of the fixed physics-time loop; stuff out here happens every draw call, not just every physics frame. e.g., camera movement is smooth at whatever framerate game is runinng at
+    // now out of the fixed physics-time loop; stuff out here happens every draw call, not just every physics frame. e.g., camera movement is smooth at whatever framerate game is runinng at.
     // draw calls are also out here, but position_norm and rotation_quat for entites is only updated every physics frame anyway, so even if they're drawn 2-3 times per physics frame 
     // on a 144hz monitor, they're still at the same positions. next step here would be to add interpolations between these states, but i'm waiting until i've got a more sophisticated animation
     // system before doing that. 
@@ -5684,7 +5685,14 @@ void gameFrame(double delta_time, TickInput tick_input)
             }
             else
             {
-                drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false), VEC3_0);
+                if (game_shader_mode != OLD && getCube3DId(draw_tile) == CUBE_3D_WATER) 
+                {
+                    drawAsset(MODEL_3D_WATER, WATER_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false), VEC3_0);
+                }
+                else 
+                {
+                    drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false), VEC3_0);
+                }
             }
         }
 
@@ -5825,6 +5833,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         // handle decrementing timers which should be consistent across physics timesteps
         timer_accumulator += delta_time;
+        global_time += delta_time;
         while (timer_accumulator >= 1.0/60.0)
         {
             FOR(popup_index, MAX_DEBUG_POPUP_COUNT) if (debug_popups[popup_index].frames_left > 0) debug_popups[popup_index].frames_left--;
@@ -5865,6 +5874,6 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
     }
 
-    vulkanSubmitFrame(draw_commands, draw_command_count, camera_with_ow_offset, game_shader_mode);
+    vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, camera_with_ow_offset, game_shader_mode);
     vulkanDraw();
 }
