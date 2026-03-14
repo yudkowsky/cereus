@@ -153,7 +153,7 @@ typedef struct
 }
 LoadedModel;
 
-typedef struct 
+typedef struct VulkanState
 {
     // platform and instance
     RendererPlatformHandles platform_handles;
@@ -215,6 +215,10 @@ typedef struct
     // outline post pass (black outlines on everything)
     VkRenderPass outline_post_render_pass;
     VkFramebuffer* outline_post_framebuffers;
+ 
+    // render pass to sample depth for water buffer
+    VkRenderPass water_render_pass;
+    VkFramebuffer* water_framebuffers;
 
     // overlay pass (lasers, which color the outlines, and sprites, which go over the outlines)
     VkRenderPass overlay_render_pass;
@@ -375,7 +379,7 @@ uint32 model_instance_count = 0;
 Model model_selected_outline_instances[1024];
 uint32 model_selected_outline_instance_count = 0;
 
-Water water_instances[1024];
+Water water_instances[8192];
 uint32 water_instance_count = 0;
 
 Camera vulkan_camera = {0};
@@ -1261,148 +1265,135 @@ void createSwapchainResources(void)
     }
 
     // depth image + view
-    VkImageCreateInfo depth_image_ci = {0};
-	depth_image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-	depth_image_ci.imageType = VK_IMAGE_TYPE_2D;
-	depth_image_ci.extent.width = vulkan_state.swapchain_extent.width;
-	depth_image_ci.extent.height = vulkan_state.swapchain_extent.height;
-	depth_image_ci.extent.depth = 1;
-	depth_image_ci.mipLevels = 1;
-	depth_image_ci.arrayLayers = 1;
-	depth_image_ci.format = vulkan_state.depth_format;
-	depth_image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-	depth_image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	depth_image_ci.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-	depth_image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
-	depth_image_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    {
+        VkImageCreateInfo depth_image_ci = {0};
+        depth_image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        depth_image_ci.imageType = VK_IMAGE_TYPE_2D;
+        depth_image_ci.extent.width = vulkan_state.swapchain_extent.width;
+        depth_image_ci.extent.height = vulkan_state.swapchain_extent.height;
+        depth_image_ci.extent.depth = 1;
+        depth_image_ci.mipLevels = 1;
+        depth_image_ci.arrayLayers = 1;
+        depth_image_ci.format = vulkan_state.depth_format;
+        depth_image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        depth_image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        depth_image_ci.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        depth_image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        depth_image_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    vkCreateImage(vulkan_state.logical_device_handle, &depth_image_ci, 0, &vulkan_state.depth_image);
+        vkCreateImage(vulkan_state.logical_device_handle, &depth_image_ci, 0, &vulkan_state.depth_image);
 
-    VkMemoryRequirements depth_memory_requirements = {0};
-    vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.depth_image, &depth_memory_requirements);
+        VkMemoryRequirements depth_memory_requirements = {0};
+        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.depth_image, &depth_memory_requirements);
 
-    VkMemoryAllocateInfo depth_alloc = {0};
-    depth_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    depth_alloc.allocationSize = depth_memory_requirements.size;
-    depth_alloc.memoryTypeIndex = findMemoryType(depth_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        VkMemoryAllocateInfo depth_alloc = {0};
+        depth_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        depth_alloc.allocationSize = depth_memory_requirements.size;
+        depth_alloc.memoryTypeIndex = findMemoryType(depth_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    vkAllocateMemory(vulkan_state.logical_device_handle, &depth_alloc, 0, &vulkan_state.depth_image_memory);
-    vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.depth_image, vulkan_state.depth_image_memory, 0);
+        vkAllocateMemory(vulkan_state.logical_device_handle, &depth_alloc, 0, &vulkan_state.depth_image_memory);
+        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.depth_image, vulkan_state.depth_image_memory, 0);
 
-    VkImageViewCreateInfo depth_view_ci = {0};
-    depth_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    depth_view_ci.image = vulkan_state.depth_image;
-    depth_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    depth_view_ci.format = vulkan_state.depth_format;
-    depth_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-    depth_view_ci.subresourceRange.baseMipLevel = 0;
-    depth_view_ci.subresourceRange.levelCount = 1;
-    depth_view_ci.subresourceRange.baseArrayLayer = 0;
-    depth_view_ci.subresourceRange.layerCount = 1;
+        VkImageViewCreateInfo depth_view_ci = {0};
+        depth_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        depth_view_ci.image = vulkan_state.depth_image;
+        depth_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        depth_view_ci.format = vulkan_state.depth_format;
+        depth_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        depth_view_ci.subresourceRange.baseMipLevel = 0;
+        depth_view_ci.subresourceRange.levelCount = 1;
+        depth_view_ci.subresourceRange.baseArrayLayer = 0;
+        depth_view_ci.subresourceRange.layerCount = 1;
 
-    vkCreateImageView(vulkan_state.logical_device_handle, &depth_view_ci, 0, &vulkan_state.depth_image_view);
+        vkCreateImageView(vulkan_state.logical_device_handle, &depth_view_ci, 0, &vulkan_state.depth_image_view);
+    }
 
     // normal image + view
-    VkImageCreateInfo normal_image_ci = {0};
-    normal_image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    normal_image_ci.imageType = VK_IMAGE_TYPE_2D;
-    normal_image_ci.extent.width = vulkan_state.swapchain_extent.width;
-    normal_image_ci.extent.height = vulkan_state.swapchain_extent.height;
-    normal_image_ci.extent.depth = 1;
-    normal_image_ci.mipLevels = 1;
-    normal_image_ci.arrayLayers = 1;
-    normal_image_ci.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    normal_image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-    normal_image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    normal_image_ci.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    normal_image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
-    normal_image_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    {
+        VkImageCreateInfo normal_image_ci = {0};
+        normal_image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        normal_image_ci.imageType = VK_IMAGE_TYPE_2D;
+        normal_image_ci.extent.width = vulkan_state.swapchain_extent.width;
+        normal_image_ci.extent.height = vulkan_state.swapchain_extent.height;
+        normal_image_ci.extent.depth = 1;
+        normal_image_ci.mipLevels = 1;
+        normal_image_ci.arrayLayers = 1;
+        normal_image_ci.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+        normal_image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        normal_image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        normal_image_ci.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        normal_image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        normal_image_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    vkCreateImage(vulkan_state.logical_device_handle, &normal_image_ci, 0, &vulkan_state.normal_image);
+        vkCreateImage(vulkan_state.logical_device_handle, &normal_image_ci, 0, &vulkan_state.normal_image);
 
-    VkMemoryRequirements normal_memory_requirements = {0};
-    vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.normal_image, &normal_memory_requirements);
+        VkMemoryRequirements normal_memory_requirements = {0};
+        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.normal_image, &normal_memory_requirements);
 
-    VkMemoryAllocateInfo normal_alloc = {0};
-    normal_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    normal_alloc.allocationSize = normal_memory_requirements.size;
-    normal_alloc.memoryTypeIndex = findMemoryType(normal_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        VkMemoryAllocateInfo normal_alloc = {0};
+        normal_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        normal_alloc.allocationSize = normal_memory_requirements.size;
+        normal_alloc.memoryTypeIndex = findMemoryType(normal_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-    vkAllocateMemory(vulkan_state.logical_device_handle, &normal_alloc, 0, &vulkan_state.normal_image_memory);
-    vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.normal_image, vulkan_state.normal_image_memory, 0);
+        vkAllocateMemory(vulkan_state.logical_device_handle, &normal_alloc, 0, &vulkan_state.normal_image_memory);
+        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.normal_image, vulkan_state.normal_image_memory, 0);
 
-    VkImageViewCreateInfo normal_view_ci = {0};
-    normal_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    normal_view_ci.image = vulkan_state.normal_image;
-    normal_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    normal_view_ci.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    normal_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    normal_view_ci.subresourceRange.baseMipLevel = 0;
-    normal_view_ci.subresourceRange.levelCount = 1;
-    normal_view_ci.subresourceRange.baseArrayLayer = 0;
-    normal_view_ci.subresourceRange.layerCount = 1;
+        VkImageViewCreateInfo normal_view_ci = {0};
+        normal_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        normal_view_ci.image = vulkan_state.normal_image;
+        normal_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        normal_view_ci.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+        normal_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        normal_view_ci.subresourceRange.baseMipLevel = 0;
+        normal_view_ci.subresourceRange.levelCount = 1;
+        normal_view_ci.subresourceRange.baseArrayLayer = 0;
+        normal_view_ci.subresourceRange.layerCount = 1;
 
-    vkCreateImageView(vulkan_state.logical_device_handle, &normal_view_ci, 0, &vulkan_state.normal_image_view);
+        vkCreateImageView(vulkan_state.logical_device_handle, &normal_view_ci, 0, &vulkan_state.normal_image_view);
+    }
 
     // scene color image + view
-    VkImageCreateInfo scene_color_image_ci = {0};
-    scene_color_image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    scene_color_image_ci.imageType = VK_IMAGE_TYPE_2D;
-    scene_color_image_ci.extent.width = vulkan_state.swapchain_extent.width;
-    scene_color_image_ci.extent.height = vulkan_state.swapchain_extent.height;
-    scene_color_image_ci.extent.depth = 1;
-    scene_color_image_ci.mipLevels = 1;
-    scene_color_image_ci.arrayLayers = 1;
-    scene_color_image_ci.format = vulkan_state.swapchain_format;
-    scene_color_image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-    scene_color_image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    scene_color_image_ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    scene_color_image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
-    scene_color_image_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    vkCreateImage(vulkan_state.logical_device_handle, &scene_color_image_ci, 0, &vulkan_state.scene_color_image);
-
-    VkMemoryRequirements scene_color_memory_requirements = {0};
-    vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.scene_color_image, &scene_color_memory_requirements);
-
-    VkMemoryAllocateInfo scene_color_alloc = {0};
-    scene_color_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    scene_color_alloc.allocationSize = scene_color_memory_requirements.size;
-    scene_color_alloc.memoryTypeIndex = findMemoryType(scene_color_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    vkAllocateMemory(vulkan_state.logical_device_handle, &scene_color_alloc, 0, &vulkan_state.scene_color_image_memory);
-    vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.scene_color_image, vulkan_state.scene_color_image_memory, 0);
-
-    VkImageViewCreateInfo scene_color_view_ci = {0};
-    scene_color_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    scene_color_view_ci.image = vulkan_state.scene_color_image;
-    scene_color_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    scene_color_view_ci.format = vulkan_state.swapchain_format;
-    scene_color_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    scene_color_view_ci.subresourceRange.baseMipLevel = 0;
-    scene_color_view_ci.subresourceRange.levelCount = 1;
-    scene_color_view_ci.subresourceRange.baseArrayLayer = 0;
-    scene_color_view_ci.subresourceRange.layerCount = 1;
-
-    vkCreateImageView(vulkan_state.logical_device_handle, &scene_color_view_ci, 0, &vulkan_state.scene_color_image_view);
-
-    // main scene framebuffers
-    vulkan_state.swapchain_framebuffers = realloc(vulkan_state.swapchain_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
-
-    for (uint32 framebuffer_index = 0; framebuffer_index < vulkan_state.swapchain_image_count; framebuffer_index++)
     {
-        VkImageView framebuffer_attachments[3] = { vulkan_state.swapchain_image_views[framebuffer_index], vulkan_state.depth_image_view, vulkan_state.normal_image_view };
+        VkImageCreateInfo scene_color_image_ci = {0};
+        scene_color_image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        scene_color_image_ci.imageType = VK_IMAGE_TYPE_2D;
+        scene_color_image_ci.extent.width = vulkan_state.swapchain_extent.width;
+        scene_color_image_ci.extent.height = vulkan_state.swapchain_extent.height;
+        scene_color_image_ci.extent.depth = 1;
+        scene_color_image_ci.mipLevels = 1;
+        scene_color_image_ci.arrayLayers = 1;
+        scene_color_image_ci.format = vulkan_state.swapchain_format;
+        scene_color_image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        scene_color_image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        scene_color_image_ci.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        scene_color_image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        scene_color_image_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        VkFramebufferCreateInfo framebuffer_ci = {0};
-        framebuffer_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        framebuffer_ci.renderPass = vulkan_state.render_pass_handle;
-        framebuffer_ci.attachmentCount = 3;
-        framebuffer_ci.pAttachments = framebuffer_attachments;
-        framebuffer_ci.width = vulkan_state.swapchain_extent.width;
-        framebuffer_ci.height = vulkan_state.swapchain_extent.height;
-        framebuffer_ci.layers = 1;
+        vkCreateImage(vulkan_state.logical_device_handle, &scene_color_image_ci, 0, &vulkan_state.scene_color_image);
 
-        vkCreateFramebuffer(vulkan_state.logical_device_handle, &framebuffer_ci, 0, &vulkan_state.swapchain_framebuffers[framebuffer_index]);
+        VkMemoryRequirements scene_color_memory_requirements = {0};
+        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.scene_color_image, &scene_color_memory_requirements);
+
+        VkMemoryAllocateInfo scene_color_alloc = {0};
+        scene_color_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        scene_color_alloc.allocationSize = scene_color_memory_requirements.size;
+        scene_color_alloc.memoryTypeIndex = findMemoryType(scene_color_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        vkAllocateMemory(vulkan_state.logical_device_handle, &scene_color_alloc, 0, &vulkan_state.scene_color_image_memory);
+        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.scene_color_image, vulkan_state.scene_color_image_memory, 0);
+
+        VkImageViewCreateInfo scene_color_view_ci = {0};
+        scene_color_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        scene_color_view_ci.image = vulkan_state.scene_color_image;
+        scene_color_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        scene_color_view_ci.format = vulkan_state.swapchain_format;
+        scene_color_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        scene_color_view_ci.subresourceRange.baseMipLevel = 0;
+        scene_color_view_ci.subresourceRange.levelCount = 1;
+        scene_color_view_ci.subresourceRange.baseArrayLayer = 0;
+        scene_color_view_ci.subresourceRange.layerCount = 1;
+
+        vkCreateImageView(vulkan_state.logical_device_handle, &scene_color_view_ci, 0, &vulkan_state.scene_color_image_view);
     }
 
     // command buffers
@@ -1433,6 +1424,8 @@ void createSwapchainResources(void)
     depth_sampled_view_ci.subresourceRange.layerCount = 1;
 
     vkCreateImageView(vulkan_state.logical_device_handle, &depth_sampled_view_ci, 0, &vulkan_state.depth_sampled_view);
+
+    // UPDATE DESCRIPTOR SETS
 
     // update depth descriptor sets
     VkDescriptorImageInfo depth_desc_info = {0};
@@ -1482,6 +1475,27 @@ void createSwapchainResources(void)
 
     vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &scene_color_desc_write, 0, 0);
 
+    // FRAMEBUFFERS
+
+    // main scene framebuffers
+    vulkan_state.swapchain_framebuffers = realloc(vulkan_state.swapchain_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
+
+    for (uint32 framebuffer_index = 0; framebuffer_index < vulkan_state.swapchain_image_count; framebuffer_index++)
+    {
+        VkImageView framebuffer_attachments[3] = { vulkan_state.swapchain_image_views[framebuffer_index], vulkan_state.depth_image_view, vulkan_state.normal_image_view };
+
+        VkFramebufferCreateInfo framebuffer_ci = {0};
+        framebuffer_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebuffer_ci.renderPass = vulkan_state.render_pass_handle;
+        framebuffer_ci.attachmentCount = 3;
+        framebuffer_ci.pAttachments = framebuffer_attachments;
+        framebuffer_ci.width = vulkan_state.swapchain_extent.width;
+        framebuffer_ci.height = vulkan_state.swapchain_extent.height;
+        framebuffer_ci.layers = 1;
+
+        vkCreateFramebuffer(vulkan_state.logical_device_handle, &framebuffer_ci, 0, &vulkan_state.swapchain_framebuffers[framebuffer_index]);
+    }
+
     // post-process framebuffers
     vulkan_state.outline_post_framebuffers = realloc(vulkan_state.outline_post_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
 
@@ -1501,7 +1515,25 @@ void createSwapchainResources(void)
         vkCreateFramebuffer(vulkan_state.logical_device_handle, &fb_ci, 0, &vulkan_state.outline_post_framebuffers[i]);
     }
 
-    // third render pass fbs
+    // water frame buffers
+    vulkan_state.water_framebuffers = realloc(vulkan_state.water_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
+
+    for (uint32 i = 0; i < vulkan_state.swapchain_image_count; i++)
+    {
+        VkImageView water_fb_attachments[2] = { vulkan_state.swapchain_image_views[i], vulkan_state.depth_image_view };
+
+        VkFramebufferCreateInfo water_fb_ci = {0};
+        water_fb_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        water_fb_ci.renderPass = vulkan_state.water_render_pass;
+        water_fb_ci.attachmentCount = 2;
+        water_fb_ci.pAttachments = water_fb_attachments;
+        water_fb_ci.width = vulkan_state.swapchain_extent.width;
+        water_fb_ci.height = vulkan_state.swapchain_extent.height;
+        water_fb_ci.layers = 1;
+
+        vkCreateFramebuffer(vulkan_state.logical_device_handle, &water_fb_ci, 0, &vulkan_state.water_framebuffers[i]);
+}
+    // overlay frame buffers
     vulkan_state.overlay_framebuffers = realloc(vulkan_state.overlay_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
 
     for (uint32 i = 0; i < vulkan_state.swapchain_image_count; i++)
@@ -1519,7 +1551,6 @@ void createSwapchainResources(void)
 
         vkCreateFramebuffer(vulkan_state.logical_device_handle, &overlay_fb_ci, 0, &vulkan_state.overlay_framebuffers[i]);
     }
-
 }
 
 void resetPipelineStates(VkPipelineColorBlendAttachmentState* blend, VkPipelineDepthStencilStateCreateInfo* depth_stencil, VkPipelineRasterizationStateCreateInfo* raster)
@@ -1904,7 +1935,63 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateRenderPass(vulkan_state.logical_device_handle, &post_render_pass_ci, 0, &vulkan_state.outline_post_render_pass);
     }
 
-    // third render pass for lasers
+    // water render pass to sample depth. also test depth but don't write
+    {
+        VkAttachmentDescription water_attachments[2] = {0};
+
+        water_attachments[0].format = vulkan_state.swapchain_format;
+        water_attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+        water_attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        water_attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        water_attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        water_attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        water_attachments[0].initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        water_attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+        water_attachments[1].format = vulkan_state.depth_format;
+        water_attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+        water_attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        water_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_NONE;
+        water_attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        water_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_NONE;
+        water_attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        water_attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+        VkAttachmentReference water_color_ref = {0};
+        water_color_ref.attachment = 0;
+        water_color_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentReference water_depth_ref = {0};
+        water_depth_ref.attachment = 1;
+        water_depth_ref.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+        VkSubpassDescription water_subpass = {0};
+        water_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        water_subpass.colorAttachmentCount = 1;
+        water_subpass.pColorAttachments = &water_color_ref;
+        water_subpass.pDepthStencilAttachment = &water_depth_ref;
+
+        VkSubpassDependency water_dependency = {0};
+        water_dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+        water_dependency.dstSubpass = 0;
+        water_dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        water_dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        water_dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        water_dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
+
+        VkRenderPassCreateInfo water_rp_ci = {0};
+        water_rp_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        water_rp_ci.attachmentCount = 2;
+        water_rp_ci.pAttachments = water_attachments;
+        water_rp_ci.subpassCount = 1;
+        water_rp_ci.pSubpasses = &water_subpass;
+        water_rp_ci.dependencyCount = 1;
+        water_rp_ci.pDependencies = &water_dependency;
+
+        vkCreateRenderPass(vulkan_state.logical_device_handle, &water_rp_ci, 0, &vulkan_state.water_render_pass);
+    }
+
+    // overlay render pass for lasers and sprites
     {
         VkAttachmentDescription overlay_attachments[2] = {0};
 
@@ -2396,26 +2483,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &model_pipeline_layout_ci, 0, &vulkan_state.model_pipeline_layout);
     }
 
-    // CREATE WATER PIPELINE LAYOUT
-
-    {
-        VkPushConstantRange push_constant_range = {0};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        push_constant_range.offset = 0;
-        push_constant_range.size = (uint32)sizeof(WaterPushConstants);
-
-        VkDescriptorSetLayout water_set_layouts[2] = { vulkan_state.descriptor_set_layout, vulkan_state.descriptor_set_layout };
-
-        VkPipelineLayoutCreateInfo water_pipeline_layout_ci = {0};
-        water_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        water_pipeline_layout_ci.setLayoutCount = 2;
-        water_pipeline_layout_ci.pSetLayouts = water_set_layouts;
-        water_pipeline_layout_ci.pushConstantRangeCount = 1;
-        water_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
-
-        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &water_pipeline_layout_ci, 0, &vulkan_state.water_pipeline_layout);
-    }
-
     // OUTLINE POST PIPELINE LAYOUT
 
     {
@@ -2434,6 +2501,26 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         layout_ci.pPushConstantRanges = &push_constant_range;
 
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.outline_post_pipeline_layout);
+    }
+
+    // CREATE WATER PIPELINE LAYOUT
+
+    {
+        VkPushConstantRange push_constant_range = {0};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = (uint32)sizeof(WaterPushConstants);
+
+        VkDescriptorSetLayout water_set_layouts[3] = { vulkan_state.descriptor_set_layout, vulkan_state.descriptor_set_layout, vulkan_state.descriptor_set_layout };
+
+        VkPipelineLayoutCreateInfo water_pipeline_layout_ci = {0};
+        water_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        water_pipeline_layout_ci.setLayoutCount = 3;
+        water_pipeline_layout_ci.pSetLayouts = water_set_layouts;
+        water_pipeline_layout_ci.pushConstantRangeCount = 1;
+        water_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
+
+        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &water_pipeline_layout_ci, 0, &vulkan_state.water_pipeline_layout);
     }
 
     // CREATE LASER PIPELINE LAYOUT
@@ -2576,24 +2663,22 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     {
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
-        color_blend_attachment_state.blendEnable = VK_FALSE;
+        VkPipelineColorBlendAttachmentState water_blend = {0};
+        water_blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        water_blend.blendEnable = VK_FALSE;
+
+        VkPipelineColorBlendStateCreateInfo water_blend_ci = {0};
+        water_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        water_blend_ci.attachmentCount = 1;
+        water_blend_ci.pAttachments = &water_blend;
 
         blend_attachments[0] = color_blend_attachment_state;
         blend_attachments[1] = color_blend_attachment_state;
 
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
-        depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
-
-        depth_stencil_state_creation_info.stencilTestEnable = VK_TRUE;
-        depth_stencil_state_creation_info.front.failOp = VK_STENCIL_OP_KEEP;
-        depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_REPLACE;
-        depth_stencil_state_creation_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
-        depth_stencil_state_creation_info.front.compareOp = VK_COMPARE_OP_ALWAYS;
-        depth_stencil_state_creation_info.front.compareMask = 0xFF;
-        depth_stencil_state_creation_info.front.writeMask = 0xFF;
-        depth_stencil_state_creation_info.front.reference = 2;
-        depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
+        depth_stencil_state_creation_info.stencilTestEnable = VK_FALSE;
 
         rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
         rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
@@ -2601,6 +2686,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         VkGraphicsPipelineCreateInfo water_ci = base_graphics_pipeline_creation_info;
         water_ci.pStages = water_shader_stages;
         water_ci.layout = vulkan_state.water_pipeline_layout;
+        water_ci.renderPass = vulkan_state.water_render_pass;
+        water_ci.pColorBlendState = &water_blend_ci;
 
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &water_ci, 0, &vulkan_state.water_pipeline_handle);
     }
@@ -3209,7 +3296,7 @@ void vulkanDraw(void)
         vkCmdEndRenderPass(command_buffer);
     }
 
-    // COPY SWAPCHAIN COLOR TO SCENE COLOR IMAGE FOR WATER SAMPLING
+    // COPY SWAPCHAIN COLOR TO SCENE COLOR IMAGE FOR WATER TO SAMPLE
 
     {
         VkImageMemoryBarrier pre_copy_barriers[2] = {0};
@@ -3294,6 +3381,59 @@ void vulkanDraw(void)
         vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 2, post_copy_barriers);
     }
 
+    // WATER PASS
+    if (water_instance_count > 0)
+    {
+        VkRenderPassBeginInfo water_rp_begin = {0};
+        water_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        water_rp_begin.renderPass = vulkan_state.water_render_pass;
+        water_rp_begin.framebuffer = vulkan_state.water_framebuffers[swapchain_image_index];
+        water_rp_begin.renderArea.offset = (VkOffset2D){0, 0};
+        water_rp_begin.renderArea.extent = vulkan_state.swapchain_extent;
+        water_rp_begin.clearValueCount = 0;
+
+        vkCmdBeginRenderPass(command_buffer, &water_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+        vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_handle);
+
+        VkDescriptorSet water_sets[3] = { 
+            vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 
+            vulkan_state.scene_color_descriptor_set, 
+            vulkan_state.depth_descriptor_set 
+        };
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_layout, 0, 3, water_sets, 0, 0);
+
+        for (uint32 water_index = 0; water_index < water_instance_count; water_index++)
+        {
+            Water* water = &water_instances[water_index];
+            LoadedModel* water_data = &vulkan_state.loaded_models[MODEL_3D_WATER - MODEL_3D_VOID];
+            if (water_data->index_count == 0) continue;
+
+            VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(command_buffer, 0, 1, &water_data->vertex_buffer, &offset);
+            vkCmdBindIndexBuffer(command_buffer, water_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+            Vec4 rotation = { 0, 0, 0, 1 };
+            Vec3 scale = { 1, 1, 1 };
+
+            float model_matrix[16];
+            mat4BuildTRS(model_matrix, water->coords, rotation, scale);
+
+            WaterPushConstants pc = {0};
+            memcpy(pc.model, model_matrix, sizeof(pc.model));
+            memcpy(pc.view, view_matrix, sizeof(pc.view));
+            memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
+            pc.time = water_time;
+
+            vkCmdPushConstants(command_buffer, vulkan_state.water_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &pc);
+            vkCmdDrawIndexed(command_buffer, water_data->index_count, 1, 0, 0, 0);
+        }
+
+        vkCmdEndRenderPass(command_buffer);
+    }
+
     // transition depth back to attachment for overlay pass (lasers, which affect outlines)
 
     VkImageMemoryBarrier depth_to_attachment = {0};
@@ -3327,41 +3467,6 @@ void vulkanDraw(void)
 
         vkCmdSetViewport(command_buffer, 0, 1, &viewport);
         vkCmdSetScissor(command_buffer, 0, 1, &scissor);
-
-        // WATER
-        if (shader_mode != OUTLINE_TEST)
-        {
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_handle);
-            VkDescriptorSet water_sets[2] = { vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], vulkan_state.scene_color_descriptor_set };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_layout, 0, 2, water_sets, 0, 0);
-
-            for (uint32 water_index = 0; water_index < water_instance_count; water_index++)
-            {
-                Water* water = &water_instances[water_index];
-                LoadedModel* water_data = &vulkan_state.loaded_models[MODEL_3D_WATER - MODEL_3D_VOID];
-                if (water_data->index_count == 0) continue;
-
-                VkDeviceSize offset = 0;
-                vkCmdBindVertexBuffers(command_buffer, 0, 1, &water_data->vertex_buffer, &offset);
-                vkCmdBindIndexBuffer(command_buffer, water_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-
-                Vec4 rotation = { 0, 0, 0, 1 };
-                Vec3 scale = { 1, 1, 1 };
-
-                float model_matrix[16];
-                mat4BuildTRS(model_matrix, water->coords, rotation, scale);
-
-                WaterPushConstants pc = {0};
-                memcpy(pc.model, model_matrix,      sizeof(pc.model));
-                memcpy(pc.view,  view_matrix,       sizeof(pc.view));
-                memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
-                pc.time = water_time;
-                LOG("water time: %f\n", water_time);
-
-                vkCmdPushConstants(command_buffer, vulkan_state.water_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &pc);
-                vkCmdDrawIndexed(command_buffer, water_data->index_count, 1, 0, 0, 0);
-            }
-        }
 
         // LASERS
         LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
@@ -3533,6 +3638,7 @@ void vulkanResize(uint32 width, uint32 height)
     {
         vkDestroyFramebuffer(vulkan_state.logical_device_handle, vulkan_state.swapchain_framebuffers[image_index], 0);
         vkDestroyFramebuffer(vulkan_state.logical_device_handle, vulkan_state.outline_post_framebuffers[image_index], 0);
+        vkDestroyFramebuffer(vulkan_state.logical_device_handle, vulkan_state.water_framebuffers[image_index], 0);
         vkDestroyFramebuffer(vulkan_state.logical_device_handle, vulkan_state.overlay_framebuffers[image_index], 0);
         vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.swapchain_image_views[image_index], 0);
     }

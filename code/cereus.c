@@ -495,7 +495,7 @@ const float CAMERA_T_TIMESTEP = 0.05f;
 int32 camera_target_plane = 0; // y level of xz plane which calculates targeted point during camera interpolation function 
                                // TODO: should probably be something defined by level, not just player coords at startup
 
-DrawCommand draw_commands[8192] = {0};
+DrawCommand draw_commands[16768] = {0};
 int32 draw_command_count = 0;
 
 WorldState world_state = {0};
