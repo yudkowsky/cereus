@@ -364,7 +364,7 @@ uint32 frame_vertex_count = 0;
 Sprite sprite_instances[8192];
 uint32 sprite_instance_count = 0;
 
-Cube cube_instances[8192]; // TODO: remove this and below when have full model support
+Cube cube_instances[8192];
 uint32 cube_instance_count = 0;
 
 Cube outline_instances[1024];

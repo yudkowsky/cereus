@@ -5436,26 +5436,29 @@ void gameFrame(double delta_time, TickInput tick_input)
 
             if (time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE && tick_input.x_press) 
             {
-                memset(&saved_alt_camera, 0, sizeof(Camera));
-                camera = saved_main_camera;
-                camera.rotation = buildCameraQuaternion(camera);
+                if (saved_alt_camera.fov > 0) // if there is a saved alt camera
+                {
+                    memset(&saved_alt_camera, 0, sizeof(Camera));
+                    camera = saved_main_camera;
+                    camera.rotation = buildCameraQuaternion(camera);
 
-                Camera empty_camera = {0};
-                {
-                    FILE* file = fopen(relative_level_path, "rb+");
-                    int32 positions[64] = {0};
-                    getCountAndPositionOfChunk(file, ALT_CAMERA_CHUNK_TAG, positions);
-                    fseek(file, positions[0], SEEK_SET);
-                    writeCameraToFile(file, &empty_camera, true);
-                    fclose(file);
-                }
-                {
-                    FILE* file = fopen(level_path, "rb+");
-                    int32 positions[64] = {0};
-                    getCountAndPositionOfChunk(file, ALT_CAMERA_CHUNK_TAG, positions);
-                    fseek(file, positions[0], SEEK_SET);
-                    writeCameraToFile(file, &empty_camera, true);
-                    fclose(file);
+                    Camera empty_camera = {0};
+                    {
+                        FILE* file = fopen(relative_level_path, "rb+");
+                        int32 positions[64] = {0};
+                        getCountAndPositionOfChunk(file, ALT_CAMERA_CHUNK_TAG, positions);
+                        fseek(file, positions[0], SEEK_SET);
+                        writeCameraToFile(file, &empty_camera, true);
+                        fclose(file);
+                    }
+                    {
+                        FILE* file = fopen(level_path, "rb+");
+                        int32 positions[64] = {0};
+                        getCountAndPositionOfChunk(file, ALT_CAMERA_CHUNK_TAG, positions);
+                        fseek(file, positions[0], SEEK_SET);
+                        writeCameraToFile(file, &empty_camera, true);
+                        fclose(file);
+                    }
                 }
             }
 
