@@ -386,6 +386,7 @@ int CALLBACK WinMain(
         double work_ms = (work_end.QuadPart - work_start.QuadPart) * seconds_per_tick * 1000.0;
 
         // sleep code
+        /*
         {
             double target_ms = 1000.0 / 120.0;
             double sleep_ms = target_ms - work_ms;
@@ -394,6 +395,7 @@ int CALLBACK WinMain(
                 Sleep((DWORD)(sleep_ms - 1.5));
             }
         }
+        */
 
         LARGE_INTEGER frame_end;
         QueryPerformanceCounter(&frame_end);

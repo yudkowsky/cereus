@@ -17,6 +17,7 @@
 DisplayInfo vulkan_display = {0};
 
 const uint32 CUBE_INSTANCE_CAPACITY = 8192;
+const uint32 WATER_INSTANCE_CAPACITY = 8192;
 
 // TODO: set these in loadAsset where stb_image gives me width / height. store in CachedAsset.
 const int32 ATLAS_2D_WIDTH = 128;
@@ -89,6 +90,13 @@ typedef struct
 }
 CubeInstanceData;
 
+// instancing water. this might be the permanent solution here?
+typedef struct
+{
+    float model[16];
+}
+WaterInstanceData;
+
 typedef struct 
 {
     Vec3 center;
@@ -135,7 +143,6 @@ InstancedPushConstants;
 
 typedef struct
 {
-    float model[16];
     float view[16];
     float proj[16];
     float time;
@@ -279,10 +286,16 @@ typedef struct VulkanState
     VkDeviceMemory cube_index_memory;
     uint32 cube_index_count;
 
+    // instanced buffers
     VkBuffer cube_instance_buffer;
 	VkDeviceMemory cube_instance_memory;
     void* cube_instance_mapped;
     uint32 cube_instance_capacity;
+
+    VkBuffer water_instance_buffer;
+    VkDeviceMemory water_instance_memory;
+    void* water_instance_mapped;
+    uint32 water_instance_capacity;
 
     // models
     LoadedModel loaded_models[64];
@@ -960,32 +973,29 @@ void uploadBufferToLocalDevice(void* source, VkDeviceSize size, VkBufferUsageFla
     *out_memory = device_memory;
 }
 
-void createInstanceBuffer()
+void createInstanceBuffer(VkBuffer* instance_buffer, VkDeviceSize buffer_size, VkDeviceMemory* instance_memory, void** instance_mapped)
 {
-	vulkan_state.cube_instance_capacity = CUBE_INSTANCE_CAPACITY;
-	VkDeviceSize buffer_size = sizeof(CubeInstanceData) * vulkan_state.cube_instance_capacity;
-
     VkBufferCreateInfo buffer_info = {0};
     buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     buffer_info.size = buffer_size;
     buffer_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
     buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    vkCreateBuffer(vulkan_state.logical_device_handle, &buffer_info, 0, &vulkan_state.cube_instance_buffer);
+    vkCreateBuffer(vulkan_state.logical_device_handle, &buffer_info, 0, instance_buffer);
 
-    VkMemoryRequirements memory_reqs = {0};
-    vkGetBufferMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.cube_instance_buffer, &memory_reqs);
+    VkMemoryRequirements memory_requirements = {0};
+    vkGetBufferMemoryRequirements(vulkan_state.logical_device_handle, *instance_buffer, &memory_requirements);
 
     VkMemoryAllocateInfo alloc_info = {0};
     alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    alloc_info.allocationSize = memory_reqs.size;
-    alloc_info.memoryTypeIndex = findMemoryType(memory_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    alloc_info.allocationSize = memory_requirements.size;
+    alloc_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
-    vkAllocateMemory(vulkan_state.logical_device_handle, &alloc_info, 0, &vulkan_state.cube_instance_memory);
-    vkBindBufferMemory(vulkan_state.logical_device_handle, vulkan_state.cube_instance_buffer, vulkan_state.cube_instance_memory, 0);
+    vkAllocateMemory(vulkan_state.logical_device_handle, &alloc_info, 0, instance_memory);
+    vkBindBufferMemory(vulkan_state.logical_device_handle, *instance_buffer, *instance_memory, 0);
 
-    vkMapMemory(vulkan_state.logical_device_handle, vulkan_state.cube_instance_memory, 0, buffer_size, 0, &vulkan_state.cube_instance_mapped);
-    memset(vulkan_state.cube_instance_mapped, 0, (size_t)buffer_size);
+    vkMapMemory(vulkan_state.logical_device_handle, *instance_memory, 0, buffer_size, 0, instance_mapped);
+    memset(*instance_mapped, 0, (size_t)buffer_size);
 }
 
 LoadedModel loadModel(char* path)
@@ -2199,8 +2209,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     vertex_input_simple.vertexAttributeDescriptionCount = 4;
     vertex_input_simple.pVertexAttributeDescriptions = vertex_attributes_simple;
 
-    // per-vertex + per-instance data: used for batched drawing of many objects in a single draw call (just cubes right now)
-    // where each instance carries its own model matrix and texture atlas region
+    // cube vertex input (instanced)
     VkVertexInputBindingDescription vertex_bindings_instanced[2] = {0};
     vertex_bindings_instanced[0].binding = 0;
     vertex_bindings_instanced[0].stride = sizeof(Vertex);
@@ -2263,6 +2272,42 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     vertex_input_instanced.pVertexBindingDescriptions = vertex_bindings_instanced;
     vertex_input_instanced.vertexAttributeDescriptionCount = 9;
     vertex_input_instanced.pVertexAttributeDescriptions = vertex_attributes_instanced;
+
+    // water vertex input (instanced)
+    VkVertexInputBindingDescription water_bindings[2] = {0};
+    water_bindings[0].binding = 0;
+    water_bindings[0].stride = sizeof(Vertex);
+    water_bindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    water_bindings[1].binding = 1;
+    water_bindings[1].stride = sizeof(WaterInstanceData);
+    water_bindings[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+
+    VkVertexInputAttributeDescription water_attrs[8] = {0};
+
+    water_attrs[0].binding = 0; water_attrs[0].location = 0;
+    water_attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT; water_attrs[0].offset = offsetof(Vertex, x);
+    water_attrs[1].binding = 0; water_attrs[1].location = 1;
+    water_attrs[1].format = VK_FORMAT_R32G32_SFLOAT; water_attrs[1].offset = offsetof(Vertex, u);
+    water_attrs[2].binding = 0; water_attrs[2].location = 2;
+    water_attrs[2].format = VK_FORMAT_R32G32B32_SFLOAT; water_attrs[2].offset = offsetof(Vertex, nx);
+    water_attrs[3].binding = 0; water_attrs[3].location = 3;
+    water_attrs[3].format = VK_FORMAT_R32G32B32_SFLOAT; water_attrs[3].offset = offsetof(Vertex, r);
+
+    water_attrs[4].binding = 1; water_attrs[4].location = 4;
+    water_attrs[4].format = VK_FORMAT_R32G32B32A32_SFLOAT; water_attrs[4].offset = 0;
+    water_attrs[5].binding = 1; water_attrs[5].location = 5;
+    water_attrs[5].format = VK_FORMAT_R32G32B32A32_SFLOAT; water_attrs[5].offset = 16;
+    water_attrs[6].binding = 1; water_attrs[6].location = 6;
+    water_attrs[6].format = VK_FORMAT_R32G32B32A32_SFLOAT; water_attrs[6].offset = 32;
+    water_attrs[7].binding = 1; water_attrs[7].location = 7;
+    water_attrs[7].format = VK_FORMAT_R32G32B32A32_SFLOAT; water_attrs[7].offset = 48;
+
+    VkPipelineVertexInputStateCreateInfo water_vertex_input = {0};
+    water_vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    water_vertex_input.vertexBindingDescriptionCount = 2;
+    water_vertex_input.pVertexBindingDescriptions = water_bindings;
+    water_vertex_input.vertexAttributeDescriptionCount = 8;
+    water_vertex_input.pVertexAttributeDescriptions = water_attrs;
 
     // empty vertex input for outline post render
     VkPipelineVertexInputStateCreateInfo empty_vertex_input = {0};
@@ -2659,10 +2704,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &model_ci, 0, &vulkan_state.model_pipeline_handle);
     }
 
-    // define water pipeline
+    // define water pipeline (instanced)
     {
-        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
-
         VkPipelineColorBlendAttachmentState water_blend = {0};
         water_blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
         water_blend.blendEnable = VK_FALSE;
@@ -2679,20 +2722,19 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
         depth_stencil_state_creation_info.stencilTestEnable = VK_FALSE;
-
         rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
         rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
         VkGraphicsPipelineCreateInfo water_ci = base_graphics_pipeline_creation_info;
+        water_ci.pVertexInputState = &water_vertex_input;
         water_ci.pStages = water_shader_stages;
         water_ci.layout = vulkan_state.water_pipeline_layout;
         water_ci.renderPass = vulkan_state.water_render_pass;
         water_ci.pColorBlendState = &water_blend_ci;
-
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &water_ci, 0, &vulkan_state.water_pipeline_handle);
     }
 
-    // define outline post pipeline. different enough that we might as well set up an entirely new creation info. sets up state first, then assigns TODO: see if i can do some cleanup here
+    // define outline post pipeline. different enough that we might as well set up an entirely new creation info. sets up state first, then assigns
     {
         VkPipelineInputAssemblyStateCreateInfo post_input_assembly_state_ci = {0};
         post_input_assembly_state_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -2870,7 +2912,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &sprite_ci, 0, &vulkan_state.sprite_pipeline_handle);
     }
 
-    createInstanceBuffer();
+    createInstanceBuffer(&vulkan_state.cube_instance_buffer, sizeof(CubeInstanceData) * CUBE_INSTANCE_CAPACITY, &vulkan_state.cube_instance_memory, &vulkan_state.cube_instance_mapped);
+    createInstanceBuffer(&vulkan_state.water_instance_buffer, sizeof(WaterInstanceData) * WATER_INSTANCE_CAPACITY, &vulkan_state.water_instance_memory, &vulkan_state.water_instance_mapped);
 
     loadAllEntities();
 }
@@ -2981,22 +3024,38 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
         }
     }
 
-    // fill instance buffer
-    CubeInstanceData* gpu_instances = (CubeInstanceData*)vulkan_state.cube_instance_mapped;
+    // fill cube instance buffer
+    CubeInstanceData* cube_gpu_instances = (CubeInstanceData*)vulkan_state.cube_instance_mapped;
 
     for (uint32 instance_index = 0; instance_index < cube_instance_count; instance_index++)
     {
         Cube* cube = &cube_instances[instance_index];
-        mat4BuildTRS(gpu_instances[instance_index].model, cube->coords, cube->rotation, cube->scale);
-        gpu_instances[instance_index].uv_rect = cube->uv;
+        mat4BuildTRS(cube_gpu_instances[instance_index].model, cube->coords, cube->rotation, cube->scale);
+        cube_gpu_instances[instance_index].uv_rect = cube->uv;
     }
 
-    VkMappedMemoryRange flush_range = {0};
-    flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    flush_range.memory = vulkan_state.cube_instance_memory;
-    flush_range.offset = 0;
-    flush_range.size = VK_WHOLE_SIZE;
-    vkFlushMappedMemoryRanges(vulkan_state.logical_device_handle, 1, &flush_range);
+    VkMappedMemoryRange cube_flush_range = {0};
+    cube_flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    cube_flush_range.memory = vulkan_state.cube_instance_memory;
+    cube_flush_range.offset = 0;
+    cube_flush_range.size = VK_WHOLE_SIZE;
+    vkFlushMappedMemoryRanges(vulkan_state.logical_device_handle, 1, &cube_flush_range);
+
+    // fill water instance buffer
+    WaterInstanceData* water_gpu_instances = (WaterInstanceData*)vulkan_state.water_instance_mapped;
+    for (uint32 i = 0; i < water_instance_count; i++)
+    {
+        Water* water = &water_instances[i];
+        Vec4 rotation = { 0, 0, 0, 1 };
+        Vec3 scale = { 1, 1, 1 };
+        mat4BuildTRS(water_gpu_instances[i].model, water->coords, rotation, scale);
+    }
+    VkMappedMemoryRange water_flush_range = {0};
+    water_flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    water_flush_range.memory = vulkan_state.water_instance_memory;
+    water_flush_range.offset = 0;
+    water_flush_range.size = VK_WHOLE_SIZE;
+    vkFlushMappedMemoryRanges(vulkan_state.logical_device_handle, 1, &water_flush_range);
 }
 
 void vulkanDraw(void)
@@ -3381,58 +3440,45 @@ void vulkanDraw(void)
         vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 2, post_copy_barriers);
     }
 
-    // WATER PASS
+    // WATER PASS (INSTANCED)
     if (water_instance_count > 0)
     {
-        VkRenderPassBeginInfo water_rp_begin = {0};
-        water_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        water_rp_begin.renderPass = vulkan_state.water_render_pass;
-        water_rp_begin.framebuffer = vulkan_state.water_framebuffers[swapchain_image_index];
-        water_rp_begin.renderArea.offset = (VkOffset2D){0, 0};
-        water_rp_begin.renderArea.extent = vulkan_state.swapchain_extent;
-        water_rp_begin.clearValueCount = 0;
-
-        vkCmdBeginRenderPass(command_buffer, &water_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
-        vkCmdSetViewport(command_buffer, 0, 1, &viewport);
-        vkCmdSetScissor(command_buffer, 0, 1, &scissor);
-
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_handle);
-
-        VkDescriptorSet water_sets[3] = { 
-            vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 
-            vulkan_state.scene_color_descriptor_set, 
-            vulkan_state.depth_descriptor_set 
-        };
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_layout, 0, 3, water_sets, 0, 0);
-
-        for (uint32 water_index = 0; water_index < water_instance_count; water_index++)
+        LoadedModel* water_data = &vulkan_state.loaded_models[MODEL_3D_WATER - MODEL_3D_VOID];
+        if (water_data->index_count > 0)
         {
-            Water* water = &water_instances[water_index];
-            LoadedModel* water_data = &vulkan_state.loaded_models[MODEL_3D_WATER - MODEL_3D_VOID];
-            if (water_data->index_count == 0) continue;
+            VkRenderPassBeginInfo water_rp_begin = {0};
+            water_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            water_rp_begin.renderPass = vulkan_state.water_render_pass;
+            water_rp_begin.framebuffer = vulkan_state.water_framebuffers[swapchain_image_index];
+            water_rp_begin.renderArea.offset = (VkOffset2D){0, 0};
+            water_rp_begin.renderArea.extent = vulkan_state.swapchain_extent;
+            water_rp_begin.clearValueCount = 0;
+            vkCmdBeginRenderPass(command_buffer, &water_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+            vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_handle);
+            VkDescriptorSet water_sets[3] = { 
+                vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 
+                vulkan_state.scene_color_descriptor_set, 
+                vulkan_state.depth_descriptor_set 
+            };
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_layout, 0, 3, water_sets, 0, 0);
 
-            VkDeviceSize offset = 0;
-            vkCmdBindVertexBuffers(command_buffer, 0, 1, &water_data->vertex_buffer, &offset);
+            VkBuffer water_buffers[2] = { water_data->vertex_buffer, vulkan_state.water_instance_buffer };
+            VkDeviceSize water_offsets[2] = { 0, 0 };
+            vkCmdBindVertexBuffers(command_buffer, 0, 2, water_buffers, water_offsets);
             vkCmdBindIndexBuffer(command_buffer, water_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-            Vec4 rotation = { 0, 0, 0, 1 };
-            Vec3 scale = { 1, 1, 1 };
-
-            float model_matrix[16];
-            mat4BuildTRS(model_matrix, water->coords, rotation, scale);
-
             WaterPushConstants pc = {0};
-            memcpy(pc.model, model_matrix, sizeof(pc.model));
             memcpy(pc.view, view_matrix, sizeof(pc.view));
             memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
             pc.time = water_time;
-
             vkCmdPushConstants(command_buffer, vulkan_state.water_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &pc);
-            vkCmdDrawIndexed(command_buffer, water_data->index_count, 1, 0, 0, 0);
-        }
 
-        vkCmdEndRenderPass(command_buffer);
-    }
+            vkCmdDrawIndexed(command_buffer, water_data->index_count, water_instance_count, 0, 0, 0);
+            vkCmdEndRenderPass(command_buffer);
+        }
+	}
 
     // transition depth back to attachment for overlay pass (lasers, which affect outlines)
 

@@ -10,7 +10,6 @@ layout(set = 1, binding = 0) uniform sampler2D scene_color_texture;
 layout(set = 2, binding = 0) uniform sampler2D depth_texture;
 
 layout(push_constant) uniform PushConstants {
-    mat4 model;
     mat4 view;
     mat4 proj;
     float time;
