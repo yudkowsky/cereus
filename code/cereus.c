@@ -4299,7 +4299,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     Int3 player_restart_coords = {0};
                     switch (game_progress)
                 	{
-                        case WORLD_0: player_restart_coords = (Int3){ 58, 2, 232 }; break;
+                        case WORLD_0: player_restart_coords = (Int3){ 58, 2, 213 }; break;
                         case WORLD_1: player_restart_coords = (Int3){ 58, 2, 197 }; break;
                         case GATE_1:  player_restart_coords = (Int3){ 58, 2, 189 }; break;
                     }
@@ -5196,7 +5196,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         }
 
         // update gameProgress based on which levels are solved, and current coords of the player
-        if (findInSolvedLevels("red-last") != -1)
+        if (findInSolvedLevels("pack-intro-i") != -1)
         {
 			if (player->coords.z <= 189) game_progress = GATE_1;
 			else game_progress = WORLD_1;

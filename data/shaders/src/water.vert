@@ -20,7 +20,7 @@ void main()
 {
     vec4 world_pos = pc.model * vec4(in_position, 1.0);
 
-    float wave_scale = 0.5;
+    float wave_scale = 1.5;
     float wx = world_pos.x;
     float wz = world_pos.z;
 

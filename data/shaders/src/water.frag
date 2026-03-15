@@ -32,6 +32,7 @@ void main()
     float water_surface_depth = linearize_depth(gl_FragCoord.z);
     float water_depth = max(scene_depth - water_surface_depth, 0.0);
 
+// currently disabled (0.0 multiplier). need to find non-screenspace alternative here
     vec3 N = normalize(frag_normal);
     vec3 N_view = mat3(pc.view) * N;
     float refract_scale = clamp(water_depth / 1.5, 0.05, 1.0);
@@ -47,8 +48,8 @@ void main()
     vec3 scene = texture(scene_color_texture, refracted_uv).rgb;
 
     vec3 shallow_color = vec3(0.02, 0.07, 0.15);
-    vec3 deep_color = vec3(0.001, 0.006, 0.018);
-    float depth_factor = clamp(water_depth / 1.0, 0.0, 1.0);
+    vec3 deep_color = vec3(0.004, 0.01, 0.025);
+    float depth_factor = clamp(water_depth / 0.7, 0.0, 1.0);
     vec3 water_tint = mix(shallow_color, deep_color, depth_factor);
     float blend = mix(0.45, 0.9, depth_factor);
 
