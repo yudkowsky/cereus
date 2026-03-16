@@ -1,5 +1,7 @@
 #version 450
 
+#include "water-height.glsl"
+
 layout(location = 0) in vec3 position;
 layout(location = 1) in vec2 input_uv;
 layout(location = 2) in vec3 input_normal;
@@ -12,20 +14,16 @@ layout(location = 8) in vec4 instance_uv_rect;
 
 layout(location = 0) out vec2 uv;
 layout(location = 1) out vec3 normal;
+layout(location = 2) out vec3 frag_world_pos;
 
 layout(push_constant) uniform PC 
 {
     mat4 view;
     mat4 projection;
     float water_base_y;
+    float time;
 }
 pc;
-
-out gl_PerVertex
-{
-    vec4 gl_Position;
-    float gl_ClipDistance[1];
-};
 
 void main()
 {
@@ -34,13 +32,5 @@ void main()
     gl_Position = pc.projection * pc.view * world_pos;
     uv = instance_uv_rect.xy + input_uv * (instance_uv_rect.zw - instance_uv_rect.xy);
     normal = vec3(instance_model * vec4(input_normal, 0.0));
-    if (pc.water_base_y < -100.0)
-    {
-        gl_ClipDistance[0] = 1.0;
-    }
-    else
-    {
-        float water_y = pc.water_base_y;
-        gl_ClipDistance[0] = water_y - world_pos.y;
-    }
+    frag_world_pos = world_pos.xyz;
 }

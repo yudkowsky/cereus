@@ -121,7 +121,8 @@ typedef struct
     Vec4 uv_rect;
     float alpha;
     float water_base_y; // negative: no clipping
-    float _[3]; // padding TODO: why does this work with 3? shouldn't it be 2?
+    float time;
+    float _[2]; // TODO: why does this work with 2? shouldn't it be 1?
 }
 PushConstants; // TODO: rename. also don't use for sprites - they don't need the time / water_base_y fields.
 
@@ -139,6 +140,7 @@ typedef struct
     float view[16];
     float proj[16];
     float water_base_y; // negative: no clipping
+    float time;
 }
 InstancedPushConstants;
 
@@ -3021,7 +3023,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     {
         VkPushConstantRange push_constant_range = {0};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         push_constant_range.offset = 0;
         push_constant_range.size = (uint32)sizeof(InstancedPushConstants);
 
@@ -3035,11 +3037,11 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_info, 0, &vulkan_state.cube_pipeline_layout);
     }
 
-    // CREATE OUTLINE PIPELINE LAYOUT
+    // CREATE OUTLINE SELECT PIPELINE LAYOUT
 
     {
         VkPushConstantRange push_constant_range = {0};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         push_constant_range.offset     = 0;
         push_constant_range.size       = (uint32)sizeof(PushConstants);
 		
@@ -3057,7 +3059,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     {
         VkPushConstantRange push_constant_range = {0};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         push_constant_range.offset = 0;
         push_constant_range.size = (uint32)sizeof(PushConstants);
 
@@ -3699,7 +3701,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     // handle water y level
     if (water_instance_count > 0)
     {
-        vulkan_state.water_plane_y = water_instances[0].coords.y + 1.2f + 0.07f; // TODO: pass this from game layer. make ShaderMode pass a ShaderInfo struct instead, and switch on this
+        vulkan_state.water_plane_y = water_instances[0].coords.y + 1.2f;
     }
     else
     {
@@ -3855,8 +3857,9 @@ void vulkanDraw(void)
             memcpy(underwater_pc.view, view_matrix, sizeof(underwater_pc.view));
             memcpy(underwater_pc.proj, projection_matrix, sizeof(underwater_pc.proj));
             underwater_pc.water_base_y = vulkan_state.water_plane_y;
+            underwater_pc.time = water_time;
 
-            vkCmdPushConstants(command_buffer, vulkan_state.cube_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(InstancedPushConstants), &underwater_pc);
+            vkCmdPushConstants(command_buffer, vulkan_state.cube_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(InstancedPushConstants), &underwater_pc);
 
             vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
         }
@@ -3881,12 +3884,13 @@ void vulkanDraw(void)
                 underwater_pc.uv_rect = (Vec4){0, 0, 1, 1};
                 underwater_pc.alpha = 1.0f;
                 underwater_pc.water_base_y = vulkan_state.water_plane_y;
+                underwater_pc.time = water_time;
 
                 vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline);
                 vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
                 vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
                 vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &underwater_pc);
+                vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &underwater_pc);
                 vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
             }
         }
@@ -3922,8 +3926,9 @@ void vulkanDraw(void)
         memcpy(pc.view, view_matrix, sizeof(pc.view));
         memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
         pc.water_base_y = -999.0f;
+        pc.time = water_time;
 
-        vkCmdPushConstants(command_buffer, vulkan_state.cube_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(InstancedPushConstants), &pc);
+        vkCmdPushConstants(command_buffer, vulkan_state.cube_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(InstancedPushConstants), &pc);
 
         vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
     }
@@ -3949,8 +3954,9 @@ void vulkanDraw(void)
         memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
         pc.uv_rect = (Vec4){0,0,1,1};
         pc.water_base_y = -999.0f;
+        pc.time = water_time;
 
-        vkCmdPushConstants(command_buffer, vulkan_state.outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+        vkCmdPushConstants(command_buffer, vulkan_state.outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
 
 		vkCmdSetDepthBias(command_buffer, -0.1f, 0.0f, -0.1f);
         vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, 1, 0, 0, 0);
@@ -3977,12 +3983,13 @@ void vulkanDraw(void)
             memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
             pc.uv_rect = (Vec4){0, 0, 1, 1};
             pc.water_base_y = -999.0f;
+            pc.time = water_time;
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline);
             vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
             vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
             vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+            vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
             vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
         }
     }
@@ -4010,8 +4017,9 @@ void vulkanDraw(void)
         memcpy(pc.proj,  projection_matrix, sizeof(pc.proj));
         pc.uv_rect = (Vec4){0, 0, 1, 1};
         pc.water_base_y = -999.0f;
+        pc.time = water_time;
 
-        vkCmdPushConstants(command_buffer, vulkan_state.outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(PushConstants), &pc);
+        vkCmdPushConstants(command_buffer, vulkan_state.outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
 
 		vkCmdSetDepthBias(command_buffer, -0.1f, 0.0f, -0.1f);
         vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
@@ -4090,6 +4098,7 @@ void vulkanDraw(void)
     }
 
     // WATER PASS (INSTANCED)
+    
     if (water_instance_count > 0)
     {
         LoadedModel* water_data = &vulkan_state.loaded_models[MODEL_3D_WATER - MODEL_3D_VOID];
@@ -4300,7 +4309,7 @@ void vulkanDraw(void)
         }
     }
 
-// overlay pass: water and lasers (outline + fill)
+    // overlay pass: water and lasers (outline + fill)
     {
         VkRenderPassBeginInfo overlay_rp_begin = {0};
         overlay_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
