@@ -6,8 +6,8 @@ set "VK_SDK_PATH=%VULKAN_SDK%"
 pushd ..\data\shaders\src
 glslc tri.vert -g -o ..\spirv\tri.vert.spv
 glslc tri.frag -g -o ..\spirv\tri.frag.spv 
-glslc outline.vert -g -o ..\spirv\outline.vert.spv
-glslc outline.frag -g -o ..\spirv\outline.frag.spv
+glslc outline-select.vert -g -o ..\spirv\outline-select.vert.spv
+glslc outline-select.frag -g -o ..\spirv\outline-select.frag.spv
 glslc laser-fill.vert -g -o ..\spirv\laser-fill.vert.spv
 glslc laser-fill.frag -g -o ..\spirv\laser-fill.frag.spv 
 glslc laser-outline.vert -g -o ..\spirv\laser-outline.vert.spv
@@ -20,8 +20,10 @@ glslc model-blackline.vert -g -o ..\spirv\model-blackline.vert.spv
 glslc model-blackline.frag -g -o ..\spirv\model-blackline.frag.spv
 glslc outline-post.vert -g -o ..\spirv\outline-post.vert.spv
 glslc outline-post.frag -g -o ..\spirv\outline-post.frag.spv
-glslc water.vert -g -o ..\spirv\water.vert.spv
-glslc water.frag -g -o ..\spirv\water.frag.spv
+glslc water-distortion.vert -g -o ..\spirv\water-distortion.vert.spv
+glslc water-distortion.frag -g -o ..\spirv\water-distortion.frag.spv
+glslc water-tint.vert -g -o ..\spirv\water-tint.vert.spv
+glslc water-tint.frag -g -o ..\spirv\water-tint.frag.spv
 popd
 
 IF EXIST ..\..\build_cereus rmdir \S \Q ..\..\build_cereus 2>nul

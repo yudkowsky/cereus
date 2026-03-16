@@ -1,8 +1,10 @@
 #version 450
 layout(location = 0) in vec2 frag_uv;
 layout(location = 0) out vec4 out_color;
+
 layout(set = 0, binding = 0) uniform sampler2D depth_texture;
 layout(set = 1, binding = 0) uniform sampler2D normal_texture;
+
 layout(push_constant) uniform PushConstants
 {
     vec2 texel_size;
