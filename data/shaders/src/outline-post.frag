@@ -4,6 +4,7 @@ layout(location = 0) out vec4 out_color;
 
 layout(set = 0, binding = 0) uniform sampler2D depth_texture;
 layout(set = 1, binding = 0) uniform sampler2D normal_texture;
+layout(set = 2, binding = 0) uniform sampler2D water_depth_texture;
 
 layout(push_constant) uniform PushConstants
 {
