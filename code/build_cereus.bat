@@ -22,8 +22,6 @@ glslc outline-post.vert -g -o ..\spirv\outline-post.vert.spv
 glslc outline-post.frag -g -o ..\spirv\outline-post.frag.spv
 glslc water-distortion.vert -g -o ..\spirv\water-distortion.vert.spv
 glslc water-distortion.frag -g -o ..\spirv\water-distortion.frag.spv
-glslc water-tint.vert -g -o ..\spirv\water-tint.vert.spv
-glslc water-tint.frag -g -o ..\spirv\water-tint.frag.spv
 popd
 
 IF EXIST ..\..\build_cereus rmdir \S \Q ..\..\build_cereus 2>nul

@@ -372,7 +372,7 @@ int CALLBACK WinMain(
         double delta_time = (current_tick.QuadPart - last_tick.QuadPart) * seconds_per_tick;
         last_tick = current_tick;
 
-        gameFrame(delta_time, tick_input); 
+        gameFrame(delta_time, &tick_input); 
 
         tick_input.mouse_dx = 0;
         tick_input.mouse_dy = 0;
@@ -383,11 +383,11 @@ int CALLBACK WinMain(
         centerCursorInWindow();
 
         QueryPerformanceCounter(&work_end);
-        double work_ms = (work_end.QuadPart - work_start.QuadPart) * seconds_per_tick * 1000.0;
 
         // sleep code
         /*
         {
+            double work_ms = (work_end.QuadPart - work_start.QuadPart) * seconds_per_tick * 1000.0;
             double target_ms = 1000.0 / 120.0;
             double sleep_ms = target_ms - work_ms;
             if (sleep_ms > 1.5)

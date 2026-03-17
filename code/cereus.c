@@ -796,21 +796,27 @@ void moveEntityInBufferAndState(Entity* e, Int3 end_coords, Direction end_direct
     setTileDirection(end_direction, end_coords);
 }
 
-bool isSource(TileType tile) 
+bool isSource(TileType type) 
 {
-    return (tile == SOURCE_RED || tile == SOURCE_GREEN || tile == SOURCE_BLUE || tile == SOURCE_MAGENTA || tile == SOURCE_YELLOW || tile == SOURCE_CYAN|| tile == SOURCE_WHITE);
+    return (type == SOURCE_RED || type == SOURCE_GREEN || type == SOURCE_BLUE || type == SOURCE_MAGENTA || type == SOURCE_YELLOW || type == SOURCE_CYAN|| type == SOURCE_WHITE);
 }
 
 // only checks tile types - doesn't do what canPush does
-bool isPushable(TileType tile)
+bool isPushable(TileType type)
 {
-    if (tile == BOX || tile == GLASS || tile == MIRROR || tile == PACK || isSource(tile)) return true;
+    if (type== BOX || type == GLASS || type == MIRROR || type == PACK || isSource(type)) return true;
     else return false;
 }
 
-bool isEntity(TileType tile)
+bool isEntity(TileType type)
 {
-    if (tile == BOX || tile == GLASS || tile == MIRROR || tile == PACK || tile == PLAYER || tile == WIN_BLOCK || tile == LOCKED_BLOCK || tile == RESET_BLOCK || isSource(tile)) return true;
+    if (type == BOX || type == GLASS || type == MIRROR || type == PACK || type == PLAYER || type == WIN_BLOCK || type == LOCKED_BLOCK || type == RESET_BLOCK || isSource(type)) return true;
+    else return false;
+}
+
+bool canBeUnderwater(TileType type)
+{
+    if (type == PLAYER || type == PACK || type == BOX || type == MIRROR || isSource(type)) return true;
     else return false;
 }
 
@@ -1730,7 +1736,7 @@ SpriteId getModelId(TileType tile)
     }
 }
 
-void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation, Vec3 color)
+void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation, Vec3 color, bool do_aabb)
 {
     if (id < 0) return;
     DrawCommand* command = &draw_commands[draw_command_count++];
@@ -1740,6 +1746,7 @@ void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotati
     command->scale = scale;
     command->rotation = rotation;
     command->color = color;
+    command->do_aabb = do_aabb;
 }
 
 // uses color.x as alpha channel.
@@ -1763,7 +1770,7 @@ void drawText(char* string, Vec2 coords, float scale, float alpha)
         Vec3 draw_coords = { pen_x, pen_y, 0};
         Vec3 draw_scale = { scale * aspect, scale, 1};
         Vec3 color = { alpha, 0.0f, 0.0f };
-        drawAsset(id, SPRITE_2D, draw_coords, draw_scale, IDENTITY_QUATERNION, color);
+        drawAsset(id, SPRITE_2D, draw_coords, draw_scale, IDENTITY_QUATERNION, color, false);
         pen_x += scale * aspect;
     }
 }
@@ -2629,7 +2636,7 @@ int32 findNextFreeInLaserBuffer()
     return -1;
 }
 
-// handles where lasers go. the complicated part of this function handles when mirrors are moving around, and offsets the lasers by visually by a bit.
+// handles where lasers go. the complicated part of this function handles when mirrors are moving around, and offsets the lasers visually by a bit.
 //
 // more detail about the mirror offset calculation:
 //
@@ -2644,7 +2651,6 @@ int32 findNextFreeInLaserBuffer()
 // guess an offset, check if the resulting geometry is consistent (i.e., incoming and reflected rays point the right way relative to each other), and flip the bit if not.
 // this bit is the only information actually required, because the magnitude of the offset can be gotten just from mirror.in_motion and the total amount of time for the movement
 // (i.e., how far along the interpolation between one axis and another is the mirror). planning to just use position_norm here instead, which would be better and simpler.
-// 
 
 // TODO: - need guard on offset_magnitude in the mirrors: if too close to edge, don't want to allow reflection
 // 		 - look if need to round from position_norm instead of checking if player is turning for some calculations; does this handle first falls vs. other falls correctly..?
@@ -3885,7 +3891,7 @@ void updatePackDetached()
 	- F, G, H are used as mouse buttons
 
 	0: normal mode:
-    - WASD movement TODO: add arrow keys
+    - WASD or arrow keys for movement
     - Z undo
     - R restart
     - Q interact TODO: think about removing this
@@ -4102,7 +4108,7 @@ void editorMode(TickInput *tick_input)
 
 // GAME LOGIC
 
-void gameFrame(double delta_time, TickInput tick_input)
+void gameFrame(double delta_time, TickInput* tick_input)
 {	
     if (delta_time > 0.1) delta_time = 0.1;
     physics_accumulator += delta_time;
@@ -4112,18 +4118,23 @@ void gameFrame(double delta_time, TickInput tick_input)
     Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
 
-    // camera input (always at 60hz)
+    //////////////////
+    // CAMERA INPUT //
+    //////////////////
+
+    // camera mouse input
     if (editor_state.editor_mode != NO_MODE)
     {
-        camera.yaw += tick_input.mouse_dx * CAMERA_SENSITIVITY;
+        camera.yaw += tick_input->mouse_dx * CAMERA_SENSITIVITY;
         if (camera.yaw >  0.5f * TAU) camera.yaw -= TAU; 
         if (camera.yaw < -0.5f * TAU) camera.yaw += TAU; 
-        camera.pitch += tick_input.mouse_dy * CAMERA_SENSITIVITY;
+        camera.pitch += tick_input->mouse_dy * CAMERA_SENSITIVITY;
         float pitch_limit = 0.25f * TAU;
         if (camera.pitch >  pitch_limit) camera.pitch =  pitch_limit; 
         if (camera.pitch < -pitch_limit) camera.pitch = -pitch_limit; 
         camera.rotation = buildCameraQuaternion(camera);
     }
+    // camera movement
     if (editor_state.editor_mode != NO_MODE && editor_state.editor_mode != SELECT_WRITE)
     {
         Vec3 right_camera_basis, forward_camera_basis;
@@ -4131,130 +4142,270 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         if (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT)
         {
-            if (tick_input.w_press) 
+            if (tick_input->w_press) 
             {
                 camera.coords.x += forward_camera_basis.x * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
                 camera.coords.z += forward_camera_basis.z * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
             }
-            if (tick_input.a_press) 
+            if (tick_input->a_press) 
             {
                 camera.coords.x -= right_camera_basis.x * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
                 camera.coords.z -= right_camera_basis.z * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
             }
-            if (tick_input.s_press) 
+            if (tick_input->s_press) 
             {
                 camera.coords.x -= forward_camera_basis.x * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
                 camera.coords.z -= forward_camera_basis.z * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
             }
-            if (tick_input.d_press) 
+            if (tick_input->d_press) 
             {
                 camera.coords.x += right_camera_basis.x * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
                 camera.coords.z += right_camera_basis.z * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
             }
-            if (tick_input.space_press) camera.coords.y += CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
-            if (tick_input.shift_press) camera.coords.y -= CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+            if (tick_input->space_press) camera.coords.y += CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+            if (tick_input->shift_press) camera.coords.y -= CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
         }
     }
 
-    // handle writing once per present frame
+    // alternative camera: switch modes on tab. defined as meta input, so can move player at same time as tab camera change.
+    if (tick_input->tab_press && time_until_allow_meta_input == 0 && editor_state.editor_mode == NO_MODE) 
+    {
+        if (saved_alt_camera.fov != 0)
+        {
+            if (camera_mode == MAIN_WAITING || camera_mode == ALT_TO_MAIN) camera_mode = MAIN_TO_ALT;
+            else camera_mode = ALT_TO_MAIN;
+        }
+        time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+    }
+
+    // perform alt <-> main camera interpolation
+    if (camera_mode == MAIN_TO_ALT)
+    {
+        camera_lerp_t += CAMERA_T_TIMESTEP;
+        if (camera_lerp_t >= 1) 
+        {
+            camera_lerp_t = 1.0f;
+            camera = saved_alt_camera;
+            camera.rotation = buildCameraQuaternion(camera);
+            camera_mode = ALT_WAITING;
+        }
+    }
+    if (camera_mode == ALT_TO_MAIN)
+    {
+        camera_lerp_t -= CAMERA_T_TIMESTEP;
+        if (camera_lerp_t <= 0)
+        {
+            camera_lerp_t = 0.0f;
+            camera = saved_main_camera;
+            camera.rotation = buildCameraQuaternion(camera);
+            camera_mode = MAIN_WAITING;
+        }
+    }
+    if (camera_lerp_t != 0 && camera_lerp_t != 1)
+    {
+        camera = lerpCamera(saved_main_camera, saved_alt_camera, camera_lerp_t, (float)camera_target_plane);
+    }
+
+    /////////////////////
+    // EDITOR KEYBINDS //
+	/////////////////////
+
+    if (time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+    {
+        // editor mode toggle
+        if (tick_input->zero_press) 
+        {
+            editor_state.editor_mode = NO_MODE;
+            createDebugPopup("game mode", GAMEPLAY_MODE_CHANGE);
+        }
+        if (tick_input->one_press) 
+        {
+            editor_state.editor_mode = PLACE_BREAK;
+            createDebugPopup("place / break mode", GAMEPLAY_MODE_CHANGE);
+        }
+        if (tick_input->two_press) 
+        {
+            editor_state.editor_mode = SELECT;
+            createDebugPopup("select mode", GAMEPLAY_MODE_CHANGE);
+        }
+
+        // toggle cheating
+        if (tick_input->three_press)
+        {
+            cheating = !cheating;
+            if (cheating) createDebugPopup("cheating", CHEAT_MODE_TOGGLE);
+            else createDebugPopup("not cheating", CHEAT_MODE_TOGGLE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        // change model states
+        if (tick_input->seven_press)
+        {
+            game_shader_mode = OUTLINE_TEST;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            createDebugPopup("shader mode: testing outlines", SHADER_MODE_CHANGE);
+        }
+        if (tick_input->eight_press)
+        {
+            game_shader_mode = OUTLINE;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            createDebugPopup("shader mode: outlines", SHADER_MODE_CHANGE);
+        }
+        if (tick_input->nine_press)
+        {
+            game_shader_mode = OLD; 
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            createDebugPopup("shader mode: old", SHADER_MODE_CHANGE);
+        }
+
+        // change camera fov for editor
+        if (tick_input->n_press && editor_state.editor_mode != NO_MODE)
+        {
+            camera.fov--;
+            time_until_allow_meta_input = 4;
+        }
+        else if (tick_input->b_press && editor_state.editor_mode != NO_MODE)
+        {
+            camera.fov++;
+            time_until_allow_meta_input = 4;
+        }
+
+        // set camera fov to wide for editor
+        if (tick_input->j_press)
+        {
+            editor_state.do_wide_camera = !editor_state.do_wide_camera;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            if (editor_state.do_wide_camera)
+            {
+                if (editor_state.editor_mode == NO_MODE)
+                {
+                    editor_state.do_wide_camera = false;
+                    if (camera_mode == MAIN_WAITING) camera.fov = saved_main_camera.fov;
+                    else if (camera_mode == ALT_WAITING) camera.fov = saved_alt_camera.fov;
+                    else camera.fov = 15.0f;
+                }
+                else
+                {
+                    camera.fov = 60.0f;
+                }
+            }
+            else
+            {
+                if (saved_main_camera.fov == camera.fov) camera.fov = 15.0f; // if working on a new level, and have saved camera as 60fov, then default to 15
+                else camera.fov = saved_main_camera.fov;
+            }
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        // snap camera yaw to nearest axis
+        if (tick_input->p_press)
+        {
+            float camera_snap_yaw = 0;
+            if 		(camera.yaw >= TAU * -0.375f && camera.yaw < TAU * -0.125f) camera_snap_yaw = TAU * -0.25f;
+            else if (camera.yaw >= TAU * -0.125f && camera.yaw < TAU *  0.125f) camera_snap_yaw = 0;
+            else if (camera.yaw >= TAU *  0.125f && camera.yaw < TAU *  0.375f) camera_snap_yaw = TAU * 0.25f;
+            else if (camera.yaw >= TAU *  0.375f || camera.yaw < TAU * -0.375f) camera_snap_yaw = TAU * 0.5f;
+            camera.yaw = camera_snap_yaw;
+            camera.rotation = buildCameraQuaternion(camera);
+            char yaw_text[256] = {0};
+            snprintf(yaw_text, sizeof(yaw_text), "camera yaw snapped to: %.3f", camera_snap_yaw);
+            createDebugPopup(yaw_text, NO_TYPE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        // speed up / slow down physics tick
+        if (tick_input->dot_press)
+        {
+            char timestep_text[256] = {0};
+            if (physics_timestep > DEFAULT_PHYSICS_TIMESTEP)
+            {
+                physics_timestep /= 2;
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                snprintf(timestep_text, sizeof(timestep_text), "physics timestep increased (%f)", physics_timestep);
+                createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
+            }
+            else
+            {
+                createDebugPopup("physics timestep already at minimum!", PHYSICS_TIMESTEP_CHANGE);
+            }
+        }
+        else if (tick_input->comma_press)
+        {
+            physics_timestep *= 2;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            char timestep_text[256] = {0};
+            snprintf(timestep_text, sizeof(timestep_text), "physics timestep decreased (%f)", physics_timestep);
+            createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
+        }
+
+        if (tick_input->backspace_press)
+        {
+            camera = saved_main_camera;
+            camera.rotation = buildCameraQuaternion(camera);
+            camera_mode = MAIN_WAITING;
+            camera_lerp_t = 0.0f;
+            createDebugPopup("returned camera to saved position", NO_TYPE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        // toggle debug press
+        if (tick_input->y_press)
+        {
+            do_debug_text = !do_debug_text;
+            if (do_debug_text) createDebugPopup("debug state visibility on", DEBUG_STATE_VISIBILITY_CHANGE);
+            else			   createDebugPopup("debug state visibility off", DEBUG_STATE_VISIBILITY_CHANGE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+    }
+
     if (editor_state.editor_mode == SELECT_WRITE)
     {
+        // handle text input once per present frame
         char (*writing_to_field)[64] = 0;
         Entity* e = getEntityFromId(editor_state.selected_id);
         if 		(editor_state.writing_field == WRITING_FIELD_NEXT_LEVEL)  writing_to_field = &e->next_level;
         else if (editor_state.writing_field == WRITING_FIELD_UNLOCKED_BY) writing_to_field = &e->unlocked_by;
 
-        if (tick_input.enter_pressed_this_frame)
+        if (tick_input->enter_pressed_this_frame)
         {
             memset(*writing_to_field, 0, sizeof(*writing_to_field));
             memcpy(*writing_to_field, editor_state.edit_buffer.string, sizeof(*writing_to_field) - 1);
 
-            world_state = next_world_state; // this is a bit messy...
+            world_state = next_world_state; // TODO: this is a bit messy... why is it needed?
 
             editor_state.editor_mode = SELECT;
             editor_state.selected_id = 0;
             editor_state.writing_field = NO_WRITING_FIELD;
         }
-        else if (tick_input.escape_press)
+        else if (tick_input->escape_press)
         {
             editor_state.editor_mode = SELECT;
             editor_state.selected_id = 0;
             editor_state.writing_field = NO_WRITING_FIELD;
         }
 
-        updateTextInput(&tick_input);
+        updateTextInput(tick_input);
     }
     else
     {
         memset(&editor_state.edit_buffer, 0, sizeof(editor_state.edit_buffer));
     }
 
-    // mode toggle
-    if (editor_state.editor_mode != SELECT_WRITE)
-    {
-        if (tick_input.zero_press) 
-        {
-            editor_state.editor_mode = NO_MODE;
-            createDebugPopup("game mode", GAMEPLAY_MODE_CHANGE);
-        }
-        if (tick_input.one_press) 
-        {
-            editor_state.editor_mode = PLACE_BREAK;
-            createDebugPopup("place / break mode", GAMEPLAY_MODE_CHANGE);
-        }
-        if (tick_input.two_press) 
-        {
-            editor_state.editor_mode = SELECT;
-            createDebugPopup("select mode", GAMEPLAY_MODE_CHANGE);
-        }
-    }
-
-    // speed up / slow down physics tick
-    if (tick_input.dot_press && time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
-    {
-        char timestep_text[256] = {0};
-        if (physics_timestep > DEFAULT_PHYSICS_TIMESTEP)
-        {
-            physics_timestep /= 2;
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            snprintf(timestep_text, sizeof(timestep_text), "physics timestep increased (%f)", physics_timestep);
-            createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
-        }
-        else
-        {
-            createDebugPopup("physics timestep already at minimum!", PHYSICS_TIMESTEP_CHANGE);
-        }
-    }
-    else if (tick_input.comma_press && time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
-    {
-        physics_timestep *= 2;
-        time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        char timestep_text[256] = {0};
-        snprintf(timestep_text, sizeof(timestep_text), "physics timestep decreased (%f)", physics_timestep);
-        createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
-    }
-
-    if (tick_input.backspace_press && time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
-    {
-        camera = saved_main_camera;
-        camera.rotation = buildCameraQuaternion(camera);
-        camera_mode = MAIN_WAITING;
-        camera_lerp_t = 0.0f;
-        createDebugPopup("returned camera to saved position", NO_TYPE);
-        time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-    }
+    ///////////////////////
+    // MAIN PHYSICS LOOP //
+    ///////////////////////
 
     while (physics_accumulator >= physics_timestep)
    	{
 		next_world_state = world_state;
 
-        debug_text_count = 0; // TODO: does this need to be global? or can it just be in this / one larger scope
+        debug_text_count = 0;
         bool silence_unlocks_due_to_restart_or_undo = false;
 
         if (editor_state.editor_mode == NO_MODE)
         {
             // assuming game undo and restart (still no undo in editor)
-            if (time_until_allow_game_input == 0 && tick_input.z_press)
+            if (time_until_allow_game_input == 0 && tick_input->z_press)
             {
                 int32 undo_animation_time = 0;
                 if (undos_performed == 0) undo_animation_time = 10;
@@ -4263,7 +4414,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 else if (undos_performed <= 8) undo_animation_time = 6;
                 else if (undos_performed <= 12) undo_animation_time = 5;
                 else undo_animation_time = 5;
-                int32 real_undo_animation_time = undo_animation_time > 8 ? 5 : undo_animation_time; // clamp at 7 frames to perform undo, and allow stand still before undo next; want slower at start, but too slow undo looks awkward.
+                int32 real_undo_animation_time = undo_animation_time > 8 ? 5 : undo_animation_time; // TODO: improve this input latency system
                 if (performUndo(real_undo_animation_time))
                 {
                     updatePackDetached();
@@ -4272,7 +4423,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 silence_unlocks_due_to_restart_or_undo = true;
                 time_until_allow_game_input = undo_animation_time;
             }
-            if (time_until_allow_game_input == 0 && tick_input.r_press)
+            if (time_until_allow_game_input == 0 && tick_input->r_press)
             {
                 // restart
                 if (!restart_last_turn) 
@@ -4313,7 +4464,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 silence_unlocks_due_to_restart_or_undo = true;
                 time_until_allow_game_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
-			if (time_until_allow_game_input == 0 && tick_input.escape_press && !in_overworld)
+			if (time_until_allow_game_input == 0 && tick_input->escape_press && !in_overworld)
             {
                 // leave current level if not in overworld. TODO: why is saving solved levels required here?
                 char save_solved_levels[64][64] = {0};
@@ -4325,15 +4476,15 @@ void gameFrame(double delta_time, TickInput tick_input)
                 writeSolvedLevelsToFile();
             }
 
-            if (time_until_allow_game_input == 0 && (tick_input.w_press || tick_input.a_press || tick_input.s_press || tick_input.d_press) && player->in_motion == 0 && player->in_motion == 0 && !player->removed)
+            if (time_until_allow_game_input == 0 && (tick_input->w_press || tick_input->a_press || tick_input->s_press || tick_input->d_press) && player->in_motion == 0 && player->in_motion == 0 && !player->removed)
             {
 				// MOVEMENT 
                 Direction input_direction = 0;
                 Int3 next_player_coords = {0};
-                if 		(tick_input.w_press) input_direction = NORTH; 
-                else if (tick_input.a_press) input_direction = WEST; 
-                else if (tick_input.s_press) input_direction = SOUTH; 
-                else if (tick_input.d_press) input_direction = EAST; 
+                if 		(tick_input->w_press) input_direction = NORTH; 
+                else if (tick_input->a_press) input_direction = WEST; 
+                else if (tick_input->s_press) input_direction = SOUTH; 
+                else if (tick_input->d_press) input_direction = EAST; 
 
                 if (input_direction == player->direction)
                 {
@@ -4382,10 +4533,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                         bool climb = false;
                         bool do_failed_animations = false;
                         int32 animation_time = 0;
-                        if 		(tick_input.w_press) next_player_coords = int3Add(player->coords, int3Negate(AXIS_Z));
-                        else if (tick_input.a_press) next_player_coords = int3Add(player->coords, int3Negate(AXIS_X));
-                        else if (tick_input.s_press) next_player_coords = int3Add(player->coords, AXIS_Z);
-                        else if (tick_input.d_press) next_player_coords = int3Add(player->coords, AXIS_X);
+                        if 		(tick_input->w_press) next_player_coords = int3Add(player->coords, int3Negate(AXIS_Z));
+                        else if (tick_input->a_press) next_player_coords = int3Add(player->coords, int3Negate(AXIS_X));
+                        else if (tick_input->s_press) next_player_coords = int3Add(player->coords, AXIS_Z);
+                        else if (tick_input->d_press) next_player_coords = int3Add(player->coords, AXIS_X);
                         TileType next_tile = getTileType(next_player_coords);
                         if (!player_will_fall_next_turn) switch (next_tile)
                         {
@@ -4821,7 +4972,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         else
         {
             // if not in editor mode NO_MODE, go into editor mode fn
-            if (time_until_allow_meta_input == 0) editorMode(&tick_input);
+            if (time_until_allow_meta_input == 0) editorMode(tick_input);
         }
 
         // pack turn sequence
@@ -5083,7 +5234,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         // win block logic
         if (getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK)
         {
-            if (tick_input.q_press && time_until_allow_game_input == 0)
+            if (tick_input->q_press && time_until_allow_game_input == 0)
             {
                 // go to win_block.next_level if conditions are met
                 Entity* wb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
@@ -5118,7 +5269,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                     gameInitializeState(wb->next_level);
                 }
             }
-            else if (tick_input.f_press && time_until_allow_game_input == 0)
+            else if (tick_input->f_press && time_until_allow_game_input == 0)
             {
                 // add win_block.next_level to solved_levels. this is a debug bind
                 bool solve_level = true;
@@ -5184,7 +5335,7 @@ void gameFrame(double delta_time, TickInput tick_input)
         if (bypass_player_fall) bypass_player_fall = false;
 
         // reset undos performed if no longer holding z undos
-        if (undos_performed > 0 && !tick_input.z_press) undos_performed = 0;
+        if (undos_performed > 0 && !tick_input->z_press) undos_performed = 0;
 
         // decide which ghosts to render, if ghosts should be rendered
         do_player_ghost = false;
@@ -5202,280 +5353,6 @@ void gameFrame(double delta_time, TickInput tick_input)
 			else game_progress = WORLD_1;
         }
         else game_progress = WORLD_0;
-
-        // final redo of laser buffer, after all logic is complete, for drawing // TODO: which of these calls throughout the code are now needed?
-		updateLaserBuffer();
-
-        // handle debug hotkeys which don't only work when in editor mode
-        if (time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
-        {
-            // change camera fov for editor
-            if (tick_input.n_press && editor_state.editor_mode != NO_MODE)
-            {
-                camera.fov--;
-                time_until_allow_meta_input = 4;
-            }
-            else if (tick_input.b_press && editor_state.editor_mode != NO_MODE)
-            {
-                camera.fov++;
-                time_until_allow_meta_input = 4;
-            }
-
-            // snap camera yaw to nearest axis
-            if (tick_input.p_press)
-            {
-                float camera_snap_yaw = 0;
-                if 		(camera.yaw >= TAU * -0.375f && camera.yaw < TAU * -0.125f) camera_snap_yaw = TAU * -0.25f;
-                else if (camera.yaw >= TAU * -0.125f && camera.yaw < TAU *  0.125f) camera_snap_yaw = 0;
-                else if (camera.yaw >= TAU *  0.125f && camera.yaw < TAU *  0.375f) camera_snap_yaw = TAU * 0.25f;
-                else if (camera.yaw >= TAU *  0.375f || camera.yaw < TAU * -0.375f) camera_snap_yaw = TAU * 0.5f;
-                camera.yaw = camera_snap_yaw;
-                camera.rotation = buildCameraQuaternion(camera);
-                char yaw_text[256] = {0};
-                snprintf(yaw_text, sizeof(yaw_text), "camera yaw snapped to: %.3f", camera_snap_yaw);
-                createDebugPopup(yaw_text, NO_TYPE);
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            }
-
-            // set camera fov to wide for editor
-            if (tick_input.j_press)
-            {
-                editor_state.do_wide_camera = !editor_state.do_wide_camera;
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                if (editor_state.do_wide_camera)
-                {
-                    if (editor_state.editor_mode == NO_MODE)
-                    {
-                        editor_state.do_wide_camera = false;
-                        if (camera_mode == MAIN_WAITING) camera.fov = saved_main_camera.fov;
-                        else if (camera_mode == ALT_WAITING) camera.fov = saved_alt_camera.fov;
-                        else camera.fov = 15.0f;
-                    }
-                    else
-                    {
-                        camera.fov = 60.0f;
-                    }
-                }
-                else
-                {
-                    if (saved_main_camera.fov == camera.fov) camera.fov = 15.0f; // if working on a new level, and have saved camera as 60fov, then default to 15
-                    else camera.fov = saved_main_camera.fov;
-                }
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            }
-
-            // change model states
-            if (tick_input.nine_press)
-            {
-               	game_shader_mode = OLD; 
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                createDebugPopup("shader mode: old", SHADER_MODE_CHANGE);
-            }
-            if (tick_input.eight_press)
-            {
-                game_shader_mode = OUTLINE;
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                createDebugPopup("shader mode: outlines", SHADER_MODE_CHANGE);
-            }
-            if (tick_input.seven_press)
-            {
-                game_shader_mode = OUTLINE_TEST;
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                createDebugPopup("shader mode: testing outlines", SHADER_MODE_CHANGE);
-            }
-
-            // get rid of debug text on press
-            if (tick_input.y_press)
-            {
-                do_debug_text = !do_debug_text;
-                if (do_debug_text) createDebugPopup("debug state visibility on", DEBUG_STATE_VISIBILITY_CHANGE);
-                else			   createDebugPopup("debug state visibility off", DEBUG_STATE_VISIBILITY_CHANGE);
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            }
-
-            // toggle cheating
-            if (tick_input.three_press)
-            {
-                cheating = !cheating;
-                if (cheating) createDebugPopup("cheating", CHEAT_MODE_TOGGLE);
-                else createDebugPopup("not cheating", CHEAT_MODE_TOGGLE);
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            }
-        }
-
-        // alternative camera: switch modes on tab. defined as meta input, so can move player at same time as tab camera change.
-        if (tick_input.tab_press && time_until_allow_meta_input == 0 && editor_state.editor_mode == NO_MODE) 
-        {
-            if (saved_alt_camera.fov != 0)
-            {
-                if (camera_mode == MAIN_WAITING || camera_mode == ALT_TO_MAIN) camera_mode = MAIN_TO_ALT;
-                else camera_mode = ALT_TO_MAIN;
-            }
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
-
-        // perform alt <-> main camera interpolation
-        if (camera_mode == MAIN_TO_ALT)
-        {
-            camera_lerp_t += CAMERA_T_TIMESTEP;
-            if (camera_lerp_t >= 1) 
-            {
-                camera_lerp_t = 1.0f;
-                camera = saved_alt_camera;
-                camera.rotation = buildCameraQuaternion(camera);
-                camera_mode = ALT_WAITING;
-            }
-        }
-        if (camera_mode == ALT_TO_MAIN)
-        {
-            camera_lerp_t -= CAMERA_T_TIMESTEP;
-            if (camera_lerp_t <= 0)
-            {
-                camera_lerp_t = 0.0f;
-                camera = saved_main_camera;
-                camera.rotation = buildCameraQuaternion(camera);
-                camera_mode = MAIN_WAITING;
-            }
-        }
-        if (camera_lerp_t != 0 && camera_lerp_t != 1)
-        {
-            camera = lerpCamera(saved_main_camera, saved_alt_camera, camera_lerp_t, (float)camera_target_plane);
-        }
-
-        camera_with_ow_offset = camera;
-        
-		// adjust overworld camera based on position
-		if (in_overworld)
-        {
-            Int3 player_delta = int3Subtract(player->coords, OVERWORLD_CAMERA_CENTER_START);
-            int32 screen_offset_x = 0;
-        	int32 screen_offset_z = 0;
-			if (player_delta.x > 0) screen_offset_x = (player_delta.x + (OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
-			else					screen_offset_x = (player_delta.x - (OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X; 
-			if (player_delta.z > 0) screen_offset_z = (player_delta.z + (OVERWORLD_SCREEN_SIZE_Z / 2)) / OVERWORLD_SCREEN_SIZE_Z;
-			else 					screen_offset_z = (player_delta.z - (OVERWORLD_SCREEN_SIZE_Z / 2)) / OVERWORLD_SCREEN_SIZE_Z;
-
-            camera_with_ow_offset.coords.x = camera.coords.x + (screen_offset_x * OVERWORLD_SCREEN_SIZE_X);
-            camera_with_ow_offset.coords.z = camera.coords.z + (screen_offset_z * OVERWORLD_SCREEN_SIZE_Z);
-
-            // camera delta info
-            char delta_text[256];
-            snprintf(delta_text, sizeof(delta_text), "player delta from origin: %.1d, %.1d --- %.1d, %.1d", player_delta.x, player_delta.z, screen_offset_x, screen_offset_z);
-            if (do_debug_text) createDebugText(delta_text);
-        }
-
-        // SAVING STUFF
-        {
-            // paths for saving data both to source and to inside build
-            char level_path[64];
-            buildLevelPathFromName(world_state.level_name, &level_path, true);
-            char relative_level_path[64];
-            buildLevelPathFromName(world_state.level_name, &relative_level_path, false);
-
-            // only used if saving in overworld
-            char overworld_zero_path[64];
-            buildLevelPathFromName(overworld_zero_name, &overworld_zero_path, true);
-            char overworld_zero_relative_path[64];
-            buildLevelPathFromName(overworld_zero_name, &overworld_zero_relative_path, false);
-
-            // write camera to file on c press, alternative camera on v press
-            if (time_until_allow_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && (tick_input.c_press || tick_input.v_press))
-            {
-                char tag[4] = {0};
-                bool write_alt_camera = false;
-                if (tick_input.c_press) 
-                {
-                    memcpy(&tag, &MAIN_CAMERA_CHUNK_TAG, sizeof(tag));
-                    createDebugPopup("main camera saved", MAIN_CAMERA_SAVE);
-                }
-                else 					
-                {
-                    memcpy(&tag, &ALT_CAMERA_CHUNK_TAG, sizeof(tag));
-                    createDebugPopup("alt camera saved", ALT_CAMERA_SAVE);
-                    write_alt_camera = true;
-                }
-
-                {
-                    FILE* file = fopen(level_path, "rb+");
-                    int32 positions[64] = {0};
-                    int32 count = getCountAndPositionOfChunk(file, tag, positions);
-
-                    if (count > 0)
-                    {
-                        fseek(file, positions[0], SEEK_SET);
-                        writeCameraToFile(file, &camera, write_alt_camera);
-                    }
-                    else
-                    {
-                        fseek(file, 0, SEEK_END);
-                        writeCameraToFile(file, &camera, write_alt_camera);
-                    }
-                    fclose(file);
-                }
-                {
-                    FILE* file = fopen(relative_level_path, "rb+");
-                    int32 positions[64] = {0};
-                    int32 count = getCountAndPositionOfChunk(file, tag, positions);
-
-                    if (count > 0)
-                    {
-                        fseek(file, positions[0], SEEK_SET);
-                        writeCameraToFile(file, &camera, write_alt_camera);
-                    }
-                    else
-                    {
-                        fseek(file, 0, SEEK_END);
-                        writeCameraToFile(file, &camera, write_alt_camera);
-                    }
-                    fclose(file);
-                }
-
-                if (tick_input.c_press) saved_main_camera = camera;
-                else saved_alt_camera = camera;
-            }
-
-            if (time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE && tick_input.x_press) 
-            {
-                if (saved_alt_camera.fov > 0) // if there is a saved alt camera
-                {
-                    memset(&saved_alt_camera, 0, sizeof(Camera));
-                    camera = saved_main_camera;
-                    camera.rotation = buildCameraQuaternion(camera);
-
-                    Camera empty_camera = {0};
-                    {
-                        FILE* file = fopen(relative_level_path, "rb+");
-                        int32 positions[64] = {0};
-                        getCountAndPositionOfChunk(file, ALT_CAMERA_CHUNK_TAG, positions);
-                        fseek(file, positions[0], SEEK_SET);
-                        writeCameraToFile(file, &empty_camera, true);
-                        fclose(file);
-                    }
-                    {
-                        FILE* file = fopen(level_path, "rb+");
-                        int32 positions[64] = {0};
-                        getCountAndPositionOfChunk(file, ALT_CAMERA_CHUNK_TAG, positions);
-                        fseek(file, positions[0], SEEK_SET);
-                        writeCameraToFile(file, &empty_camera, true);
-                        fclose(file);
-                    }
-                }
-            }
-
-            // write level to file on i press
-            if (time_until_allow_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input.i_press) 
-            {
-                saveLevelRewrite(level_path, true);
-                saveLevelRewrite(relative_level_path, true);
-                if (in_overworld)
-                {
-                    saveLevelRewrite(overworld_zero_path, true);
-                    saveLevelRewrite(overworld_zero_relative_path, true);
-                }
-                createDebugPopup("level saved", LEVEL_SAVE);
-                writeSolvedLevelsToFile();
-            }
-        }
 
         // create debug texts
         if (do_debug_text)
@@ -5596,19 +5473,147 @@ void gameFrame(double delta_time, TickInput tick_input)
 
         if (time_until_allow_game_input > 0) time_until_allow_game_input--;
 	}
+    
+    /////////////////////
+	// AFTER GAME LOOP //
+    /////////////////////
 
-    // now out of the fixed physics-time loop; stuff out here happens every draw call, not just every physics frame. e.g., camera movement is smooth at whatever framerate game is runinng at.
-    // draw calls are also out here, but position_norm and rotation_quat for entites is only updated every physics frame anyway, so even if they're drawn 2-3 times per physics frame 
-    // on a 144hz monitor, they're still at the same positions. next step here would be to add interpolations between these states, but i'm waiting until i've got a more sophisticated animation
-    // system before doing that. 
-    // 
-    // also, i don't want to sacrifice the already maybe-very-bad game feel here, and interpolating between states seems to mean that i have to run 1 physics frame, or 16ms, behind, 
-    // to have something to interpolate against. there's probably some cheating you can do by predicting the next position and interpolating against that when in the middle of an animation, 
-    // but that doesn't solve the problem of an action happening after some delay when pressing a button, which i don't want. 
-    // so i also want to set up buffered inputs before setting this up, so i can see if this is actually a problem, and if there's any solution within my current system, or if i can find some 
-    // other solution, e.g. just running physics at 120hz.
+    // SAVING STUFF (depends on changed state, so after loop)
+    {
+        // paths for saving data both to source and to inside build
+        char level_path[64];
+        buildLevelPathFromName(world_state.level_name, &level_path, true);
+        char relative_level_path[64];
+        buildLevelPathFromName(world_state.level_name, &relative_level_path, false);
 
-    // update camera for drawing (every display frame)
+        // only used if saving in overworld
+        char overworld_zero_path[64];
+        buildLevelPathFromName(overworld_zero_name, &overworld_zero_path, true);
+        char overworld_zero_relative_path[64];
+        buildLevelPathFromName(overworld_zero_name, &overworld_zero_relative_path, false);
+
+        // write camera to file on c press, alternative camera on v press
+        if (time_until_allow_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && (tick_input->c_press || tick_input->v_press))
+        {
+            char tag[4] = {0};
+            bool write_alt_camera = false;
+            if (tick_input->c_press) 
+            {
+                memcpy(&tag, &MAIN_CAMERA_CHUNK_TAG, sizeof(tag));
+                createDebugPopup("main camera saved", MAIN_CAMERA_SAVE);
+            }
+            else 					
+            {
+                memcpy(&tag, &ALT_CAMERA_CHUNK_TAG, sizeof(tag));
+                createDebugPopup("alt camera saved", ALT_CAMERA_SAVE);
+                write_alt_camera = true;
+            }
+
+            {
+                FILE* file = fopen(level_path, "rb+");
+                int32 positions[64] = {0};
+                int32 count = getCountAndPositionOfChunk(file, tag, positions);
+
+                if (count > 0)
+                {
+                    fseek(file, positions[0], SEEK_SET);
+                    writeCameraToFile(file, &camera, write_alt_camera);
+                }
+                else
+                {
+                    fseek(file, 0, SEEK_END);
+                    writeCameraToFile(file, &camera, write_alt_camera);
+                }
+                fclose(file);
+            }
+            {
+                FILE* file = fopen(relative_level_path, "rb+");
+                int32 positions[64] = {0};
+                int32 count = getCountAndPositionOfChunk(file, tag, positions);
+
+                if (count > 0)
+                {
+                    fseek(file, positions[0], SEEK_SET);
+                    writeCameraToFile(file, &camera, write_alt_camera);
+                }
+                else
+                {
+                    fseek(file, 0, SEEK_END);
+                    writeCameraToFile(file, &camera, write_alt_camera);
+                }
+                fclose(file);
+            }
+
+            if (tick_input->c_press) saved_main_camera = camera;
+            else saved_alt_camera = camera;
+        }
+
+        if (time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE && tick_input->x_press) 
+        {
+            if (saved_alt_camera.fov > 0) // if there is a saved alt camera
+            {
+                memset(&saved_alt_camera, 0, sizeof(Camera));
+                camera = saved_main_camera;
+                camera.rotation = buildCameraQuaternion(camera);
+
+                Camera empty_camera = {0};
+                {
+                    FILE* file = fopen(relative_level_path, "rb+");
+                    int32 positions[64] = {0};
+                    getCountAndPositionOfChunk(file, ALT_CAMERA_CHUNK_TAG, positions);
+                    fseek(file, positions[0], SEEK_SET);
+                    writeCameraToFile(file, &empty_camera, true);
+                    fclose(file);
+                }
+                {
+                    FILE* file = fopen(level_path, "rb+");
+                    int32 positions[64] = {0};
+                    getCountAndPositionOfChunk(file, ALT_CAMERA_CHUNK_TAG, positions);
+                    fseek(file, positions[0], SEEK_SET);
+                    writeCameraToFile(file, &empty_camera, true);
+                    fclose(file);
+                }
+            }
+        }
+
+        // write level to file on i press
+        if (time_until_allow_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input->i_press) 
+        {
+            saveLevelRewrite(level_path, true);
+            saveLevelRewrite(relative_level_path, true);
+            if (in_overworld)
+            {
+                saveLevelRewrite(overworld_zero_path, true);
+                saveLevelRewrite(overworld_zero_relative_path, true);
+            }
+            createDebugPopup("level saved", LEVEL_SAVE);
+            writeSolvedLevelsToFile();
+        }
+    }
+
+
+    // adjust overworld camera based on position
+    camera_with_ow_offset = camera;
+    if (in_overworld)
+    {
+        Int3 player_delta = int3Subtract(player->coords, OVERWORLD_CAMERA_CENTER_START);
+        int32 screen_offset_x = 0;
+        int32 screen_offset_z = 0;
+        if (player_delta.x > 0) screen_offset_x = (player_delta.x + (OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
+        else					screen_offset_x = (player_delta.x - (OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X; 
+        if (player_delta.z > 0) screen_offset_z = (player_delta.z + (OVERWORLD_SCREEN_SIZE_Z / 2)) / OVERWORLD_SCREEN_SIZE_Z;
+        else 					screen_offset_z = (player_delta.z - (OVERWORLD_SCREEN_SIZE_Z / 2)) / OVERWORLD_SCREEN_SIZE_Z;
+
+        camera_with_ow_offset.coords.x = camera.coords.x + (screen_offset_x * OVERWORLD_SCREEN_SIZE_X);
+        camera_with_ow_offset.coords.z = camera.coords.z + (screen_offset_z * OVERWORLD_SCREEN_SIZE_Z);
+
+        // camera delta info
+        char delta_text[256];
+        snprintf(delta_text, sizeof(delta_text), "player delta from origin: %.1d, %.1d --- %.1d, %.1d", player_delta.x, player_delta.z, screen_offset_x, screen_offset_z);
+        if (do_debug_text) createDebugText(delta_text);
+    }
+
+    // update camera for drawing. after loop because depends on in_overworld
     camera_with_ow_offset = camera;
     if (in_overworld)
     {
@@ -5624,7 +5629,10 @@ void gameFrame(double delta_time, TickInput tick_input)
         camera_with_ow_offset.coords.z = camera.coords.z + (screen_offset_z * OVERWORLD_SCREEN_SIZE_Z);
     }
 
-    // DRAW 3D
+    /////////////
+    // DRAW 3D //
+	/////////////
+
     {
         updateLaserBuffer();
 
@@ -5643,7 +5651,7 @@ void gameFrame(double delta_time, TickInput tick_input)
 			if (lb.direction == UP || lb.direction == DOWN) rotation = directionToQuaternion(lb.direction, false);
 			else rotation = directionToQuaternion(lb.direction, true);
             
-            drawAsset(CUBE_3D_LASER_GREEN, LASER, center, scale, rotation, colorToRGB(lb.color));
+            drawAsset(CUBE_3D_LASER_GREEN, LASER, center, scale, rotation, colorToRGB(lb.color), false);
         }
 
         /*
@@ -5669,6 +5677,8 @@ void gameFrame(double delta_time, TickInput tick_input)
             if (isEntity(draw_tile))
             {
                 Entity* e = getEntityAtCoords(bufferIndexToCoords(tile_index));
+                bool do_aabb = false;
+                if (canBeUnderwater(draw_tile)) do_aabb = true;
 
                 if (e->locked) draw_tile = LOCKED_BLOCK;
                 if (draw_tile == WIN_BLOCK)
@@ -5679,20 +5689,20 @@ void gameFrame(double delta_time, TickInput tick_input)
 
                 if (game_shader_mode == OLD)
                 {
-                    drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0); 
+                    drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0, do_aabb); 
                 }
                 else
                 {
-                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0);
+                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0, do_aabb);
                 }
             }
             else
             {
                 if (game_shader_mode != OLD && getCube3DId(draw_tile) == CUBE_3D_WATER) 
                 {
-                    drawAsset(MODEL_3D_WATER, WATER_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false), VEC3_0);
+                    drawAsset(MODEL_3D_WATER, WATER_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false), VEC3_0, false);
                 }
-                drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false), VEC3_0);
+                drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false), VEC3_0, false);
             }
         }
 
@@ -5703,22 +5713,22 @@ void gameFrame(double delta_time, TickInput tick_input)
             // TODO: this is terrible (fix with shaders)
             bool hit_by_green = false;
             if (player->green_hit.north || player->green_hit.west || player->green_hit.south || player->green_hit.east || player->green_hit.up || player->green_hit.down) hit_by_green = true;
-            if      (player->hit_by_red && hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_WHITE,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
-            else if (player->hit_by_red && hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_YELLOW,  CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
-            else if (player->hit_by_red &&      	       player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
-            else if (             		   hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_CYAN,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
-            else if (player->hit_by_red                 	  				  ) drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
-            else if (             		   hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_GREEN,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
-            else if (                            		   player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
-            else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0);
+            if      (player->hit_by_red && hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_WHITE,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, true);
+            else if (player->hit_by_red && hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_YELLOW,  CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, true);
+            else if (player->hit_by_red &&      	       player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, true);
+            else if (             		   hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_CYAN,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, true);
+            else if (player->hit_by_red                 	  				  ) drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, true);
+            else if (             		   hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_GREEN,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, true);
+            else if (                            		   player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, true);
+            else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, true);
 
-            if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, true), VEC3_0);
-            if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, true),   VEC3_0);
+            if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, true), VEC3_0, false);
+            if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, true),   VEC3_0, false);
         }
-        if (!world_state.pack.removed) drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat, VEC3_0);
+        if (!world_state.pack.removed) drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat, VEC3_0, true);
 
         // draw camera boundary lines
-		if (time_until_allow_meta_input == 0 && tick_input.t_press && !(editor_state.editor_mode == SELECT_WRITE))
+		if (time_until_allow_meta_input == 0 && tick_input->t_press && !(editor_state.editor_mode == SELECT_WRITE))
         {
             draw_level_boundary = !draw_level_boundary;
             if (draw_level_boundary) createDebugPopup("level / camera boundary visibility on", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
@@ -5755,8 +5765,8 @@ void gameFrame(double delta_time, TickInput tick_input)
                         x_draw_coords = vec3Add(x_draw_coords, outline_offset);
                         z_draw_coords = vec3Add(z_draw_coords, outline_offset);
 
-                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, VEC3_0);
-                    	drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, VEC3_0);
+                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, VEC3_0, false);
+                    	drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, VEC3_0, false);
                         x_draw_offset += OVERWORLD_SCREEN_SIZE_X;
                     }
                     x_draw_offset = 0;
@@ -5772,10 +5782,10 @@ void gameFrame(double delta_time, TickInput tick_input)
                 Vec3 z_draw_coords_far  = (Vec3){ (float)level_dim.x / 2.0f, (float)level_dim.y / 2.0f, (float)level_dim.z + 0.5f };
                 Vec3 x_draw_scale = (Vec3){ 0, 						   (float)level_dim.y, (float)level_dim.z + 1.0f };
                 Vec3 z_draw_scale = (Vec3){ (float)level_dim.x + 1.0f, (float)level_dim.y, 0 };
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_near, x_draw_scale, IDENTITY_QUATERNION, VEC3_0);
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_near, z_draw_scale, IDENTITY_QUATERNION, VEC3_0);
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_far,  x_draw_scale, IDENTITY_QUATERNION, VEC3_0);
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_far,  z_draw_scale, IDENTITY_QUATERNION, VEC3_0);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_near, x_draw_scale, IDENTITY_QUATERNION, VEC3_0, false);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_near, z_draw_scale, IDENTITY_QUATERNION, VEC3_0, false);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_far,  x_draw_scale, IDENTITY_QUATERNION, VEC3_0, false);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_far,  z_draw_scale, IDENTITY_QUATERNION, VEC3_0, false);
             }
         }
 
@@ -5790,7 +5800,10 @@ void gameFrame(double delta_time, TickInput tick_input)
         */
     }
 
-    // DRAW 2D
+    /////////////
+    // DRAW 2D //
+    /////////////
+
     {
         Vec3 color_2d = { 1, 0, 0 }; // using alpha as first channel. 2d assets just use sprite atlas, so not using color.
         
@@ -5800,12 +5813,12 @@ void gameFrame(double delta_time, TickInput tick_input)
             Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
             Vec3 center_screen = { ((float)game_display.client_width / 2), ((float)game_display.client_height / 2), 0.0f }; // weird numbers are just adjustment because raycast starts slightly offset 
                                                                                                         		 // i think this is due to windowed mode, but could be issue with raycast.
-        	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, color_2d);
+        	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, color_2d, false);
 
             // picked block
             Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
             Vec3 picked_block_coords = { game_display.client_width - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
-            drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, color_2d);
+            drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, color_2d, false);
 
             if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
             {
@@ -5813,7 +5826,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                 if (game_shader_mode != OLD) selected_id = getModelId(getTileTypeFromId(editor_state.selected_id));
                 Entity* selected_e = 0;
                 if (editor_state.selected_id > 0) selected_e = getEntityFromId(editor_state.selected_id);
-                if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position_norm, DEFAULT_SCALE, selected_e->rotation_quat, VEC3_0);
+                if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position_norm, DEFAULT_SCALE, selected_e->rotation_quat, VEC3_0, false);
 
                 if ((editor_state.selected_id / ID_OFFSET_RESET_BLOCK) * ID_OFFSET_RESET_BLOCK == ID_OFFSET_RESET_BLOCK)
                 {
@@ -5825,7 +5838,7 @@ void gameFrame(double delta_time, TickInput tick_input)
                         Entity* to_reset_e = getEntityFromId(ri.id);
                         SpriteId to_reset_id = getCube3DId(MIRROR);
                         if (game_shader_mode != OLD) to_reset_id = getModelId(getTileTypeFromId(to_reset_e->id));
-                        drawAsset(to_reset_id, OUTLINE_3D, to_reset_e->position_norm, DEFAULT_SCALE, to_reset_e->rotation_quat, VEC3_0);
+                        drawAsset(to_reset_id, OUTLINE_3D, to_reset_e->position_norm, DEFAULT_SCALE, to_reset_e->rotation_quat, VEC3_0, false);
                     }
                 }
             }

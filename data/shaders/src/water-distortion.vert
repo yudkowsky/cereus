@@ -15,8 +15,8 @@ layout(push_constant) uniform PushConstants
 {
     mat4 view;
     mat4 proj;
-    float water_plane_y;
     float time;
+    float debug_mode;
 }
 pc;
 

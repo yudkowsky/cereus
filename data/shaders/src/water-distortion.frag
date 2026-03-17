@@ -14,14 +14,18 @@ layout(push_constant) uniform PushConstants
     mat4 view;
     mat4 proj;
     float time;
+    float debug_mode;
 }
 pc;
+
 const float z_near = 1.0;
 const float z_far = 300.0;
+
 float linearize_depth(float d)
 {
     return z_near * z_far / (z_far - d * (z_far - z_near));
 }
+
 void main()
 {
     vec2 tex_size = vec2(textureSize(underwater_texture, 0));
@@ -48,25 +52,39 @@ void main()
     float outline_width = 0.008 * water_surface_depth / pc.proj[1][1];
     if (water_depth < outline_width && water_depth > 0.0)
     {
-        out_color = vec4(0.0, 0.0, 0.0, 1.0);
+        if (pc.debug_mode < 0.5)
+        {
+            out_color = vec4(0.0, 0.0, 0.0, 1.0);
+        }
+        else
+        {
+            out_color = vec4(0.0, 1.0, 0.0, 1.0);
+        }
         out_water_depth = gl_FragCoord.z;
         return;
     }
 
     // tint
-    float tint_depth = max(linearize_depth(texture(depth_texture, refracted_uv).r) - water_surface_depth, 0.0);
+    if (pc.debug_mode < 0.5)
+    {
+        float tint_depth = max(linearize_depth(texture(depth_texture, refracted_uv).r) - water_surface_depth, 0.0);
 
-    vec3 absorption = exp(-tint_depth * vec3(0.4, 0.2, 0.1));
-    scene *= absorption;
+        vec3 absorption = exp(-tint_depth * vec3(0.4, 0.2, 0.1));
+        scene *= absorption;
 
-    vec3 shallow_color = vec3(0.02, 0.07, 0.15);
-    vec3 deep_color = vec3(0.004, 0.01, 0.025);
-    float tint_factor = clamp(tint_depth / 0.65, 0.0, 1.0);
-    tint_factor = pow(tint_factor, 0.5);
-    vec3 water_tint = mix(shallow_color, deep_color, tint_factor);
-    float blend = mix(0.45, 0.9, tint_factor);
-    scene = mix(scene, water_tint, blend);
+        vec3 shallow_color = vec3(0.02, 0.07, 0.15);
+        vec3 deep_color = vec3(0.004, 0.01, 0.025);
+        float tint_factor = clamp(tint_depth / 0.65, 0.0, 1.0);
+        tint_factor = pow(tint_factor, 0.5);
+        vec3 water_tint = mix(shallow_color, deep_color, tint_factor);
+        float blend = mix(0.45, 0.9, tint_factor);
+        scene = mix(scene, water_tint, blend);
 
-    out_color = vec4(scene, 1.0);
-    out_water_depth = gl_FragCoord.z;
+        out_color = vec4(scene, 1.0);
+        out_water_depth = gl_FragCoord.z;
+    }
+    else
+    {
+        discard;
+    }
 }

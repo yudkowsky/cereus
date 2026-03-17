@@ -147,8 +147,8 @@ typedef struct
 {
     float view[16];
     float proj[16];
-    float water_plane_y;
     float time;
+    float debug_mode;
 }
 WaterPushConstants;
 
@@ -307,6 +307,18 @@ typedef struct VulkanState
     LoadedModel laser_cylinder_model; // TODO: probably index everything into loaded models; figure out what order i want to put stuff in, if can't just take their id
 }
 VulkanState;
+
+typedef struct
+{
+    Vec3 min;
+    float pad0;
+    Vec3 max;
+    float pad1;
+}
+WaterAABB;
+
+WaterAABB water_aabbs[16];
+uint32 water_aabb_count;
 
 #define U0 (0.0f)
 #define U1 (1.0f/3.0f)
@@ -2555,7 +2567,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.outline_post_pipeline_layout);
     }
 
-    // CREATE WATER DISTORTION PIPELINE LAYOUT
+    // CREATE WATER DISTORTION + TINT PIPELINE LAYOUT
 
     {
         VkPushConstantRange push_constant_range = {0};
@@ -3036,6 +3048,18 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
             cube->rotation    = command->rotation;
             cube->uv          = uv_rect;
         }
+
+        if (command->do_aabb)
+        {
+            if (water_aabb_count < 15)
+            {
+                // assumes everything that 'canBeUnderwater' is 1x1 tile; so generate AABB +-0.5 from coords
+                WaterAABB* aabb = &water_aabbs[water_aabb_count];
+                aabb->min = (Vec3){ command->coords.x - 0.5f, command->coords.y - 0.5f, command->coords.z - 0.5f }; 
+                aabb->max = (Vec3){ command->coords.x + 0.5f, command->coords.y + 0.5f, command->coords.z + 0.5f };
+                water_aabb_count++;
+            }
+        }
     }
 
     // fill cube instance buffer
@@ -3212,13 +3236,13 @@ void vulkanDraw(void)
             vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
             vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
 
-            InstancedPushConstants pc = {0};
-            memcpy(pc.view, view_matrix, sizeof(pc.view));
-            memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
-            pc.water_base_y = vulkan_state.water_plane_y;
-            pc.time = water_time;
+            InstancedPushConstants underwater_cube_pc = {0};
+            memcpy(underwater_cube_pc.view, view_matrix, sizeof(underwater_cube_pc.view));
+            memcpy(underwater_cube_pc.proj, projection_matrix, sizeof(underwater_cube_pc.proj));
+            underwater_cube_pc.water_base_y = vulkan_state.water_plane_y;
+            underwater_cube_pc.time = water_time;
 
-            vkCmdPushConstants(command_buffer, vulkan_state.cube_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(InstancedPushConstants), &pc);
+            vkCmdPushConstants(command_buffer, vulkan_state.cube_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(InstancedPushConstants), &underwater_cube_pc);
             vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
         }
 
@@ -3234,26 +3258,26 @@ void vulkanDraw(void)
                 float model_matrix[16];
                 mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
 
-                PushConstants pc = {0};
-                memcpy(pc.model, model_matrix, sizeof(pc.model));
-                memcpy(pc.view, view_matrix, sizeof(pc.view));
-                memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
-                pc.uv_rect = (Vec4){0, 0, 1, 1};
-                pc.water_base_y = vulkan_state.water_plane_y;
-                pc.time = water_time;
+                PushConstants underwater_model_pc = {0};
+                memcpy(underwater_model_pc.model, model_matrix, sizeof(underwater_model_pc.model));
+                memcpy(underwater_model_pc.view, view_matrix, sizeof(underwater_model_pc.view));
+                memcpy(underwater_model_pc.proj, projection_matrix, sizeof(underwater_model_pc.proj));
+                underwater_model_pc.uv_rect = (Vec4){0, 0, 1, 1};
+                underwater_model_pc.water_base_y = vulkan_state.water_plane_y;
+                underwater_model_pc.time = water_time;
 
                 vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline);
                 vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
                 vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
                 vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
+                vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &underwater_model_pc);
                 vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
             }
         }
 
         vkCmdEndRenderPass(command_buffer);
 
-        // outline post on underwater scene
+        // outlines on underwater scene
         if (shader_mode != OLD)
         {
             VkImageMemoryBarrier depth_to_read = {0};
@@ -3304,13 +3328,13 @@ void vulkanDraw(void)
 
             float focal_length = (float)vulkan_state.swapchain_extent.height / ((2 * 3.141592653f) * tanf(vulkan_camera.fov / 360.0f));
 
-            float post_pc[6] = {
+            float underwater_outline_pc[6] = {
                 1.0f / (float)vulkan_state.swapchain_extent.width,
                 1.0f / (float)vulkan_state.swapchain_extent.height,
                 2.0f, 0.2f, focal_length,
                 (shader_mode == OUTLINE_TEST) ? 1.0f : 0.0f
             };
-            vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 6, post_pc);
+            vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 6, underwater_outline_pc);
 
             vkCmdDraw(command_buffer, 3, 1, 0, 0);
             vkCmdEndRenderPass(command_buffer);
@@ -3401,43 +3425,14 @@ void vulkanDraw(void)
         vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
         vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
 
-        InstancedPushConstants pc = {0};
-        memcpy(pc.view, view_matrix, sizeof(pc.view));
-        memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
-        pc.water_base_y = -999.0f;
-        pc.time = water_time;
+        InstancedPushConstants cube_pc = {0};
+        memcpy(cube_pc.view, view_matrix, sizeof(cube_pc.view));
+        memcpy(cube_pc.proj, projection_matrix, sizeof(cube_pc.proj));
+        cube_pc.water_base_y = -999.0f;
+        cube_pc.time = water_time;
 
-        vkCmdPushConstants(command_buffer, vulkan_state.cube_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(InstancedPushConstants), &pc);
+        vkCmdPushConstants(command_buffer, vulkan_state.cube_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(InstancedPushConstants), &cube_pc);
         vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
-    }
-
-    // CUBE OUTLINE PIPELINE
-
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_pipeline);
-
-    VkDeviceSize outline_vb_offset = 0;
-    vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.cube_vertex_buffer, &outline_vb_offset);
-    vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
-
-    for (uint32 outline_instance_index = 0; outline_instance_index < outline_instance_count; outline_instance_index++)
-    {
-        Cube* cube = &outline_instances[outline_instance_index];
-        float model_matrix[16];
-        mat4BuildTRS(model_matrix, cube->coords, cube->rotation, cube->scale);
-
-        PushConstants pc = {0};
-        memcpy(pc.model, model_matrix, sizeof(pc.model));
-        memcpy(pc.view, view_matrix, sizeof(pc.view));
-        memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
-        pc.uv_rect = (Vec4){0,0,1,1};
-        pc.water_base_y = -999.0f;
-        pc.time = water_time;
-
-        vkCmdPushConstants(command_buffer, vulkan_state.outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
-
-        vkCmdSetDepthBias(command_buffer, -0.1f, 0.0f, -0.1f);
-        vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, 1, 0, 0, 0);
-        vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
     }
 
     // MODEL PIPELINE
@@ -3454,19 +3449,19 @@ void vulkanDraw(void)
             float model_matrix[16];
             mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
 
-            PushConstants pc = {0};
-            memcpy(pc.model, model_matrix, sizeof(pc.model));
-            memcpy(pc.view, view_matrix, sizeof(pc.view));
-            memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
-            pc.uv_rect = (Vec4){0, 0, 1, 1};
-            pc.water_base_y = -999.0f;
-            pc.time = water_time;
+            PushConstants model_pc = {0};
+            memcpy(model_pc.model, model_matrix, sizeof(model_pc.model));
+            memcpy(model_pc.view, view_matrix, sizeof(model_pc.view));
+            memcpy(model_pc.proj, projection_matrix, sizeof(model_pc.proj));
+            model_pc.uv_rect = (Vec4){0, 0, 1, 1};
+            model_pc.water_base_y = -999.0f;
+            model_pc.time = water_time;
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline);
             vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
             vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
             vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
+            vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &model_pc);
             vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
         }
     }
@@ -3569,7 +3564,7 @@ void vulkanDraw(void)
         vkCmdEndRenderPass(command_buffer);
     }
 
-    // WATER DISTORTION PASS
+    // WATER DISTORTION + TINT PASS
 
     if (water_instance_count > 0)
     {
@@ -3591,11 +3586,7 @@ void vulkanDraw(void)
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline);
 
-            VkDescriptorSet water_sets[3] = {
-                vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index],
-                vulkan_state.scene_copy_descriptor_set,
-                vulkan_state.depth_descriptor_set
-            };
+            VkDescriptorSet water_sets[3] = { vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], vulkan_state.scene_copy_descriptor_set, vulkan_state.depth_descriptor_set };
             vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline_layout, 0, 3, water_sets, 0, 0);
 
             VkBuffer water_buffers[2] = { water_data->vertex_buffer, vulkan_state.water_instance_buffer };
@@ -3603,12 +3594,13 @@ void vulkanDraw(void)
             vkCmdBindVertexBuffers(command_buffer, 0, 2, water_buffers, water_offsets);
             vkCmdBindIndexBuffer(command_buffer, water_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-            WaterPushConstants pc = {0};
-            memcpy(pc.view, view_matrix, sizeof(pc.view));
-            memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
-            pc.water_plane_y = vulkan_state.water_plane_y;
-            pc.time = water_time;
-            vkCmdPushConstants(command_buffer, vulkan_state.water_distortion_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &pc);
+            WaterPushConstants water_pc = {0};
+            memcpy(water_pc.view, view_matrix, sizeof(water_pc.view));
+            memcpy(water_pc.proj, projection_matrix, sizeof(water_pc.proj));
+            water_pc.time = water_time;
+            water_pc.debug_mode = (shader_mode == OUTLINE_TEST) ? 1.0f : 0.0f;
+
+            vkCmdPushConstants(command_buffer, vulkan_state.water_distortion_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &water_pc);
 
             vkCmdDrawIndexed(command_buffer, water_data->index_count, water_instance_count, 0, 0, 0);
             vkCmdEndRenderPass(command_buffer);
