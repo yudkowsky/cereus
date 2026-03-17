@@ -5678,7 +5678,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
             {
                 Entity* e = getEntityAtCoords(bufferIndexToCoords(tile_index));
                 bool do_aabb = false;
-                if (canBeUnderwater(draw_tile)) do_aabb = true;
+                if (canBeUnderwater(draw_tile) && e->position_norm.y < 2.0f)
+                {
+                    do_aabb = true;
+                }
 
                 if (e->locked) draw_tile = LOCKED_BLOCK;
                 if (draw_tile == WIN_BLOCK)
@@ -5708,24 +5711,31 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
         if (!world_state.player.removed)
         {
-            player = &world_state.player;
+            bool do_player_aabb = false;
+            if (player->position_norm.y < 2.0f) do_player_aabb = true;
 
             // TODO: this is terrible (fix with shaders)
             bool hit_by_green = false;
             if (player->green_hit.north || player->green_hit.west || player->green_hit.south || player->green_hit.east || player->green_hit.up || player->green_hit.down) hit_by_green = true;
-            if      (player->hit_by_red && hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_WHITE,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, true);
-            else if (player->hit_by_red && hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_YELLOW,  CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, true);
-            else if (player->hit_by_red &&      	       player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, true);
-            else if (             		   hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_CYAN,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, true);
-            else if (player->hit_by_red                 	  				  ) drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, true);
-            else if (             		   hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_GREEN,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, true);
-            else if (                            		   player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, true);
-            else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, true);
+            if      (player->hit_by_red && hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_WHITE,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, do_player_aabb);
+            else if (player->hit_by_red && hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_YELLOW,  CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, do_player_aabb);
+            else if (player->hit_by_red &&      	       player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, do_player_aabb);
+            else if (             		   hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_CYAN,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, do_player_aabb);
+            else if (player->hit_by_red                 	  				  ) drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, do_player_aabb);
+            else if (             		   hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_GREEN,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, do_player_aabb);
+            else if (                            		   player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, do_player_aabb);
+            else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, do_player_aabb);
 
-            if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, true), VEC3_0, false);
-            if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, true),   VEC3_0, false);
+            // technically should maybe generate ghost AABBs here, if i ever want ghost to render under water
+            if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, false), VEC3_0, false);
+            if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, false),   VEC3_0, false);
         }
-        if (!world_state.pack.removed) drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat, VEC3_0, true);
+        if (!world_state.pack.removed) 
+        {
+            bool do_pack_aabb = false;
+            if (player->position_norm.y < 2.0f) do_pack_aabb = true;
+            drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat, VEC3_0, do_pack_aabb);
+        }
 
         // draw camera boundary lines
 		if (time_until_allow_meta_input == 0 && tick_input->t_press && !(editor_state.editor_mode == SELECT_WRITE))

@@ -305,6 +305,14 @@ typedef struct VulkanState
     // models
     LoadedModel loaded_models[64];
     LoadedModel laser_cylinder_model; // TODO: probably index everything into loaded models; figure out what order i want to put stuff in, if can't just take their id
+
+    // uniform buffer for ray tracing
+    VkDescriptorSetLayout ubo_descriptor_set_layout;
+
+    VkBuffer water_aabb_buffer;
+    VkDeviceMemory water_aabb_memory;
+    void* water_aabb_mapped;
+    VkDescriptorSet water_aabb_descriptor_set;
 }
 VulkanState;
 
@@ -317,8 +325,8 @@ typedef struct
 }
 WaterAABB;
 
-WaterAABB water_aabbs[16];
-uint32 water_aabb_count;
+WaterAABB water_aabbs[16] = {0};
+uint32 water_aabb_count = 0;
 
 #define U0 (0.0f)
 #define U1 (1.0f/3.0f)
@@ -2442,7 +2450,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     vkCreateSampler(vulkan_state.logical_device_handle, &sampler_creation_info, 0, &vulkan_state.pixel_art_sampler);
 
-    // descriptor sets let the fragment shader look up the texture it needs from gpu memory. one descriptor set per texture in texture cache.
+    // standard descriptor set for normal vertex / fragment shader pairs
 	VkDescriptorSetLayoutBinding descriptor_set_binding = {0};
 	descriptor_set_binding.binding = 0;
     descriptor_set_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -2456,18 +2464,80 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     vkCreateDescriptorSetLayout(vulkan_state.logical_device_handle, &descriptor_set_layout_creation_info, 0, &vulkan_state.descriptor_set_layout);
 
+    // UBO descriptor set layout for water AABB data
+    VkDescriptorSetLayoutBinding ubo_binding = {0};
+    ubo_binding.binding = 0;
+    ubo_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    ubo_binding.descriptorCount = 1;
+    ubo_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo ubo_layout_ci = {0};
+    ubo_layout_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    ubo_layout_ci.bindingCount = 1;
+    ubo_layout_ci.pBindings = &ubo_binding;
+
+    vkCreateDescriptorSetLayout(vulkan_state.logical_device_handle, &ubo_layout_ci, 0, &vulkan_state.ubo_descriptor_set_layout);
+
     // descriptor pool allocates memory for all descriptor sets
-    VkDescriptorPoolSize descriptor_pool_size = {0};
-    descriptor_pool_size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    descriptor_pool_size.descriptorCount = 1024;
+    VkDescriptorPoolSize descriptor_pool_sizes[2] = {0};
+   	descriptor_pool_sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    descriptor_pool_sizes[0].descriptorCount = 1024;
+    descriptor_pool_sizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    descriptor_pool_sizes[1].descriptorCount = 4;
     
     VkDescriptorPoolCreateInfo descriptor_pool_creation_info = {0};
     descriptor_pool_creation_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptor_pool_creation_info.poolSizeCount = 1;
-    descriptor_pool_creation_info.pPoolSizes = &descriptor_pool_size;
+    descriptor_pool_creation_info.poolSizeCount = 2;
+    descriptor_pool_creation_info.pPoolSizes = descriptor_pool_sizes;
     descriptor_pool_creation_info.maxSets = 1024;
 
     vkCreateDescriptorPool(vulkan_state.logical_device_handle, &descriptor_pool_creation_info, 0, &vulkan_state.descriptor_pool);
+
+    // create AABB UBO buffer
+    VkBufferCreateInfo aabb_buffer_ci = {0};
+    aabb_buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    aabb_buffer_ci.size = sizeof(WaterAABB) * 16 * 16; // 16 AABBs * 16 bytes for count
+    aabb_buffer_ci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    aabb_buffer_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    vkCreateBuffer(vulkan_state.logical_device_handle, &aabb_buffer_ci, 0, &vulkan_state.water_aabb_buffer);
+
+    VkMemoryRequirements aabb_memory_requirements = {0};
+    vkGetBufferMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.water_aabb_buffer, &aabb_memory_requirements);
+
+    VkMemoryAllocateInfo aabb_alloc = {0};
+    aabb_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    aabb_alloc.allocationSize = aabb_memory_requirements.size;
+    aabb_alloc.memoryTypeIndex = findMemoryType(aabb_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    vkAllocateMemory(vulkan_state.logical_device_handle, &aabb_alloc, 0, &vulkan_state.water_aabb_memory);
+    vkBindBufferMemory(vulkan_state.logical_device_handle, vulkan_state.water_aabb_buffer, vulkan_state.water_aabb_memory, 0);
+    vkMapMemory(vulkan_state.logical_device_handle, vulkan_state.water_aabb_memory, 0, aabb_buffer_ci.size, 0, &vulkan_state.water_aabb_mapped);
+    
+    // allocate aabb descriptor set
+    VkDescriptorSetAllocateInfo aabb_descriptor_set_alloc = {0};
+    aabb_descriptor_set_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    aabb_descriptor_set_alloc.descriptorPool = vulkan_state.descriptor_pool;
+    aabb_descriptor_set_alloc.descriptorSetCount = 1;
+    aabb_descriptor_set_alloc.pSetLayouts = &vulkan_state.ubo_descriptor_set_layout;
+
+    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &aabb_descriptor_set_alloc, &vulkan_state.water_aabb_descriptor_set);
+
+    // point aabb descriptor at buffer
+    VkDescriptorBufferInfo aabb_descriptor_set_buffer_info = {0};
+    aabb_descriptor_set_buffer_info.buffer = vulkan_state.water_aabb_buffer;
+    aabb_descriptor_set_buffer_info.offset = 0;
+    aabb_descriptor_set_buffer_info.range = aabb_buffer_ci.size;
+
+    VkWriteDescriptorSet aabb_descriptor_set_write = {0};
+    aabb_descriptor_set_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    aabb_descriptor_set_write.dstSet = vulkan_state.water_aabb_descriptor_set;
+    aabb_descriptor_set_write.dstBinding = 0;
+    aabb_descriptor_set_write.descriptorCount = 1;
+    aabb_descriptor_set_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    aabb_descriptor_set_write.pBufferInfo = &aabb_descriptor_set_buffer_info;
+
+    vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &aabb_descriptor_set_write, 0, 0);
 
     // TODO: maybe wrap this
     VkDescriptorSetAllocateInfo depth_descriptor_set_alloc = {0};
@@ -2575,11 +2645,16 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         push_constant_range.offset = 0;
         push_constant_range.size = (uint32)sizeof(WaterPushConstants);
 
-        VkDescriptorSetLayout water_set_layouts[3] = { vulkan_state.descriptor_set_layout, vulkan_state.descriptor_set_layout, vulkan_state.descriptor_set_layout };
+        VkDescriptorSetLayout water_set_layouts[4] = { 
+            vulkan_state.descriptor_set_layout,  	// atlas
+            vulkan_state.descriptor_set_layout, 	// underwater scene copy
+            vulkan_state.descriptor_set_layout,		// depth 
+            vulkan_state.ubo_descriptor_set_layout 	// AABB UBO
+        };
 
         VkPipelineLayoutCreateInfo water_distortion_pipeline_layout_ci = {0};
         water_distortion_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        water_distortion_pipeline_layout_ci.setLayoutCount = 3;
+        water_distortion_pipeline_layout_ci.setLayoutCount = 4;
         water_distortion_pipeline_layout_ci.pSetLayouts = water_set_layouts;
         water_distortion_pipeline_layout_ci.pushConstantRangeCount = 1;
         water_distortion_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
@@ -2960,6 +3035,8 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     model_selected_outline_instance_count = 0;
     water_instance_count = 0;
 
+    water_aabb_count = 0;
+
     for (int asset_index = 0; asset_index < draw_command_count; asset_index++)
     {
         DrawCommand* command = &draw_commands[asset_index];
@@ -3060,6 +3137,11 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
                 water_aabb_count++;
             }
         }
+
+        // upload AABB buffer to UBO
+        uint32 aabb_count_padded[4] = { water_aabb_count, 0, 0, 0 };
+        memcpy(vulkan_state.water_aabb_mapped, aabb_count_padded, 16);
+        memcpy((uint8*)vulkan_state.water_aabb_mapped + 16, water_aabbs, sizeof(WaterAABB) * water_aabb_count);
     }
 
     // fill cube instance buffer
@@ -3586,8 +3668,13 @@ void vulkanDraw(void)
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline);
 
-            VkDescriptorSet water_sets[3] = { vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], vulkan_state.scene_copy_descriptor_set, vulkan_state.depth_descriptor_set };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline_layout, 0, 3, water_sets, 0, 0);
+            VkDescriptorSet water_sets[4] = { 
+                vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 
+                vulkan_state.scene_copy_descriptor_set, 
+                vulkan_state.depth_descriptor_set,
+                vulkan_state.water_aabb_descriptor_set
+            };
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline_layout, 0, 4, water_sets, 0, 0);
 
             VkBuffer water_buffers[2] = { water_data->vertex_buffer, vulkan_state.water_instance_buffer };
             VkDeviceSize water_offsets[2] = { 0, 0 };
