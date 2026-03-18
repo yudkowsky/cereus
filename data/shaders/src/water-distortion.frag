@@ -43,6 +43,29 @@ float linearize_depth(float d)
 
 void main()
 {
-    float t = float(aabbs.aabb_count) / 15.0;
-    out_color = vec4(t, 0.0, 1.0 - t, 1.0);
+    vec3 P = frag_world_pos;
+
+    bool above_box = false;
+    for (int i = 0; i < aabbs.aabb_count; i++)
+	{
+        vec3 box_min = aabbs.boxes[i].box_min;
+        vec3 box_max = aabbs.boxes[i].box_max;
+
+        if (P.x >= box_min.x && P.x <= box_max.x && 
+            P.z >= box_min.z && P.z <= box_max.z &&
+            P.y > box_min.y)
+        {
+            above_box = true;
+            break;
+        }
+    }
+
+    if (above_box)
+    {
+        out_color = vec4(1.0, 0.3, 0.0, 1.0);
+    }
+    else
+    {
+        out_color = vec4(0.0, 0.1, 0.3, 1.0);
+    }
 }

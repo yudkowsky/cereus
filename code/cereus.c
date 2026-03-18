@@ -460,10 +460,11 @@ const int32 OVERWORLD_SCREEN_SIZE_X = 21;
 const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 
 const double DEFAULT_PHYSICS_TIMESTEP = 1.0/60.0;
-double physics_timestep = 1.0/60.0;
+double physics_timestep_multiplier = 1.0;
+//double physics_timestep = 1.0/60.0;
 double physics_accumulator = 0;
 double timer_accumulator = 0;
-double global_time = 0;
+double global_time = 0; // will not work as a 'time elapsed' counter in editor mode because it grows slower during time slowdown
 
 const char debug_level_name[64] = "red-last";
 const char relative_start_level_path_buffer[64] = "data/levels/";
@@ -4317,11 +4318,11 @@ void gameFrame(double delta_time, TickInput* tick_input)
         if (tick_input->dot_press)
         {
             char timestep_text[256] = {0};
-            if (physics_timestep > DEFAULT_PHYSICS_TIMESTEP)
+            if (physics_timestep_multiplier > 1.0)
             {
-                physics_timestep /= 2;
+                physics_timestep_multiplier /= 2;
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                snprintf(timestep_text, sizeof(timestep_text), "physics timestep increased (%f)", physics_timestep);
+                snprintf(timestep_text, sizeof(timestep_text), "physics timestep increased (%f)", physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
                 createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
             }
             else
@@ -4331,10 +4332,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
         }
         else if (tick_input->comma_press)
         {
-            physics_timestep *= 2;
+            physics_timestep_multiplier *= 2;
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             char timestep_text[256] = {0};
-            snprintf(timestep_text, sizeof(timestep_text), "physics timestep decreased (%f)", physics_timestep);
+            snprintf(timestep_text, sizeof(timestep_text), "physics timestep decreased (%f)", physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
             createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
         }
 
@@ -4395,7 +4396,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
     // MAIN PHYSICS LOOP //
     ///////////////////////
 
-    while (physics_accumulator >= physics_timestep)
+    while (physics_accumulator >= (physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP))
    	{
 		next_world_state = world_state;
 
@@ -5469,7 +5470,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         // finished updating state
         world_state = next_world_state;
 
-        physics_accumulator -= physics_timestep;
+        physics_accumulator -= physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP;
 
         if (time_until_allow_game_input > 0) time_until_allow_game_input--;
 	}
@@ -5856,7 +5857,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
         // handle decrementing timers which should be consistent across physics timesteps
         timer_accumulator += delta_time;
-        global_time += delta_time;
+        global_time += (delta_time / physics_timestep_multiplier);
         while (timer_accumulator >= 1.0/60.0)
         {
             FOR(popup_index, MAX_DEBUG_POPUP_COUNT) if (debug_popups[popup_index].frames_left > 0) debug_popups[popup_index].frames_left--;
