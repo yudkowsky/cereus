@@ -1,0 +1,101 @@
+#version 450
+
+#include "water-height.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rgba16f) uniform writeonly image2D rt_output;
+layout(set = 1, binding = 0) uniform sampler2D depth_texture;
+layout(set = 2, binding = 0) uniform sampler2D underwater_texture;
+
+struct BoxAABB
+{
+    vec3 box_min;
+    float model_id;
+    vec3 box_max;
+    float _;
+};
+
+struct MeshVertex
+{
+    float x, y, z;
+    float u, v;
+    float nx, ny, nz;
+    float r, g, b;
+};
+
+struct MeshInfo
+{
+    uint vertex_offset;
+    uint index_offset;
+    uint index_count;
+    uint _;
+};
+
+layout(set = 3, binding = 0) uniform AABBData
+{
+    int aabb_count;
+    BoxAABB boxes[16];
+}
+aabbs;
+
+layout(set = 4, binding = 0) buffer MeshVertices { MeshVertex verts[]; } mesh_vertices;
+layout(set = 5, binding = 0) buffer MeshIndices { uint indices[]; } mesh_indices;
+layout(set = 6, binding = 0) buffer MeshInfos { MeshInfo infos[]; } mesh_infos;
+
+layout(push_constant) uniform PushConstants
+{
+    mat4 view;
+    mat4 proj;
+    mat4 inv_view_proj;
+    float cam_x, cam_y, cam_z;
+    float time;
+    float screen_width, screen_height; // might not be needed, checking against viewport anyway
+    float water_plane_y;
+    float viewport_x, viewport_y, viewport_width, viewport_height;
+}
+pc;
+
+void main()
+{
+    ivec2 pixel_coords = ivec2(gl_GlobalInvocationID.xy);
+
+    // check if pixel is inside viewport. this also handles the the nonexistent pixels that occur when image size isn't divisible by workspace chunk size.
+	if (pixel_coords.x < pc.viewport_x || pixel_coords.x >= pc.viewport_x + pc.viewport_width || pixel_coords.y < pc.viewport_y || pixel_coords.y >= pc.viewport_y + pc.viewport_height)
+    {
+        imageStore(rt_output, pixel_coords, vec4(0));
+        return;
+    }
+
+	// get pixel coords in [-1, 1] on the view image
+	vec2 ndc_pixel_coords = vec2((float(pixel_coords.x - pc.viewport_x) / pc.viewport_width) * 2 - 1, 1 - (float(pixel_coords.y - pc.viewport_y) / pc.viewport_height) * 2);
+
+	// unproject two points at same pixel coordinates to figure out direction vector between them
+    vec4 near_clip = pc.inv_view_proj * vec4(ndc_pixel_coords, 0.0, 1.0);
+    vec4 far_clip  = pc.inv_view_proj * vec4(ndc_pixel_coords, 1.0, 1.0);
+
+    vec3 near_world = near_clip.xyz / near_clip.w;
+    vec3 far_world  = far_clip.xyz / far_clip.w;
+
+    vec3 ray_direction = normalize(far_world - near_world);
+    vec3 ray_origin = vec3(pc.cam_x, pc.cam_y, pc.cam_z); // get origin from camera position
+
+	// approximate intersection at water_plane_y
+	float t = (pc.water_plane_y - ray_origin.y) / ray_direction.y;
+	vec3 ray_point = ray_origin + ray_direction * t;
+
+    float t_low = t - 0.5;
+    float t_high = t + 0.5;
+    for (int binary_search_step = 0; binary_search_step < 16; binary_search_step++)
+    {
+        // move t_high or t_low depending on what region we know the water surface will be
+        float t_mid = (t_low + t_high) / 2;
+        ray_point = ray_origin + ray_direction * t_mid;
+        if (ray_point.y > waterHeight(ray_point, pc.time) + pc.water_plane_y) t_low = t_mid;
+        else t_high = t_mid;
+    }
+
+	// output normal for now
+    vec3 normal = waterNormal(ray_point.xyz, pc.time);
+    imageStore(rt_output, pixel_coords, vec4(normal * 0.5 + 0.5, 1.0));
+}

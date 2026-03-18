@@ -41,26 +41,17 @@ pc;
 const float z_near = 1.0;
 const float z_far = 300.0;
 
-void main()
+float linearize_depth(float d)
 {
-    vec2 screen_uv = gl_FragCoord.xy / vec2(textureSize(rt_result, 0));
-    out_color = vec4(texture(rt_result, screen_uv).rgb, 1.0);
+    return z_near * z_far / (z_far - d * (z_far - z_near));
 }
 
-/*
 void main()
 {
     vec2 tex_size = vec2(textureSize(rt_result, 0));
     vec2 screen_uv = gl_FragCoord.xy / tex_size;
     vec4 rt = texture(rt_result, screen_uv);
     
-    if (rt.a > 0.0)
-    {
-        out_color = rt;
-    }
-    else
-    {
-        discard;
-    }
+    // just pass through the raytraced value
+    out_color = vec4(rt.r, rt.g, rt.b, 1.0);
 }
-*/

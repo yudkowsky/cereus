@@ -158,11 +158,12 @@ typedef struct
 {
     float view[16];
     float proj[16];
+    float inv_view_proj[16];
     float cam_x, cam_y, cam_z;
     float time;
     float screen_width, screen_height;
     float water_plane_y;
-    float _;
+    float viewport_x, viewport_y, viewport_width, viewport_height;
 }
 WaterComputePushConstants;
 
@@ -176,6 +177,24 @@ typedef struct
     uint32 index_count;
 }
 LoadedModel;
+
+typedef struct
+{
+    Vec3 min;
+    float model_id;
+    Vec3 max;
+    float _;
+}
+WaterAABB;
+
+typedef struct
+{
+    uint32 vertex_offset; // in vertices
+    uint32 index_offset; // in indices
+    uint32 index_count;
+    uint32 _;
+}
+ModelMeshInfo;
 
 typedef struct VulkanState
 {
@@ -339,17 +358,23 @@ typedef struct VulkanState
     VkDeviceMemory water_aabb_memory;
     void* water_aabb_mapped;
     VkDescriptorSet water_aabb_descriptor_set;
+
+    // mesh handling for ray tracing
+    VkBuffer mesh_vertex_ssbo;
+    VkDeviceMemory mesh_vertex_ssbo_memory;
+    VkBuffer mesh_index_ssbo;
+    VkDeviceMemory mesh_index_ssbo_memory;
+    VkDescriptorSet mesh_vertex_descriptor_set;
+    VkDescriptorSet mesh_index_descriptor_set;
+    VkDescriptorSetLayout ssbo_descriptor_set_layout;
+
+    ModelMeshInfo mesh_info_table[64];
+
+    VkBuffer mesh_info_buffer;
+    VkDeviceMemory mesh_info_memory;
+    VkDescriptorSet mesh_info_descriptor_set;
 }
 VulkanState;
-
-typedef struct
-{
-    Vec3 min;
-    float pad0;
-    Vec3 max;
-    float pad1;
-}
-WaterAABB;
 
 WaterAABB water_aabbs[16] = {0};
 uint32 water_aabb_count = 0;
@@ -466,6 +491,42 @@ void mat4Multiply(float output_matrix[16], float a[16], float b[16])
         }
     }
     memcpy(output_matrix, temporary_matrix, sizeof(temporary_matrix));
+}
+
+// pretty sure this is right. but should probably test it somehow
+void mat4Inverse(float out[16], float m[16])
+{
+    float inv[16];
+    
+    inv[0]  =  m[5]*m[10]*m[15] - m[5]*m[11]*m[14] - m[9]*m[6]*m[15] + m[9]*m[7]*m[14] + m[13]*m[6]*m[11] - m[13]*m[7]*m[10];
+    inv[4]  = -m[4]*m[10]*m[15] + m[4]*m[11]*m[14] + m[8]*m[6]*m[15] - m[8]*m[7]*m[14] - m[12]*m[6]*m[11] + m[12]*m[7]*m[10];
+    inv[8]  =  m[4]*m[9]*m[15]  - m[4]*m[11]*m[13] - m[8]*m[5]*m[15] + m[8]*m[7]*m[13] + m[12]*m[5]*m[11] - m[12]*m[7]*m[9];
+    inv[12] = -m[4]*m[9]*m[14]  + m[4]*m[10]*m[13] + m[8]*m[5]*m[14] - m[8]*m[6]*m[13] - m[12]*m[5]*m[10] + m[12]*m[6]*m[9];
+    
+    inv[1]  = -m[1]*m[10]*m[15] + m[1]*m[11]*m[14] + m[9]*m[2]*m[15] - m[9]*m[3]*m[14] - m[13]*m[2]*m[11] + m[13]*m[3]*m[10];
+    inv[5]  =  m[0]*m[10]*m[15] - m[0]*m[11]*m[14] - m[8]*m[2]*m[15] + m[8]*m[3]*m[14] + m[12]*m[2]*m[11] - m[12]*m[3]*m[10];
+    inv[9]  = -m[0]*m[9]*m[15]  + m[0]*m[11]*m[13] + m[8]*m[1]*m[15] - m[8]*m[3]*m[13] - m[12]*m[1]*m[11] + m[12]*m[3]*m[9];
+    inv[13] =  m[0]*m[9]*m[14]  - m[0]*m[10]*m[13] - m[8]*m[1]*m[14] + m[8]*m[2]*m[13] + m[12]*m[1]*m[10] - m[12]*m[2]*m[9];
+    
+    inv[2]  =  m[1]*m[6]*m[15] - m[1]*m[7]*m[14] - m[5]*m[2]*m[15] + m[5]*m[3]*m[14] + m[13]*m[2]*m[7] - m[13]*m[3]*m[6];
+    inv[6]  = -m[0]*m[6]*m[15] + m[0]*m[7]*m[14] + m[4]*m[2]*m[15] - m[4]*m[3]*m[14] - m[12]*m[2]*m[7] + m[12]*m[3]*m[6];
+    inv[10] =  m[0]*m[5]*m[15] - m[0]*m[7]*m[13] - m[4]*m[1]*m[15] + m[4]*m[3]*m[13] + m[12]*m[1]*m[7] - m[12]*m[3]*m[5];
+    inv[14] = -m[0]*m[5]*m[14] + m[0]*m[6]*m[13] + m[4]*m[1]*m[14] - m[4]*m[2]*m[13] - m[12]*m[1]*m[6] + m[12]*m[2]*m[5];
+    
+    inv[3]  = -m[1]*m[6]*m[11] + m[1]*m[7]*m[10] + m[5]*m[2]*m[11] - m[5]*m[3]*m[10] - m[9]*m[2]*m[7] + m[9]*m[3]*m[6];
+    inv[7]  =  m[0]*m[6]*m[11] - m[0]*m[7]*m[10] - m[4]*m[2]*m[11] + m[4]*m[3]*m[10] + m[8]*m[2]*m[7] - m[8]*m[3]*m[6];
+    inv[11] = -m[0]*m[5]*m[11] + m[0]*m[7]*m[9]  + m[4]*m[1]*m[11] - m[4]*m[3]*m[9]  - m[8]*m[1]*m[7] + m[8]*m[3]*m[5];
+    inv[15] =  m[0]*m[5]*m[10] - m[0]*m[6]*m[9]  - m[4]*m[1]*m[10] + m[4]*m[2]*m[9]  + m[8]*m[1]*m[6] - m[8]*m[2]*m[5];
+    
+    float determinant = m[0]*inv[0] + m[1]*inv[4] + m[2]*inv[8] + m[3]*inv[12];
+    if (determinant == 0.0f) 
+    { 
+        memcpy(out, m, 64); 
+        return; 
+    }
+    
+    determinant = 1.0f / determinant;
+    for (int i = 0; i < 16; i++) out[i] = inv[i] * determinant;
 }
 
 void mat4BuildTranslation(float output_matrix[16], Vec3 translation) 
@@ -1176,8 +1237,8 @@ LoadedModel loadModel(char* path)
         }
     }
 
-    uploadBufferToLocalDevice(vertices, sizeof(Vertex) * total_verts, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &result.vertex_buffer, &result.vertex_memory);
-    uploadBufferToLocalDevice(indices, sizeof(uint32) * total_indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, &result.index_buffer, &result.index_memory);
+    uploadBufferToLocalDevice(vertices, sizeof(Vertex) * total_verts, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, &result.vertex_buffer, &result.vertex_memory);
+    uploadBufferToLocalDevice(indices, sizeof(uint32) * total_indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, &result.index_buffer, &result.index_memory);
 
     result.index_count = (uint32)total_indices;
     result.data = data;
@@ -1209,6 +1270,171 @@ void loadAllEntities()
     vulkan_state.loaded_models[MODEL_3D_SOURCE_WHITE   - MODEL_3D_VOID] = loadModel("data/assets/white-source.glb");
 
     vulkan_state.laser_cylinder_model = loadModel("data/assets/laser-cylinder.glb");
+}
+
+// only for entities that can be underwater
+void buildMeshSSBOs()
+{
+    // first pass: count total vertices and indices across all loaded models
+    uint32 total_vertices = 0;
+    uint32 total_indices = 0;
+    
+    for (uint32 model_index = 0; model_index < 64; model_index++)
+    {
+        if (vulkan_state.loaded_models[model_index].index_count == 0) continue;
+
+        vulkan_state.mesh_info_table[model_index].vertex_offset = total_vertices;
+        vulkan_state.mesh_info_table[model_index].index_offset = total_indices;
+        vulkan_state.mesh_info_table[model_index].index_count = vulkan_state.loaded_models[model_index].index_count;
+
+        // TODO: store vertex count in model instead of rederiving here
+        cgltf_data* data = vulkan_state.loaded_models[model_index].data;
+        if (!data) continue;
+
+        uint32 model_verts = 0;
+        uint32 model_indices = 0;
+        for (cgltf_size m = 0; m < data->meshes_count; m++)
+        {
+            for (cgltf_size p = 0; p < data->meshes[m].primitives_count; p++)
+            {
+                cgltf_primitive* prim = &data->meshes[m].primitives[p];
+                if (prim->attributes_count == 0 || !prim->indices) continue;
+                model_verts += (uint32)prim->attributes[0].data->count;
+                model_indices += (uint32)prim->indices->count;
+            }
+        }
+
+        total_vertices += model_verts;
+        total_indices += model_indices;
+    }
+
+    if (total_vertices == 0 || total_indices == 0) return;
+
+    // second pass: fill all combined arrays
+    Vertex* all_vertices = malloc(sizeof(Vertex) * total_vertices);
+    uint32* all_indices = malloc(sizeof(uint32) * total_indices);
+
+    uint32 vertex_cursor = 0;
+    uint32 index_cursor = 0;
+
+    for (uint32 model_index = 0; model_index < 64; model_index++)
+    {
+        cgltf_data* data = vulkan_state.loaded_models[model_index].data;
+        if (!data || vulkan_state.loaded_models[model_index].index_count == 0) continue;
+
+        for (cgltf_size mesh_index = 0; mesh_index < data->meshes_count; mesh_index++)
+        {
+            for (cgltf_size prim_index = 0; prim_index < data->meshes[mesh_index].primitives_count; prim_index++)
+            {
+                cgltf_primitive* prim = &data->meshes[mesh_index].primitives[prim_index];
+
+                cgltf_accessor* pos_acc = 0;
+                cgltf_accessor* normal_acc = 0;
+                cgltf_accessor* uv_acc = 0;
+
+                for (cgltf_size attribute_index = 0; attribute_index < prim->attributes_count; attribute_index++)
+                {
+                    if 		(prim->attributes[attribute_index].type == cgltf_attribute_type_position) pos_acc    = prim->attributes[attribute_index].data;
+                    else if (prim->attributes[attribute_index].type == cgltf_attribute_type_normal)   normal_acc = prim->attributes[attribute_index].data;
+                    else if (prim->attributes[attribute_index].type == cgltf_attribute_type_texcoord) uv_acc     = prim->attributes[attribute_index].data;
+                }
+                if (!pos_acc || !prim->indices) continue;
+
+                float base_color[4] = {1,1,1,1};
+                if (prim->material && prim->material->has_pbr_metallic_roughness)
+                {
+                    base_color[0] = prim->material->pbr_metallic_roughness.base_color_factor[0];
+                    base_color[1] = prim->material->pbr_metallic_roughness.base_color_factor[1];
+                    base_color[2] = prim->material->pbr_metallic_roughness.base_color_factor[2];
+                    base_color[3] = prim->material->pbr_metallic_roughness.base_color_factor[3];
+                }
+
+                uint32 prim_base_vertex = vertex_cursor;
+
+                for (cgltf_size v = 0; v < pos_acc->count; v++)
+                {
+                    Vertex* vertex = &all_vertices[vertex_cursor++];
+                    float pos[3] = {0};
+                    cgltf_accessor_read_float(pos_acc, v, pos, 3);
+                    vertex->x = pos[0]; vertex->y = pos[1]; vertex->z = pos[2];
+
+                    if (uv_acc) { float uv[2] = {0}; cgltf_accessor_read_float(uv_acc, v, uv, 2); vertex->u = uv[0]; vertex->v = uv[1]; }
+                    else { vertex->u = 0; vertex->v = 0; }
+
+                    if (normal_acc) { float n[3] = {0}; cgltf_accessor_read_float(normal_acc, v, n, 3); vertex->nx = n[0]; vertex->ny = n[1]; vertex->nz = n[2]; }
+                    else { vertex->nx = 0; vertex->ny = 1; vertex->nz = 0; }
+
+                    vertex->r = base_color[0]; vertex->g = base_color[1]; vertex->b = base_color[2];
+                }
+
+                for (cgltf_size idx = 0; idx < prim->indices->count; idx++)
+                {
+                    all_indices[index_cursor++] = (uint32)(cgltf_accessor_read_index(prim->indices, idx) + prim_base_vertex);
+                }
+            }
+        }
+    }
+
+    // upload data
+    uploadBufferToLocalDevice(all_vertices, sizeof(Vertex) * total_vertices, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, &vulkan_state.mesh_vertex_ssbo, &vulkan_state.mesh_vertex_ssbo_memory);
+    uploadBufferToLocalDevice(all_indices,  sizeof(uint32) * total_indices, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, &vulkan_state.mesh_index_ssbo, &vulkan_state.mesh_index_ssbo_memory);
+    uploadBufferToLocalDevice(vulkan_state.mesh_info_table, sizeof(ModelMeshInfo) * 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, &vulkan_state.mesh_info_buffer, &vulkan_state.mesh_info_memory);
+
+    free(all_vertices);
+    free(all_indices);
+
+    // allocate and update descriptor sets
+    VkDescriptorSetAllocateInfo ssbo_alloc = {0};
+    ssbo_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    ssbo_alloc.descriptorPool = vulkan_state.descriptor_pool;
+    ssbo_alloc.descriptorSetCount = 1;
+    ssbo_alloc.pSetLayouts = &vulkan_state.ssbo_descriptor_set_layout;
+
+    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &ssbo_alloc, &vulkan_state.mesh_vertex_descriptor_set);
+    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &ssbo_alloc, &vulkan_state.mesh_index_descriptor_set);
+    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &ssbo_alloc, &vulkan_state.mesh_info_descriptor_set);
+
+    VkDescriptorBufferInfo vert_buf = {0};
+    vert_buf.buffer = vulkan_state.mesh_vertex_ssbo;
+    vert_buf.offset = 0;
+    vert_buf.range = VK_WHOLE_SIZE;
+
+    VkDescriptorBufferInfo idx_buf = {0};
+    idx_buf.buffer = vulkan_state.mesh_index_ssbo;
+    idx_buf.offset = 0;
+    idx_buf.range = VK_WHOLE_SIZE;
+
+    VkDescriptorBufferInfo info_buf = {0};
+    info_buf.buffer = vulkan_state.mesh_info_buffer;
+    info_buf.offset = 0;
+    info_buf.range = VK_WHOLE_SIZE;
+
+    VkWriteDescriptorSet writes[3] = {0};
+
+    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[0].dstSet = vulkan_state.mesh_vertex_descriptor_set;
+    writes[0].dstBinding = 0;
+    writes[0].descriptorCount = 1;
+    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[0].pBufferInfo = &vert_buf;
+
+    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[1].dstSet = vulkan_state.mesh_index_descriptor_set;
+    writes[1].dstBinding = 0;
+    writes[1].descriptorCount = 1;
+    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[1].pBufferInfo = &idx_buf;
+
+    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writes[2].dstSet = vulkan_state.mesh_info_descriptor_set;
+    writes[2].dstBinding = 0;
+    writes[2].descriptorCount = 1;
+    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writes[2].pBufferInfo = &info_buf;
+
+    vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 3, writes, 0, 0);
+
+    LOG("built mesh SSBOs: %u total vertices, %u total indices\n", total_vertices, total_indices);
 }
 
 VkPipelineShaderStageCreateInfo loadShaderStage(char* path, VkShaderModule* module, VkShaderStageFlagBits stage_bit)
@@ -2595,18 +2821,34 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     vkCreateDescriptorSetLayout(vulkan_state.logical_device_handle, &storage_image_layout_ci, 0, &vulkan_state.storage_image_descriptor_set_layout);
 
+    // ssbo layout
+    VkDescriptorSetLayoutBinding ssbo_binding = {0};
+    ssbo_binding.binding = 0;
+    ssbo_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    ssbo_binding.descriptorCount = 1;
+    ssbo_binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+    VkDescriptorSetLayoutCreateInfo ssbo_layout_ci = {0};
+    ssbo_layout_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    ssbo_layout_ci.bindingCount = 1;
+    ssbo_layout_ci.pBindings = &ssbo_binding;
+
+    vkCreateDescriptorSetLayout(vulkan_state.logical_device_handle, &ssbo_layout_ci, 0, &vulkan_state.ssbo_descriptor_set_layout);
+
     // descriptor pool allocates memory for all descriptor sets
-    VkDescriptorPoolSize descriptor_pool_sizes[3] = {0};
+    VkDescriptorPoolSize descriptor_pool_sizes[4] = {0};
    	descriptor_pool_sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     descriptor_pool_sizes[0].descriptorCount = 1024;
     descriptor_pool_sizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     descriptor_pool_sizes[1].descriptorCount = 4;
     descriptor_pool_sizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     descriptor_pool_sizes[2].descriptorCount = 4;
+    descriptor_pool_sizes[3].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    descriptor_pool_sizes[3].descriptorCount = 8;
     
     VkDescriptorPoolCreateInfo descriptor_pool_creation_info = {0};
     descriptor_pool_creation_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    descriptor_pool_creation_info.poolSizeCount = 3;
+    descriptor_pool_creation_info.poolSizeCount = 4;
     descriptor_pool_creation_info.pPoolSizes = descriptor_pool_sizes;
     descriptor_pool_creation_info.maxSets = 1024;
 
@@ -2641,6 +2883,22 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     aabb_descriptor_set_alloc.pSetLayouts = &vulkan_state.ubo_descriptor_set_layout;
 
     vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &aabb_descriptor_set_alloc, &vulkan_state.water_aabb_descriptor_set);
+
+    // point aabb descriptor at buffer (doesn't change on resize, so no point in having it in create swaphain resources)
+    VkDescriptorBufferInfo aabb_buf_info = {0};
+    aabb_buf_info.buffer = vulkan_state.water_aabb_buffer;
+    aabb_buf_info.offset = 0;
+    aabb_buf_info.range = VK_WHOLE_SIZE;
+
+    VkWriteDescriptorSet aabb_write = {0};
+    aabb_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    aabb_write.dstSet = vulkan_state.water_aabb_descriptor_set;
+    aabb_write.dstBinding = 0;
+    aabb_write.descriptorCount = 1;
+    aabb_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    aabb_write.pBufferInfo = &aabb_buf_info;
+
+    vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &aabb_write, 0, 0);
 
 	// storage image descriptor set (compute writes)
     {
@@ -2791,11 +3049,14 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     // CREATE WATER COMPUTE PIPELINE
 
     {
-        VkDescriptorSetLayout compute_set_layouts[4] = {
+        VkDescriptorSetLayout compute_set_layouts[7] = {
             vulkan_state.storage_image_descriptor_set_layout,  // rt output
             vulkan_state.descriptor_set_layout,                // depth
             vulkan_state.descriptor_set_layout,                // underwater scene
-            vulkan_state.ubo_descriptor_set_layout             // aabbs
+            vulkan_state.ubo_descriptor_set_layout,            // aabbs
+            vulkan_state.ssbo_descriptor_set_layout,		   // mesh vertices
+            vulkan_state.ssbo_descriptor_set_layout,		   // mesh indices
+            vulkan_state.ssbo_descriptor_set_layout,           // mesh info
         };
 
         VkPushConstantRange push_constant_range = {0};
@@ -2805,7 +3066,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         VkPipelineLayoutCreateInfo layout_ci = {0};
         layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layout_ci.setLayoutCount = 4;
+        layout_ci.setLayoutCount = 7;
         layout_ci.pSetLayouts = compute_set_layouts;
         layout_ci.pushConstantRangeCount = 1;
         layout_ci.pPushConstantRanges = &push_constant_range;
@@ -3196,6 +3457,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     createInstanceBuffer(&vulkan_state.water_instance_buffer, sizeof(WaterInstanceData) * WATER_INSTANCE_CAPACITY, &vulkan_state.water_instance_memory, &vulkan_state.water_instance_mapped);
 
     loadAllEntities();
+
+    buildMeshSSBOs();
 }
 
 void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, float global_time, Camera game_camera, ShaderMode shader_mode_from_game)
@@ -3313,15 +3576,16 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
                 WaterAABB* aabb = &water_aabbs[water_aabb_count];
                 aabb->min = (Vec3){ command->coords.x - 0.5f, command->coords.y - 0.5f, command->coords.z - 0.5f }; 
                 aabb->max = (Vec3){ command->coords.x + 0.5f, command->coords.y + 0.5f, command->coords.z + 0.5f };
+                aabb->model_id = (float)(command->sprite_id - MODEL_3D_VOID);
                 water_aabb_count++;
             }
         }
-
-        // upload AABB buffer to UBO
-        uint32 aabb_count_padded[4] = { water_aabb_count, 0, 0, 0 };
-        memcpy(vulkan_state.water_aabb_mapped, aabb_count_padded, 16);
-        memcpy((uint8*)vulkan_state.water_aabb_mapped + 16, water_aabbs, sizeof(WaterAABB) * water_aabb_count);
     }
+
+    // upload AABB buffer to UBO
+    uint32 aabb_count_padded[4] = { water_aabb_count, 0, 0, 0 };
+    memcpy(vulkan_state.water_aabb_mapped, aabb_count_padded, 16);
+    memcpy((uint8*)vulkan_state.water_aabb_mapped + 16, water_aabbs, sizeof(WaterAABB) * water_aabb_count);
 
     // fill cube instance buffer
     CubeInstanceData* cube_gpu_instances = (CubeInstanceData*)vulkan_state.cube_instance_mapped;
@@ -3355,6 +3619,13 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     water_flush_range.offset = 0;
     water_flush_range.size = VK_WHOLE_SIZE;
     vkFlushMappedMemoryRanges(vulkan_state.logical_device_handle, 1, &water_flush_range);
+
+    VkMappedMemoryRange aabb_flush_range = {0};
+    aabb_flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    aabb_flush_range.memory = vulkan_state.water_aabb_memory;
+    aabb_flush_range.offset = 0;
+    aabb_flush_range.size = VK_WHOLE_SIZE;
+    vkFlushMappedMemoryRanges(vulkan_state.logical_device_handle, 1, &aabb_flush_range);
 
     // handle water y level
     if (water_instance_count > 0)
@@ -3693,17 +3964,25 @@ void vulkanDraw(void)
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.water_compute_pipeline);
 
         // bind descriptor sets
-        VkDescriptorSet compute_sets[4] = {
+        VkDescriptorSet compute_sets[7] = {
             vulkan_state.water_rt_storage_descriptor_set,
             vulkan_state.depth_descriptor_set,
             vulkan_state.scene_copy_descriptor_set,
-            vulkan_state.water_aabb_descriptor_set
+            vulkan_state.water_aabb_descriptor_set,
+            vulkan_state.mesh_vertex_descriptor_set,
+            vulkan_state.mesh_index_descriptor_set,
+            vulkan_state.mesh_info_descriptor_set
         };
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.water_compute_pipeline_layout, 0, 4, compute_sets, 0, 0);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.water_compute_pipeline_layout, 0, 7, compute_sets, 0, 0);
 
         WaterComputePushConstants compute_pc = {0};
         memcpy(compute_pc.view, view_matrix, sizeof(compute_pc.view));
         memcpy(compute_pc.proj, projection_matrix, sizeof(compute_pc.proj));
+
+        float view_proj[16];
+        mat4Multiply(view_proj, projection_matrix, view_matrix);
+        mat4Inverse(compute_pc.inv_view_proj, view_proj);
+
         compute_pc.cam_x = vulkan_camera.coords.x;
         compute_pc.cam_y = vulkan_camera.coords.y;
         compute_pc.cam_z = vulkan_camera.coords.z;
@@ -3711,6 +3990,10 @@ void vulkanDraw(void)
         compute_pc.screen_width = (float)vulkan_state.swapchain_extent.width;
         compute_pc.screen_height = (float)vulkan_state.swapchain_extent.height;
         compute_pc.water_plane_y = vulkan_state.water_plane_y;
+        compute_pc.viewport_x = viewport_x;
+        compute_pc.viewport_y = viewport_y;
+        compute_pc.viewport_width = viewport_width;
+        compute_pc.viewport_height = viewport_height;
 
         vkCmdPushConstants(command_buffer, vulkan_state.water_compute_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(WaterComputePushConstants), &compute_pc);
 
