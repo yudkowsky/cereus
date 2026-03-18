@@ -17,6 +17,9 @@ layout(push_constant) uniform PushConstants
     mat4 proj;
     float time;
     float debug_mode;
+    float cam_x;
+    float cam_y;
+    float cam_z;
 }
 pc;
 

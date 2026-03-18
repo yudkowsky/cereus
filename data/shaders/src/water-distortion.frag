@@ -24,48 +24,43 @@ layout(set = 3, binding = 0) uniform AABBData
 }
 aabbs;
 
+layout(set = 4, binding = 0) uniform sampler2D rt_result;
+
 layout(push_constant) uniform PushConstants 
 {
     mat4 view;
     mat4 proj;
     float time;
     float debug_mode;
+    float cam_x;
+    float cam_y;
+    float cam_z;
 }
 pc;
 
 const float z_near = 1.0;
 const float z_far = 300.0;
 
-float linearize_depth(float d)
-{
-    return z_near * z_far / (z_far - d * (z_far - z_near));
-}
-
 void main()
 {
-    vec3 P = frag_world_pos;
+    vec2 screen_uv = gl_FragCoord.xy / vec2(textureSize(rt_result, 0));
+    out_color = vec4(texture(rt_result, screen_uv).rgb, 1.0);
+}
 
-    bool above_box = false;
-    for (int i = 0; i < aabbs.aabb_count; i++)
-	{
-        vec3 box_min = aabbs.boxes[i].box_min;
-        vec3 box_max = aabbs.boxes[i].box_max;
-
-        if (P.x >= box_min.x && P.x <= box_max.x && 
-            P.z >= box_min.z && P.z <= box_max.z &&
-            P.y > box_min.y)
-        {
-            above_box = true;
-            break;
-        }
-    }
-
-    if (above_box)
+/*
+void main()
+{
+    vec2 tex_size = vec2(textureSize(rt_result, 0));
+    vec2 screen_uv = gl_FragCoord.xy / tex_size;
+    vec4 rt = texture(rt_result, screen_uv);
+    
+    if (rt.a > 0.0)
     {
-        out_color = vec4(1.0, 0.3, 0.0, 1.0);
+        out_color = rt;
     }
     else
     {
-        out_color = vec4(0.0, 0.1, 0.3, 1.0);
+        discard;
     }
 }
+*/
