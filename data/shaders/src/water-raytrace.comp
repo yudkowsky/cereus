@@ -86,6 +86,7 @@ void main()
 	vec3 ray_point = ray_origin + ray_direction * t_approx;
 
     float t_low = t_approx - 0.5;
+    float t_mid = 0.0;
     float t_high = t_approx + 0.5;
     for (int binary_search_step = 0; binary_search_step < 16; binary_search_step++)
     {
@@ -204,7 +205,7 @@ void main()
         // output color
         imageStore(rt_output, pixel_coords, vec4(closest_color, 1.0));
         // output normal and depth
-        imageStore(rt_normal_depth, pixel_coords, vec4(closest_normal, t_closest));
+        imageStore(rt_normal_depth, pixel_coords, vec4(closest_normal, t_closest + t_mid));
     }
     else
     {

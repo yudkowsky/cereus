@@ -4207,158 +4207,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
         camera = lerpCamera(saved_main_camera, saved_alt_camera, camera_lerp_t, (float)camera_target_plane);
     }
 
-    /////////////////////
-    // EDITOR KEYBINDS //
-	/////////////////////
-
-    if (time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
-    {
-        // editor mode toggle
-        if (tick_input->zero_press) 
-        {
-            editor_state.editor_mode = NO_MODE;
-            createDebugPopup("game mode", GAMEPLAY_MODE_CHANGE);
-        }
-        if (tick_input->one_press) 
-        {
-            editor_state.editor_mode = PLACE_BREAK;
-            createDebugPopup("place / break mode", GAMEPLAY_MODE_CHANGE);
-        }
-        if (tick_input->two_press) 
-        {
-            editor_state.editor_mode = SELECT;
-            createDebugPopup("select mode", GAMEPLAY_MODE_CHANGE);
-        }
-
-        // toggle cheating
-        if (tick_input->three_press)
-        {
-            cheating = !cheating;
-            if (cheating) createDebugPopup("cheating", CHEAT_MODE_TOGGLE);
-            else createDebugPopup("not cheating", CHEAT_MODE_TOGGLE);
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
-
-        // change model states
-        if (tick_input->seven_press)
-        {
-            game_shader_mode = OUTLINE_TEST;
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            createDebugPopup("shader mode: testing outlines", SHADER_MODE_CHANGE);
-        }
-        if (tick_input->eight_press)
-        {
-            game_shader_mode = OUTLINE;
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            createDebugPopup("shader mode: outlines", SHADER_MODE_CHANGE);
-        }
-        if (tick_input->nine_press)
-        {
-            game_shader_mode = OLD; 
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            createDebugPopup("shader mode: old", SHADER_MODE_CHANGE);
-        }
-
-        // change camera fov for editor
-        if (tick_input->n_press && editor_state.editor_mode != NO_MODE)
-        {
-            camera.fov--;
-            time_until_allow_meta_input = 4;
-        }
-        else if (tick_input->b_press && editor_state.editor_mode != NO_MODE)
-        {
-            camera.fov++;
-            time_until_allow_meta_input = 4;
-        }
-
-        // set camera fov to wide for editor
-        if (tick_input->j_press)
-        {
-            editor_state.do_wide_camera = !editor_state.do_wide_camera;
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            if (editor_state.do_wide_camera)
-            {
-                if (editor_state.editor_mode == NO_MODE)
-                {
-                    editor_state.do_wide_camera = false;
-                    if (camera_mode == MAIN_WAITING) camera.fov = saved_main_camera.fov;
-                    else if (camera_mode == ALT_WAITING) camera.fov = saved_alt_camera.fov;
-                    else camera.fov = 15.0f;
-                }
-                else
-                {
-                    camera.fov = 60.0f;
-                }
-            }
-            else
-            {
-                if (saved_main_camera.fov == camera.fov) camera.fov = 15.0f; // if working on a new level, and have saved camera as 60fov, then default to 15
-                else camera.fov = saved_main_camera.fov;
-            }
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
-
-        // snap camera yaw to nearest axis
-        if (tick_input->p_press)
-        {
-            float camera_snap_yaw = 0;
-            if 		(camera.yaw >= TAU * -0.375f && camera.yaw < TAU * -0.125f) camera_snap_yaw = TAU * -0.25f;
-            else if (camera.yaw >= TAU * -0.125f && camera.yaw < TAU *  0.125f) camera_snap_yaw = 0;
-            else if (camera.yaw >= TAU *  0.125f && camera.yaw < TAU *  0.375f) camera_snap_yaw = TAU * 0.25f;
-            else if (camera.yaw >= TAU *  0.375f || camera.yaw < TAU * -0.375f) camera_snap_yaw = TAU * 0.5f;
-            camera.yaw = camera_snap_yaw;
-            camera.rotation = buildCameraQuaternion(camera);
-            char yaw_text[256] = {0};
-            snprintf(yaw_text, sizeof(yaw_text), "camera yaw snapped to: %.3f", camera_snap_yaw);
-            createDebugPopup(yaw_text, NO_TYPE);
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
-
-        // speed up / slow down physics tick
-        if (tick_input->dot_press)
-        {
-            char timestep_text[256] = {0};
-            if (physics_timestep_multiplier > 1.0)
-            {
-                physics_timestep_multiplier /= 2;
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                snprintf(timestep_text, sizeof(timestep_text), "physics timestep increased (%f)", physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
-                createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
-            }
-            else
-            {
-                createDebugPopup("physics timestep already at minimum!", PHYSICS_TIMESTEP_CHANGE);
-            }
-        }
-        else if (tick_input->comma_press)
-        {
-            physics_timestep_multiplier *= 2;
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            char timestep_text[256] = {0};
-            snprintf(timestep_text, sizeof(timestep_text), "physics timestep decreased (%f)", physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
-            createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
-        }
-
-        if (tick_input->backspace_press)
-        {
-            camera = saved_main_camera;
-            camera.rotation = buildCameraQuaternion(camera);
-            camera_mode = MAIN_WAITING;
-            camera_lerp_t = 0.0f;
-            createDebugPopup("returned camera to saved position", NO_TYPE);
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
-
-        // toggle debug press
-        if (tick_input->y_press)
-        {
-            do_debug_text = !do_debug_text;
-            if (do_debug_text) createDebugPopup("debug state visibility on", DEBUG_STATE_VISIBILITY_CHANGE);
-            else			   createDebugPopup("debug state visibility off", DEBUG_STATE_VISIBILITY_CHANGE);
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
-    }
-
     if (editor_state.editor_mode == SELECT_WRITE)
     {
         // handle text input once per present frame
@@ -5476,8 +5324,156 @@ void gameFrame(double delta_time, TickInput* tick_input)
 	}
     
     /////////////////////
-	// AFTER GAME LOOP //
-    /////////////////////
+    // EDITOR KEYBINDS //
+	/////////////////////
+
+    if (time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+    {
+        // editor mode toggle
+        if (tick_input->zero_press) 
+        {
+            editor_state.editor_mode = NO_MODE;
+            createDebugPopup("game mode", GAMEPLAY_MODE_CHANGE);
+        }
+        if (tick_input->one_press) 
+        {
+            editor_state.editor_mode = PLACE_BREAK;
+            createDebugPopup("place / break mode", GAMEPLAY_MODE_CHANGE);
+        }
+        if (tick_input->two_press) 
+        {
+            editor_state.editor_mode = SELECT;
+            createDebugPopup("select mode", GAMEPLAY_MODE_CHANGE);
+        }
+
+        // toggle cheating
+        if (tick_input->three_press)
+        {
+            cheating = !cheating;
+            if (cheating) createDebugPopup("cheating", CHEAT_MODE_TOGGLE);
+            else createDebugPopup("not cheating", CHEAT_MODE_TOGGLE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        // change model states
+        if (tick_input->seven_press)
+        {
+            game_shader_mode = OUTLINE_TEST;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            createDebugPopup("shader mode: testing outlines", SHADER_MODE_CHANGE);
+        }
+        if (tick_input->eight_press)
+        {
+            game_shader_mode = OUTLINE;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            createDebugPopup("shader mode: outlines", SHADER_MODE_CHANGE);
+        }
+        if (tick_input->nine_press)
+        {
+            game_shader_mode = OLD; 
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            createDebugPopup("shader mode: old", SHADER_MODE_CHANGE);
+        }
+
+        // change camera fov for editor
+        if (tick_input->n_press && editor_state.editor_mode != NO_MODE)
+        {
+            camera.fov--;
+            time_until_allow_meta_input = 4;
+        }
+        else if (tick_input->b_press && editor_state.editor_mode != NO_MODE)
+        {
+            camera.fov++;
+            time_until_allow_meta_input = 4;
+        }
+
+        // set camera fov to wide for editor
+        if (tick_input->j_press)
+        {
+            editor_state.do_wide_camera = !editor_state.do_wide_camera;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            if (editor_state.do_wide_camera)
+            {
+                if (editor_state.editor_mode == NO_MODE)
+                {
+                    editor_state.do_wide_camera = false;
+                    if (camera_mode == MAIN_WAITING) camera.fov = saved_main_camera.fov;
+                    else if (camera_mode == ALT_WAITING) camera.fov = saved_alt_camera.fov;
+                    else camera.fov = 15.0f;
+                }
+                else
+                {
+                    camera.fov = 60.0f;
+                }
+            }
+            else
+            {
+                if (saved_main_camera.fov == camera.fov) camera.fov = 15.0f; // if working on a new level, and have saved camera as 60fov, then default to 15
+                else camera.fov = saved_main_camera.fov;
+            }
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        // snap camera yaw to nearest axis
+        if (tick_input->p_press)
+        {
+            float camera_snap_yaw = 0;
+            if 		(camera.yaw >= TAU * -0.375f && camera.yaw < TAU * -0.125f) camera_snap_yaw = TAU * -0.25f;
+            else if (camera.yaw >= TAU * -0.125f && camera.yaw < TAU *  0.125f) camera_snap_yaw = 0;
+            else if (camera.yaw >= TAU *  0.125f && camera.yaw < TAU *  0.375f) camera_snap_yaw = TAU * 0.25f;
+            else if (camera.yaw >= TAU *  0.375f || camera.yaw < TAU * -0.375f) camera_snap_yaw = TAU * 0.5f;
+            camera.yaw = camera_snap_yaw;
+            camera.rotation = buildCameraQuaternion(camera);
+            char yaw_text[256] = {0};
+            snprintf(yaw_text, sizeof(yaw_text), "camera yaw snapped to: %.3f", camera_snap_yaw);
+            createDebugPopup(yaw_text, NO_TYPE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        // speed up / slow down physics tick
+        if (tick_input->dot_press)
+        {
+            char timestep_text[256] = {0};
+            if (physics_timestep_multiplier > 1.0)
+            {
+                physics_timestep_multiplier /= 2;
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                snprintf(timestep_text, sizeof(timestep_text), "physics timestep increased (%f)", physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
+                createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
+            }
+            else
+            {
+                createDebugPopup("physics timestep already at minimum!", PHYSICS_TIMESTEP_CHANGE);
+            }
+        }
+        else if (tick_input->comma_press)
+        {
+            physics_timestep_multiplier *= 2;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            char timestep_text[256] = {0};
+            snprintf(timestep_text, sizeof(timestep_text), "physics timestep decreased (%f)", physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
+            createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
+        }
+
+        if (tick_input->backspace_press)
+        {
+            camera = saved_main_camera;
+            camera.rotation = buildCameraQuaternion(camera);
+            camera_mode = MAIN_WAITING;
+            camera_lerp_t = 0.0f;
+            createDebugPopup("returned camera to saved position", NO_TYPE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        // toggle debug press
+        if (tick_input->y_press)
+        {
+            do_debug_text = !do_debug_text;
+            if (do_debug_text) createDebugPopup("debug state visibility on", DEBUG_STATE_VISIBILITY_CHANGE);
+            else			   createDebugPopup("debug state visibility off", DEBUG_STATE_VISIBILITY_CHANGE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+    }
 
     // SAVING STUFF (depends on changed state, so after loop)
     {
@@ -5607,11 +5603,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
         camera_with_ow_offset.coords.x = camera.coords.x + (screen_offset_x * OVERWORLD_SCREEN_SIZE_X);
         camera_with_ow_offset.coords.z = camera.coords.z + (screen_offset_z * OVERWORLD_SCREEN_SIZE_Z);
-
-        // camera delta info
-        char delta_text[256];
-        snprintf(delta_text, sizeof(delta_text), "player delta from origin: %.1d, %.1d --- %.1d, %.1d", player_delta.x, player_delta.z, screen_offset_x, screen_offset_z);
-        if (do_debug_text) createDebugText(delta_text);
     }
 
     // update camera for drawing. after loop because depends on in_overworld

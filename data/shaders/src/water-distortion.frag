@@ -54,7 +54,8 @@ void main()
         vec4 nd_left   = texture(raytrace_normal_depth, screen_uv - vec2(texel.x, 0.0));
         vec4 nd_right  = texture(raytrace_normal_depth, screen_uv + vec2(texel.x, 0.0));
 
-		bool do_depth_edge = detectDepthEdge(nd_center.a, nd_up.a, nd_down.a, nd_left.a, nd_right.a, 1.0, pc.depth_threshold);
+		float underwater_edge_difference_constant = 20;
+		bool do_depth_edge = detectDepthEdge(nd_center.a, nd_up.a, nd_down.a, nd_left.a, nd_right.a, underwater_edge_difference_constant, pc.depth_threshold);
         bool do_normal_edge = detectNormalEdge(nd_center.rgb, nd_up.rgb, nd_down.rgb, nd_left.rgb, nd_right.rgb, pc.normal_threshold);
 
         if (do_depth_edge || do_normal_edge)
