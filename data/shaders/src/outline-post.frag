@@ -1,4 +1,7 @@
 #version 450
+
+#include "edge-detect.glsl"
+
 layout(location = 0) in vec2 frag_uv;
 layout(location = 0) out vec4 out_color;
 
@@ -25,9 +28,6 @@ float linearize(float raw_depth)
 
 void main()
 {
-	bool do_normal_edge = false;
-	bool do_depth_edge = false;
-
     vec2 step = pc.texel_size;
 
 	// depth edge detection
@@ -36,35 +36,19 @@ void main()
     float down   = linearize(texture(depth_texture, frag_uv - vec2(0.0,    step.y)).r);
     float left   = linearize(texture(depth_texture, frag_uv - vec2(step.x, 0.0)).r);
     float right  = linearize(texture(depth_texture, frag_uv + vec2(step.x, 0.0)).r);
-
-    float laplacian = abs(up + down - 2.0 * center) + abs(left + right - 2.0 * center);
-    float normalized = (laplacian / center) * pc.focal_length;
-
-    if (normalized > pc.depth_threshold)
-    {
-        do_depth_edge = true;
-    }
+    bool do_depth_edge = detectDepthEdge(center, up, down, left, right, pc.focal_length, pc.depth_threshold);
 
     // normal edge detection
+	bool do_normal_edge = false;
     vec3 n_center = texture(normal_texture, frag_uv).rgb;
     bool has_normal = dot(n_center, n_center) > 0.01;
-
     if (has_normal)
     {
         vec3 n_up    = texture(normal_texture, frag_uv + vec2(0.0, step.y)).rgb;
         vec3 n_down  = texture(normal_texture, frag_uv - vec2(0.0, step.y)).rgb;
         vec3 n_left  = texture(normal_texture, frag_uv - vec2(step.x, 0.0)).rgb;
         vec3 n_right = texture(normal_texture, frag_uv + vec2(step.x, 0.0)).rgb;
-
-        float max_normal_diff = max(
-            max(1.0 - dot(n_center, n_up),   1.0 - dot(n_center, n_down)),
-            max(1.0 - dot(n_center, n_left), 1.0 - dot(n_center, n_right))
-        );
-
-        if (max_normal_diff > pc.normal_threshold)
-        {
-            do_normal_edge = true;
-        }
+        do_normal_edge = detectNormalEdge(n_center, n_up, n_down, n_left, n_right, pc.normal_threshold);
     }
 
 	if (pc.debug_mode > 0.9)
