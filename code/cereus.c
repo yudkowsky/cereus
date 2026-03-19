@@ -466,7 +466,7 @@ double physics_accumulator = 0;
 double timer_accumulator = 0;
 double global_time = 0; // will not work as a 'time elapsed' counter in editor mode because it grows slower during time slowdown
 
-const char debug_level_name[64] = "red-last";
+const char debug_level_name[64] = "red-across";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
