@@ -106,11 +106,11 @@ void main()
 	float reflection_factor = reflection_coefficient + (1.0 - reflection_coefficient) * pow(1.0 - cos_theta, 5.0);
 
     // specular sun reflection
-	vec3 sun_direction = normalize(vec3(0.0, 1.0, 0.0));
+	vec3 sun_direction = normalize(vec3(0.3, 1.0, 0.1));
     vec3 reflected_direction = reflect(ray_direction, water_normal);
     float shininess = 150.0;
     float specular = pow(max(dot(reflected_direction, sun_direction), 0.0), shininess);
-    vec3 sky_color = vec3(0.4, 0.6, 0.9);
+    vec3 sky_color = vec3(0.2, 0.2, 0.2); // just some default brightness
     vec3 sun_color = vec3(1.0, 0.95, 0.8);
     vec3 reflection_contribution = reflection_factor * (sky_color + sun_color * specular);
 
@@ -221,7 +221,7 @@ void main()
     else
     {
         // temp handling of no-hit
-        vec3 water_color = vec3(0.0, 0.01, 0.03);
+        vec3 water_color = vec3(0.0, 0.002, 0.02);
 		vec3 final_color = (1.0 - reflection_factor) * water_color + reflection_contribution;
 		imageStore(rt_output, pixel_coords, vec4(final_color, 0.0));
         imageStore(rt_normal_depth, pixel_coords, vec4(0.0));
