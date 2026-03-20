@@ -267,7 +267,7 @@ typedef enum
     MAIN_WAITING,
     MAIN_TO_ALT,
     ALT_WAITING,
-    ALT_TO_MAIN
+    ALT_TO_MAIN,
 }
 CameraMode;
 

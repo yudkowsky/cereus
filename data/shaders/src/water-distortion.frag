@@ -72,6 +72,7 @@ void main()
     }
     else
     {
-        out_color = vec4(0.0, 0.01, 0.05, 1.0);
+        // alpha 0 right now means 'miss, but still output this color because it has the fresnel effect calculations'
+        out_color = vec4(raytrace_output.rgb, 1.0);
     }
 }
