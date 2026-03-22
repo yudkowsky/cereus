@@ -466,7 +466,7 @@ double physics_accumulator = 0;
 double timer_accumulator = 0;
 double global_time = 0; // will not work as a 'time elapsed' counter in editor mode because it grows slower during time slowdown
 
-const char debug_level_name[64] = "red-across";
+const char debug_level_name[64] = "red-mirror";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
@@ -2652,6 +2652,21 @@ Int3 roundNormCoordsToInt(Vec3 position)
     return coords;
 }
 
+// will return negative of component along NORTH, WEST, and DOWN.
+float getSignedComponentAlongDirection(Direction direction, Vec3 vector)
+{
+    switch (direction)
+    {
+        case SOUTH: return vector.z;
+        case NORTH: return -vector.z;
+        case EAST: 	return vector.x;
+        case WEST: 	return -vector.x;
+        case UP: 	return vector.y;
+        case DOWN: 	return -vector.y;
+        default: return 0;
+    }
+}
+
 float getDistanceFromLaserAlongAxis(Direction laser_direction, Vec3 laser_position, Vec3 entity_position)
 {
 	switch (laser_direction)
@@ -2684,8 +2699,7 @@ int32 findNextFreeInLaserBuffer()
 // handles where lasers go. the complicated part of this function handles when mirrors are moving around, and offsets the lasers visually by a bit.
 
 // TODO: spam trailing hitboxes in undo function at relevant places. might be an ugly solution, but should work fine for everything i know trailing hitboxes are used for.
-// 		 moving mirrors (maybe don't need to worry about skip_mirror and skip_mirror_id because moving 1 unit away should always move far enough away that it just works?)
-//		 set laser coords to entities when entities are moving against (or away from) mirror so no chomp
+//		 edge case in moving mirrors (red-mirror)
 
 void updateLaserBuffer(void)
 {
@@ -2749,6 +2763,11 @@ void updateLaserBuffer(void)
         Vec3 current_norm_coords = source->position_norm;
         Int3 current_tile_coords = roundNormCoordsToInt(current_norm_coords);
 
+        // idea here: mirrors and lasers when pushed can collide with themselves because they take up two tiles while the trailing hitbox is active
+        // only mirror and laser ids can be skipped.
+        int32 id_to_skip = 0;
+        int32 id_to_skip_timer = 0;
+
         FOR(laser_turn_index, MAX_LASER_TURNS_ALLOWED) // iterate over laser segments
         {
             bool no_more_turns = true;
@@ -2765,6 +2784,18 @@ void updateLaserBuffer(void)
 
             FOR(laser_tile_index, MAX_LASER_TRAVEL_DISTANCE) // iterate over individual tiles
             {
+                // first tile on first turn. skip source id.
+                if (laser_turn_index == 0 && laser_tile_index == 0)
+                {
+                    id_to_skip = source->id;
+                    id_to_skip_timer = 2;
+                }
+
+                // decrease id_to_skip_timer if > 0, so that all entities that get skipped (even those set last pass) have only one check of being skipped. if no more skipping, remove to-skip id 
+                if (id_to_skip_timer > 0) id_to_skip_timer--;
+                else id_to_skip = 0;
+
+                // stop if oob
                 if (!intCoordsWithinLevelBounds(current_tile_coords))
                 {
                     lb->end_coords = current_norm_coords;
@@ -2844,8 +2875,14 @@ void updateLaserBuffer(void)
                     if (th_hit) mirror = getEntityAtCoords(getNextCoords(current_tile_coords, th.moving_direction));
                     else mirror = getEntityAtCoords(current_tile_coords);
 
-                    float distance_from_mirror = getDistanceFromLaserAlongAxis(current_direction, current_norm_coords, mirror->position_norm);
-                    if (distance_from_mirror > 0.5)
+                    // check if should skip this id, if so passthrough
+                    bool passthrough = false;
+                    if (mirror->id == id_to_skip) passthrough = true;
+
+                    float distance_from_mirror_along_axes = getDistanceFromLaserAlongAxis(current_direction, current_norm_coords, mirror->position_norm);
+                    if (distance_from_mirror_along_axes > 0.5) passthrough = true;
+
+                    if (passthrough)
                     {
                         // passthrough
                         current_norm_coords = vec3Add(directionToVector(current_direction), current_norm_coords);
@@ -2853,7 +2890,7 @@ void updateLaserBuffer(void)
                         continue;
                     }
 
-                    if (distance_from_mirror == 0)
+                    if (distance_from_mirror_along_axes == 0)
                     {
                         lb->end_coords = mirror->position_norm;
                         current_norm_coords = mirror->position_norm;
@@ -2863,7 +2900,23 @@ void updateLaserBuffer(void)
                         break;
                     }
 
-                    // TODO: mirror is ofset from current_norm_coords
+                    // get difference along next_laser_direction of current_norm_coords vs mirror->position_norm.
+                    // this will be relevantly signed because getSignedComponentAlongDirection gives signed output.
+                    // add that difference to norm_coords along current_direction. again signs are accounted for because directionToVector gives signed output.
+                    // differences along the other axis (the one orthogonal to both current dir and next dir) are ignored, because they don't change point of reflection
+                    Direction next_laser_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
+                    Vec3 norm_coord_difference = vec3Subtract(current_norm_coords, mirror->position_norm);
+                    float difference_along_next_laser_direction_axis = getSignedComponentAlongDirection(next_laser_direction, norm_coord_difference);
+                    Vec3 corresponding_difference_along_current_direction_axis = vec3ScalarMultiply(directionToVector(current_direction), difference_along_next_laser_direction_axis);
+                    current_norm_coords = vec3Add(current_norm_coords, corresponding_difference_along_current_direction_axis);
+
+                    id_to_skip = mirror->id;
+                    id_to_skip_timer = 2;
+
+                    lb->end_coords = current_norm_coords;
+                    current_direction = next_laser_direction;
+                    no_more_turns = false;
+                    break;
                 }
 
                 if (real_hit_type != NONE)
@@ -2875,14 +2928,22 @@ void updateLaserBuffer(void)
                         if (th_hit) e = getEntityAtCoords(getNextCoords(current_tile_coords, th.moving_direction));
                         else e = getEntityAtCoords(current_tile_coords);
 
+						// check if should skip this id, if so passthrough
+                        bool passthrough = false;
+                        if (e->id == id_to_skip) passthrough = true;
+
+                        // default distance check for passthrough
                         float distance_from_entity = getDistanceFromLaserAlongAxis(current_direction, current_norm_coords, e->position_norm);
-                        if (distance_from_entity > 0.5)
+                        if (distance_from_entity > 0.5) passthrough = true;
+
+                        if (passthrough)
                         {
                             // passthrough
                             current_norm_coords = vec3Add(directionToVector(current_direction), current_norm_coords);
                             current_tile_coords = roundNormCoordsToInt(current_norm_coords);
                             continue;
                         }
+
                         if (distance_from_entity == 0)
                         {
                             lb->end_coords = e->position_norm;
