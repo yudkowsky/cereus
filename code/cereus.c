@@ -2700,6 +2700,7 @@ int32 findNextFreeInLaserBuffer()
 
 // TODO: spam trailing hitboxes in undo function at relevant places. might be an ugly solution, but should work fine for everything i know trailing hitboxes are used for.
 //		 edge case in moving mirrors (red-mirror)
+//		 add id to trailing hitboxes instead of backsolving from direction and position. this also gets rid of pack edge case
 
 void updateLaserBuffer(void)
 {
@@ -4420,11 +4421,13 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 }
 
                                 moveEntityInBufferAndState(player, next_player_coords, player->direction);
+                                player->position_norm = intCoordsToNorm(player->coords);
 
                                 if (!pack_detached)
                                 {
                                     Int3 next_pack_coords = getNextCoords(next_player_coords, oppositeDirection(input_direction));
                                     moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
+                                    pack->position_norm = intCoordsToNorm(pack->coords);
                                 }
 
                                 updateLaserBuffer();
