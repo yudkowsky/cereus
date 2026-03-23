@@ -216,8 +216,8 @@ typedef enum
     WORLD_0,
     WORLD_1,
     GATE_1,
-    //WORLD_2,
-    //GATE_2
+    WORLD_2,
+    GATE_2
 }
 GameProgress;
 
@@ -4254,6 +4254,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         case WORLD_0: player_restart_coords = (Int3){ 58, 2, 213 }; break;
                         case WORLD_1: player_restart_coords = (Int3){ 58, 2, 197 }; break;
                         case GATE_1:  player_restart_coords = (Int3){ 58, 2, 189 }; break;
+                        case WORLD_2: player_restart_coords = (Int3){ 58, 2, 167 }; break;
+                        case GATE_2:  player_restart_coords = (Int3){ 58, 2, 159 }; break;
                     }
                     moveEntityInBufferAndState(player, player_restart_coords, NORTH);
                     setEntityVecsFromInts(player);
@@ -5152,7 +5154,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
         // update gameProgress based on which levels are solved, and current coords of the player
         if (findInSolvedLevels("pack-intro-i") != -1)
         {
-			if (player->coords.z <= 189) game_progress = GATE_1;
+			if (player->coords.z <= 159) game_progress = GATE_2;
+			else if (player->coords.z <= 174) game_progress = WORLD_2;
+			else if (player->coords.z <= 189) game_progress = GATE_1;
 			else game_progress = WORLD_1;
         }
         else game_progress = WORLD_0;
