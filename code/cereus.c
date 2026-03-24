@@ -1089,7 +1089,6 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
         entity_group[entity_index].id = entity_index + entityIdOffset(entity_group, color);
         entity_group[entity_index].unlocked_by[0] = '\0';
         entity_group[entity_index].next_level[0] = '\0';
-        setTileDirection(direction, coords); // TODO: is this needed here?
         return entity_group[entity_index].id;
     }
     return 0;
@@ -1989,6 +1988,7 @@ void editorPlaceOnlyInstanceOfTile(Entity* entity, Int3 coords, TileType tile, i
     entity->coords = coords;
     entity->position_norm = intCoordsToNorm(coords);
     entity->id = id;
+    entity->removed = false;
     setTileType(editor_state.picked_tile, coords);
     setTileDirection(NORTH, coords);
 }
@@ -4039,16 +4039,18 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 {
                     if (intCoordsWithinLevelBounds(raycast_output.place_coords))
                     {
+                        if (editor_state.picked_tile == PLAYER) editorPlaceOnlyInstanceOfTile(player, raycast_output.place_coords, PLAYER, PLAYER_ID);
+                        else if (editor_state.picked_tile == PACK) editorPlaceOnlyInstanceOfTile(pack, raycast_output.place_coords, PACK, PACK_ID);
                         if (isSource(editor_state.picked_tile)) 
                         {
                             setTileType(editor_state.picked_tile, raycast_output.place_coords); 
-                            setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
                             setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
+                            setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
                         }
-                        else if (editor_state.picked_tile == PLAYER) editorPlaceOnlyInstanceOfTile(player, raycast_output.place_coords, PLAYER, PLAYER_ID);
-                        else if (editor_state.picked_tile == PACK) editorPlaceOnlyInstanceOfTile(pack, raycast_output.place_coords, PACK, PACK_ID);
                         else
                         {
+                            setTileType(editor_state.picked_tile, raycast_output.place_coords);
+
                             Entity* entity_group = 0;
                             switch (editor_state.picked_tile)
                             {
@@ -4060,11 +4062,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 case RESET_BLOCK:  entity_group = next_world_state.reset_blocks;  break;
                                 default: entity_group = 0;
                             }
-                            if (entity_group != 0) setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
-                            setTileType(editor_state.picked_tile, raycast_output.place_coords);
-
-                            if (editor_state.picked_tile != VOID && editor_state.picked_tile != WATER && editor_state.picked_tile != GRID) 
+                            if (entity_group != 0) 
                             {
+                                setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
                                 setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
                             }
                             else 
