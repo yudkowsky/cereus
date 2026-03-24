@@ -446,7 +446,7 @@ Camera vulkan_camera = {0};
 ShaderMode shader_mode = OLD;
 
 float water_time = 0.0f;
-const float depth_threshold = 2.0f;
+const float depth_threshold = 1.0f;
 const float normal_threshold = 0.2f;
 
 Cube cube_instances[8192];
@@ -3849,7 +3849,6 @@ void vulkanDraw(void)
         vkCmdSetViewport(command_buffer, 0, 1, &viewport);
         vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
-        /*
         if (cube_instance_count > 0)
         {
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline);
@@ -3870,35 +3869,7 @@ void vulkanDraw(void)
             vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
         }
 
-        if (model_instance_count > 0)
-        {
-            for (uint32 i = 0; i < model_instance_count; i++)
-            {
-                Model* model = &model_instances[i];
-                LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
-                if (model_data->index_count == 0) continue;
-
-                VkDeviceSize offset = 0;
-                float model_matrix[16];
-                mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
-
-                PushConstants underwater_model_pc = {0};
-                memcpy(underwater_model_pc.model, model_matrix, sizeof(underwater_model_pc.model));
-                memcpy(underwater_model_pc.view, view_matrix, sizeof(underwater_model_pc.view));
-                memcpy(underwater_model_pc.proj, projection_matrix, sizeof(underwater_model_pc.proj));
-                underwater_model_pc.uv_rect = (Vec4){0, 0, 1, 1};
-                underwater_model_pc.water_base_y = vulkan_state.water_plane_y;
-                underwater_model_pc.time = water_time;
-
-                vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline);
-                vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
-                vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
-                vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &underwater_model_pc);
-                vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
-            }
-        }
-        */
+        // don't render models here since models are raytraced for refraction
 
         vkCmdEndRenderPass(command_buffer);
 

@@ -216,11 +216,11 @@ void main()
     {
         //vec3 final_color = (1.0 - reflection_factor) * closest_color + reflection_contribution;
         imageStore(rt_output, pixel_coords, vec4(closest_color, 1.0));
-        imageStore(rt_normal_depth, pixel_coords, vec4(closest_normal, t_closest + t_high));
+        imageStore(rt_normal_depth, pixel_coords, vec4(closest_normal, t_closest)); // add t_high here if i want to pass total depth, not just depth from buffer
     }
     else
     {
-        // temp handling of no-hit
+        // temp handling of no-hit. when there is art for the bottom, there should never be no-hit.
         vec3 water_color = vec3(0.0, 0.002, 0.02);
 		vec3 final_color = (1.0 - reflection_factor) * water_color + reflection_contribution;
 		imageStore(rt_output, pixel_coords, vec4(final_color, 0.0));

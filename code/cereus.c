@@ -3641,9 +3641,8 @@ bool performUndo(int32 undo_animation_time)
                                 createPackRotationAnimation(intCoordsToNorm(old_player_coords), mid_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, second_animation_time);
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
                             }
-                            else if (dy != 0 && (dx != 0 || dz != 0))
+                            else if (dy != 0 && (dx != 0 || dz != 0)) // pack move and fall
                             {
-                                // pack move and fall
                                 Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
                                 int32 first_animation_time = undo_animation_time / 2;
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
@@ -3651,7 +3650,7 @@ bool performUndo(int32 undo_animation_time)
                                 createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, second_animation_time);
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
                             }
-                            else // pack, but just moving normally, or being pushed / falling normally, so interpolate normally
+                            else // pack moving normally
                             {
                                 createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, PACK_ID, undo_animation_time);
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));

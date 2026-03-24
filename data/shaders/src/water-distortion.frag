@@ -29,6 +29,7 @@ pc;
 
 const float z_near = 1.0;
 const float z_far = 300.0;
+const vec3 water_tint = vec3(0.00, 0.01, 0.04);
 
 float linearize_depth(float d)
 {
@@ -63,16 +64,33 @@ void main()
             color = vec3(0.0);
         }
 
-        float depth = nd_center.a;
-        vec3 water_tint = vec3(0.0, 0.01, 0.05);
-        float tint_factor = clamp(depth / 1.0, 0.0, 0.8);
-        color = mix(color, water_tint, tint_factor);
-        
-        out_color = vec4(color, 1.0);
+		// the depth i get from the compute shader is the depth from the water surface. this probably isn't ideal when i'm dealing with outlines, but they're bad right now anyway
+        float ray_depth = nd_center.a;
+       	float tint_factor = mix(0.3, 0.95, clamp(ray_depth / 0.7, 0.0, 1.0));
+        out_color = vec4(mix(color, water_tint, tint_factor), 1.0);
     }
     else
     {
-        // alpha 0 right now means 'miss, but still output this color because it has the fresnel effect calculations'
-        out_color = vec4(raytrace_output.rgb, 1.0);
-    }
+        vec3 N = normalize(frag_normal);
+        float water_surface_depth = linearize_depth(gl_FragCoord.z);
+
+        float scene_depth = linearize_depth(texture(depth_texture, screen_uv).r);
+        float first_water_depth = max(scene_depth - water_surface_depth, 0.0);
+        float dead_zone = 0.05;
+        float effective_depth = max(first_water_depth - dead_zone, 0.0);
+        float max_distortion_depth = 1.0;
+        float distortion_scale = clamp(effective_depth / max_distortion_depth, 0.0, 1.0);
+
+        float focal_length = pc.proj[1][1]; // cotangent of half-fov
+        float depth_scale = focal_length / max(water_surface_depth, 0.1);
+        vec2 distortion = N.xz * 0.1 * distortion_scale * depth_scale;
+        vec2 refracted_uv = screen_uv + distortion;
+
+        float final_depth = linearize_depth(texture(depth_texture, refracted_uv).r);
+        float final_water_depth = max(final_depth - water_surface_depth, 0.0);
+
+        vec3 scene = texture(underwater_texture, refracted_uv).rgb;
+        vec3 fresnel_contribution = raytrace_output.rgb;
+        out_color = vec4(mix(scene, water_tint, 0.35) + fresnel_contribution, 1.0);
+	}	
 }
