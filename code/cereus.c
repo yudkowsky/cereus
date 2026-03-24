@@ -2012,16 +2012,16 @@ Int3 getNextCoords(Int3 coords, Direction direction)
     }
 }
 
-// assumes only one difference (will prioritise unpredictably)
+// the fact that y is checked last here matters sometimes, notably in the performUndo interpolations.
 Direction getDirectionFromCoordDiff(Int3 to_coords, Int3 from_coords)
 {
     Int3 diff = int3Subtract(from_coords, to_coords);
     if 		(diff.x ==  1) return EAST;
     else if (diff.x == -1) return WEST;
-    else if (diff.y ==  1) return UP;
-    else if (diff.y == -1) return DOWN;
     else if (diff.z ==  1) return SOUTH;
     else if (diff.z == -1) return NORTH;
+    else if (diff.y ==  1) return UP;
+    else if (diff.y == -1) return DOWN;
     return NO_DIRECTION;
 }
 
