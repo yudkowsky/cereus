@@ -424,6 +424,7 @@ const int32 MAX_DEBUG_POPUP_COUNT = 32;
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
 const Int3 AXIS_Z = { 0, 0, 1 };
+const Int3 INT3_0 = { 0, 0, 0 };
 const Vec3 VEC3_0 = { 0, 0, 0 };
 const Vec4 IDENTITY_QUATERNION  = { 0, 0, 0, 1 };
 
@@ -490,6 +491,7 @@ CameraMode saved_overworld_camera_mode = {0};
 Int3 camera_screen_offset = {0};
 const Int3 OVERWORLD_CAMERA_CENTER_START = { 58, 2, 197 };
 bool draw_level_boundary = false;
+Int3 ow_player_coords_for_offset = {0};
 
 float camera_lerp_t = 0.0f;
 const float CAMERA_T_TIMESTEP = 0.05f;
@@ -5302,6 +5304,16 @@ void gameFrame(double delta_time, TickInput* tick_input)
         // reset undos performed if no longer holding z undos
         if (undos_performed > 0 && !tick_input->z_press) undos_performed = 0;
 
+        // update overworld player coords for camera offset if player not removed. if player is removed, these coords persist, so that camera doesn't jump wildly when changing player pos in editor
+        if (in_overworld)
+        {
+            if (!player->removed) ow_player_coords_for_offset = player->coords;
+        }
+        else 
+        {
+            ow_player_coords_for_offset = INT3_0;
+        }
+
         // decide which ghosts to render, if ghosts should be rendered
         do_player_ghost = false;
         do_pack_ghost = false;
@@ -5312,14 +5324,11 @@ void gameFrame(double delta_time, TickInput* tick_input)
         }
 
         // update gameProgress based on which levels are solved, and current coords of the player
-        if (findInSolvedLevels("pack-intro-i") != -1)
-        {
-			if (player->coords.z <= 159) game_progress = GATE_2;
-			else if (player->coords.z <= 174) game_progress = WORLD_2;
-			else if (player->coords.z <= 189) game_progress = GATE_1;
-			else game_progress = WORLD_1;
-        }
-        else game_progress = WORLD_0;
+        if (findInSolvedLevels("pack-intro-i") == -1) game_progress = WORLD_0;
+        else if (player->coords.z <= 159) game_progress = GATE_2;
+        else if (player->coords.z <= 174) game_progress = WORLD_2;
+        else if (player->coords.z <= 189) game_progress = GATE_1;
+        else game_progress = WORLD_1;
 
         // create debug texts
         if (do_debug_text)
@@ -5341,6 +5350,12 @@ void gameFrame(double delta_time, TickInput* tick_input)
             snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, moving_time: %d, moving_direction: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack->in_motion, pack->moving_direction);
             createDebugText(pack_text);
 
+        	// TEMP
+            char temp[256] = {0};
+            snprintf(temp, sizeof(temp), "ow player coords: %d, %d, %d", ow_player_coords_for_offset.x, ow_player_coords_for_offset.y, ow_player_coords_for_offset.z);
+            createDebugText(temp);
+
+            /*
             // camera pos info
             char camera_text[256] = {0};
             snprintf(camera_text, sizeof(camera_text), "current camera info:    %.1f, %.1f, %.1f, fov: %.1f", camera.coords.x, camera.coords.y, camera.coords.z, camera.fov);
@@ -5360,6 +5375,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             char t_text[256] = {0};
             snprintf(t_text, sizeof(t_text), "t value: %.2f", camera_lerp_t);
             createDebugText(t_text);
+            */
 
             /*
             // show undos performed
@@ -5554,28 +5570,11 @@ void gameFrame(double delta_time, TickInput* tick_input)
         }
     }
 
-
-    // adjust overworld camera based on position
-    camera_with_ow_offset = camera;
-    if (in_overworld)
-    {
-        Int3 player_delta = int3Subtract(player->coords, OVERWORLD_CAMERA_CENTER_START);
-        int32 screen_offset_x = 0;
-        int32 screen_offset_z = 0;
-        if (player_delta.x > 0) screen_offset_x = (player_delta.x + (OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
-        else					screen_offset_x = (player_delta.x - (OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X; 
-        if (player_delta.z > 0) screen_offset_z = (player_delta.z + (OVERWORLD_SCREEN_SIZE_Z / 2)) / OVERWORLD_SCREEN_SIZE_Z;
-        else 					screen_offset_z = (player_delta.z - (OVERWORLD_SCREEN_SIZE_Z / 2)) / OVERWORLD_SCREEN_SIZE_Z;
-
-        camera_with_ow_offset.coords.x = camera.coords.x + (screen_offset_x * OVERWORLD_SCREEN_SIZE_X);
-        camera_with_ow_offset.coords.z = camera.coords.z + (screen_offset_z * OVERWORLD_SCREEN_SIZE_Z);
-    }
-
     // update camera for drawing. after loop because depends on in_overworld
     camera_with_ow_offset = camera;
     if (in_overworld)
     {
-        Int3 player_delta = int3Subtract(world_state.player.coords, OVERWORLD_CAMERA_CENTER_START);
+        Int3 player_delta = int3Subtract(ow_player_coords_for_offset, OVERWORLD_CAMERA_CENTER_START);
         int32 screen_offset_x = 0;
         int32 screen_offset_z = 0;
         if (player_delta.x > 0) screen_offset_x = (player_delta.x + (OVERWORLD_SCREEN_SIZE_X / 2)) / OVERWORLD_SCREEN_SIZE_X;
