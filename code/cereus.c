@@ -3871,194 +3871,6 @@ void updatePackDetached()
     - LMB / RMB to select block, to set win blocks / locked blocks / reset blocks
 */
 
-void editorMode(TickInput *tick_input)
-{
-    Entity* player = &next_world_state.player;
-    Entity* pack = &next_world_state.pack;
-
-    if (editor_state.editor_mode == PLACE_BREAK)
-    {
-        if (tick_input->left_mouse_press || tick_input->right_mouse_press || tick_input->middle_mouse_press || tick_input->r_press || tick_input->f_press || tick_input->h_press || tick_input->g_press)
-        {
-            Vec3 neg_z_basis = {0, 0, -1};
-            RaycastHit raycast_output = raycastHitCube(camera_with_ow_offset.coords, vec3RotateByQuaternion(neg_z_basis, camera_with_ow_offset.rotation), MAX_RAYCAST_SEEK_LENGTH);
-
-            if ((tick_input->left_mouse_press || tick_input->f_press) && raycast_output.hit) 
-            {
-                Entity *entity= getEntityAtCoords(raycast_output.hit_coords);
-                if (entity != 0)
-                {
-                    entity->coords = (Int3){0};
-                    entity->position_norm = (Vec3){0};
-                    entity->removed = true;
-
-                    // TODO: if deleting entity, go through reset blocks and remove from reset block
-                }
-                setTileType(NONE, raycast_output.hit_coords);
-                setTileDirection(NORTH, raycast_output.hit_coords);
-            }
-            else if ((tick_input->right_mouse_press || tick_input->h_press) && raycast_output.hit) 
-            {
-                if (!intCoordsWithinLevelBounds(raycast_output.place_coords)) return;
-                if (isSource(editor_state.picked_tile)) 
-                {
-                    setTileType(editor_state.picked_tile, raycast_output.place_coords); 
-                    setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
-                    setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
-                }
-                else if (editor_state.picked_tile == PLAYER) editorPlaceOnlyInstanceOfTile(player, raycast_output.place_coords, PLAYER, PLAYER_ID);
-                else if (editor_state.picked_tile == PACK) editorPlaceOnlyInstanceOfTile(pack, raycast_output.place_coords, PACK, PACK_ID);
-                else
-                {
-                    Entity* entity_group = 0;
-                    switch (editor_state.picked_tile)
-                    {
-                        case BOX:     	   entity_group = next_world_state.boxes;    	  break;
-                        case MIRROR:  	   entity_group = next_world_state.mirrors;  	  break;
-                        case GLASS: 	   entity_group = next_world_state.glass_blocks;  break;
-                        case WIN_BLOCK:    entity_group = next_world_state.win_blocks;    break;
-                        case LOCKED_BLOCK: entity_group = next_world_state.locked_blocks; break;
-                        case RESET_BLOCK:  entity_group = next_world_state.reset_blocks;  break;
-                        default: entity_group = 0;
-                    }
-                    if (entity_group != 0) setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
-                    setTileType(editor_state.picked_tile, raycast_output.place_coords);
-
-                    if (editor_state.picked_tile != VOID && editor_state.picked_tile != WATER && editor_state.picked_tile != GRID) 
-                    {
-                        setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
-                    }
-                    else 
-                    {
-                        setTileDirection(NORTH, raycast_output.place_coords);
-                    }
-                }
-            }
-            else if (tick_input->r_press && raycast_output.hit)
-            {   
-                TileType tile = getTileType(raycast_output.hit_coords);
-                if (isEntity(tile) && tile != VOID && tile != WATER)
-                {
-                    Direction direction = getTileDirection(raycast_output.hit_coords);
-                    if (direction == DOWN) direction = NORTH;
-                    else direction++;
-                    setTileDirection(direction, raycast_output.hit_coords);
-                    Entity *entity = getEntityAtCoords(raycast_output.hit_coords);
-                    if (entity != 0)
-                    {
-                        entity->direction = direction;
-                        entity->rotation_quat = directionToQuaternion(direction, true);
-                    }
-                }
-                else if (tile == LADDER)
-                {
-                    Direction direction = getTileDirection(raycast_output.hit_coords);
-                    if (direction == EAST) direction = NORTH;
-                    else direction++;
-                    setTileDirection(direction, raycast_output.hit_coords);
-                }
-            }
-            else if ((tick_input->middle_mouse_press || tick_input->g_press) && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
-
-            time_until_allow_meta_input = PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT;
-        }
-        if (tick_input->l_press)
-        {
-            editor_state.picked_tile++;
-            if (editor_state.picked_tile == LADDER + 1) editor_state.picked_tile = VOID;
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
-        if (tick_input->m_press)
-        {
-            clearSolvedLevels();
-            createDebugPopup("solved levels cleared", NO_TYPE);
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
-    }
-
-    if (editor_state.editor_mode == SELECT)
-    {
-        if (tick_input->left_mouse_press)
-        {
-            Vec3 neg_z_basis = {0, 0, -1};
-            RaycastHit raycast_output = raycastHitCube(camera_with_ow_offset.coords, vec3RotateByQuaternion(neg_z_basis, camera_with_ow_offset.rotation), MAX_RAYCAST_SEEK_LENGTH);
-
-            if (isEntity(getTileType(raycast_output.hit_coords)))
-            {
-                editor_state.selected_id = getEntityId(raycast_output.hit_coords);
-                editor_state.selected_coords = raycast_output.hit_coords;
-            }
-            else
-            {
-                editor_state.selected_id = -1;
-            }
-        }
-
-        else if (tick_input->right_mouse_press)
-        {
-            Vec3 neg_z_basis = {0, 0, -1};
-            RaycastHit raycast_output = raycastHitCube(camera_with_ow_offset.coords, vec3RotateByQuaternion(neg_z_basis, camera_with_ow_offset.rotation), MAX_RAYCAST_SEEK_LENGTH);
-            Entity* rb = 0;
-            if (editor_state.selected_id > 0) rb = getEntityFromId(editor_state.selected_id);
-            if (rb != 0 && getTileType(rb->coords) == RESET_BLOCK)
-            {
-                Entity* new_e = getEntityAtCoords(raycast_output.hit_coords);
-                if (new_e != 0)
-                {
-                    int32 present_in_rb = -1;
-                    FOR(present_check_index, MAX_RESET_COUNT) if (rb->reset_info[present_check_index].id == new_e->id) 
-                    {
-                        present_in_rb = present_check_index;
-                        break;
-                    }
-                    if (present_in_rb == -1)
-                    {
-                        int32 next_free = findNextFreeInResetBlock(rb);
-                        if (next_free != -1) 
-                        {
-                            rb->reset_info[next_free].id = new_e->id;
-                            rb->reset_info[next_free].start_coords = new_e->coords;
-                            rb->reset_info[next_free].start_type = editor_state.picked_tile;
-                            rb->reset_info[next_free].start_direction = new_e->direction;
-                        }
-                    }
-                    else
-                    {
-                        rb->reset_info[present_in_rb].id = -1;
-                    }
-                    time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                }
-                // did not click on entity
-            }
-        }
-
-        else if (editor_state.selected_id > 0)
-        {
-            if (tick_input->l_press) 
-            {
-                editor_state.editor_mode = SELECT_WRITE;
-                editor_state.writing_field = WRITING_FIELD_NEXT_LEVEL;
-            }
-            else if (tick_input->b_press)
-            {
-                editor_state.editor_mode = SELECT_WRITE;
-                editor_state.writing_field = WRITING_FIELD_UNLOCKED_BY;
-            }
-            else if (tick_input->q_press && editor_state.selected_id / ID_OFFSET_WIN_BLOCK * ID_OFFSET_WIN_BLOCK == ID_OFFSET_WIN_BLOCK)
-            {
-				Entity* wb = getEntityFromId(editor_state.selected_id);
-                if (wb->next_level[0] != 0)
-                {
-                    levelChangePrep(wb->next_level);
-                    time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                    gameInitializeState(wb->next_level);
-                    writeSolvedLevelsToFile();
-                }
-            }
-        }
-    }
-}
-
 // GAME LOGIC
 
 void gameFrame(double delta_time, TickInput* tick_input)
@@ -4159,9 +3971,13 @@ void gameFrame(double delta_time, TickInput* tick_input)
         camera = lerpCamera(saved_main_camera, saved_alt_camera, camera_lerp_t, (float)camera_target_plane);
     }
 
+    ////////////
+    // EDITOR //
+	////////////
+
+    // handle text input first
     if (editor_state.editor_mode == SELECT_WRITE)
     {
-        // handle text input once per present frame
         char (*writing_to_field)[64] = 0;
         Entity* e = getEntityFromId(editor_state.selected_id);
         if 		(editor_state.writing_field == WRITING_FIELD_NEXT_LEVEL)  writing_to_field = &e->next_level;
@@ -4191,6 +4007,353 @@ void gameFrame(double delta_time, TickInput* tick_input)
     {
         memset(&editor_state.edit_buffer, 0, sizeof(editor_state.edit_buffer));
     }
+
+    // MAIN EDITOR MODE FUNCTIONALITY (mostly anything to do with the raycasts)
+
+    if (time_until_allow_meta_input == 0)
+    {
+        if (editor_state.editor_mode == PLACE_BREAK)
+        {
+            if (tick_input->left_mouse_press || tick_input->right_mouse_press || tick_input->middle_mouse_press || tick_input->r_press || tick_input->f_press || tick_input->h_press || tick_input->g_press)
+            {
+                Vec3 neg_z_basis = {0, 0, -1};
+                RaycastHit raycast_output = raycastHitCube(camera_with_ow_offset.coords, vec3RotateByQuaternion(neg_z_basis, camera_with_ow_offset.rotation), MAX_RAYCAST_SEEK_LENGTH);
+
+                if ((tick_input->left_mouse_press || tick_input->f_press) && raycast_output.hit) 
+                {
+                    Entity *entity= getEntityAtCoords(raycast_output.hit_coords);
+                    if (entity != 0)
+                    {
+                        entity->coords = (Int3){0};
+                        entity->position_norm = (Vec3){0};
+                        entity->removed = true;
+
+                        // TODO: if deleting entity, go through reset blocks and remove from reset block
+                    }
+                    setTileType(NONE, raycast_output.hit_coords);
+                    setTileDirection(NORTH, raycast_output.hit_coords);
+                }
+                else if ((tick_input->right_mouse_press || tick_input->h_press) && raycast_output.hit) 
+                {
+                    if (intCoordsWithinLevelBounds(raycast_output.place_coords))
+                    {
+                        if (isSource(editor_state.picked_tile)) 
+                        {
+                            setTileType(editor_state.picked_tile, raycast_output.place_coords); 
+                            setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
+                            setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
+                        }
+                        else if (editor_state.picked_tile == PLAYER) editorPlaceOnlyInstanceOfTile(player, raycast_output.place_coords, PLAYER, PLAYER_ID);
+                        else if (editor_state.picked_tile == PACK) editorPlaceOnlyInstanceOfTile(pack, raycast_output.place_coords, PACK, PACK_ID);
+                        else
+                        {
+                            Entity* entity_group = 0;
+                            switch (editor_state.picked_tile)
+                            {
+                                case BOX:     	   entity_group = next_world_state.boxes;    	  break;
+                                case MIRROR:  	   entity_group = next_world_state.mirrors;  	  break;
+                                case GLASS: 	   entity_group = next_world_state.glass_blocks;  break;
+                                case WIN_BLOCK:    entity_group = next_world_state.win_blocks;    break;
+                                case LOCKED_BLOCK: entity_group = next_world_state.locked_blocks; break;
+                                case RESET_BLOCK:  entity_group = next_world_state.reset_blocks;  break;
+                                default: entity_group = 0;
+                            }
+                            if (entity_group != 0) setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
+                            setTileType(editor_state.picked_tile, raycast_output.place_coords);
+
+                            if (editor_state.picked_tile != VOID && editor_state.picked_tile != WATER && editor_state.picked_tile != GRID) 
+                            {
+                                setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
+                            }
+                            else 
+                            {
+                                setTileDirection(NORTH, raycast_output.place_coords);
+                            }
+                        }
+                    }
+                }
+                else if (tick_input->r_press && raycast_output.hit)
+                {   
+                    TileType tile = getTileType(raycast_output.hit_coords);
+                    if (isEntity(tile) && tile != VOID && tile != WATER)
+                    {
+                        Direction direction = getTileDirection(raycast_output.hit_coords);
+                        if (direction == DOWN) direction = NORTH;
+                        else direction++;
+                        setTileDirection(direction, raycast_output.hit_coords);
+                        Entity *entity = getEntityAtCoords(raycast_output.hit_coords);
+                        if (entity != 0)
+                        {
+                            entity->direction = direction;
+                            entity->rotation_quat = directionToQuaternion(direction, true);
+                        }
+                    }
+                    else if (tile == LADDER)
+                    {
+                        Direction direction = getTileDirection(raycast_output.hit_coords);
+                        if (direction == EAST) direction = NORTH;
+                        else direction++;
+                        setTileDirection(direction, raycast_output.hit_coords);
+                    }
+                }
+                else if ((tick_input->middle_mouse_press || tick_input->g_press) && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
+
+                time_until_allow_meta_input = PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT;
+            }
+            if (tick_input->l_press)
+            {
+                editor_state.picked_tile++;
+                if (editor_state.picked_tile == LADDER + 1) editor_state.picked_tile = VOID;
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            }
+            if (tick_input->m_press)
+            {
+                clearSolvedLevels();
+                createDebugPopup("solved levels cleared", NO_TYPE);
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            }
+        }
+
+        if (editor_state.editor_mode == SELECT)
+        {
+            if (tick_input->left_mouse_press)
+            {
+                Vec3 neg_z_basis = {0, 0, -1};
+                RaycastHit raycast_output = raycastHitCube(camera_with_ow_offset.coords, vec3RotateByQuaternion(neg_z_basis, camera_with_ow_offset.rotation), MAX_RAYCAST_SEEK_LENGTH);
+
+                if (isEntity(getTileType(raycast_output.hit_coords)))
+                {
+                    editor_state.selected_id = getEntityId(raycast_output.hit_coords);
+                    editor_state.selected_coords = raycast_output.hit_coords;
+                }
+                else
+                {
+                    editor_state.selected_id = -1;
+                }
+            }
+
+            else if (tick_input->right_mouse_press)
+            {
+                Vec3 neg_z_basis = {0, 0, -1};
+                RaycastHit raycast_output = raycastHitCube(camera_with_ow_offset.coords, vec3RotateByQuaternion(neg_z_basis, camera_with_ow_offset.rotation), MAX_RAYCAST_SEEK_LENGTH);
+                Entity* rb = 0;
+                if (editor_state.selected_id > 0) rb = getEntityFromId(editor_state.selected_id);
+                if (rb != 0 && getTileType(rb->coords) == RESET_BLOCK)
+                {
+                    Entity* new_e = getEntityAtCoords(raycast_output.hit_coords);
+                    if (new_e != 0)
+                    {
+                        int32 present_in_rb = -1;
+                        FOR(present_check_index, MAX_RESET_COUNT) if (rb->reset_info[present_check_index].id == new_e->id) 
+                        {
+                            present_in_rb = present_check_index;
+                            break;
+                        }
+                        if (present_in_rb == -1)
+                        {
+                            int32 next_free = findNextFreeInResetBlock(rb);
+                            if (next_free != -1) 
+                            {
+                                rb->reset_info[next_free].id = new_e->id;
+                                rb->reset_info[next_free].start_coords = new_e->coords;
+                                rb->reset_info[next_free].start_type = editor_state.picked_tile;
+                                rb->reset_info[next_free].start_direction = new_e->direction;
+                            }
+                        }
+                        else
+                        {
+                            rb->reset_info[present_in_rb].id = -1;
+                        }
+                        time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                    }
+                    // did not click on entity
+                }
+            }
+
+            else if (editor_state.selected_id > 0)
+            {
+                // start writing next level
+                if (tick_input->l_press) 
+                {
+                    editor_state.editor_mode = SELECT_WRITE;
+                    editor_state.writing_field = WRITING_FIELD_NEXT_LEVEL;
+                    time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                }
+                // start writing unlocked by
+                else if (tick_input->b_press)
+                {
+                    editor_state.editor_mode = SELECT_WRITE;
+                    editor_state.writing_field = WRITING_FIELD_UNLOCKED_BY;
+                    time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+
+                }
+                // go to selected level of block on q press
+                else if (tick_input->q_press && editor_state.selected_id / ID_OFFSET_WIN_BLOCK * ID_OFFSET_WIN_BLOCK == ID_OFFSET_WIN_BLOCK)
+                {
+                    Entity* wb = getEntityFromId(editor_state.selected_id);
+                    if (wb->next_level[0] != 0)
+                    {
+                        levelChangePrep(wb->next_level);
+                        gameInitializeState(wb->next_level);
+                        writeSolvedLevelsToFile();
+                        time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                    }
+                }
+            }
+        }
+    }
+
+    // KEYBINDS - separate check for time_until_allow_meta_input because might have been modified above, and if so want to skip this
+    if (time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
+    {
+        // editor mode toggle
+        if (tick_input->zero_press) 
+        {
+            editor_state.editor_mode = NO_MODE;
+            createDebugPopup("game mode", GAMEPLAY_MODE_CHANGE);
+        }
+        if (tick_input->one_press) 
+        {
+            editor_state.editor_mode = PLACE_BREAK;
+            createDebugPopup("place / break mode", GAMEPLAY_MODE_CHANGE);
+        }
+        if (tick_input->two_press) 
+        {
+            editor_state.editor_mode = SELECT;
+            createDebugPopup("select mode", GAMEPLAY_MODE_CHANGE);
+        }
+
+        // toggle cheating
+        if (tick_input->three_press)
+        {
+            cheating = !cheating;
+            if (cheating) createDebugPopup("cheating", CHEAT_MODE_TOGGLE);
+            else createDebugPopup("not cheating", CHEAT_MODE_TOGGLE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        // change model states
+        if (tick_input->seven_press)
+        {
+            game_shader_mode = OUTLINE_TEST;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            createDebugPopup("shader mode: testing outlines", SHADER_MODE_CHANGE);
+        }
+        if (tick_input->eight_press)
+        {
+            game_shader_mode = OUTLINE;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            createDebugPopup("shader mode: outlines", SHADER_MODE_CHANGE);
+        }
+        if (tick_input->nine_press)
+        {
+            game_shader_mode = OLD; 
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            createDebugPopup("shader mode: old", SHADER_MODE_CHANGE);
+        }
+
+        // change camera fov for editor
+        if (tick_input->n_press && editor_state.editor_mode != NO_MODE)
+        {
+            camera.fov--;
+            time_until_allow_meta_input = 4;
+        }
+        else if (tick_input->b_press && editor_state.editor_mode != NO_MODE)
+        {
+            camera.fov++;
+            time_until_allow_meta_input = 4;
+        }
+
+        // set camera fov to wide for editor
+        if (tick_input->j_press)
+        {
+            editor_state.do_wide_camera = !editor_state.do_wide_camera;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            if (editor_state.do_wide_camera)
+            {
+                if (editor_state.editor_mode == NO_MODE)
+                {
+                    editor_state.do_wide_camera = false;
+                    if (camera_mode == MAIN_WAITING) camera.fov = saved_main_camera.fov;
+                    else if (camera_mode == ALT_WAITING) camera.fov = saved_alt_camera.fov;
+                    else camera.fov = 15.0f;
+                }
+                else
+                {
+                    camera.fov = 60.0f;
+                }
+            }
+            else
+            {
+                if (saved_main_camera.fov == camera.fov) camera.fov = 15.0f; // if working on a new level, and have saved camera as 60fov, then default to 15
+                else camera.fov = saved_main_camera.fov;
+            }
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        // snap camera yaw to nearest axis
+        if (tick_input->p_press)
+        {
+            float camera_snap_yaw = 0;
+            if 		(camera.yaw >= TAU * -0.375f && camera.yaw < TAU * -0.125f) camera_snap_yaw = TAU * -0.25f;
+            else if (camera.yaw >= TAU * -0.125f && camera.yaw < TAU *  0.125f) camera_snap_yaw = 0;
+            else if (camera.yaw >= TAU *  0.125f && camera.yaw < TAU *  0.375f) camera_snap_yaw = TAU * 0.25f;
+            else if (camera.yaw >= TAU *  0.375f || camera.yaw < TAU * -0.375f) camera_snap_yaw = TAU * 0.5f;
+            camera.yaw = camera_snap_yaw;
+            camera.rotation = buildCameraQuaternion(camera);
+            char yaw_text[256] = {0};
+            snprintf(yaw_text, sizeof(yaw_text), "camera yaw snapped to: %.3f", camera_snap_yaw);
+            createDebugPopup(yaw_text, NO_TYPE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        // speed up / slow down physics tick
+        if (tick_input->dot_press)
+        {
+            char timestep_text[256] = {0};
+            if (physics_timestep_multiplier > 1.0)
+            {
+                physics_timestep_multiplier /= 2;
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                snprintf(timestep_text, sizeof(timestep_text), "physics timestep increased (%f)", physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
+                createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
+            }
+            else
+            {
+                createDebugPopup("physics timestep already at minimum!", PHYSICS_TIMESTEP_CHANGE);
+            }
+        }
+        else if (tick_input->comma_press)
+        {
+            physics_timestep_multiplier *= 2;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            char timestep_text[256] = {0};
+            snprintf(timestep_text, sizeof(timestep_text), "physics timestep decreased (%f)", physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
+            createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
+        }
+
+        if (tick_input->backspace_press)
+        {
+            camera = saved_main_camera;
+            camera.rotation = buildCameraQuaternion(camera);
+            camera_mode = MAIN_WAITING;
+            camera_lerp_t = 0.0f;
+            createDebugPopup("returned camera to saved position", NO_TYPE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        // toggle debug press
+        if (tick_input->y_press)
+        {
+            do_debug_text = !do_debug_text;
+            if (do_debug_text) createDebugPopup("debug state visibility on", DEBUG_STATE_VISIBILITY_CHANGE);
+            else			   createDebugPopup("debug state visibility off", DEBUG_STATE_VISIBILITY_CHANGE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+    }
+
+    // catch up any edits done in editor mode to the world state
+    world_state = next_world_state;
 
     ///////////////////////
     // MAIN PHYSICS LOOP //
@@ -4774,11 +4937,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
             }
         }
-        else
-        {
-            // if not in editor mode NO_MODE, go into editor mode fn
-            if (time_until_allow_meta_input == 0) editorMode(tick_input);
-        }
 
         // pack turn sequence
         // the pack_intermediate_states_timer numbers control when during a turn does the backpack push things, and what tile(s) does the backpack occupy for the purposes of laser passthrough
@@ -5280,158 +5438,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
         if (time_until_allow_game_input > 0) time_until_allow_game_input--;
 	}
-    
-    /////////////////////
-    // EDITOR KEYBINDS //
-	/////////////////////
-
-    if (time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
-    {
-        // editor mode toggle
-        if (tick_input->zero_press) 
-        {
-            editor_state.editor_mode = NO_MODE;
-            createDebugPopup("game mode", GAMEPLAY_MODE_CHANGE);
-        }
-        if (tick_input->one_press) 
-        {
-            editor_state.editor_mode = PLACE_BREAK;
-            createDebugPopup("place / break mode", GAMEPLAY_MODE_CHANGE);
-        }
-        if (tick_input->two_press) 
-        {
-            editor_state.editor_mode = SELECT;
-            createDebugPopup("select mode", GAMEPLAY_MODE_CHANGE);
-        }
-
-        // toggle cheating
-        if (tick_input->three_press)
-        {
-            cheating = !cheating;
-            if (cheating) createDebugPopup("cheating", CHEAT_MODE_TOGGLE);
-            else createDebugPopup("not cheating", CHEAT_MODE_TOGGLE);
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
-
-        // change model states
-        if (tick_input->seven_press)
-        {
-            game_shader_mode = OUTLINE_TEST;
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            createDebugPopup("shader mode: testing outlines", SHADER_MODE_CHANGE);
-        }
-        if (tick_input->eight_press)
-        {
-            game_shader_mode = OUTLINE;
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            createDebugPopup("shader mode: outlines", SHADER_MODE_CHANGE);
-        }
-        if (tick_input->nine_press)
-        {
-            game_shader_mode = OLD; 
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            createDebugPopup("shader mode: old", SHADER_MODE_CHANGE);
-        }
-
-        // change camera fov for editor
-        if (tick_input->n_press && editor_state.editor_mode != NO_MODE)
-        {
-            camera.fov--;
-            time_until_allow_meta_input = 4;
-        }
-        else if (tick_input->b_press && editor_state.editor_mode != NO_MODE)
-        {
-            camera.fov++;
-            time_until_allow_meta_input = 4;
-        }
-
-        // set camera fov to wide for editor
-        if (tick_input->j_press)
-        {
-            editor_state.do_wide_camera = !editor_state.do_wide_camera;
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            if (editor_state.do_wide_camera)
-            {
-                if (editor_state.editor_mode == NO_MODE)
-                {
-                    editor_state.do_wide_camera = false;
-                    if (camera_mode == MAIN_WAITING) camera.fov = saved_main_camera.fov;
-                    else if (camera_mode == ALT_WAITING) camera.fov = saved_alt_camera.fov;
-                    else camera.fov = 15.0f;
-                }
-                else
-                {
-                    camera.fov = 60.0f;
-                }
-            }
-            else
-            {
-                if (saved_main_camera.fov == camera.fov) camera.fov = 15.0f; // if working on a new level, and have saved camera as 60fov, then default to 15
-                else camera.fov = saved_main_camera.fov;
-            }
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
-
-        // snap camera yaw to nearest axis
-        if (tick_input->p_press)
-        {
-            float camera_snap_yaw = 0;
-            if 		(camera.yaw >= TAU * -0.375f && camera.yaw < TAU * -0.125f) camera_snap_yaw = TAU * -0.25f;
-            else if (camera.yaw >= TAU * -0.125f && camera.yaw < TAU *  0.125f) camera_snap_yaw = 0;
-            else if (camera.yaw >= TAU *  0.125f && camera.yaw < TAU *  0.375f) camera_snap_yaw = TAU * 0.25f;
-            else if (camera.yaw >= TAU *  0.375f || camera.yaw < TAU * -0.375f) camera_snap_yaw = TAU * 0.5f;
-            camera.yaw = camera_snap_yaw;
-            camera.rotation = buildCameraQuaternion(camera);
-            char yaw_text[256] = {0};
-            snprintf(yaw_text, sizeof(yaw_text), "camera yaw snapped to: %.3f", camera_snap_yaw);
-            createDebugPopup(yaw_text, NO_TYPE);
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
-
-        // speed up / slow down physics tick
-        if (tick_input->dot_press)
-        {
-            char timestep_text[256] = {0};
-            if (physics_timestep_multiplier > 1.0)
-            {
-                physics_timestep_multiplier /= 2;
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                snprintf(timestep_text, sizeof(timestep_text), "physics timestep increased (%f)", physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
-                createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
-            }
-            else
-            {
-                createDebugPopup("physics timestep already at minimum!", PHYSICS_TIMESTEP_CHANGE);
-            }
-        }
-        else if (tick_input->comma_press)
-        {
-            physics_timestep_multiplier *= 2;
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            char timestep_text[256] = {0};
-            snprintf(timestep_text, sizeof(timestep_text), "physics timestep decreased (%f)", physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
-            createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
-        }
-
-        if (tick_input->backspace_press)
-        {
-            camera = saved_main_camera;
-            camera.rotation = buildCameraQuaternion(camera);
-            camera_mode = MAIN_WAITING;
-            camera_lerp_t = 0.0f;
-            createDebugPopup("returned camera to saved position", NO_TYPE);
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
-
-        // toggle debug press
-        if (tick_input->y_press)
-        {
-            do_debug_text = !do_debug_text;
-            if (do_debug_text) createDebugPopup("debug state visibility on", DEBUG_STATE_VISIBILITY_CHANGE);
-            else			   createDebugPopup("debug state visibility off", DEBUG_STATE_VISIBILITY_CHANGE);
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
-    }
 
     // SAVING STUFF (depends on changed state, so after loop)
     {
