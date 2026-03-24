@@ -266,29 +266,26 @@ typedef struct VulkanState
 
     // PIPELINES AND LAYOUTS
 
-    // first render pass, for the main scene
     VkPipelineLayout default_graphics_pipeline_layout;
-
-    VkPipeline cube_pipeline;
-    VkPipelineLayout cube_pipeline_layout; 
-
-    VkPipeline outline_pipeline;
-	VkPipelineLayout outline_pipeline_layout;
-
-    VkPipeline model_pipeline;
-    VkPipelineLayout model_pipeline_layout;
-
-    VkPipeline water_distortion_pipeline;
-    VkPipelineLayout water_distortion_pipeline_layout;
 
     VkPipeline water_compute_pipeline;
     VkPipelineLayout water_compute_pipeline_layout;
 
-    // second render pass (outlines, based on depth and normal)
+    VkPipeline cube_pipeline;
+    VkPipelineLayout cube_pipeline_layout; 
+
+    VkPipeline model_pipeline;
+    VkPipelineLayout model_pipeline_layout;
+
     VkPipeline outline_post_pipeline;
     VkPipelineLayout outline_post_pipeline_layout;
 
-    // third render pass (lasers + sprites)
+    VkPipeline water_distortion_pipeline;
+    VkPipelineLayout water_distortion_pipeline_layout;
+
+    VkPipeline editor_outline_pipeline;
+    VkPipelineLayout editor_outline_pipeline_layout;
+
     VkPipeline laser_fill_pipeline;
     VkPipeline laser_outline_pipeline;
     VkPipelineLayout laser_pipeline_layout;
@@ -452,29 +449,29 @@ float water_time = 0.0f;
 const float depth_threshold = 2.0f;
 const float normal_threshold = 0.2f;
 
-Sprite sprite_instances[8192];
-uint32 sprite_instance_count = 0;
-
 Cube cube_instances[8192];
 uint32 cube_instance_count = 0;
 
-Cube outline_instances[1024];
-uint32 outline_instance_count = 0;
-
-Laser laser_instances[1024];
-uint32 laser_instance_count = 0;
-
 Model model_instances[1024];
 uint32 model_instance_count = 0;
-
-Model model_selected_outline_instances[1024];
-uint32 model_selected_outline_instance_count = 0;
 
 Water water_instances[8192];
 uint32 water_instance_count = 0;
 
 WaterAABB water_aabbs[16] = {0};
 uint32 water_aabb_count = 0;
+
+Cube cube_editor_outline_instances[1024];
+uint32 cube_editor_outline_instance_count = 0;
+
+Model model_editor_outline_instances[1024];
+uint32 model_editor_outline_instance_count = 0;
+
+Laser laser_instances[1024];
+uint32 laser_instance_count = 0;
+
+Sprite sprite_instances[8192];
+uint32 sprite_instance_count = 0;
 
 void mat4Identity(float matrix[16]) 
 {
@@ -3051,6 +3048,35 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
 	createSwapchainResources();
 
+    // CREATE WATER COMPUTE PIPELINE
+
+    {
+        VkDescriptorSetLayout compute_set_layouts[8] = {
+            vulkan_state.storage_image_descriptor_set_layout,  // rt output
+            vulkan_state.descriptor_set_layout,                // depth
+            vulkan_state.descriptor_set_layout,                // underwater scene
+            vulkan_state.ubo_descriptor_set_layout,            // aabbs
+            vulkan_state.ssbo_descriptor_set_layout,		   // mesh vertices
+            vulkan_state.ssbo_descriptor_set_layout,		   // mesh indices
+            vulkan_state.ssbo_descriptor_set_layout,           // mesh info
+            vulkan_state.storage_image_descriptor_set_layout,  // rt output (normal + depth)
+        };
+
+        VkPushConstantRange push_constant_range = {0};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = sizeof(WaterComputePushConstants);
+
+        VkPipelineLayoutCreateInfo layout_ci = {0};
+        layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layout_ci.setLayoutCount = 8;
+        layout_ci.pSetLayouts = compute_set_layouts;
+        layout_ci.pushConstantRangeCount = 1;
+        layout_ci.pPushConstantRanges = &push_constant_range;
+
+        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.water_compute_pipeline_layout);
+    }
+
 	// CREATE CUBE (INSTANCED) PIPELINE LAYOUT
 
     {
@@ -3067,24 +3093,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         layout_info.pPushConstantRanges = &push_constant_range;
 
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_info, 0, &vulkan_state.cube_pipeline_layout);
-    }
-
-    // CREATE OUTLINE SELECT PIPELINE LAYOUT
-
-    {
-        VkPushConstantRange push_constant_range = {0};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        push_constant_range.offset     = 0;
-        push_constant_range.size       = (uint32)sizeof(PushConstants);
-		
-        VkPipelineLayoutCreateInfo outline_pipeline_layout_ci = {0};
-        outline_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        outline_pipeline_layout_ci.setLayoutCount = 0;
-        outline_pipeline_layout_ci.pSetLayouts = 0;
-        outline_pipeline_layout_ci.pushConstantRangeCount = 1;
-        outline_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
-
-        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &outline_pipeline_layout_ci, 0, &vulkan_state.outline_pipeline_layout);
     }
 
     // CREATE MODEL PIPELINE LAYOUT
@@ -3151,36 +3159,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &water_distortion_pipeline_layout_ci, 0, &vulkan_state.water_distortion_pipeline_layout);
     }
 
-    // CREATE WATER COMPUTE PIPELINE
+    // CREATE PIPELINE FOR WATER COMPUTE SHADER
 
-    {
-        VkDescriptorSetLayout compute_set_layouts[8] = {
-            vulkan_state.storage_image_descriptor_set_layout,  // rt output
-            vulkan_state.descriptor_set_layout,                // depth
-            vulkan_state.descriptor_set_layout,                // underwater scene
-            vulkan_state.ubo_descriptor_set_layout,            // aabbs
-            vulkan_state.ssbo_descriptor_set_layout,		   // mesh vertices
-            vulkan_state.ssbo_descriptor_set_layout,		   // mesh indices
-            vulkan_state.ssbo_descriptor_set_layout,           // mesh info
-            vulkan_state.storage_image_descriptor_set_layout,  // rt output (normal + depth)
-        };
-
-        VkPushConstantRange push_constant_range = {0};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        push_constant_range.offset = 0;
-        push_constant_range.size = sizeof(WaterComputePushConstants);
-
-        VkPipelineLayoutCreateInfo layout_ci = {0};
-        layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layout_ci.setLayoutCount = 8;
-        layout_ci.pSetLayouts = compute_set_layouts;
-        layout_ci.pushConstantRangeCount = 1;
-        layout_ci.pPushConstantRanges = &push_constant_range;
-
-        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.water_compute_pipeline_layout);
-    }
-
-    // load shader and create pipeline for water compute shader
     {
         VkShaderModule compute_shader_module = {0};
         void* bytes = 0;
@@ -3206,6 +3186,23 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateComputePipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &pipeline_ci, 0, &vulkan_state.water_compute_pipeline);
 
         vkDestroyShaderModule(vulkan_state.logical_device_handle, compute_shader_module, 0);
+    }
+
+    // CREATE EDITOR OUTLINE PIPELINE LAYOUT
+    {
+        VkPushConstantRange push_constant_range = {0};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = (uint32)sizeof(PushConstants);
+
+        VkPipelineLayoutCreateInfo layout_ci = {0};
+        layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layout_ci.setLayoutCount = 0;
+        layout_ci.pSetLayouts = 0;
+        layout_ci.pushConstantRangeCount = 1;
+        layout_ci.pPushConstantRanges = &push_constant_range;
+
+        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.editor_outline_pipeline_layout);
     }
 
     // CREATE LASER PIPELINE LAYOUT
@@ -3287,28 +3284,31 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &cube_ci, 0, &vulkan_state.cube_pipeline);
     }
 
-    // define selected outline pipeline
+    // define overlay outline pipeline (for drawing selection outlines on top of everything)
     {
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
         color_blend_attachment_state.blendEnable = VK_FALSE;
 
-        blend_attachments[0] = color_blend_attachment_state;
-        blend_attachments[1] = color_blend_attachment_state;
+        VkPipelineColorBlendStateCreateInfo overlay_outline_blend_ci = {0};
+        overlay_outline_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        overlay_outline_blend_ci.attachmentCount = 1;
+        overlay_outline_blend_ci.pAttachments = &color_blend_attachment_state;
 
-        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthTestEnable = VK_FALSE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
-        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 
-		rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_LINE;
+        rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_LINE;
         rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
         rasterization_state_creation_info.lineWidth = 1.0f;
 
-		VkGraphicsPipelineCreateInfo outline_ci = base_graphics_pipeline_creation_info;
-        outline_ci.pStages = outline_select_shader_stages;
-        outline_ci.layout = vulkan_state.outline_pipeline_layout; // use outline pipeline layout (no descriptors)
+        VkGraphicsPipelineCreateInfo overlay_outline_ci = base_graphics_pipeline_creation_info;
+        overlay_outline_ci.pStages = outline_select_shader_stages;
+        overlay_outline_ci.layout = vulkan_state.editor_outline_pipeline_layout;
+        overlay_outline_ci.renderPass = vulkan_state.overlay_render_pass;
+        overlay_outline_ci.pColorBlendState = &overlay_outline_blend_ci;
 
-        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &outline_ci, 0, &vulkan_state.outline_pipeline);
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &overlay_outline_ci, 0, &vulkan_state.editor_outline_pipeline);
     }
 
     // define model pipeline: depth on, write to stencil 2.
@@ -3577,10 +3577,10 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
 
     sprite_instance_count = 0;
     cube_instance_count = 0;
-    outline_instance_count = 0;
     laser_instance_count = 0;
     model_instance_count = 0;
-    model_selected_outline_instance_count = 0;
+    cube_editor_outline_instance_count = 0;
+    model_editor_outline_instance_count = 0;
     water_instance_count = 0;
 
     water_aabb_count = 0;
@@ -3598,7 +3598,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
             if (vulkan_state.loaded_models[sprite_id - MODEL_3D_VOID].index_count <= 0) render_model = false;
             if (render_model)
             {
-                Model* model = &model_selected_outline_instances[model_selected_outline_instance_count++];
+                Model* model = &model_editor_outline_instances[model_editor_outline_instance_count++];
                 model->model_id = (uint32)sprite_id;
                 model->coords   = command->coords;
                 model->scale    = command->scale;
@@ -3607,7 +3607,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
             else
             {
                 // outline 3d called with cube id, so render cube
-                Cube* cube = &outline_instances[outline_instance_count++];
+                Cube* cube = &cube_editor_outline_instances[cube_editor_outline_instance_count++];
                 cube->coords      = command->coords;
                 cube->scale       = command->scale;
                 cube->rotation    = command->rotation;
@@ -3840,13 +3840,16 @@ void vulkanDraw(void)
     render_pass_begin_info.clearValueCount = 3;
     render_pass_begin_info.pClearValues = clear_values;
 
-    // 1. UNDERWATER SCENE PASS (fallback for ray misses)
+    // UNDERWATER SCENE PASS (unused right now, because solid color fallback on ray miss)
+    // TODO: for temporary fallback, maybe just grab cubes and use those as fallback? so that no double rendering of entities under the water, but still some distortion effect
+
     if (water_instance_count > 0)
     {
         vkCmdBeginRenderPass(command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
         vkCmdSetViewport(command_buffer, 0, 1, &viewport);
         vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
+        /*
         if (cube_instance_count > 0)
         {
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline);
@@ -3895,10 +3898,12 @@ void vulkanDraw(void)
                 vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
             }
         }
+        */
 
         vkCmdEndRenderPass(command_buffer);
 
-        // 2. COPY UNDERWATER SCENE TO scene_copy_image
+        // COPY UNDERWATER SCENE TO scene_copy_image
+
         {
             VkImageMemoryBarrier swap_to_src = {0};
             swap_to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -3965,7 +3970,8 @@ void vulkanDraw(void)
             vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0, 1, &copy_to_read);
         }
 
-        // 3. WATER RAYTRACE COMPUTE PASS
+        // WATER RAYTRACE COMPUTE PASS
+
         {
             VkImageMemoryBarrier rt_barriers[2] = {0};
 
@@ -4052,11 +4058,13 @@ void vulkanDraw(void)
         }
     }
 
-    // 4. FULL SCENE PASS
+    // FULL SCENE PASS
+
     vkCmdBeginRenderPass(command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdSetViewport(command_buffer, 0, 1, &viewport);
     vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
+    // cubes
     if (cube_instance_count > 0)
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline);
@@ -4077,6 +4085,7 @@ void vulkanDraw(void)
         vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
     }
 
+    // models
     if (model_instance_count > 0)
     {
         for (uint32 model_instance_index = 0; model_instance_index < model_instance_count; model_instance_index++)
@@ -4106,40 +4115,10 @@ void vulkanDraw(void)
         }
     }
 
-    // model selected outlines
-    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_pipeline);
-
-    for (uint32 outline_index = 0; outline_index < model_selected_outline_instance_count; outline_index++)
-    {
-        Model* model = &model_selected_outline_instances[outline_index];
-        LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
-        if (model_data->index_count == 0) continue;
-
-        VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
-        vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-
-        float model_matrix[16];
-        mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
-
-        PushConstants pc = {0};
-        memcpy(pc.model, model_matrix, sizeof(pc.model));
-        memcpy(pc.view, view_matrix, sizeof(pc.view));
-        memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
-        pc.uv_rect = (Vec4){0, 0, 1, 1};
-        pc.water_base_y = -999.0f;
-        pc.time = water_time;
-
-        vkCmdPushConstants(command_buffer, vulkan_state.outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
-
-        vkCmdSetDepthBias(command_buffer, -0.1f, 0.0f, -0.1f);
-        vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
-        vkCmdSetDepthBias(command_buffer, 0.0f, 0.0f, 0.0f);
-    }
-
     vkCmdEndRenderPass(command_buffer);
 
-    // 5. OUTLINE POST PASS (above-water only)
+    // OUTLINE POST PASS (above-water only)
+
     if (shader_mode != OLD)
     {
         VkImageMemoryBarrier depth_to_read = {0};
@@ -4204,7 +4183,8 @@ void vulkanDraw(void)
         vkCmdEndRenderPass(command_buffer);
     }
 
-    // 6. WATER DISTORTION + TINT + OUTLINE PASS
+    // WATER DISTORTION + TINT + OUTLINE PASS
+
     if (water_instance_count > 0)
     {
         LoadedModel* water_data = &vulkan_state.loaded_models[MODEL_3D_WATER - MODEL_3D_VOID];
@@ -4257,7 +4237,8 @@ void vulkanDraw(void)
         }
     }
 
-    // 7. OVERLAY PASS (lasers + sprites)
+    // OVERLAY PASS (editor outlines + lasers + sprites)
+
     {
         VkRenderPassBeginInfo overlay_rp_begin = {0};
         overlay_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -4272,6 +4253,62 @@ void vulkanDraw(void)
         vkCmdSetViewport(command_buffer, 0, 1, &viewport);
         vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
+        // selected outlines (on top of everything)
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.editor_outline_pipeline);
+
+        // cube outlines
+        {
+            VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.cube_vertex_buffer, &offset);
+            vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+            for (uint32 cube_outline_index = 0; cube_outline_index < cube_editor_outline_instance_count; cube_outline_index++)
+            {
+                Cube* cube = &cube_editor_outline_instances[cube_outline_index];
+
+                float model_matrix[16];
+                mat4BuildTRS(model_matrix, cube->coords, cube->rotation, cube->scale);
+
+                PushConstants pc = {0};
+                memcpy(pc.model, model_matrix, sizeof(pc.model));
+                memcpy(pc.view, view_matrix, sizeof(pc.view));
+                memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
+                pc.uv_rect = cube->uv;
+                pc.water_base_y = -999.0f;
+                pc.time = water_time;
+
+                vkCmdPushConstants(command_buffer, vulkan_state.editor_outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
+                vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, 1, 0, 0, 0);
+            }
+        }
+
+        // model outlines
+        for (uint32 model_outline_index = 0; model_outline_index < model_editor_outline_instance_count; model_outline_index++)
+        {
+            Model* model = &model_editor_outline_instances[model_outline_index];
+            LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
+            if (model_data->index_count == 0) continue;
+
+            VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
+            vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+            float model_matrix[16];
+            mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
+
+            PushConstants pc = {0};
+            memcpy(pc.model, model_matrix, sizeof(pc.model));
+            memcpy(pc.view, view_matrix, sizeof(pc.view));
+            memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
+            pc.uv_rect = (Vec4){0, 0, 1, 1};
+            pc.water_base_y = -999.0f;
+            pc.time = water_time;
+
+            vkCmdPushConstants(command_buffer, vulkan_state.editor_outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
+            vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
+        }
+
+        // lasers
         LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
         if (laser_mesh->index_count > 0)
         {
@@ -4326,6 +4363,7 @@ void vulkanDraw(void)
             }
         }
 
+        // sprites
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline);
 
         VkDeviceSize sprite_vb_offset = 0;
