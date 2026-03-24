@@ -1087,7 +1087,9 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
         entity_group[entity_index].rotation_quat = directionToQuaternion(direction, true);
         entity_group[entity_index].color = color;
         entity_group[entity_index].id = entity_index + entityIdOffset(entity_group, color);
-        setTileDirection(direction, coords);
+        entity_group[entity_index].unlocked_by[0] = '\0';
+        entity_group[entity_index].next_level[0] = '\0';
+        setTileDirection(direction, coords); // TODO: is this needed here?
         return entity_group[entity_index].id;
     }
     return 0;
