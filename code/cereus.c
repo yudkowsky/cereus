@@ -3312,8 +3312,7 @@ void gameRedraw(DisplayInfo display_from_platform)
     if (draw_command_count == 0) return;
     game_display = display_from_platform;
 	recalculateDebugStartCoords();
-    vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, camera_with_ow_offset, game_shader_mode); // render models is temp passthrough here. toggles some shaders that apply to everything,
-                                                                          						                       // but that i only want on when working on rendering
+    vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, camera_with_ow_offset, game_shader_mode); 
     vulkanDraw();
 }
 
@@ -5564,6 +5563,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
             {
                 saveLevelRewrite(overworld_zero_path, true);
                 saveLevelRewrite(overworld_zero_relative_path, true);
+
+                // overwrite overworld_zero's world state with the new saved one
+                memcpy(&overworld_zero, &world_state, sizeof(WorldState));
             }
             createDebugPopup("level saved", LEVEL_SAVE);
             writeSolvedLevelsToFile();
