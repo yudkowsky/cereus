@@ -2032,10 +2032,7 @@ void resetPipelineStates(VkPipelineColorBlendAttachmentState* blend, VkPipelineD
     raster->cullMode = VK_CULL_MODE_NONE;
     raster->frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     raster->lineWidth = 1.0f;
-    raster->depthBiasEnable = VK_TRUE;
-    raster->depthBiasConstantFactor = 0.0f;
-    raster->depthBiasClamp = 0.0f;
-    raster->depthBiasSlopeFactor = 0.0f;
+    raster->depthBiasEnable = VK_FALSE;
 }
 
 void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo display)
@@ -2769,7 +2766,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 	viewport_state_creation_info.pViewports = &dummy_viewport;
     viewport_state_creation_info.pScissors = &dummy_scissor;
 
-    VkDynamicState dynamic_states[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS };
+    VkDynamicState dynamic_states[2] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
 
     VkPipelineDynamicStateCreateInfo dynamic_state_creation_info = {0};
     dynamic_state_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
@@ -2783,10 +2780,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_FILL; // fill triangles (not lines / points)
     rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE; // turn off back/face culling: skip rasterizing triangles facing a certain way
     rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; // define which winding would be "front"; doesn't matter while cull is off
-    rasterization_state_creation_info.depthBiasEnable = VK_TRUE; 
-    rasterization_state_creation_info.depthBiasConstantFactor = 0.0f;
-    rasterization_state_creation_info.depthBiasClamp = 0.0f;
-    rasterization_state_creation_info.depthBiasSlopeFactor = 0.0f;
+    rasterization_state_creation_info.depthBiasEnable = VK_FALSE; 
     rasterization_state_creation_info.lineWidth = 1.0f;
 
     VkPipelineMultisampleStateCreateInfo multisample_state_creation_info = {0};
@@ -3569,6 +3563,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
 void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, float global_time, Camera game_camera, ShaderMode shader_mode_from_game)
 {  
+    vkWaitForFences(vulkan_state.logical_device_handle, 1, &vulkan_state.in_flight_fences[vulkan_state.current_frame], VK_TRUE, UINT64_MAX);
+
     vulkan_camera = game_camera;
 
     shader_mode = shader_mode_from_game;
@@ -3746,8 +3742,6 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
 
 void vulkanDraw(void)
 {
-    vkWaitForFences(vulkan_state.logical_device_handle, 1, &vulkan_state.in_flight_fences[vulkan_state.current_frame], VK_TRUE, UINT64_MAX);
-
     uint32 swapchain_image_index = 0;
     VkResult acquire_result = vkAcquireNextImageKHR(vulkan_state.logical_device_handle, vulkan_state.swapchain_handle, UINT64_MAX, vulkan_state.image_available_semaphores[vulkan_state.current_frame], VK_NULL_HANDLE, &swapchain_image_index);
 
@@ -4059,6 +4053,9 @@ void vulkanDraw(void)
     // models
     if (model_instance_count > 0)
     {
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
+
         for (uint32 model_instance_index = 0; model_instance_index < model_instance_count; model_instance_index++)
         {
             Model* model = &model_instances[model_instance_index];
@@ -4077,8 +4074,6 @@ void vulkanDraw(void)
             model_pc.water_base_y = -999.0f;
             model_pc.time = water_time;
 
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline);
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
             vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
             vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
             vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &model_pc);

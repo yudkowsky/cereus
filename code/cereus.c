@@ -4576,19 +4576,27 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             {
                                 // leap of faith logic
                                 memcpy(&leap_of_faith_snapshot, &world_state, sizeof(WorldState));
+                                Animation animations_snapshot[32] = {0};
+                                memcpy(&animations_snapshot, &animations, sizeof(Animation) * MAX_ANIMATION_COUNT);
+                                // ignoring trailing hitboxes in the setup because they are relatively short-lived to the 9 or so frames of fast forward. but if one is created on frams 7+ then
+                                // this could be a mistake, because the player won't actually be red when she walks off the edge (disparity betwenn this simulation and the actual logic)
+                                TrailingHitbox trailing_hitboxes_snapshot[32] = {0};
+                                memcpy (&trailing_hitboxes_snapshot, &trailing_hitboxes, sizeof(TrailingHitbox) * MAX_TRAILING_HITBOX_COUNT);
 
-                                if (do_push) pushAll(next_player_coords, input_direction, 0, false, false);
+                                if (do_push) pushAll(next_player_coords, input_direction, MOVE_OR_PUSH_ANIMATION_TIME, true, false);
 
                                 if (!player->hit_by_blue)
                                 {
-                                    bool animations_on = false;
+                                    // still doing animations, because need the position norm to update - but will skip ahead in the animation. if doesn't work, clear back to animations savestate
+                                    bool animations_on = true;
                                     doFallingObjects(animations_on);
                                     if (pack_detached) doFallingEntity(pack, animations_on);
                                     doHeadMovement(input_direction, animations_on, 1);
                                 }
 
                                 moveEntityInBufferAndState(player, next_player_coords, player->direction);
-                                player->position_norm = intCoordsToNorm(player->coords);
+
+                                player->position_norm = intCoordsToNorm(player->coords); // instead of creating animation for this, i'll just set position norm to where it will be after the animation
 
                                 if (!pack_detached)
                                 {
@@ -4597,12 +4605,36 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                     pack->position_norm = intCoordsToNorm(pack->coords);
                                 }
 
+                                // fastforward everything in animations by amount of time taken to push
+                                for (int32 animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
+                                {
+                                    Animation* a = &animations[animation_index];
+                                    if (a->frames_left == 0) continue;
+                                    if (a->frames_left <= MOVE_OR_PUSH_ANIMATION_TIME)
+                                    {
+                                        if (a->position_to_change != 0) *a->position_to_change = a->position[0];
+                                        if (a->rotation_to_change != 0) *a->rotation_to_change = a->rotation[0];
+                                    }
+                                    else
+                                    {
+                                        if (a->position_to_change != 0) *a->position_to_change = a->position[a->frames_left - MOVE_OR_PUSH_ANIMATION_TIME];
+                                        if (a->rotation_to_change != 0) *a->rotation_to_change = a->rotation[a->frames_left - MOVE_OR_PUSH_ANIMATION_TIME];
+                                    }
+                                }
+
+                                // ignore trailing hitboxes
+                                memset(&trailing_hitboxes, 0, sizeof(TrailingHitbox) * MAX_TRAILING_HITBOX_COUNT);
+
                                 updateLaserBuffer();
 
                                 bool leap_of_faith_worked = false;
                                 if (player->hit_by_red) leap_of_faith_worked = true;
-                                //next_world_state = world_state_savestate;
+
+                                // restore state no matter what, since even if worked i want to run the animations properly now anyway
                                 memcpy(&next_world_state, &leap_of_faith_snapshot, sizeof(WorldState));
+                                memcpy(&animations, &animations_snapshot, sizeof(Animation) * MAX_ANIMATION_COUNT);
+                                memcpy(&trailing_hitboxes, &trailing_hitboxes_snapshot, sizeof(TrailingHitbox) * MAX_TRAILING_HITBOX_COUNT);
+
                                 if (leap_of_faith_worked)
                                 {
                                     if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
