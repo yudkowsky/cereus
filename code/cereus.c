@@ -2670,6 +2670,24 @@ float getSignedComponentAlongDirection(Direction direction, Vec3 vector)
     }
 }
 
+Vec3 vec3ZeroComponentAlongDirection(Direction direction, Vec3 vector)
+{
+    switch(direction)
+    {
+        case NORTH:
+        case SOUTH:
+            return (Vec3){ vector.x, vector.y, 0.0f };
+        case WEST:
+        case EAST:
+            return (Vec3){ 0.0f, vector.y, vector.z };
+        case UP:
+        case DOWN:
+            return (Vec3){ vector.x, 0.0f, vector.z };
+        default:
+            return VEC3_0;
+    }
+}
+
 float getDistanceFromLaserAlongAxis(Direction laser_direction, Vec3 laser_position, Vec3 entity_position)
 {
 	switch (laser_direction)
@@ -2901,11 +2919,14 @@ void updateLaserBuffer(void)
                     // this will be relevantly signed because getSignedComponentAlongDirection gives signed output.
                     // add that difference to norm_coords along current_direction. again signs are accounted for because directionToVector gives signed output.
                     // differences along the other axis (the one orthogonal to both current dir and next dir) are ignored, because they don't change point of reflection
+                    // to get norm coords, add corresponding difference, plus norm_coord_difference along the axes that aren't current_direction axis
                     Direction next_laser_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
                     Vec3 norm_coord_difference = vec3Subtract(current_norm_coords, mirror->position_norm);
                     float difference_along_next_laser_direction_axis = getSignedComponentAlongDirection(next_laser_direction, norm_coord_difference);
                     Vec3 corresponding_difference_along_current_direction_axis = vec3ScalarMultiply(directionToVector(current_direction), difference_along_next_laser_direction_axis);
-                    current_norm_coords = vec3Add(current_norm_coords, corresponding_difference_along_current_direction_axis);
+                    //current_norm_coords = vec3Add(mirror->position_norm, vec3Add(norm_coord_difference, corresponding_difference_along_current_direction_axis));
+                    Vec3 norm_coord_difference_not_along_current_direction_axis = vec3ZeroComponentAlongDirection(current_direction, norm_coord_difference);
+                    current_norm_coords = vec3Add(mirror->position_norm, vec3Add(norm_coord_difference_not_along_current_direction_axis, corresponding_difference_along_current_direction_axis));
 
                     id_to_skip = mirror->id;
                     id_to_skip_timer = 2;
@@ -5424,10 +5445,11 @@ void gameFrame(double delta_time, TickInput* tick_input)
             snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, moving_time: %d, moving_direction: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack->in_motion, pack->moving_direction);
             createDebugText(pack_text);
 
-        	// TEMP
-            char temp[256] = {0};
-            snprintf(temp, sizeof(temp), "ow player coords: %d, %d, %d", ow_player_coords_for_offset.x, ow_player_coords_for_offset.y, ow_player_coords_for_offset.z);
-            createDebugText(temp);
+            char mirror_info[256] = {0};
+            Entity m1 = next_world_state.mirrors[0];
+            Entity m2 = next_world_state.mirrors[1];
+            snprintf(mirror_info, sizeof(mirror_info), "mirror 1 pos norm: %.2f, %.2f, %.2f, mirror 2 pos norm: %.2f, %.2f, %.2f", m1.position_norm.x, m1.position_norm.y, m1.position_norm.z, m2.position_norm.x, m2.position_norm.y, m2.position_norm.z);
+            createDebugText(mirror_info);
 
             /*
             // camera pos info
@@ -5462,6 +5484,16 @@ void gameFrame(double delta_time, TickInput* tick_input)
             char edit_text[256] = {0};
             snprintf(edit_text, sizeof(edit_text), "selected id: %d; coords: %d, %d, %d", editor_state.selected_id, editor_state.selected_coords.x, editor_state.selected_coords.y, editor_state.selected_coords.z);
             createDebugText(edit_text);
+
+            // debug: write laser start and end coords
+            FOR(lb_index, 64)
+            {
+                LaserBuffer lb = laser_buffer[lb_index];
+                if (vec3IsEqual(lb.start_coords, VEC3_0)) continue;
+                char lb_text[256] = {0};
+                snprintf(lb_text, sizeof(lb_text), "lb start coords: %.2f, %.2f, %.2f, lb end coords: %.2f, %.2f, %.2f", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z);
+                if (do_debug_text) createDebugText(lb_text);
+            }
 
 			/*
             // show undo deltas in buffer
@@ -5688,18 +5720,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
             drawAsset(CUBE_3D_LASER_GREEN, LASER, center, scale, rotation, colorToRGB(lb.color), false);
         }
 
-        /*
-        // debug: write laser start and end coords
-        FOR(lb_index, 64)
-        {
-            LaserBuffer lb = laser_buffer[lb_index];
-            if (vec3IsEqual(lb.start_coords, VEC3_0)) continue;
-            char lb_text[256] = {0};
-            snprintf(lb_text, sizeof(lb_text), "lb start coords: %.2f, %.2f, %.2f, lb end coords: %.2f, %.2f, %.2f", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z);
-            if (do_debug_text) createDebugText(lb_text);
-        }
-        */
-
         // clear laser buffer 
         memset(laser_buffer, 0, sizeof(laser_buffer));
 
@@ -5833,6 +5853,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             }
         }
 
+        /*
         // temp draw outline around trailing hitboxes
         FOR(th_index, MAX_TRAILING_HITBOX_COUNT)
         {
@@ -5840,6 +5861,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             if (th.frames == 0) continue;
             drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0, false);
         }
+        */
     }
 
     /////////////
