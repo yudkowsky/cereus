@@ -159,9 +159,8 @@ WorldState;
 // trailing hitboxes are to leave something interactible in a location even if the actual object has moved on to a different integer coord. this is helpful mostly for updateLaserBuffer
 typedef struct
 {
+    int32 id;
 	Int3 coords;
-    Direction hit_direction;
-    Direction moving_direction;
     int32 frames;
     TileType type;
 }
@@ -405,6 +404,7 @@ const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
 
 const int32 TRAILING_HITBOX_TIME = 5;
+const int32 TRAILING_HITBOX_UNDO_TIME = 3;
 const int32 FIRST_TRAILING_PACK_TURN_HITBOX_TIME = 2;
 const int32 TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN = 2;
 const int32 PACK_TIME_IN_INTERMEDIATE_STATE = 4;
@@ -2051,12 +2051,11 @@ int32 findNextFreeInTrailingHitboxes()
     return 0;
 }
 
-void createTrailingHitbox(Int3 coords, Direction moving_direction, Direction hit_direction, int32 frames, TileType type)
+void createTrailingHitbox(int32 id, Int3 coords, int32 frames, TileType type)
 {
     int32 hitbox_index = findNextFreeInTrailingHitboxes();
+    trailing_hitboxes[hitbox_index].id = id;
     trailing_hitboxes[hitbox_index].coords = coords;
-    trailing_hitboxes[hitbox_index].hit_direction = hit_direction;
-    trailing_hitboxes[hitbox_index].moving_direction = moving_direction;
     trailing_hitboxes[hitbox_index].frames = frames;
     trailing_hitboxes[hitbox_index].type = type;
 }
@@ -2461,7 +2460,7 @@ void pushOnce(Int3 coords, Direction direction, int32 animation_time)
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                  id, animation_time); 
     int32 trailing_hitbox_time = (animation_time / 2) + 1;
-    createTrailingHitbox(coords, direction, NO_DIRECTION, trailing_hitbox_time, trailing_hitbox_type);
+    createTrailingHitbox(id, coords, trailing_hitbox_time, trailing_hitbox_type);
 }
 
 // assumes at least the lowest layer of the stack is able to be pushed. checks if next is NONE, if so stops. 
@@ -2507,7 +2506,7 @@ void pushUp(Int3 coords, int32 animation_time)
         createInterpolationAnimation(intCoordsToNorm(current_coords), intCoordsToNorm(coords_above), &e->position_norm,
                 					 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                      e->id, animation_time);
-    	createTrailingHitbox(current_coords, UP, NO_DIRECTION, (animation_time / 2) + 1, tile);
+    	createTrailingHitbox(e->id, current_coords, (animation_time / 2) + 1, tile);
         current_coords = getNextCoords(current_coords, DOWN);
     }
 }
@@ -2866,18 +2865,11 @@ void updateLaserBuffer(void)
                     break;
                 }
 
-                if (real_hit_type == PACK && !pack_detached)
-                {
-                    // just break here - it's an annoying object to handle in the !NONE case.
-                    lb->end_coords = current_norm_coords;
-                    break;
-                }
-
                 if (real_hit_type == MIRROR)
                 {
                     // get mirror entity
                     Entity* mirror = {0};
-                    if (th_hit) mirror = getEntityAtCoords(getNextCoords(current_tile_coords, th.moving_direction));
+                    if (th_hit) mirror = getEntityFromId(th.id);
                     else mirror = getEntityAtCoords(current_tile_coords);
 
                     // check if should skip this id, if so passthrough
@@ -2930,7 +2922,7 @@ void updateLaserBuffer(void)
                     if (isEntity(real_hit_type))
                     {
                         Entity* e = {0};
-                        if (th_hit) e = getEntityAtCoords(getNextCoords(current_tile_coords, th.moving_direction));
+                        if (th_hit) e = getEntityFromId(th.id);
                         else e = getEntityAtCoords(current_tile_coords);
 
 						// check if should skip this id, if so passthrough
@@ -2998,7 +2990,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
             if (do_animation) 
             {
                 createFirstFallAnimation(intCoordsToNorm(current_start_coords), &entity_in_stack->position_norm, entity_in_stack->id);
-                createTrailingHitbox(current_start_coords, DOWN, NO_DIRECTION, TRAILING_HITBOX_TIME + 4, getTileType(entity_in_stack->coords)); // it takes 4 extra frames to get to the point where it's cutting off the below laser (and thus not cutting off above, i guess)
+                createTrailingHitbox(entity_in_stack->id, current_start_coords, TRAILING_HITBOX_TIME + 5, getTileType(entity_in_stack->coords));
             }
             entity_in_stack->first_fall_already_done = true;
             entity_in_stack->in_motion = STANDARD_IN_MOTION_TIME + 5;
@@ -3013,7 +3005,7 @@ bool doFallingEntity(Entity* entity, bool do_animation)
                                              &entity_in_stack->position_norm,
                                              IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                              entity_in_stack->id, FALL_ANIMATION_TIME);
-                createTrailingHitbox(current_start_coords, DOWN, NO_DIRECTION, TRAILING_HITBOX_TIME, getTileType(entity_in_stack->coords));
+                createTrailingHitbox(entity_in_stack->id, current_start_coords, TRAILING_HITBOX_TIME, getTileType(entity_in_stack->coords));
             }
             entity_in_stack->first_fall_already_done = true;
             entity_in_stack->in_motion = STANDARD_IN_MOTION_TIME + 1;
@@ -3531,6 +3523,7 @@ bool performUndo(int32 undo_animation_time)
         if (e)
         {
             Vec3 old_position = e->position_norm;
+            Int3 old_coords = normCoordsToInt(e->position_norm);
             Vec4 old_rotation = e->rotation_quat;
             bool was_at_different_coords = !int3IsEqual(e->coords, delta->old_coords);
             bool was_at_different_direction = (e->direction != delta->old_direction);
@@ -3550,17 +3543,17 @@ bool performUndo(int32 undo_animation_time)
                 if (!header->level_changed && !header->was_teleport && !header->was_reset && (was_at_different_coords || was_at_different_direction))
                 {
                     int32 dx = (int32)roundf(e->position_norm.x - old_position.x);
-                    int32 dy = (int32)roundf(e->position_norm.y - old_position.y);
+                    int32 dy = (int32)roundf(e->position_norm.y - old_position.y + 0.49f);
                     int32 dz = (int32)roundf(e->position_norm.z - old_position.z);
 
                     if (dx != 0 || dy != 0 || dz != 0 || was_at_different_direction) // only do any sort of interpolation if the object moved / changed direction 
                     {
                         if (dx != 0 && dy != 0 && dz != 0) e->in_motion = undo_animation_time;
-                        // moving direction is updated later. TODO: note that this doesn't work with the 2-step animations (it just assumes whatever diff coord direction function returns as direction) - but should work for all 'normal' animations
 
                         // a lot of edge case handling for how to interpolate undos
                         if (e->id == PLAYER_ID)
                         {
+                            Entity* player = &next_world_state.player;
                             if (header->was_climb)
                             {
                                 // player climb
@@ -3570,6 +3563,12 @@ bool performUndo(int32 undo_animation_time)
                                 createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, first_animation_time);
                                 createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, second_animation_time);
                                 e->moving_direction = NO_DIRECTION;
+                                // handle trailing hitboxes
+                                for (int32 height_index = 0; height_index < -dy + 1; height_index++)
+                                {
+                                    createTrailingHitbox(PLAYER_ID, int3Add(int3ScalarMultiply(AXIS_Y, height_index), player->coords), undo_animation_time, PLAYER);
+                                }
+                                createTrailingHitbox(PLAYER_ID, old_coords, undo_animation_time, PLAYER);
                             }
                             else if (dy != 0 && was_at_different_direction)
                             {
@@ -3579,7 +3578,12 @@ bool performUndo(int32 undo_animation_time)
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
                                 createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, first_animation_time);
                                 createInterpolationAnimation(VEC3_0, VEC3_0, 0, old_rotation, e->rotation_quat, &e->rotation_quat, PLAYER_ID, second_animation_time);
-                                e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
+                                e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
+                                // handle trailing hitboxes
+                                for (int32 height_index = 0; height_index < dy + 1; height_index++)
+                                {
+                                    createTrailingHitbox(PLAYER_ID, int3Add(int3ScalarMultiply(AXIS_Y, height_index), old_coords), undo_animation_time, PLAYER);
+                                }
                             }
                             else if (dy != 0 && (dx != 0 || dz != 0))
                             {
@@ -3589,16 +3593,25 @@ bool performUndo(int32 undo_animation_time)
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
                                 createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, first_animation_time);
                                 createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, second_animation_time);
-                                e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
+                                e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
+                                // handle trailing hitboxes
+                                for (int32 height_index = 0; height_index < dy + 1; height_index++) // seems to generate an extra trailing hitbox above sometimes. but that's okay
+                                {
+                                    createTrailingHitbox(PLAYER_ID, int3Add(int3ScalarMultiply(AXIS_Y, height_index), old_coords), undo_animation_time, PLAYER);
+                                }
                             }
                             else
                             {
                                 createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, PLAYER_ID, undo_animation_time);
-                                e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
+                                e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
+                                // handle trailing hitbox
+                                createTrailingHitbox(PLAYER_ID, normCoordsToInt(old_position), TRAILING_HITBOX_UNDO_TIME, PLAYER);
                             }
                         }
                         else if (e->id == PACK_ID)
                         {
+                            Entity* pack = &next_world_state.pack;
+
                             Int3 old_player_coords = {0};
                             uint32 scan_pos = header->delta_start_pos;
                             FOR(scan_index, header->entity_count)
@@ -3618,10 +3631,14 @@ bool performUndo(int32 undo_animation_time)
                             int32 clockwise_calculation = player_to_new_pack_dir - player_to_old_pack_dir;
                             bool clockwise = (clockwise_calculation == -1 || clockwise_calculation == 3);
 
-                            if (dy == 0 && dx != 0 && dz != 0) // if both dx and dz != 0 this must be a turn
+                            if (dy == 0 && dx != 0 && dz != 0) // if both dx and dz != 0 (but still dy == 0) this must be a turn
                             {
                                 createPackRotationAnimation(intCoordsToNorm(old_player_coords), old_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, undo_animation_time);
-                                e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
+                                e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
+                                // handle trailing hitboxes
+                                createTrailingHitbox(PACK_ID, old_coords, undo_animation_time, PACK);
+                                createTrailingHitbox(PACK_ID, getNextCoords(pack->coords, oppositeDirection(player_to_new_pack_dir)), undo_animation_time, PACK); 
+                                createTrailingHitbox(PACK_ID, pack->coords, undo_animation_time, PACK);
                             }
                             else if (header->was_climb)
                             {
@@ -3631,15 +3648,28 @@ bool performUndo(int32 undo_animation_time)
                                 createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PACK_ID, first_animation_time);
                                 createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PACK_ID, second_animation_time);
                                 e->moving_direction = NO_DIRECTION;
+                                // handle trailing hitboxes
+                                for (int32 height_index = 0; height_index < -dy + 1; height_index++)
+                                {
+                                    createTrailingHitbox(PACK_ID, int3Add(int3ScalarMultiply(AXIS_Y, height_index), pack->coords), undo_animation_time, PACK);
+                                }
                             }
-                            else if (dy != 0 && dx != 0 && dz != 0) // if both dx and dz != 0 this must be a turn
+                            else if (dy != 0 && dx != 0 && dz != 0) // if both dx and dz != 0 this must be a turn. also a fall, because dy != 0
                             {
                                 Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
                                 int32 first_animation_time = undo_animation_time / 2;
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
                                 createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, first_animation_time);
                                 createPackRotationAnimation(intCoordsToNorm(old_player_coords), mid_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, second_animation_time);
-                                e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
+                                e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
+                                // handle trailing hitboxes
+                                for (int32 height_index = 0; height_index < dy; height_index++)
+                                {
+                                    createTrailingHitbox(PACK_ID, int3Add(int3ScalarMultiply(AXIS_Y, height_index), old_coords), undo_animation_time, PACK);
+                                }
+                                //createTrailingHitbox(PACK_ID, normCoordsToInt(mid_position), undo_animation_time, PACK); causes fall sometimes, and this block isn't really needed i think
+                                createTrailingHitbox(PACK_ID, getNextCoords(pack->coords, oppositeDirection(player_to_new_pack_dir)), undo_animation_time, PACK); 
+                                createTrailingHitbox(PACK_ID, pack->coords, undo_animation_time, PACK);
                             }
                             else if (dy != 0 && (dx != 0 || dz != 0)) // pack move and fall
                             {
@@ -3648,12 +3678,19 @@ bool performUndo(int32 undo_animation_time)
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
                                 createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, first_animation_time);
                                 createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, second_animation_time);
-                                e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
+                                e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
+                                // handle trailing hitboxes
+                                for (int32 height_index = 0; height_index < dy + 1; height_index++)
+                                {
+                                    createTrailingHitbox(PACK_ID, int3Add(int3ScalarMultiply(AXIS_Y, height_index), old_coords), undo_animation_time, PACK);
+                                }
                             }
                             else // pack moving normally
                             {
                                 createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, PACK_ID, undo_animation_time);
-                                e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
+                                e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
+                                // handle trailing hitbox
+                                createTrailingHitbox(PACK_ID, normCoordsToInt(old_position), TRAILING_HITBOX_UNDO_TIME, PACK);
                             }
                         }
                         else if (dy != 0 && (dx != 0 || dz != 0))
@@ -3664,12 +3701,19 @@ bool performUndo(int32 undo_animation_time)
                             int32 second_animation_time = undo_animation_time - first_animation_time;
                             createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, first_animation_time);
                             createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, second_animation_time);
-                            e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
+                            e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
+                            // handle trailing hitboxes
+                            for (int32 height_index = 0; height_index < dy + 1; height_index++)
+                            {
+                                createTrailingHitbox(e->id, int3Add(int3ScalarMultiply(AXIS_Y, height_index), old_coords), undo_animation_time, type);
+                            }
                         }
                         else
                         {
                             createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, e->id, undo_animation_time);
-                            e->moving_direction = getDirectionFromCoordDiff(e->coords, normCoordsToInt(old_position));
+                            e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
+                            // handle trailing hitbox
+                            createTrailingHitbox(e->id, normCoordsToInt(old_position), TRAILING_HITBOX_UNDO_TIME, type);
                         }
                     }
                 }
@@ -3801,7 +3845,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
     createInterpolationAnimation(intCoordsToNorm(player->coords), intCoordsToNorm(next_player_coords), &player->position_norm,
                                  IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                  PLAYER_ID, animation_time);
-    createTrailingHitbox(player->coords, input_direction, NO_DIRECTION, TRAILING_HITBOX_TIME, PLAYER);
+    createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
     moveEntityInBufferAndState(player, next_player_coords, player->direction);
     player->moving_direction = input_direction;
     changeMoving(player);
@@ -3813,7 +3857,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
         createInterpolationAnimation(intCoordsToNorm(pack->coords), intCoordsToNorm(next_pack_coords), &pack->position_norm,
                                      IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                      PACK_ID, animation_time);
-        createTrailingHitbox(pack->coords, input_direction, NO_DIRECTION, TRAILING_HITBOX_TIME, PACK);
+        createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
         moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
         pack->moving_direction = input_direction;
         changeMoving(pack);
@@ -4848,7 +4892,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                     {
                                         recordActionForUndo(&world_state, false, false, false);
 
-                                        createTrailingHitbox(pack->coords, input_direction, NO_DIRECTION, FIRST_TRAILING_PACK_TURN_HITBOX_TIME, PACK);
+                                        createTrailingHitbox(PACK_ID, pack->coords, FIRST_TRAILING_PACK_TURN_HITBOX_TIME, PACK);
 
                                         if (isPushable(getTileType(getNextCoords(player->coords, UP)))) 
                                         {
@@ -4982,7 +5026,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         {
             if (pack_turn_state.pack_intermediate_states_timer == 7)
             {
-                createTrailingHitbox(pack->coords, pack_turn_state.pack_orthogonal_push_direction, NO_DIRECTION, 4, PACK);
+                createTrailingHitbox(PACK_ID, pack->coords, 4, PACK);
 				if (pack_turn_state.do_diagonal_push_on_turn) pushAll(pack_turn_state.pack_intermediate_coords, oppositeDirection(player->direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false);
             }
             else if (pack_turn_state.pack_intermediate_states_timer == 5)
@@ -4996,7 +5040,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             else if (pack_turn_state.pack_intermediate_states_timer == 3)
             {
                 moveEntityInBufferAndState(pack, pack_turn_state.pack_hitbox_turning_to_coords, pack->direction);
-                createTrailingHitbox(pack_turn_state.pack_intermediate_coords, pack->direction, NO_DIRECTION, 3, PACK);
+                createTrailingHitbox(PACK_ID, pack_turn_state.pack_intermediate_coords, 3, PACK);
             }
             pack_turn_state.pack_intermediate_states_timer--;
         }
@@ -5789,15 +5833,13 @@ void gameFrame(double delta_time, TickInput* tick_input)
             }
         }
 
-        /*
         // temp draw outline around trailing hitboxes
         FOR(th_index, MAX_TRAILING_HITBOX_COUNT)
         {
             TrailingHitbox th = trailing_hitboxes[th_index];
-            if (th.frames == 0 || th.hit_direction != NO_DIRECTION) continue;
-            drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0);
+            if (th.frames == 0) continue;
+            drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0, false);
         }
-        */
     }
 
     /////////////
