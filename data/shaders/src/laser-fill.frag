@@ -18,16 +18,7 @@ pc;
 
 void main()
 {
-    float radial = length(frag_pos_model.xy) * 2.0;
-
-    // flat interior fill
-	float fill = 0.15;
-
-    // bright edge
-    float edge = smoothstep(0.7, 1.0, radial) * 0.8;
-
-    float intensity = fill + edge;
+    float intensity = pc.color.a;
     out_color = vec4(pc.color.rgb * intensity, intensity);
-
     out_normal = vec4(0.0);
 }

@@ -2924,7 +2924,6 @@ void updateLaserBuffer(void)
                     Vec3 norm_coord_difference = vec3Subtract(current_norm_coords, mirror->position_norm);
                     float difference_along_next_laser_direction_axis = getSignedComponentAlongDirection(next_laser_direction, norm_coord_difference);
                     Vec3 corresponding_difference_along_current_direction_axis = vec3ScalarMultiply(directionToVector(current_direction), difference_along_next_laser_direction_axis);
-                    //current_norm_coords = vec3Add(mirror->position_norm, vec3Add(norm_coord_difference, corresponding_difference_along_current_direction_axis));
                     Vec3 norm_coord_difference_not_along_current_direction_axis = vec3ZeroComponentAlongDirection(current_direction, norm_coord_difference);
                     current_norm_coords = vec3Add(mirror->position_norm, vec3Add(norm_coord_difference_not_along_current_direction_axis, corresponding_difference_along_current_direction_axis));
 
@@ -3900,43 +3899,6 @@ void updatePackDetached()
     }
     else pack_detached = true;
 }
-
-// EDITOR
-
-/*
-	- T press: draw camera boundary lines
-    - Y press: get rid of debug text in top left
-    - backspace press: reset camera to saved location
-
-	- F, G, H are used as mouse buttons
-
-	0: normal mode:
-    - WASD or arrow keys for movement
-    - Z undo
-    - R restart
-    - Q interact TODO: think about removing this
-
-	1: place/break mode
-    - WASD, SPACE, SHIFT: camera movement
-    - E: toggle rendering of models TODO: remove this when have 3d models for everything
-    - LMB: break block
-    - RMB: place selected on normal totarget block
-    - MMB: select targeted block as picked block
-    - L: increment picked block by 1
-    - R: rotate target block
-    - I: save world state
-    - C: save camera
-    - V: save alt camera
-    - X: remove alt camera
-    - J: change wide camera
-    - B: fov up
-    - N: fov down
-    - M: clear solved levels
-	- P: face camera north
-
-    2: select mode
-    - LMB / RMB to select block, to set win blocks / locked blocks / reset blocks
-*/
 
 // GAME LOGIC
 
