@@ -291,6 +291,7 @@ typedef enum
     PHYSICS_TIMESTEP_CHANGE,
     CHEAT_MODE_TOGGLE,
     SHADER_MODE_CHANGE,
+    DRAW_TRAILING_HITBOX_TOGGLE,
 }
 PopupType;
 
@@ -520,11 +521,13 @@ LaserBuffer laser_buffer[64] = {0};
 TrailingHitbox trailing_hitboxes[32]; 
 Animation animations[32];
 
+GameProgress game_progress = WORLD_0;
 bool in_overworld = false;
 bool pack_detached = false;
-ShaderMode game_shader_mode = OLD;
-GameProgress game_progress = WORLD_0;
+
 bool cheating = false;
+ShaderMode game_shader_mode = OLD;
+bool draw_trailing_hitboxes = false;
 
 bool player_will_fall_next_turn = false;
 bool bypass_player_fall;
@@ -3656,7 +3659,7 @@ bool performUndo(int32 undo_animation_time)
                                 createPackRotationAnimation(intCoordsToNorm(old_player_coords), old_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, undo_animation_time);
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                                 // handle trailing hitboxes
-                                createTrailingHitbox(PACK_ID, old_coords, undo_animation_time, PACK);
+                                createTrailingHitbox(PACK_ID, old_coords, TRAILING_HITBOX_UNDO_TIME, PACK);
                                 createTrailingHitbox(PACK_ID, getNextCoords(pack->coords, oppositeDirection(player_to_new_pack_dir)), undo_animation_time, PACK); 
                                 createTrailingHitbox(PACK_ID, pack->coords, undo_animation_time, PACK);
                             }
@@ -3687,7 +3690,7 @@ bool performUndo(int32 undo_animation_time)
                                 {
                                     createTrailingHitbox(PACK_ID, int3Add(int3ScalarMultiply(AXIS_Y, height_index), old_coords), undo_animation_time, PACK);
                                 }
-                                //createTrailingHitbox(PACK_ID, normCoordsToInt(mid_position), undo_animation_time, PACK); causes fall sometimes, and this block isn't really needed i think
+                                //createTrailingHitbox(PACK_ID, normCoordsToInt(mid_position), undo_animation_time, PACK); this causes fall sometimes, and this block isn't really needed i think
                                 createTrailingHitbox(PACK_ID, getNextCoords(pack->coords, oppositeDirection(player_to_new_pack_dir)), undo_animation_time, PACK); 
                                 createTrailingHitbox(PACK_ID, pack->coords, undo_animation_time, PACK);
                             }
@@ -4261,6 +4264,15 @@ void gameFrame(double delta_time, TickInput* tick_input)
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
 
+        // toggle drawing trailing hitboxes as cube outlines
+        if (tick_input->o_press)
+        {
+            draw_trailing_hitboxes = !draw_trailing_hitboxes;
+            if (cheating) createDebugPopup("showing trailing hitboxes", DRAW_TRAILING_HITBOX_TOGGLE);
+            else createDebugPopup("not showing trailing hitboxes", DRAW_TRAILING_HITBOX_TOGGLE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
         // change model states
         if (tick_input->seven_press)
         {
@@ -4698,12 +4710,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                             if (can_climb)
                             {
+                                createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
                                 moveEntityInBufferAndState(player, coords_above, player->direction);
-			
                                 createInterpolationAnimation(intCoordsToNorm(getNextCoords(player->coords, DOWN)),
-                                                             intCoordsToNorm(player->coords),
-                                                             &player->position_norm,
-                                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                             intCoordsToNorm(player->coords), &player->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                                              PLAYER_ID, CLIMB_ANIMATION_TIME);
 
                                 player->in_motion = CLIMB_ANIMATION_TIME;
@@ -4711,12 +4721,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                                 if (!pack_detached)
                                 {
+                                    createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
                                     moveEntityInBufferAndState(pack, getNextCoords(pack->coords, UP), pack->direction);
-
                                     createInterpolationAnimation(intCoordsToNorm(getNextCoords(pack->coords, DOWN)),
-                                                                 intCoordsToNorm(pack->coords),
-                                                                 &pack->position_norm,
-                                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
+                                                                 intCoordsToNorm(pack->coords), &pack->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                                                  PACK_ID, CLIMB_ANIMATION_TIME);
 
                                     pack->in_motion = CLIMB_ANIMATION_TIME;
@@ -5815,15 +5823,16 @@ void gameFrame(double delta_time, TickInput* tick_input)
             }
         }
 
-        /*
-        // temp draw outline around trailing hitboxes
-        FOR(th_index, MAX_TRAILING_HITBOX_COUNT)
+        // draw outline around trailing hitboxes
+        if (draw_trailing_hitboxes)
         {
-            TrailingHitbox th = trailing_hitboxes[th_index];
-            if (th.frames == 0) continue;
-            drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0, false);
+            FOR(th_index, MAX_TRAILING_HITBOX_COUNT)
+            {
+                TrailingHitbox th = trailing_hitboxes[th_index];
+                if (th.frames == 0) continue;
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0, false);
+            }
         }
-        */
     }
 
     /////////////

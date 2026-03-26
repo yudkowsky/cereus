@@ -4303,7 +4303,7 @@ void vulkanDraw(void)
                         memcpy(pc.view, view_matrix, sizeof(pc.view));
                         memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
                         float t = (float)shell / 9.0f;
-                        float intensity = 0.02f + 0.05f * t * t;
+                        float intensity = 0.02f + 0.1f * t * t;
                         pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, intensity };
 
                         vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &pc);
