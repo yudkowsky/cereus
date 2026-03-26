@@ -156,7 +156,7 @@ typedef struct DrawCommand
     Vec3 coords;
     Vec3 scale;
     Vec4 rotation;
-    Vec3 color;
+    Vec4 color;
     bool do_aabb;
 }
 DrawCommand;

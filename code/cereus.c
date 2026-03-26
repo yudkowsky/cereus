@@ -321,6 +321,8 @@ typedef struct
     Vec3 end_coords;
     Direction direction;
     Color color;
+    bool active;
+    int32 age; // maxes out at whatever value is used for maximum brightness
 }
 LaserBuffer;
 
@@ -413,9 +415,10 @@ const int32 PACK_TIME_IN_INTERMEDIATE_STATE = 4;
 const int32 MAX_ENTITY_INSTANCE_COUNT = 64;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
 const int32 MAX_ANIMATION_COUNT = 32;
+const int32 MAX_SOURCE_COUNT = 32;
 const int32 MAX_LASER_TRAVEL_DISTANCE = 128;
 const int32 MAX_LASER_TURNS_ALLOWED = 16;
-const int32 MAX_SOURCE_COUNT = 32;
+const int32 MAX_LASER_AGE = 5;
 const int32 MAX_PUSHABLE_STACK_SIZE = 32;
 const int32 MAX_TRAILING_HITBOX_COUNT = 32;
 const int32 MAX_LEVEL_COUNT = 64;
@@ -427,6 +430,7 @@ const Int3 AXIS_Y = { 0, 1, 0 };
 const Int3 AXIS_Z = { 0, 0, 1 };
 const Int3 INT3_0 = { 0, 0, 0 };
 const Vec3 VEC3_0 = { 0, 0, 0 };
+const Vec4 VEC4_0 = { 0, 0, 0, 0 };
 const Vec4 IDENTITY_QUATERNION  = { 0, 0, 0, 1 };
 
 const int32 PLAYER_ID = 1;
@@ -517,13 +521,14 @@ int32 time_until_allow_game_input = 0;
 int32 time_until_allow_meta_input = 0;
 
 EditorState editor_state = {0};
-LaserBuffer laser_buffer[64] = {0};
+LaserBuffer laser_buffer[512] = {0}; // 512 = 64 max sources * 16 max laser turns
 TrailingHitbox trailing_hitboxes[32]; 
 Animation animations[32];
 
 GameProgress game_progress = WORLD_0;
 bool in_overworld = false;
 bool pack_detached = false;
+bool laser_age_updated_this_frame = false;
 
 bool cheating = false;
 ShaderMode game_shader_mode = OLD;
@@ -1755,7 +1760,7 @@ SpriteId getModelId(TileType tile)
     }
 }
 
-void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation, Vec3 color, bool do_aabb)
+void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation, Vec4 color, bool do_aabb)
 {
     if (id < 0) return;
     DrawCommand* command = &draw_commands[draw_command_count++];
@@ -1788,7 +1793,7 @@ void drawText(char* string, Vec2 coords, float scale, float alpha)
         SpriteId id = (SpriteId)(SPRITE_2D_FONT_SPACE + (character - 32));
         Vec3 draw_coords = { pen_x, pen_y, 0};
         Vec3 draw_scale = { scale * aspect, scale, 1};
-        Vec3 color = { alpha, 0.0f, 0.0f };
+        Vec4 color = { 0.0f, 0.0f, 0.0f, alpha };
         drawAsset(id, SPRITE_2D, draw_coords, draw_scale, IDENTITY_QUATERNION, color, false);
         pen_x += scale * aspect;
     }
@@ -2714,23 +2719,21 @@ float getDistanceFromLaserAlongAxis(Direction laser_direction, Vec3 laser_positi
     }
 }
 
+/*
 int32 findNextFreeInLaserBuffer()
 {
     FOR(laser_buffer_index, MAX_SOURCE_COUNT) if (laser_buffer[laser_buffer_index].color == NO_COLOR) return laser_buffer_index;
     return -1;
 }
+*/
 
 // handles where lasers go. the complicated part of this function handles when mirrors are moving around, and offsets the lasers visually by a bit.
-
-// TODO: spam trailing hitboxes in undo function at relevant places. might be an ugly solution, but should work fine for everything i know trailing hitboxes are used for.
-//		 edge case in moving mirrors (red-mirror)
-//		 add id to trailing hitboxes instead of backsolving from direction and position. this also gets rid of pack edge case
-
-void updateLaserBuffer(void)
+void updateLaserBuffer()
 {
     Entity* player = &next_world_state.player;
 
-    memset(laser_buffer, 0, sizeof(laser_buffer));
+    // set all lasers to inactive. will make them active in the loop
+    FOR(laser_segment_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED) laser_buffer[laser_segment_index].active = false;
 
     player->hit_by_red   = false;
     player->hit_by_blue  = false;
@@ -2738,6 +2741,8 @@ void updateLaserBuffer(void)
 
     // if a source is a non-primary color, create primary sources of the constituent colors 
     // TODO: probably shouldn't rebuild this buffer every time function is called, could just update when sources are moved / on level rebuild
+    // 		 especially now that i'm using this to iterate over lasers, need to make sure this array is 'rebuilt' in the same way between calls, otherwise ages will be all messed up.
+    // 		 should probably build it by source id or something... but then what about multicolored lasers? for now will be fine because never remove / add lasers in game
     Entity sources_as_primary[256] = {0};
     int32 primary_index = 0;
     FOR(source_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -2797,12 +2802,13 @@ void updateLaserBuffer(void)
         {
             bool no_more_turns = true;
 
-            LaserBuffer* lb = &laser_buffer[findNextFreeInLaserBuffer()];
+            LaserBuffer* lb = &laser_buffer[source_index * MAX_LASER_TURNS_ALLOWED + laser_turn_index];
 
             // start of some segment: always move one tile forward from where we are before we start checking for anything
             lb->start_coords = current_norm_coords;
             lb->direction = current_direction;
             lb->color = source->color;
+            lb->active = true;
 
             current_norm_coords = vec3Add(directionToVector(current_direction), current_norm_coords);
             current_tile_coords = roundNormCoordsToInt(current_norm_coords);
@@ -3187,6 +3193,8 @@ void gameInitializeState(char* level_name)
     if (level_name == 0) strcpy(next_world_state.level_name, debug_level_name);
     else strcpy(next_world_state.level_name, level_name);
 
+    memset(laser_buffer, 0, sizeof(laser_buffer));
+
     Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
 
@@ -3197,6 +3205,7 @@ void gameInitializeState(char* level_name)
     memcpy(persist_solved_levels, next_world_state.solved_levels, sizeof(persist_solved_levels));
 
     memset(&next_world_state, 0, sizeof(WorldState));
+
     strcpy(next_world_state.level_name, persist_level_name);
     memcpy(next_world_state.solved_levels, persist_solved_levels, sizeof(persist_solved_levels));
 
@@ -3912,6 +3921,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
     draw_command_count = 0;
 
+    laser_age_updated_this_frame = false;
+
     Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
 
@@ -4523,14 +4534,15 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             }
                             // tp sends player ontop of themselves - should count as a successful tp, but no point changing state, and don't samve to undo buffer.
                             time_until_allow_game_input = SUCCESSFUL_TP_TIME;
+
+                            // make sure laser buffer is up to date after the teleport
+                            updateLaserBuffer();
                         }
                         else
                         {
                             // tp obstructed
                             time_until_allow_game_input = FAILED_TP_TIME;
                         }
-
-                        updateLaserBuffer();
                     }
                     else
                     {
@@ -4664,6 +4676,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 // ignore trailing hitboxes
                                 memset(&trailing_hitboxes, 0, sizeof(TrailingHitbox) * MAX_TRAILING_HITBOX_COUNT);
 
+                                // actually check for a hit
                                 updateLaserBuffer();
 
                                 bool leap_of_faith_worked = false;
@@ -4686,7 +4699,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                     resetPlayerAndPackMotion();
                                     doFailedWalkAnimations(player->direction);
                                     time_until_allow_game_input = FAILED_ANIMATION_TIME;
-                                    updateLaserBuffer();
                                 }
                             }
                         }
@@ -5036,8 +5048,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
             pack_turn_state.pack_intermediate_states_timer--;
         }
 
-		updateLaserBuffer();
-
         // falling logic
         bool do_falling_logic = true;
         if (undos_performed != 0) do_falling_logic = false; // only do gravity if not currently holding the undo button.
@@ -5082,6 +5092,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
             }
         }
+        //updateLaserBuffer();
 
         // climb logic
         if (player->moving_direction == UP && player->in_motion == 1)
@@ -5395,6 +5406,25 @@ void gameFrame(double delta_time, TickInput* tick_input)
         else if (player->coords.z <= 189) game_progress = GATE_1;
         else game_progress = WORLD_1;
 
+        // handle age after all lasers have been set to active / inactive. this is for an instant stop, but gradual fade-in
+        if (!laser_age_updated_this_frame)
+        {
+            FOR(laser_segment_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED)
+            {
+                LaserBuffer* lb = &laser_buffer[laser_segment_index];
+                if (lb->active)
+                {
+                    lb->age++;
+                    if (lb->age > MAX_LASER_AGE) lb->age = MAX_LASER_AGE;
+                }
+                else
+                {
+                    lb->age = 0;
+                }
+            }
+            laser_age_updated_this_frame = true;
+        }
+
         // create debug texts
         if (do_debug_text)
         {
@@ -5461,7 +5491,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 LaserBuffer lb = laser_buffer[lb_index];
                 if (vec3IsEqual(lb.start_coords, VEC3_0)) continue;
                 char lb_text[256] = {0};
-                snprintf(lb_text, sizeof(lb_text), "lb start coords: %.2f, %.2f, %.2f, lb end coords: %.2f, %.2f, %.2f", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z);
+                snprintf(lb_text, sizeof(lb_text), "laser start coords: %.2f, %.2f, %.2f, laser end coords: %.2f, %.2f, %.2f, lb age: %i", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z, lb.age);
                 if (do_debug_text) createDebugText(lb_text);
             }
 
@@ -5532,6 +5562,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
         if (time_until_allow_game_input > 0) time_until_allow_game_input--;
 	}
+
+    laser_age_updated_this_frame = false;
 
     // SAVING STUFF (depends on changed state, so after loop)
     {
@@ -5670,13 +5702,17 @@ void gameFrame(double delta_time, TickInput* tick_input)
 	/////////////
 
     {
+        // draw lasers
+
+        // final update laser buffer call
         updateLaserBuffer();
 
-        // draw lasers
-        FOR(laser_buffer_index, 64)
+        FOR(laser_buffer_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED)
         {
             LaserBuffer lb = laser_buffer[laser_buffer_index];
             if (lb.color == NO_COLOR) continue;
+            if (lb.active == false) continue;
+            if (lb.age == 0) continue;
 
             Vec3 diff = vec3Subtract(lb.end_coords, lb.start_coords);
             Vec3 center = vec3Add(lb.start_coords, vec3ScalarMultiply(diff, 0.5));
@@ -5686,12 +5722,13 @@ void gameFrame(double delta_time, TickInput* tick_input)
             Vec4 rotation = {0};
 			if (lb.direction == UP || lb.direction == DOWN) rotation = directionToQuaternion(lb.direction, false);
 			else rotation = directionToQuaternion(lb.direction, true);
-            
-            drawAsset(CUBE_3D_LASER_GREEN, LASER, center, scale, rotation, colorToRGB(lb.color), false);
-        }
 
-        // clear laser buffer 
-        memset(laser_buffer, 0, sizeof(laser_buffer));
+            Vec3 color_without_alpha = colorToRGB(lb.color);
+            float alpha = (float)lb.age / (float)MAX_LASER_AGE;
+            Vec4 color_with_alpha = { color_without_alpha.x, color_without_alpha.y, color_without_alpha.z, alpha };
+            
+            drawAsset(CUBE_3D_LASER_GREEN, LASER, center, scale, rotation, color_with_alpha, false);
+        }
 
         // draw most things (not player or pack) TODO: after models can include pack here because can be DEFAULT_SCALE. after actual shaders for the color of the player can also include player here
         for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
@@ -5716,20 +5753,20 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                 if (game_shader_mode == OLD)
                 {
-                    drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0, do_aabb); 
+                    drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC4_0, do_aabb); 
                 }
                 else
                 {
-                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC3_0, do_aabb);
+                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC4_0, do_aabb);
                 }
             }
             else
             {
                 if (game_shader_mode != OLD && getCube3DId(draw_tile) == CUBE_3D_WATER) 
                 {
-                    drawAsset(MODEL_3D_WATER, WATER_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false), VEC3_0, false);
+                    drawAsset(MODEL_3D_WATER, WATER_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false), VEC4_0, false);
                 }
-                drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false), VEC3_0, false);
+                drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false), VEC4_0, false);
             }
         }
 
@@ -5741,24 +5778,24 @@ void gameFrame(double delta_time, TickInput* tick_input)
             // TODO: this is terrible (fix with shaders)
             bool hit_by_green = false;
             if (player->green_hit.north || player->green_hit.west || player->green_hit.south || player->green_hit.east || player->green_hit.up || player->green_hit.down) hit_by_green = true;
-            if      (player->hit_by_red && hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_WHITE,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, do_player_aabb);
-            else if (player->hit_by_red && hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_YELLOW,  CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, do_player_aabb);
-            else if (player->hit_by_red &&      	       player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, do_player_aabb);
-            else if (             		   hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_CYAN,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, do_player_aabb);
-            else if (player->hit_by_red                 	  				  ) drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, do_player_aabb);
-            else if (             		   hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_GREEN,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, do_player_aabb);
-            else if (                            		   player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, do_player_aabb);
-            else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC3_0, do_player_aabb);
+            if      (player->hit_by_red && hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_WHITE,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb);
+            else if (player->hit_by_red && hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_YELLOW,  CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb);
+            else if (player->hit_by_red &&      	       player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb);
+            else if (             		   hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_CYAN,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb);
+            else if (player->hit_by_red                 	  				  ) drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb);
+            else if (             		   hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_GREEN,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb);
+            else if (                            		   player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb);
+            else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb);
 
             // technically should maybe generate ghost AABBs here, if i ever want ghost to render under water
-            if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, false), VEC3_0, false);
-            if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, false),   VEC3_0, false);
+            if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, false), VEC4_0, false);
+            if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, false),   VEC4_0, false);
         }
         if (!world_state.pack.removed) 
         {
             bool do_pack_aabb = false;
             if (player->position_norm.y < 2.0f) do_pack_aabb = true;
-            drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat, VEC3_0, do_pack_aabb);
+            drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat, VEC4_0, do_pack_aabb);
         }
 
         // draw camera boundary lines
@@ -5799,8 +5836,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         x_draw_coords = vec3Add(x_draw_coords, outline_offset);
                         z_draw_coords = vec3Add(z_draw_coords, outline_offset);
 
-                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, VEC3_0, false);
-                    	drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, VEC3_0, false);
+                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, VEC4_0, false);
+                    	drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, VEC4_0, false);
                         x_draw_offset += OVERWORLD_SCREEN_SIZE_X;
                     }
                     x_draw_offset = 0;
@@ -5816,10 +5853,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 Vec3 z_draw_coords_far  = (Vec3){ (float)level_dim.x / 2.0f, (float)level_dim.y / 2.0f, (float)level_dim.z + 0.5f };
                 Vec3 x_draw_scale = (Vec3){ 0, 						   (float)level_dim.y, (float)level_dim.z + 1.0f };
                 Vec3 z_draw_scale = (Vec3){ (float)level_dim.x + 1.0f, (float)level_dim.y, 0 };
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_near, x_draw_scale, IDENTITY_QUATERNION, VEC3_0, false);
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_near, z_draw_scale, IDENTITY_QUATERNION, VEC3_0, false);
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_far,  x_draw_scale, IDENTITY_QUATERNION, VEC3_0, false);
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_far,  z_draw_scale, IDENTITY_QUATERNION, VEC3_0, false);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_near, x_draw_scale, IDENTITY_QUATERNION, VEC4_0, false);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_near, z_draw_scale, IDENTITY_QUATERNION, VEC4_0, false);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_far,  x_draw_scale, IDENTITY_QUATERNION, VEC4_0, false);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_far,  z_draw_scale, IDENTITY_QUATERNION, VEC4_0, false);
             }
         }
 
@@ -5830,7 +5867,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             {
                 TrailingHitbox th = trailing_hitboxes[th_index];
                 if (th.frames == 0) continue;
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC3_0, false);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC4_0, false);
             }
         }
     }
@@ -5840,7 +5877,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
     /////////////
 
     {
-        Vec3 color_2d = { 1, 0, 0 }; // using alpha as first channel. 2d assets just use sprite atlas, so not using color.
+        Vec4 color_with_alpha = { 0, 0, 0, 1 }; // using alpha as first channel. 2d assets just use sprite atlas, so not using color.
         
 		if (editor_state.editor_mode != NO_MODE)
         {
@@ -5848,12 +5885,12 @@ void gameFrame(double delta_time, TickInput* tick_input)
             Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
             Vec3 center_screen = { ((float)game_display.client_width / 2), ((float)game_display.client_height / 2), 0.0f }; // weird numbers are just adjustment because raycast starts slightly offset 
                                                                                                         		 // i think this is due to windowed mode, but could be issue with raycast.
-        	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, color_2d, false);
+        	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, color_with_alpha, false);
 
             // picked block
             Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
             Vec3 picked_block_coords = { game_display.client_width - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
-            drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, color_2d, false);
+            drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, color_with_alpha, false);
 
             if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
             {
@@ -5861,7 +5898,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 if (game_shader_mode != OLD) selected_id = getModelId(getTileTypeFromId(editor_state.selected_id));
                 Entity* selected_e = 0;
                 if (editor_state.selected_id > 0) selected_e = getEntityFromId(editor_state.selected_id);
-                if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position_norm, DEFAULT_SCALE, selected_e->rotation_quat, VEC3_0, false);
+                if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position_norm, DEFAULT_SCALE, selected_e->rotation_quat, VEC4_0, false);
 
                 if ((editor_state.selected_id / ID_OFFSET_RESET_BLOCK) * ID_OFFSET_RESET_BLOCK == ID_OFFSET_RESET_BLOCK)
                 {
@@ -5873,7 +5910,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         Entity* to_reset_e = getEntityFromId(ri.id);
                         SpriteId to_reset_id = getCube3DId(MIRROR);
                         if (game_shader_mode != OLD) to_reset_id = getModelId(getTileTypeFromId(to_reset_e->id));
-                        drawAsset(to_reset_id, OUTLINE_3D, to_reset_e->position_norm, DEFAULT_SCALE, to_reset_e->rotation_quat, VEC3_0, false);
+                        drawAsset(to_reset_id, OUTLINE_3D, to_reset_e->position_norm, DEFAULT_SCALE, to_reset_e->rotation_quat, VEC4_0, false);
                     }
                 }
             }

@@ -79,7 +79,7 @@ typedef struct
     Vec3 center;
     float length;
     Vec4 rotation;
-    Vec3 color;
+    Vec4 color;
 }
 Laser;
 
@@ -3655,7 +3655,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
             sprite->asset_index = (uint32)atlas_asset_index;
             sprite->coords      = command->coords;
             sprite->size        = command->scale;
-            sprite->alpha       = command->color.x;
+            sprite->alpha       = command->color.w;
             sprite->uv          = spriteUV(sprite_id, type, atlas_width, atlas_height);
         }
         else if (type == CUBE_3D)
@@ -3674,7 +3674,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
         {
             if (water_aabb_count < 15)
             {
-                // assumes everything that 'canBeUnderwater' is 1x1 tile; so generate AABB +-0.5 from coords
+                // assumes everything that canBeUnderwater is 1x1 tile; so generate AABB +-0.5 from coords
                 WaterAABB* aabb = &water_aabbs[water_aabb_count];
                 aabb->min = (Vec3){ command->coords.x - 0.5f, command->coords.y - 0.5f, command->coords.z - 0.5f }; 
                 aabb->max = (Vec3){ command->coords.x + 0.5f, command->coords.y + 0.5f, command->coords.z + 0.5f };
@@ -4303,8 +4303,9 @@ void vulkanDraw(void)
                         memcpy(pc.view, view_matrix, sizeof(pc.view));
                         memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
                         float t = (float)shell / 9.0f;
-                        float intensity = 0.02f + 0.1f * t * t;
+                        float intensity = 0.02f + (0.1f * t * t * laser->color.w) * 5;
                         pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, intensity };
+                        if (intensity > 0.5) pc.color = (Vec4){ 1.0f, 1.0f, 1.0f, 1.0f };
 
                         vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &pc);
                         vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
