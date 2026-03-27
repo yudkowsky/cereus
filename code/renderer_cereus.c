@@ -4290,9 +4290,11 @@ void vulkanDraw(void)
                 {
                     Laser* laser = &laser_instances[laser_index];
 
-                    for (uint32 shell = 0; shell < 10; shell++)
+                    uint32 iterations = 15;
+                    for (uint32 shell = 0; shell < iterations; shell++)
                     {
-                        float radius_scale = 1.0f - (float)shell * 0.09f;
+                        float width = 1.3f;
+                        float radius_scale = width - (float)shell * (width / (float)iterations);
                         Vec3 laser_scale = { radius_scale, radius_scale, laser->length };
 
                         float model_matrix[16];
@@ -4302,10 +4304,10 @@ void vulkanDraw(void)
                         memcpy(pc.model, model_matrix, sizeof(pc.model));
                         memcpy(pc.view, view_matrix, sizeof(pc.view));
                         memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
-                        float t = (float)shell / 9.0f;
-                        float intensity = 0.02f + (0.1f * t * t * laser->color.w) * 5;
+                        float t = (float)shell / (float)iterations;
+                        float intensity = 0.02f + (0.1f * t*t*t * laser->color.w) * 8.0f;
                         pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, intensity };
-                        if (intensity > 0.5) pc.color = (Vec4){ 1.0f, 1.0f, 1.0f, 1.0f };
+                        if (intensity > 0.4f) pc.color = (Vec4){ 1.0f, 1.0f, 1.0f, 0.9f };
 
                         vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &pc);
                         vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);

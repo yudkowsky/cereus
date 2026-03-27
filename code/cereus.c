@@ -321,8 +321,6 @@ typedef struct
     Vec3 end_coords;
     Direction direction;
     Color color;
-    bool active;
-    int32 age; // maxes out at whatever value is used for maximum brightness
 }
 LaserBuffer;
 
@@ -528,7 +526,6 @@ Animation animations[32];
 GameProgress game_progress = WORLD_0;
 bool in_overworld = false;
 bool pack_detached = false;
-bool laser_age_updated_this_frame = false;
 
 bool cheating = false;
 ShaderMode game_shader_mode = OLD;
@@ -2733,7 +2730,7 @@ void updateLaserBuffer()
     Entity* player = &next_world_state.player;
 
     // set all lasers to inactive. will make them active in the loop
-    FOR(laser_segment_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED) laser_buffer[laser_segment_index].active = false;
+    memset(laser_buffer, 0, sizeof(laser_buffer));
 
     player->hit_by_red   = false;
     player->hit_by_blue  = false;
@@ -2808,7 +2805,6 @@ void updateLaserBuffer()
             lb->start_coords = current_norm_coords;
             lb->direction = current_direction;
             lb->color = source->color;
-            lb->active = true;
 
             current_norm_coords = vec3Add(directionToVector(current_direction), current_norm_coords);
             current_tile_coords = roundNormCoordsToInt(current_norm_coords);
@@ -2901,6 +2897,7 @@ void updateLaserBuffer()
 
                     // check if should skip this id, if so passthrough
                     bool passthrough = false;
+                    bool end_here = false;
                     if (mirror->id == id_to_skip) passthrough = true;
 
                     float distance_from_mirror_along_axes = getDistanceFromLaserAlongAxis(current_direction, current_norm_coords, mirror->position_norm);
@@ -2912,6 +2909,13 @@ void updateLaserBuffer()
                         current_norm_coords = vec3Add(directionToVector(current_direction), current_norm_coords);
                         current_tile_coords = roundNormCoordsToInt(current_norm_coords);
                         continue;
+                    }
+
+                    if (distance_from_mirror_along_axes > 0.3)
+                    {
+                        // between 0.5 and 0.3, so this hits the 'edge' of the mirror: break the laser
+                        // still want to do later calculations to calculate exact coords to end
+                        end_here = true;
                     }
 
                     if (distance_from_mirror_along_axes == 0)
@@ -2936,12 +2940,14 @@ void updateLaserBuffer()
                     Vec3 norm_coord_difference_not_along_current_direction_axis = vec3ZeroComponentAlongDirection(current_direction, norm_coord_difference);
                     current_norm_coords = vec3Add(mirror->position_norm, vec3Add(norm_coord_difference_not_along_current_direction_axis, corresponding_difference_along_current_direction_axis));
 
-                    id_to_skip = mirror->id;
-                    id_to_skip_timer = 2;
-
+                    if (!end_here)
+                    {
+                        id_to_skip = mirror->id;
+                        id_to_skip_timer = 2;
+                        no_more_turns = false;
+                        current_direction = next_laser_direction;
+                    }
                     lb->end_coords = current_norm_coords;
-                    current_direction = next_laser_direction;
-                    no_more_turns = false;
                     break;
                 }
 
@@ -3920,8 +3926,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
     physics_accumulator += delta_time;
 
     draw_command_count = 0;
-
-    laser_age_updated_this_frame = false;
 
     Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
@@ -5092,7 +5096,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
             }
         }
-        //updateLaserBuffer();
 
         // climb logic
         if (player->moving_direction == UP && player->in_motion == 1)
@@ -5406,25 +5409,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
         else if (player->coords.z <= 189) game_progress = GATE_1;
         else game_progress = WORLD_1;
 
-        // handle age after all lasers have been set to active / inactive. this is for an instant stop, but gradual fade-in
-        if (!laser_age_updated_this_frame)
-        {
-            FOR(laser_segment_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED)
-            {
-                LaserBuffer* lb = &laser_buffer[laser_segment_index];
-                if (lb->active)
-                {
-                    lb->age++;
-                    if (lb->age > MAX_LASER_AGE) lb->age = MAX_LASER_AGE;
-                }
-                else
-                {
-                    lb->age = 0;
-                }
-            }
-            laser_age_updated_this_frame = true;
-        }
-
         // create debug texts
         if (do_debug_text)
         {
@@ -5491,7 +5475,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 LaserBuffer lb = laser_buffer[lb_index];
                 if (vec3IsEqual(lb.start_coords, VEC3_0)) continue;
                 char lb_text[256] = {0};
-                snprintf(lb_text, sizeof(lb_text), "laser start coords: %.2f, %.2f, %.2f, laser end coords: %.2f, %.2f, %.2f, lb age: %i", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z, lb.age);
+                snprintf(lb_text, sizeof(lb_text), "laser start coords: %.2f, %.2f, %.2f, laser end coords: %.2f, %.2f, %.2f", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z);
                 if (do_debug_text) createDebugText(lb_text);
             }
 
@@ -5562,8 +5546,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
         if (time_until_allow_game_input > 0) time_until_allow_game_input--;
 	}
-
-    laser_age_updated_this_frame = false;
 
     // SAVING STUFF (depends on changed state, so after loop)
     {
@@ -5711,8 +5693,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
         {
             LaserBuffer lb = laser_buffer[laser_buffer_index];
             if (lb.color == NO_COLOR) continue;
-            if (lb.active == false) continue;
-            if (lb.age == 0) continue;
 
             Vec3 diff = vec3Subtract(lb.end_coords, lb.start_coords);
             Vec3 center = vec3Add(lb.start_coords, vec3ScalarMultiply(diff, 0.5));
@@ -5724,7 +5704,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 			else rotation = directionToQuaternion(lb.direction, true);
 
             Vec3 color_without_alpha = colorToRGB(lb.color);
-            float alpha = (float)lb.age / (float)MAX_LASER_AGE;
+            float alpha = 1.0f;
             Vec4 color_with_alpha = { color_without_alpha.x, color_without_alpha.y, color_without_alpha.z, alpha };
             
             drawAsset(CUBE_3D_LASER_GREEN, LASER, center, scale, rotation, color_with_alpha, false);
