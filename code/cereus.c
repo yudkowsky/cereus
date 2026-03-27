@@ -410,6 +410,7 @@ const int32 TRAILING_HITBOX_TIME = 5;
 const int32 FIRST_TRAILING_PACK_TURN_HITBOX_TIME = 2;
 const int32 TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN = 2;
 const int32 PACK_TIME_IN_INTERMEDIATE_STATE = 4;
+const int32 TIME_AFTER_UNDO_UNTIL_PHYSICS_START = 4;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 64;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
@@ -466,7 +467,6 @@ const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 
 const double DEFAULT_PHYSICS_TIMESTEP = 1.0/60.0;
 double physics_timestep_multiplier = 1.0;
-//double physics_timestep = 1.0/60.0;
 double physics_accumulator = 0;
 double timer_accumulator = 0;
 double global_time = 0; // will not work as a 'time elapsed' counter in editor mode because it grows slower during time slowdown
@@ -513,6 +513,7 @@ Int3 level_dim = {0};
 
 UndoBuffer undo_buffer = {0};
 int32 undos_performed = 0;
+int32 undo_press_timer = 0;
 bool restart_last_turn = false;
 
 // controls how long until player is allowed to make action like movement. will rework when add buffered inputs
@@ -2741,8 +2742,6 @@ void updateLaserBuffer()
 
     // if a source is a non-primary color, create primary sources of the constituent colors 
     // TODO: probably shouldn't rebuild this buffer every time function is called, could just update when sources are moved / on level rebuild
-    // 		 especially now that i'm using this to iterate over lasers, need to make sure this array is 'rebuilt' in the same way between calls, otherwise ages will be all messed up.
-    // 		 should probably build it by source id or something... but then what about multicolored lasers? for now will be fine because never remove / add lasers in game
     Entity sources_as_primary[256] = {0};
     int32 primary_index = 0;
     FOR(source_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -2916,18 +2915,29 @@ void updateLaserBuffer()
                             continue;
                         }
 
-                        if (distance_from_mirror_along_axes > 0.3)
+                        Direction next_laser_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
+
+                        if (next_laser_direction == NO_DIRECTION) 
+                        {
+                            // hit side of mirror which doesnt reflect
+                            // TODO: because of angled shape of mirror, this check is too aggressive - should passthrough if distance from the plane the mirror sits on is >0.2 or something
+                            Vec3 norm_coords_not_along_axis = vec3ZeroComponentAlongDirection(current_direction, current_norm_coords);
+                            Vec3 mirror_coords_along_axis = vec3ScalarMultiply(directionToVector(current_direction), getSignedComponentAlongDirection(current_direction, mirror->position_norm));
+                            Vec3 coords_without_offset = vec3Add(norm_coords_not_along_axis, mirror_coords_along_axis);
+                            lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), -0.38f));
+                            advance_tile = false;
+                            break;
+                        }
+
+                        if (distance_from_mirror_along_axes > 0.35)
                         {
                             // between 0.5 and 0.3, so this hits the 'edge' of the mirror: break the laser
                             // still want to do later calculations to calculate exact coords to end
                             end_here = true;
                         }
-
-                        if (distance_from_mirror_along_axes == 0)
+                        else if (distance_from_mirror_along_axes == 0)
                         {
                             lb->end_coords = mirror->position_norm;
-                            
-                            Direction next_laser_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
 
                             // find end clip plane
                             Vec3 mirror_normal = vec3Normalize(vec3Add(directionToVector(next_laser_direction), directionToVector(oppositeDirection(current_direction))));
@@ -2937,7 +2947,6 @@ void updateLaserBuffer()
                             current_norm_coords = mirror->position_norm;
                             current_direction = next_laser_direction;
                             advance_tile = false;
-                            if (current_direction == NO_DIRECTION) break;
                             no_more_turns = false;
                             break;
                         }
@@ -2947,14 +2956,13 @@ void updateLaserBuffer()
                         // add that difference to norm_coords along current_direction. again signs are accounted for because directionToVector gives signed output.
                         // differences along the other axis (the one orthogonal to both current dir and next dir) are ignored, because they don't change point of reflection
                         // to get norm coords, add corresponding difference, plus norm_coord_difference along the axes that aren't current_direction axis
-                        Direction next_laser_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
                         Vec3 norm_coord_difference = vec3Subtract(current_norm_coords, mirror->position_norm);
                         float difference_along_next_laser_direction_axis = getSignedComponentAlongDirection(next_laser_direction, norm_coord_difference);
                         Vec3 corresponding_difference_along_current_direction_axis = vec3ScalarMultiply(directionToVector(current_direction), difference_along_next_laser_direction_axis);
                         Vec3 norm_coord_difference_not_along_current_direction_axis = vec3ZeroComponentAlongDirection(current_direction, norm_coord_difference);
                         current_norm_coords = vec3Add(mirror->position_norm, vec3Add(norm_coord_difference_not_along_current_direction_axis, corresponding_difference_along_current_direction_axis));
 
-                        // compute for clip plane before overwriting next_laser_direction
+                        // compute for clip plane before overwriting current_direction
                         Vec3 mirror_normal = vec3Normalize(vec3Add(directionToVector(next_laser_direction), directionToVector(oppositeDirection(current_direction))));
 
                         if (!end_here)
@@ -2974,7 +2982,7 @@ void updateLaserBuffer()
                         break;
                     }
 
-                    // else, hit type is something that isn't NONE - do default behaviour
+                    // hit type is something that isn't NONE - do default behaviour
                     //if (hit_type != NONE)
                     {
                         // if entity there could be a real hit with a passthrough. in any other case, just stop here.
@@ -3597,7 +3605,7 @@ bool performUndo(int32 undo_animation_time)
             bool was_at_different_direction = (e->direction != delta->old_direction);
 
             e->coords = delta->old_coords;
-            e->position_norm = intCoordsToNorm(e->coords); // TODO: this gets overwritten later, but is used as endpoint for queued animations. a bit messy, maybe fix
+            e->position_norm = intCoordsToNorm(e->coords); // this gets overwritten later, but is used as endpoint for queued animations
             e->direction = delta->old_direction;
             e->rotation_quat = directionToQuaternion(e->direction, true);
             e->removed = delta->was_removed;
@@ -4065,7 +4073,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             memset(*writing_to_field, 0, sizeof(*writing_to_field));
             memcpy(*writing_to_field, editor_state.edit_buffer.string, sizeof(*writing_to_field) - 1);
 
-            world_state = next_world_state; // TODO: this is a bit messy... why is it needed?
+            //world_state = next_world_state; don't think this is needed. but something might break sometime soon TODO: if it's been like a week, get rid of this
 
             editor_state.editor_mode = SELECT;
             editor_state.selected_id = 0;
@@ -4104,8 +4112,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         entity->coords = (Int3){0};
                         entity->position_norm = (Vec3){0};
                         entity->removed = true;
-
-                        // TODO: if deleting entity, go through reset blocks and remove from reset block
                     }
                     setTileType(NONE, raycast_output.hit_coords);
                     setTileDirection(NORTH, raycast_output.hit_coords);
@@ -4458,20 +4464,20 @@ void gameFrame(double delta_time, TickInput* tick_input)
             if (time_until_allow_game_input == 0 && tick_input->z_press)
             {
                 int32 undo_animation_time = 0;
-                if (undos_performed == 0) undo_animation_time = 10;
-                else if (undos_performed <= 2) undo_animation_time = 8;
+                if (undos_performed <= 2) undo_animation_time = 8;
                 else if (undos_performed <= 4) undo_animation_time = 7;
                 else if (undos_performed <= 8) undo_animation_time = 6;
                 else if (undos_performed <= 12) undo_animation_time = 5;
                 else undo_animation_time = 5;
-                int32 real_undo_animation_time = undo_animation_time > 8 ? 5 : undo_animation_time; // TODO: improve this input latency system
-                if (performUndo(real_undo_animation_time))
+                if (performUndo(undo_animation_time))
                 {
                     updatePackDetached();
                     undos_performed++;
                 }
                 silence_unlocks_due_to_restart_or_undo = true;
                 time_until_allow_game_input = undo_animation_time;
+
+            	undo_press_timer = undo_animation_time + TIME_AFTER_UNDO_UNTIL_PHYSICS_START;
             }
             if (time_until_allow_game_input == 0 && tick_input->r_press)
             {
@@ -5084,7 +5090,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
         // falling logic
         bool do_falling_logic = true;
-        if (undos_performed != 0) do_falling_logic = false; // only do gravity if not currently holding the undo button.
+        if (undo_press_timer > 0) do_falling_logic = false; // only do gravity if there's not been an undo recently
         if (cheating) do_falling_logic = false;
 
         if (do_falling_logic)
@@ -5412,6 +5418,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
         // reset undos performed if no longer holding z undos
         if (undos_performed > 0 && !tick_input->z_press) undos_performed = 0;
+        // decrement undo timer if > 0
+        if (undo_press_timer > 0) undo_press_timer--;
 
         // update overworld player coords for camera offset if player not removed. if player is removed, these coords persist, so that camera doesn't jump wildly when changing player pos in editor
         if (in_overworld)

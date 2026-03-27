@@ -4299,7 +4299,7 @@ void vulkanDraw(void)
                     uint32 iterations = 15;
                     for (uint32 shell = 0; shell < iterations; shell++)
                     {
-                        float width = 1.3f;
+                        float width = 1.5f;
                         float radius_scale = width - (float)shell * (width / (float)iterations);
                         Vec3 laser_scale = { radius_scale, radius_scale, laser->length };
 
@@ -4312,9 +4312,28 @@ void vulkanDraw(void)
                         memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
 
                         float t = (float)shell / (float)iterations;
-                        float intensity = 0.02f + (0.1f * t*t*t * laser->color.w) * 8.0f;
+                        float intensity = 0.02f + (t*t*t * laser->color.w);
                         pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, intensity };
-                        if (intensity > 0.4f) pc.color = (Vec4){ 1.0f, 1.0f, 1.0f, 0.9f };
+                        if (intensity > 0.5f) 
+                        {
+                            float not_primary_color_value = 0.85f;
+                            if (laser->color.x > 0.5f)
+                            {
+                                pc.color.y = not_primary_color_value;
+                                pc.color.z = not_primary_color_value;
+                            }
+                            if (laser->color.y > 0.5f)
+                            {
+                                pc.color.x = not_primary_color_value;
+                                pc.color.z = not_primary_color_value;
+                            }
+                            if (laser->color.z > 0.5f)
+                            {
+                                pc.color.x = not_primary_color_value;
+                                pc.color.y = not_primary_color_value;
+                            }
+                        }
+                        if (intensity > 0.6f) pc.color = (Vec4){ 0.0f, 0.0f, 0.0f, 0.0f };
 
                         pc.start_clip_plane = laser->start_clip_plane;
                         pc.end_clip_plane = laser->end_clip_plane;
