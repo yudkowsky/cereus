@@ -405,7 +405,6 @@ const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
 
 const int32 TRAILING_HITBOX_TIME = 5;
-const int32 TRAILING_HITBOX_UNDO_TIME = 3;
 const int32 FIRST_TRAILING_PACK_TURN_HITBOX_TIME = 2;
 const int32 TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN = 2;
 const int32 PACK_TIME_IN_INTERMEDIATE_STATE = 4;
@@ -2811,6 +2810,8 @@ void updateLaserBuffer()
 
             FOR(laser_tile_index, MAX_LASER_TRAVEL_DISTANCE) // iterate over individual tiles
             {
+                bool advance_tile = true; // used to break out of both for loops, or not
+
                 // first tile on first turn. skip source id.
                 if (laser_turn_index == 0 && laser_tile_index == 0)
                 {
@@ -2829,169 +2830,175 @@ void updateLaserBuffer()
                     break;
                 }
 
-                // for now assuming only one tile hit, i.e. lasers are very thin (and the effect of the laser comes from strength of light, rather than the laser being thicker)
-				TileType real_hit_type = getTileType(current_tile_coords);
-
-                // if th_hit at current tile, then override other tile hit
-                bool th_hit = false;
+                TileType types_to_check[2] = { NONE, getTileType(current_tile_coords) }; // trailing hitbox, followed by real type; trailing hitbox intersection takes priority
                 TrailingHitbox th = {0};
                 if (trailingHitboxAtCoords(current_tile_coords, &th) && th.frames > 0)
                 {
-                    real_hit_type = th.type;
-                    th_hit = true;
+                    types_to_check[0] = th.type;
                 }
 
-                // handle lasers hitting various entities
-                if (real_hit_type == PLAYER)
+                FOR(check, 2)
                 {
-                    float distance_from_player = getDistanceFromLaserAlongAxis(current_direction, current_norm_coords, player->position_norm);
-                    if (distance_from_player > 0.5f)
-                    {
-                        // passthrough
-                        current_norm_coords = vec3Add(directionToVector(current_direction), current_norm_coords);
-                        current_tile_coords = roundNormCoordsToInt(current_norm_coords);
-                        continue;
-                    }
-                    if (distance_from_player == 0)
-                    {
-                        lb->end_coords = player->position_norm;
-                        current_norm_coords = player->position_norm;
-                    }
-                    else
-                    {
-                        lb->end_coords = current_norm_coords;
-                    }
+                    TileType hit_type = types_to_check[check];
+                    if (hit_type == NONE) continue;
+                    bool this_is_th = check == 0;
 
-                    // set player color based on laser
-                    LaserColor laser_color = colorToLaserColor(lb->color);
-                    if (laser_color.red)
+                    if (hit_type == PLAYER)
                     {
-                        player->hit_by_red = true;
-                    }
-                    if (laser_color.green) 
-                    {
-                        switch (current_direction)
+                        float distance_from_player = getDistanceFromLaserAlongAxis(current_direction, current_norm_coords, player->position_norm);
+                        if (distance_from_player > 0.5f)
                         {
-                            case NORTH: player->green_hit.north = true; break;
-                            case WEST:  player->green_hit.west  = true; break;
-                            case SOUTH: player->green_hit.south = true; break;
-                            case EAST:  player->green_hit.east  = true; break;
-                            case UP:    player->green_hit.up    = true; break;
-                            case DOWN:  player->green_hit.down  = true; break;
-                            default: break;
+                            // passthrough
+                            continue;
                         }
-                    }
-                    if (laser_color.blue)
-                    {
-                        player->hit_by_blue  = true;
-                    }
-                    break;
-                }
+                        if (distance_from_player == 0)
+                        {
+                            lb->end_coords = player->position_norm;
+                            current_norm_coords = player->position_norm;
+                        }
+                        else
+                        {
+                            lb->end_coords = current_norm_coords;
+                        }
 
-                if (real_hit_type == MIRROR)
-                {
-                    // get mirror entity
-                    Entity* mirror = {0};
-                    if (th_hit) mirror = getEntityFromId(th.id);
-                    else mirror = getEntityAtCoords(current_tile_coords);
-
-                    // check if should skip this id, if so passthrough
-                    bool passthrough = false;
-                    bool end_here = false;
-                    if (mirror->id == id_to_skip) passthrough = true;
-
-                    float distance_from_mirror_along_axes = getDistanceFromLaserAlongAxis(current_direction, current_norm_coords, mirror->position_norm);
-                    if (distance_from_mirror_along_axes > 0.5) passthrough = true;
-
-                    if (passthrough)
-                    {
-                        // passthrough
-                        current_norm_coords = vec3Add(directionToVector(current_direction), current_norm_coords);
-                        current_tile_coords = roundNormCoordsToInt(current_norm_coords);
-                        continue;
-                    }
-
-                    if (distance_from_mirror_along_axes > 0.3)
-                    {
-                        // between 0.5 and 0.3, so this hits the 'edge' of the mirror: break the laser
-                        // still want to do later calculations to calculate exact coords to end
-                        end_here = true;
-                    }
-
-                    if (distance_from_mirror_along_axes == 0)
-                    {
-                        lb->end_coords = mirror->position_norm;
-                        current_norm_coords = mirror->position_norm;
-                        current_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
-                        if (current_direction == NO_DIRECTION) break;
-                        no_more_turns = false;
+                        // set player color based on laser
+                        LaserColor laser_color = colorToLaserColor(lb->color);
+                        if (laser_color.red)
+                        {
+                            player->hit_by_red = true;
+                        }
+                        if (laser_color.green) 
+                        {
+                            switch (current_direction)
+                            {
+                                case NORTH: player->green_hit.north = true; break;
+                                case WEST:  player->green_hit.west  = true; break;
+                                case SOUTH: player->green_hit.south = true; break;
+                                case EAST:  player->green_hit.east  = true; break;
+                                case UP:    player->green_hit.up    = true; break;
+                                case DOWN:  player->green_hit.down  = true; break;
+                                default: break;
+                            }
+                        }
+                        if (laser_color.blue)
+                        {
+                            player->hit_by_blue  = true;
+                        }
+                        advance_tile = false;
                         break;
                     }
 
-                    // get difference along next_laser_direction of current_norm_coords vs mirror->position_norm.
-                    // this will be relevantly signed because getSignedComponentAlongDirection gives signed output.
-                    // add that difference to norm_coords along current_direction. again signs are accounted for because directionToVector gives signed output.
-                    // differences along the other axis (the one orthogonal to both current dir and next dir) are ignored, because they don't change point of reflection
-                    // to get norm coords, add corresponding difference, plus norm_coord_difference along the axes that aren't current_direction axis
-                    Direction next_laser_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
-                    Vec3 norm_coord_difference = vec3Subtract(current_norm_coords, mirror->position_norm);
-                    float difference_along_next_laser_direction_axis = getSignedComponentAlongDirection(next_laser_direction, norm_coord_difference);
-                    Vec3 corresponding_difference_along_current_direction_axis = vec3ScalarMultiply(directionToVector(current_direction), difference_along_next_laser_direction_axis);
-                    Vec3 norm_coord_difference_not_along_current_direction_axis = vec3ZeroComponentAlongDirection(current_direction, norm_coord_difference);
-                    current_norm_coords = vec3Add(mirror->position_norm, vec3Add(norm_coord_difference_not_along_current_direction_axis, corresponding_difference_along_current_direction_axis));
-
-                    if (!end_here)
+                    if (hit_type == MIRROR)
                     {
-                        id_to_skip = mirror->id;
-                        id_to_skip_timer = 2;
-                        no_more_turns = false;
-                        current_direction = next_laser_direction;
-                    }
-                    lb->end_coords = current_norm_coords;
-                    break;
-                }
+                        // get mirror entity
+                        Entity* mirror = {0};
+                        if (this_is_th) mirror = getEntityFromId(th.id);
+                        else mirror = getEntityAtCoords(current_tile_coords);
 
-                if (real_hit_type != NONE)
-                {
-                    // if entity there could be a real hit with a passthrough. in any other case, just stop here.
-                    if (isEntity(real_hit_type))
-                    {
-                        Entity* e = {0};
-                        if (th_hit) e = getEntityFromId(th.id);
-                        else e = getEntityAtCoords(current_tile_coords);
-
-						// check if should skip this id, if so passthrough
+                        // check if should skip this id, if so passthrough
                         bool passthrough = false;
-                        if (e->id == id_to_skip) passthrough = true;
+                        bool end_here = false;
+                        if (mirror->id == id_to_skip) passthrough = true;
 
-                        // default distance check for passthrough
-                        float distance_from_entity = getDistanceFromLaserAlongAxis(current_direction, current_norm_coords, e->position_norm);
-                        if (distance_from_entity > 0.5) passthrough = true;
+                        float distance_from_mirror_along_axes = getDistanceFromLaserAlongAxis(current_direction, current_norm_coords, mirror->position_norm);
+                        if (distance_from_mirror_along_axes > 0.5) passthrough = true;
 
                         if (passthrough)
                         {
                             // passthrough
-                            current_norm_coords = vec3Add(directionToVector(current_direction), current_norm_coords);
-                            current_tile_coords = roundNormCoordsToInt(current_norm_coords);
                             continue;
                         }
 
-                        if (distance_from_entity == 0)
+                        if (distance_from_mirror_along_axes > 0.3)
                         {
-                            lb->end_coords = e->position_norm;
-                            current_norm_coords = e->position_norm;
+                            // between 0.5 and 0.3, so this hits the 'edge' of the mirror: break the laser
+                            // still want to do later calculations to calculate exact coords to end
+                            end_here = true;
+                        }
+
+                        if (distance_from_mirror_along_axes == 0)
+                        {
+                            lb->end_coords = mirror->position_norm;
+                            current_norm_coords = mirror->position_norm;
+                            current_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
+                            advance_tile = false;
+                            if (current_direction == NO_DIRECTION) break;
+                            no_more_turns = false;
                             break;
                         }
-                    }
-                    lb->end_coords = current_norm_coords;
-                    break;
-                }
 
-                current_norm_coords = vec3Add(directionToVector(current_direction), current_norm_coords);
-                current_tile_coords = roundNormCoordsToInt(current_norm_coords);
+                        // get difference along next_laser_direction of current_norm_coords vs mirror->position_norm.
+                        // this will be relevantly signed because getSignedComponentAlongDirection gives signed output.
+                        // add that difference to norm_coords along current_direction. again signs are accounted for because directionToVector gives signed output.
+                        // differences along the other axis (the one orthogonal to both current dir and next dir) are ignored, because they don't change point of reflection
+                        // to get norm coords, add corresponding difference, plus norm_coord_difference along the axes that aren't current_direction axis
+                        Direction next_laser_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
+                        Vec3 norm_coord_difference = vec3Subtract(current_norm_coords, mirror->position_norm);
+                        float difference_along_next_laser_direction_axis = getSignedComponentAlongDirection(next_laser_direction, norm_coord_difference);
+                        Vec3 corresponding_difference_along_current_direction_axis = vec3ScalarMultiply(directionToVector(current_direction), difference_along_next_laser_direction_axis);
+                        Vec3 norm_coord_difference_not_along_current_direction_axis = vec3ZeroComponentAlongDirection(current_direction, norm_coord_difference);
+                        current_norm_coords = vec3Add(mirror->position_norm, vec3Add(norm_coord_difference_not_along_current_direction_axis, corresponding_difference_along_current_direction_axis));
+
+                        if (!end_here)
+                        {
+                            id_to_skip = mirror->id;
+                            id_to_skip_timer = 2;
+                            no_more_turns = false;
+                            current_direction = next_laser_direction;
+                        }
+                        lb->end_coords = current_norm_coords;
+                        advance_tile = false;
+                        break;
+                    }
+
+                    // else, hit type is something that isn't NONE - do default behaviour
+                    //if (hit_type != NONE)
+                    {
+                        // if entity there could be a real hit with a passthrough. in any other case, just stop here.
+                        if (isEntity(hit_type))
+                        {
+                            Entity* e = {0};
+                            if (this_is_th) e = getEntityFromId(th.id);
+                            else e = getEntityAtCoords(current_tile_coords);
+
+                            // check if should skip this id, if so passthrough
+                            bool passthrough = false;
+                            if (e->id == id_to_skip) passthrough = true;
+
+                            // default distance check for passthrough
+                            float distance_from_entity = getDistanceFromLaserAlongAxis(current_direction, current_norm_coords, e->position_norm);
+                            if (distance_from_entity > 0.5) passthrough = true;
+
+                            if (passthrough)
+                            {
+                                // passthrough
+                                continue;
+                            }
+
+                            if (distance_from_entity == 0)
+                            {
+                                lb->end_coords = e->position_norm;
+                                current_norm_coords = e->position_norm;
+                                advance_tile = false;
+                                break;
+                            }
+                        }
+                        lb->end_coords = current_norm_coords;
+                        advance_tile = false;
+                        break;
+                    }
+                }
+                
+                if (advance_tile)
+                {
+                    current_norm_coords = vec3Add(directionToVector(current_direction), current_norm_coords);
+                    current_tile_coords = roundNormCoordsToInt(current_norm_coords);
+                }
+                else break;
             }
 
-            if (no_more_turns) break;
+            if (no_more_turns) 
+            break;
         }
     }
 }
@@ -3638,12 +3645,12 @@ bool performUndo(int32 undo_animation_time)
                                     createTrailingHitbox(PLAYER_ID, int3Add(int3ScalarMultiply(AXIS_Y, height_index), old_coords), undo_animation_time, PLAYER);
                                 }
                             }
-                            else
+                            else // player moving normally
                             {
                                 createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, PLAYER_ID, undo_animation_time);
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                                 // handle trailing hitbox
-                                createTrailingHitbox(PLAYER_ID, normCoordsToInt(old_position), TRAILING_HITBOX_UNDO_TIME, PLAYER);
+                                createTrailingHitbox(PLAYER_ID, normCoordsToInt(old_position), 3, PLAYER); // TODO: figure out timings in this code
                             }
                         }
                         else if (e->id == PACK_ID)
@@ -3674,7 +3681,7 @@ bool performUndo(int32 undo_animation_time)
                                 createPackRotationAnimation(intCoordsToNorm(old_player_coords), old_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, undo_animation_time);
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                                 // handle trailing hitboxes
-                                createTrailingHitbox(PACK_ID, old_coords, TRAILING_HITBOX_UNDO_TIME, PACK);
+                                createTrailingHitbox(PACK_ID, old_coords, TRAILING_HITBOX_TIME, PACK);
                                 createTrailingHitbox(PACK_ID, getNextCoords(pack->coords, oppositeDirection(player_to_new_pack_dir)), undo_animation_time, PACK); 
                                 createTrailingHitbox(PACK_ID, pack->coords, undo_animation_time, PACK);
                             }
@@ -3728,7 +3735,7 @@ bool performUndo(int32 undo_animation_time)
                                 createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, PACK_ID, undo_animation_time);
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                                 // handle trailing hitbox
-                                createTrailingHitbox(PACK_ID, normCoordsToInt(old_position), TRAILING_HITBOX_UNDO_TIME, PACK);
+                                createTrailingHitbox(PACK_ID, normCoordsToInt(old_position), TRAILING_HITBOX_TIME, PACK);
                             }
                         }
                         else if (dy != 0 && (dx != 0 || dz != 0))
@@ -3751,7 +3758,7 @@ bool performUndo(int32 undo_animation_time)
                             createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, e->id, undo_animation_time);
                             e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                             // handle trailing hitbox
-                            createTrailingHitbox(e->id, normCoordsToInt(old_position), TRAILING_HITBOX_UNDO_TIME, type);
+                            createTrailingHitbox(e->id, normCoordsToInt(old_position), TRAILING_HITBOX_TIME, type);
                         }
                     }
                 }
