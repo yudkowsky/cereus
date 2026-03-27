@@ -80,6 +80,8 @@ typedef struct
     float length;
     Vec4 rotation;
     Vec4 color;
+    Vec4 start_clip_plane;
+    Vec4 end_clip_plane;
 }
 Laser;
 
@@ -110,6 +112,8 @@ typedef struct
     float view[16];
     float proj[16];
     Vec4 color;
+    Vec4 start_clip_plane;
+    Vec4 end_clip_plane;
 }
 LaserPushConstants;
 
@@ -3618,6 +3622,8 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
             laser->length   = command->scale.z;
             laser->rotation = command->rotation;
             laser->color    = command->color;
+            laser->start_clip_plane = command->start_clip_plane;
+            laser->end_clip_plane = command->end_clip_plane;
         }
         else if (type == MODEL_3D)
         {
@@ -4274,7 +4280,7 @@ void vulkanDraw(void)
             vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
         }
 
-        // lasers
+        // laser pass
         LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
         if (laser_mesh->index_count > 0)
         {
@@ -4304,10 +4310,14 @@ void vulkanDraw(void)
                         memcpy(pc.model, model_matrix, sizeof(pc.model));
                         memcpy(pc.view, view_matrix, sizeof(pc.view));
                         memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
+
                         float t = (float)shell / (float)iterations;
                         float intensity = 0.02f + (0.1f * t*t*t * laser->color.w) * 8.0f;
                         pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, intensity };
                         if (intensity > 0.4f) pc.color = (Vec4){ 1.0f, 1.0f, 1.0f, 0.9f };
+
+                        pc.start_clip_plane = laser->start_clip_plane;
+                        pc.end_clip_plane = laser->end_clip_plane;
 
                         vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &pc);
                         vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);

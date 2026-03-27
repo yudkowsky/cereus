@@ -158,6 +158,11 @@ typedef struct DrawCommand
     Vec4 rotation;
     Vec4 color;
     bool do_aabb;
+
+    // used only for making sure lasers aren't partially visible through mirrors.
+    // TODO: find some more intelligent way of packing this information so not every call needs this
+    Vec4 start_clip_plane;
+	Vec4 end_clip_plane;
 }
 DrawCommand;
 
