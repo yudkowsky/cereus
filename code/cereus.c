@@ -2716,6 +2716,14 @@ float getDistanceFromLaserAlongAxis(Direction laser_direction, Vec3 laser_positi
     }
 }
 
+
+Vec3 getNormCoordsWithEntityCoordAlongAxis(Direction direction, Vec3 current_norm_coords, Vec3 mirror_position)
+{
+    Vec3 norm_coords_not_along_axis = vec3ZeroComponentAlongDirection(direction, current_norm_coords);
+    Vec3 mirror_coords_along_axis = vec3ScalarMultiply(directionToVector(direction), getSignedComponentAlongDirection(direction, mirror_position));
+    return vec3Add(norm_coords_not_along_axis, mirror_coords_along_axis);
+}
+
 /*
 int32 findNextFreeInLaserBuffer()
 {
@@ -2725,6 +2733,7 @@ int32 findNextFreeInLaserBuffer()
 */
 
 // handles where lasers go. the complicated part of this function handles when mirrors are moving around, and offsets the lasers visually by a bit.
+// TODO: insert small sphere at mirror reflection point
 void updateLaserBuffer()
 {
     Entity* player = &next_world_state.player;
@@ -2800,7 +2809,9 @@ void updateLaserBuffer()
             LaserBuffer* lb = &laser_buffer[source_index * MAX_LASER_TURNS_ALLOWED + laser_turn_index];
 
             // start of some segment: always move one tile forward from where we are before we start checking for anything
-            lb->start_coords = current_norm_coords;
+            float laser_source_start_offset = game_shader_mode == OLD ? 0.5f : 0.4f;
+            if (laser_turn_index == 0) lb->start_coords = vec3Add(source->position_norm, vec3ScalarMultiply(directionToVector(current_direction), laser_source_start_offset));
+            else lb->start_coords = current_norm_coords;
             lb->direction = current_direction;
             lb->color = source->color;
             if (laser_turn_index > 0) lb->start_clip_plane = laser_buffer[source_index * MAX_LASER_TURNS_ALLOWED + laser_turn_index - 1].end_clip_plane;
@@ -2853,15 +2864,10 @@ void updateLaserBuffer()
                             // passthrough
                             continue;
                         }
-                        if (distance_from_player == 0)
-                        {
-                            lb->end_coords = player->position_norm;
-                            current_norm_coords = player->position_norm;
-                        }
-                        else
-                        {
-                            lb->end_coords = current_norm_coords;
-                        }
+
+                        Vec3 coords_without_offset = getNormCoordsWithEntityCoordAlongAxis(current_direction, current_norm_coords, player->position_norm);
+                        lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), -0.375f));
+                        current_norm_coords = player->position_norm;
 
                         // set player color based on laser
                         LaserColor laser_color = colorToLaserColor(lb->color);
@@ -2917,9 +2923,7 @@ void updateLaserBuffer()
                         {
                             // hit side of mirror which doesnt reflect
                             // TODO: because of angled shape of mirror, this check is too aggressive - should passthrough if distance from the plane the mirror sits on is >0.2 or something
-                            Vec3 norm_coords_not_along_axis = vec3ZeroComponentAlongDirection(current_direction, current_norm_coords);
-                            Vec3 mirror_coords_along_axis = vec3ScalarMultiply(directionToVector(current_direction), getSignedComponentAlongDirection(current_direction, mirror->position_norm));
-                            Vec3 coords_without_offset = vec3Add(norm_coords_not_along_axis, mirror_coords_along_axis);
+                            Vec3 coords_without_offset = getNormCoordsWithEntityCoordAlongAxis(current_direction, current_norm_coords, mirror->position_norm);
                             lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), -0.38f));
                             advance_tile = false;
                             break;
@@ -2981,6 +2985,8 @@ void updateLaserBuffer()
                     // hit type is something that isn't NONE - do default behaviour
                     //if (hit_type != NONE)
                     {
+                        Vec3 coords_without_offset = VEC3_0;
+                        float offset = 0.0f;
                         // if entity there could be a real hit with a passthrough. in any other case, just stop here.
                         if (isEntity(hit_type))
                         {
@@ -3002,15 +3008,17 @@ void updateLaserBuffer()
                                 continue;
                             }
 
-                            if (distance_from_entity == 0)
-                            {
-                                lb->end_coords = e->position_norm;
-                                current_norm_coords = e->position_norm;
-                                advance_tile = false;
-                                break;
-                            }
+                            coords_without_offset = getNormCoordsWithEntityCoordAlongAxis(current_direction, current_norm_coords, e->position_norm);
+                            offset = -0.5f;
+                            if (e->id == PACK_ID) offset = -0.375f;
                         }
-                        lb->end_coords = current_norm_coords;
+                        else
+                        {
+                            coords_without_offset = getNormCoordsWithEntityCoordAlongAxis(current_direction, current_norm_coords, intCoordsToNorm(current_tile_coords));
+                            offset = -0.5f;
+                        }
+
+                        lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), offset));
                         advance_tile = false;
                         break;
                     }

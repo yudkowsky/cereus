@@ -3448,12 +3448,22 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     {
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
+        /*
         color_blend_attachment_state.blendEnable = VK_TRUE;
         color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
         color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
+        */
+
+        color_blend_attachment_state.blendEnable = VK_TRUE;
+        color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
+        color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
         color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
 
         depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
@@ -4301,30 +4311,31 @@ void vulkanDraw(void)
                 {
                     Laser* laser = &laser_instances[laser_index];
 
-                    float width = 1.5f;
+                    float width = 2.0f;
                     Vec3 laser_scale = { width, width, laser->length };
 
                     float model_matrix[16];
                     mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
 
-                    LaserPushConstants pc = {0};
-                    memcpy(pc.model, model_matrix, sizeof(pc.model));
+                    LaserPushConstants laser_pc = {0};
+                    memcpy(laser_pc.model, model_matrix, sizeof(laser_pc.model));
 
                     float intersection_matrix[16];
                     Vec3 unit_scale = { 1.0f, 1.0f, 1.0f };
                     mat4BuildTRS(intersection_matrix, laser->center, laser->rotation, unit_scale);
                     float inverse_intersection_matrix[16];
                     mat4Inverse(inverse_intersection_matrix, intersection_matrix);
-                    memcpy(pc.inverse_intersection, inverse_intersection_matrix, sizeof(inverse_intersection_matrix));
-                    memcpy(pc.proj_view_matrix, proj_view_matrix, sizeof(proj_view_matrix));
+                    memcpy(laser_pc.inverse_intersection, inverse_intersection_matrix, sizeof(inverse_intersection_matrix));
 
-                    pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 0.1f };
-                    pc.start_clip_plane = laser->start_clip_plane;
-                    pc.end_clip_plane = laser->end_clip_plane;
-                    pc.camera_position = vulkan_camera.coords;
-                    pc.half_length = laser->length * 0.5f;
+                    memcpy(laser_pc.proj_view_matrix, proj_view_matrix, sizeof(proj_view_matrix));
 
-                    vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &pc);
+                    laser_pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 0.1f };
+                    laser_pc.start_clip_plane = laser->start_clip_plane;
+                    laser_pc.end_clip_plane = laser->end_clip_plane;
+                    laser_pc.camera_position = vulkan_camera.coords;
+                    laser_pc.half_length = (laser->length) * 0.5f;
+
+                    vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &laser_pc);
                     vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
                 }
             }

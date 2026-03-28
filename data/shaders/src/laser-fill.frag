@@ -17,7 +17,7 @@ layout(push_constant) uniform PC
 }
 pc;
 
-const float radius = 0.3;
+const float radius = 1.0;
 
 void main()
 {
@@ -54,7 +54,9 @@ void main()
     vec2 closest_point = ray_origin.xy + t_closest * ray_direction.xy;
     float closest_distance = length(closest_point);
 
-    float intensity = pow(1.0 - clamp(closest_distance / 0.30, 0.0, 1.0), 3.0);
-    if (intensity > 0.6) out_color = vec4(pc.color.rgb + 0.8, 1.0);
-    else out_color = vec4(pc.color.rgb * intensity * 1.0/0.6, 1.0);
+    float intensity = pow(1.0 - clamp(closest_distance / 0.5, 0.0, 1.0), 4.0);
+    //if (intensity > 0.65 && intensity < 0.75) out_color = vec4(vec3(0.0), 1.0);
+    if (intensity > 0.65) out_color = vec4(pc.color.rgb + 0.6, 1.0);
+    //else out_color = vec4(pc.color.rgb * intensity * 1.0/0.55, 1.0);
+    else out_color = vec4(pc.color.rgb, intensity * 1.0/0.55);
 }
