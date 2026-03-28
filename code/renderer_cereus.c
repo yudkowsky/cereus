@@ -109,11 +109,13 @@ PushConstants; // TODO: rename. also don't use for sprites - they don't need the
 typedef struct 
 {
     float model[16];
-    float view[16];
-    float proj[16];
+    float inverse_intersection[16];
+    float proj_view_matrix[16];
     Vec4 color;
     Vec4 start_clip_plane;
     Vec4 end_clip_plane;
+    Vec3 camera_position;
+    float half_length;
 }
 LaserPushConstants;
 
@@ -4290,57 +4292,40 @@ void vulkanDraw(void)
             vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_vb_offset);
             vkCmdBindIndexBuffer(command_buffer, laser_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
+            float proj_view_matrix[16] = {0};
+            mat4Multiply(proj_view_matrix, projection_matrix, view_matrix);
+
             if (shader_mode != OUTLINE_TEST)
             {
                 for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
                 {
                     Laser* laser = &laser_instances[laser_index];
 
-                    uint32 iterations = 15;
-                    for (uint32 shell = 0; shell < iterations; shell++)
-                    {
-                        float width = 1.5f;
-                        float radius_scale = width - (float)shell * (width / (float)iterations);
-                        Vec3 laser_scale = { radius_scale, radius_scale, laser->length };
+                    float width = 1.5f;
+                    Vec3 laser_scale = { width, width, laser->length };
 
-                        float model_matrix[16];
-                        mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
+                    float model_matrix[16];
+                    mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
 
-                        LaserPushConstants pc = {0};
-                        memcpy(pc.model, model_matrix, sizeof(pc.model));
-                        memcpy(pc.view, view_matrix, sizeof(pc.view));
-                        memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
+                    LaserPushConstants pc = {0};
+                    memcpy(pc.model, model_matrix, sizeof(pc.model));
 
-                        float t = (float)shell / (float)iterations;
-                        float intensity = 0.02f + (t*t*t * laser->color.w);
-                        pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, intensity };
-                        if (intensity > 0.5f) 
-                        {
-                            float not_primary_color_value = 0.85f;
-                            if (laser->color.x > 0.5f)
-                            {
-                                pc.color.y = not_primary_color_value;
-                                pc.color.z = not_primary_color_value;
-                            }
-                            if (laser->color.y > 0.5f)
-                            {
-                                pc.color.x = not_primary_color_value;
-                                pc.color.z = not_primary_color_value;
-                            }
-                            if (laser->color.z > 0.5f)
-                            {
-                                pc.color.x = not_primary_color_value;
-                                pc.color.y = not_primary_color_value;
-                            }
-                        }
-                        if (intensity > 0.6f) pc.color = (Vec4){ 0.0f, 0.0f, 0.0f, 0.0f };
+                    float intersection_matrix[16];
+                    Vec3 unit_scale = { 1.0f, 1.0f, 1.0f };
+                    mat4BuildTRS(intersection_matrix, laser->center, laser->rotation, unit_scale);
+                    float inverse_intersection_matrix[16];
+                    mat4Inverse(inverse_intersection_matrix, intersection_matrix);
+                    memcpy(pc.inverse_intersection, inverse_intersection_matrix, sizeof(inverse_intersection_matrix));
+                    memcpy(pc.proj_view_matrix, proj_view_matrix, sizeof(proj_view_matrix));
 
-                        pc.start_clip_plane = laser->start_clip_plane;
-                        pc.end_clip_plane = laser->end_clip_plane;
+                    pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 0.1f };
+                    pc.start_clip_plane = laser->start_clip_plane;
+                    pc.end_clip_plane = laser->end_clip_plane;
+                    pc.camera_position = vulkan_camera.coords;
+                    pc.half_length = laser->length * 0.5f;
 
-                        vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &pc);
-                        vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
-                    }
+                    vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &pc);
+                    vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
                 }
             }
         }

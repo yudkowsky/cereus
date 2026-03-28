@@ -401,8 +401,6 @@ const int32 CLIMB_ANIMATION_TIME = 9;
 const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6;
 const int32 FAILED_ANIMATION_TIME = 8;
 const int32 STANDARD_IN_MOTION_TIME = 7;
-const int32 STANDARD_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH = 4;
-const int32 PUSH_FROM_TURN_IN_MOTION_TIME_FOR_LASER_PASSTHROUGH = 2;
 const int32 SUCCESSFUL_TP_TIME = 8;
 const int32 FAILED_TP_TIME = 8;
 
@@ -416,9 +414,8 @@ const int32 MAX_ENTITY_INSTANCE_COUNT = 64;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
 const int32 MAX_ANIMATION_COUNT = 32;
 const int32 MAX_SOURCE_COUNT = 32;
-const int32 MAX_LASER_TRAVEL_DISTANCE = 128;
+const int32 MAX_LASER_TRAVEL_DISTANCE = 256;
 const int32 MAX_LASER_TURNS_ALLOWED = 16;
-const int32 MAX_LASER_AGE = 5;
 const int32 MAX_PUSHABLE_STACK_SIZE = 32;
 const int32 MAX_TRAILING_HITBOX_COUNT = 32;
 const int32 MAX_LEVEL_COUNT = 64;
@@ -1317,7 +1314,6 @@ int32 findNextFreeInResetBlock(Entity* rb)
     FOR(to_reset_index, MAX_RESET_COUNT) if (rb->reset_info[to_reset_index].id == -1) return to_reset_index;
     return -1;
 }
-
 
 void loadResetBlockInfo(FILE* file)
 {

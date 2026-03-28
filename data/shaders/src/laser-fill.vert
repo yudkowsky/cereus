@@ -9,10 +9,13 @@ layout(location = 0) out vec3 world_pos;
 layout(push_constant) uniform PC
 {
     mat4 model;
-    mat4 view;
-    mat4 projection;
+    mat4 inverse_intersection;
+    mat4 proj_view;
     vec4 color;
-    float cam_model_x, cam_model_y, cam_model_z;
+    vec4 start_clip_plane;
+    vec4 end_clip_plane;
+    vec3 camera_position;
+    float radius;
 }
 pc;
 
@@ -20,5 +23,5 @@ void main()
 {
     vec4 world = pc.model * vec4(in_position, 1.0);
     world_pos = world.xyz;
-    gl_Position = pc.projection * pc.view * world;
+    gl_Position = pc.proj_view * world;
 }
