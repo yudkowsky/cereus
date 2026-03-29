@@ -32,6 +32,11 @@ bool blackTest(vec4 colors)
     return (dot(colors.rgb, vec3(1.0)) < 0.05 && colors.a > 0.5);
 }
 
+bool whiteTest(vec4 colors)
+{
+    return (dot(colors.rgb, vec3(1.0)) > 2.0 && colors.a > 0.5);
+}
+
 void main()
 {
     // contains index into fragment pool of most recent fragment written at this point
@@ -100,18 +105,20 @@ void main()
         float group_alpha = colors[sorted_index].a;
         float group_depth = depths[sorted_index];
         bool has_black = blackTest(colors[sorted_index]);
+        bool has_white = whiteTest(colors[sorted_index]);
 
 		// absorb colors into one group if they're within depth allowed for the same group
         int scan_for_same_group = sorted_index + 1;
         while (scan_for_same_group < count && (depths[scan_for_same_group] - group_depth) < pc.depth_threshold)
         {
             if (blackTest(colors[scan_for_same_group])) has_black = true;
+            if (whiteTest(colors[scan_for_same_group])) has_white = true;
             group_color += colors[scan_for_same_group].rgb * colors[scan_for_same_group].a;
             group_alpha = max(group_alpha, colors[scan_for_same_group].a);
             scan_for_same_group++;
         }
 
-        if (has_black)
+        if (has_black && !has_white)
         {
             group_color = vec3(0.0);
             group_alpha = 1.0;
