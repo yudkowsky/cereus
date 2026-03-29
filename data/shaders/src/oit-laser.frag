@@ -45,9 +45,24 @@ void main()
     float closest_distance = length(closest_point);
 
     float intensity = pow(1.0 - clamp(closest_distance / 0.4, 0.0, 1.0), 1.5);
+
+    float rate = fwidth(intensity);
+    float boundary = 0.80;
+    float pixel_dist = abs(intensity - boundary) / rate;
+
     vec4 laser_color;
-    if (intensity > 0.80) laser_color = vec4(pc.color.rgb + 0.6, 1.0);
-    else laser_color = vec4(pc.color.rgb, intensity * 1.0 / 0.8);
+    if (pixel_dist < 1.0)
+    {
+        laser_color = vec4(0.0, 0.0, 0.0, 1.0);
+    }
+    else if (intensity > 0.80)
+    {
+        laser_color = vec4(pc.color.rgb + 0.6, 1.0);
+    }
+    else
+    {
+        laser_color = vec4(pc.color.rgb, intensity * 1.0 / 0.8);
+    }
 
     if (laser_color.a < 0.01) discard;
 
