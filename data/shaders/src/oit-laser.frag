@@ -42,26 +42,32 @@ void main()
     if (closest_3d.z < -pc.half_length) t_closest = (-pc.half_length - ray_origin.z) / ray_direction.z;
     if (closest_3d.z >  pc.half_length) t_closest = ( pc.half_length - ray_origin.z) / ray_direction.z;
     vec2 closest_point = ray_origin.xy + t_closest * ray_direction.xy;
-    float closest_distance = length(closest_point);
 
-    float intensity = pow(1.0 - clamp(closest_distance / 0.4, 0.0, 1.0), 1.5);
+    float closest_distance = length(closest_point);
+    float distance_per_pixel = length(vec2(dFdx(closest_distance), dFdy(closest_distance)));
+    float outline_width_pixels = 2.0;
+    float outline_band = outline_width_pixels * distance_per_pixel;
 
     float outline_intensity_boundary = 0.8;
+    float beam_radius = 0.4;
+    float falloff_exponent = 1.5;
+    float outline_distance = beam_radius * (1.0 - pow(outline_intensity_boundary, 1.0 / falloff_exponent));
+    float intensity = pow(1.0 - clamp(closest_distance / beam_radius, 0.0, 1.0), falloff_exponent);
 
-	// make outlines constant screen-space width
-    float intensity_change_per_channel = fwidth(intensity);
-    float pixels_from_outline = abs(intensity - outline_intensity_boundary) / intensity_change_per_channel;
+    bool is_outline = (closest_distance < outline_distance + outline_band) && (closest_distance > outline_distance);
 
     vec4 laser_color;
-	bool is_outline = false;
-
     if (intensity > outline_intensity_boundary)
     {
-        laser_color = vec4(pc.color.rgb + 0.4, 1.0);
+        laser_color = vec4(pc.color.rgb + 0.5, 1.0);
+        is_outline = false;
+    }
+    else if (is_outline)
+    {
+        laser_color = vec4(pc.color.rgb, intensity / outline_intensity_boundary);
     }
     else
     {
-		if (pixels_from_outline < 2.0) is_outline = true; // change for outline width
         laser_color = vec4(pc.color.rgb, intensity / outline_intensity_boundary);
     }
 
