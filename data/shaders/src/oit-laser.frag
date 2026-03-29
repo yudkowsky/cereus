@@ -46,22 +46,23 @@ void main()
 
     float intensity = pow(1.0 - clamp(closest_distance / 0.4, 0.0, 1.0), 1.5);
 
-    float rate = fwidth(intensity);
-    float boundary = 0.80;
-    float pixel_dist = abs(intensity - boundary) / rate;
+    float outline_intensity_boundary = 0.8;
+
+	// make outlines constant screen-space width
+    float intensity_change_per_channel = fwidth(intensity);
+    float pixels_from_outline = abs(intensity - outline_intensity_boundary) / intensity_change_per_channel;
 
     vec4 laser_color;
-    if (pixel_dist < 1.0)
+	bool is_outline = false;
+
+    if (intensity > outline_intensity_boundary)
     {
-        laser_color = vec4(0.0, 0.0, 0.0, 1.0);
-    }
-    else if (intensity > 0.80)
-    {
-        laser_color = vec4(pc.color.rgb + 0.6, 1.0);
+        laser_color = vec4(pc.color.rgb + 0.4, 1.0);
     }
     else
     {
-        laser_color = vec4(pc.color.rgb, intensity * 1.0 / 0.8);
+		if (pixels_from_outline < 2.0) is_outline = true; // change for outline width
+        laser_color = vec4(pc.color.rgb, intensity / outline_intensity_boundary);
     }
 
     if (laser_color.a < 0.01) discard;
@@ -76,5 +77,5 @@ void main()
 
     uint old_head = imageAtomicExchange(head_image, ivec2(gl_FragCoord.xy), index);
 
-    fragments[index] = uvec4(packed, floatBitsToUint(gl_FragCoord.z), old_head, 0);
+    fragments[index] = uvec4(packed, floatBitsToUint(gl_FragCoord.z), old_head, is_outline);
 }

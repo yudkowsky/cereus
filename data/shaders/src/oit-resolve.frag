@@ -27,30 +27,22 @@ float linearize(float ndc_z)
     return (near * far) / (far - ndc_z * (far - near));
 }
 
-bool blackTest(vec4 colors)
+bool whiteTest(vec4 c)
 {
-    return (dot(colors.rgb, vec3(1.0)) < 0.05 && colors.a > 0.5);
-}
-
-bool whiteTest(vec4 colors)
-{
-    return (dot(colors.rgb, vec3(1.0)) > 2.0 && colors.a > 0.5);
+    return (dot(c.rgb, vec3(1.0)) > 1.5 && c.a > 0.5);
 }
 
 void main()
 {
-    // contains index into fragment pool of most recent fragment written at this point
     uint head_of_list = imageLoad(head_image, ivec2(gl_FragCoord.xy)).r;
-
-	// discard fragment if no laser has been written at all
     if (head_of_list == 0xFFFFFFFF) discard;
 
-	// get depth of closest scene geometry. used to reject lasers behind geometry later
     vec2 uv = gl_FragCoord.xy / vec2(textureSize(scene_depth, 0));
     float scene_z = texture(scene_depth, uv).r;
 
     vec4 colors[MAX_FRAGS];
     float depths[MAX_FRAGS];
+    uint flags[MAX_FRAGS];
     int count = 0;
 
     uint current_entry_in_list = head_of_list;
@@ -61,7 +53,6 @@ void main()
 
         if (frag_depth <= scene_z)
         {
-            // unpack 32bit color
             uint packed = frag.x;
             colors[count] = vec4(
                 float((packed >> 24) & 0xFFu) / 255.0,
@@ -70,6 +61,7 @@ void main()
                 float( packed        & 0xFFu) / 255.0
             );
             depths[count] = linearize(frag_depth);
+            flags[count] = frag.w;
             count++;
         }
 
@@ -83,15 +75,18 @@ void main()
     {
         float depth_to_insert = depths[unsorted_index];
         vec4 color_to_insert = colors[unsorted_index];
+        uint flag_to_insert = flags[unsorted_index];
         int scan = unsorted_index - 1;
         while (scan >= 0 && depths[scan] > depth_to_insert)
         {
             depths[scan + 1] = depths[scan];
             colors[scan + 1] = colors[scan];
+            flags[scan + 1] = flags[scan];
             scan--;
         }
         depths[scan + 1] = depth_to_insert;
         colors[scan + 1] = color_to_insert;
+        flags[scan + 1] = flag_to_insert;
     }
 
     // group by depth threshold, composite front-to-back
@@ -101,30 +96,40 @@ void main()
     int sorted_index = 0;
     while (sorted_index < count)
     {
-        vec3 group_color = colors[sorted_index].rgb * colors[sorted_index].a;
-        float group_alpha = colors[sorted_index].a;
         float group_depth = depths[sorted_index];
-        bool has_black = blackTest(colors[sorted_index]);
-        bool has_white = whiteTest(colors[sorted_index]);
+        bool has_outline = false;
+        bool has_white = false;
 
-		// absorb colors into one group if they're within depth allowed for the same group
-        int scan_for_same_group = sorted_index + 1;
-        while (scan_for_same_group < count && (depths[scan_for_same_group] - group_depth) < pc.depth_threshold)
+        // first pass: scan group bounds and check for outline / white
+        int scan_for_same_group = sorted_index;
+        while (scan_for_same_group < count && (scan_for_same_group == sorted_index || (depths[scan_for_same_group] - group_depth) < pc.depth_threshold))
         {
-            if (blackTest(colors[scan_for_same_group])) has_black = true;
+            if (flags[scan_for_same_group] == 1) has_outline = true;
             if (whiteTest(colors[scan_for_same_group])) has_white = true;
-            group_color += colors[scan_for_same_group].rgb * colors[scan_for_same_group].a;
-            group_alpha = max(group_alpha, colors[scan_for_same_group].a);
             scan_for_same_group++;
         }
 
-        if (has_black && !has_white)
+        bool outline_wins = has_outline && !has_white;
+
+        // second pass: build group color
+        vec3 group_color = vec3(0.0);
+        float group_alpha = 0.0;
+
+        if (outline_wins)
         {
             group_color = vec3(0.0);
             group_alpha = 1.0;
         }
-		else
-		{
+        else
+        {
+            int group_scan = sorted_index;
+            while (group_scan < scan_for_same_group)
+            {
+                vec4 c = colors[group_scan];
+                group_color = max(group_color, c.rgb * c.a);
+                group_alpha = max(group_alpha, c.a);
+                group_scan++;
+            }
             group_color = min(group_color, vec3(1.0));
         }
 
