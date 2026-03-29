@@ -2620,8 +2620,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         overlay_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         overlay_attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
         overlay_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        overlay_attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        overlay_attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        overlay_attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        overlay_attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
         VkAttachmentReference overlay_color_reference = {0};
         overlay_color_reference.attachment = 0;
@@ -2629,7 +2629,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         VkAttachmentReference overlay_depth_reference = {0};
         overlay_depth_reference.attachment = 1;
-        overlay_depth_reference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        overlay_depth_reference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
         VkSubpassDescription overlay_subpass = {0};
         overlay_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -3430,11 +3430,12 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     // OIT RESOLVE PIPELINE LAYOUT
 
     {
-        VkDescriptorSetLayout oit_resolve_set_layouts[3] = 
+        VkDescriptorSetLayout oit_resolve_set_layouts[4] = 
         {
             vulkan_state.storage_image_descriptor_set_layout,  // head image
             vulkan_state.ssbo_descriptor_set_layout,           // fragment pool
             vulkan_state.ssbo_descriptor_set_layout,           // counter (not really needed here)
+            vulkan_state.descriptor_set_layout,				   // depth sampler
         };
 
         VkPushConstantRange push_constant_range = {0};
@@ -3444,7 +3445,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         VkPipelineLayoutCreateInfo layout_ci = {0};
         layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layout_ci.setLayoutCount = 3;
+        layout_ci.setLayoutCount = 4;
         layout_ci.pSetLayouts = oit_resolve_set_layouts;
         layout_ci.pushConstantRangeCount = 1;
         layout_ci.pPushConstantRanges = &push_constant_range;
@@ -3681,10 +3682,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         color_blend_attachment_state.blendEnable = VK_FALSE;
         color_blend_attachment_state.colorWriteMask = 0;
 
-        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthTestEnable = VK_FALSE;
         depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
-        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
-        depth_stencil_state_creation_info.stencilTestEnable = VK_FALSE;
 
         rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
 
@@ -4072,7 +4071,6 @@ void vulkanDraw(void)
     render_pass_begin_info.pClearValues = clear_values;
 
     // UNDERWATER SCENE PASS (unused right now, because solid color fallback on ray miss)
-    // TODO: for temporary fallback, maybe just grab cubes and use those as fallback? so that no double rendering of entities under the water, but still some distortion effect
 
     if (water_instance_count > 0)
     {
@@ -4198,7 +4196,8 @@ void vulkanDraw(void)
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.water_compute_pipeline);
 
-            VkDescriptorSet compute_sets[8] = {
+            VkDescriptorSet compute_sets[8] = 
+            {
                 vulkan_state.water_rt_storage_descriptor_set,
                 vulkan_state.depth_descriptor_set,
                 vulkan_state.scene_copy_descriptor_set,
@@ -4443,6 +4442,26 @@ void vulkanDraw(void)
     // OVERLAY PASS (editor outlines + lasers + sprites)
 
     {
+        if (shader_mode == OLD)
+        {
+            VkImageMemoryBarrier depth_to_read = {0};
+            depth_to_read.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            depth_to_read.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+            depth_to_read.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+            depth_to_read.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            depth_to_read.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            depth_to_read.image = vulkan_state.depth_image;
+            depth_to_read.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+            depth_to_read.subresourceRange.baseMipLevel = 0;
+            depth_to_read.subresourceRange.levelCount = 1;
+            depth_to_read.subresourceRange.baseArrayLayer = 0;
+            depth_to_read.subresourceRange.layerCount = 1;
+            depth_to_read.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            depth_to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+            vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &depth_to_read);
+        }
+
         // clear oit resources 
         {
             // transition head image to TRANSFER_DST for clearing
@@ -4580,7 +4599,7 @@ void vulkanDraw(void)
             {
                 vulkan_state.oit_head_storage_descriptor_set,
                 vulkan_state.oit_fragment_pool_descriptor_set,
-                vulkan_state.oit_counter_descriptor_set
+                vulkan_state.oit_counter_descriptor_set,
             };
             vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.oit_laser_pipeline_layout, 0, 3, oit_sets, 0, 0);
 
@@ -4638,15 +4657,16 @@ void vulkanDraw(void)
         {
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.oit_resolve_pipeline);
 
-            VkDescriptorSet oit_sets[3] = 
+            VkDescriptorSet oit_sets[4] = 
             {
                 vulkan_state.oit_head_storage_descriptor_set,
                 vulkan_state.oit_fragment_pool_descriptor_set,
-                vulkan_state.oit_counter_descriptor_set
+                vulkan_state.oit_counter_descriptor_set,
+                vulkan_state.depth_descriptor_set,
             };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.oit_resolve_pipeline_layout, 0, 3, oit_sets, 0, 0);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.oit_resolve_pipeline_layout, 0, 4, oit_sets, 0, 0);
 
-            float oit_depth_threshold = 0.001f;
+            float oit_depth_threshold = 0.5f;
             vkCmdPushConstants(command_buffer, vulkan_state.oit_resolve_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float), &oit_depth_threshold);
 
             vkCmdDraw(command_buffer, 3, 1, 0, 0);
