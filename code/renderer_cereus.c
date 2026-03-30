@@ -4633,8 +4633,24 @@ void vulkanDraw(void)
                 memcpy(laser_pc.proj_view_matrix, proj_view_matrix, sizeof(proj_view_matrix));
 
                 laser_pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 0.1f };
-                laser_pc.start_clip_plane = laser->start_clip_plane;
-                laser_pc.end_clip_plane = laser->end_clip_plane;
+
+                float* m = intersection_matrix;
+                Vec4 ws = laser->start_clip_plane;
+                laser_pc.start_clip_plane = (Vec4){
+                    m[0]*ws.x  + m[1]*ws.y  + m[2]*ws.z  + m[3]*ws.w,
+                    m[4]*ws.x  + m[5]*ws.y  + m[6]*ws.z  + m[7]*ws.w,
+                    m[8]*ws.x  + m[9]*ws.y  + m[10]*ws.z + m[11]*ws.w,
+                    m[12]*ws.x + m[13]*ws.y + m[14]*ws.z + m[15]*ws.w,
+                };
+
+                ws = laser->end_clip_plane;
+                laser_pc.end_clip_plane = (Vec4){
+                    m[0]*ws.x  + m[1]*ws.y  + m[2]*ws.z  + m[3]*ws.w,
+                    m[4]*ws.x  + m[5]*ws.y  + m[6]*ws.z  + m[7]*ws.w,
+                    m[8]*ws.x  + m[9]*ws.y  + m[10]*ws.z + m[11]*ws.w,
+                    m[12]*ws.x + m[13]*ws.y + m[14]*ws.z + m[15]*ws.w,
+                };
+
                 laser_pc.camera_position = vulkan_camera.coords;
                 laser_pc.half_length = (laser->length) * 0.5f;
 
