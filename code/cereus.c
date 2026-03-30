@@ -396,7 +396,8 @@ const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT= 9;
 const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
 const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9;
 const int32 TURN_ANIMATION_TIME = 9; // somewhat hard coded, tied to PUSH_FROM_TURN...
-const int32 FALL_ANIMATION_TIME = 8; // hard coded (because acceleration in first fall anim must be constant)
+const int32 FALL_ANIMATION_TIME = 8; 
+const int32 FIRST_FALL_ANIMATION_TIME = 12;
 const int32 CLIMB_ANIMATION_TIME = 9;
 const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6;
 const int32 FAILED_ANIMATION_TIME = 8;
@@ -513,9 +514,9 @@ int32 undos_performed = 0;
 int32 undo_press_timer = 0;
 bool restart_last_turn = false;
 
-// controls how long until player is allowed to make action like movement. will rework when add buffered inputs
-int32 time_until_allow_game_input = 0;
+int32 time_until_allow_game_input = 0; // setting this to -1 means no more movement will be allowed at all
 int32 time_until_allow_meta_input = 0;
+int32 time_until_allow_undo_or_restart_input = 0;
 
 EditorState editor_state = {0};
 LaserBuffer laser_buffer[512] = {0}; // 512 = 64 max sources * 16 max laser turns
@@ -660,9 +661,9 @@ Vec3 intCoordsToNorm(Int3 int_coords)
     return (Vec3){ (float)int_coords.x, (float)int_coords.y, (float)int_coords.z };
 }
 
-Int3 normCoordsToInt(Vec3 norm_coords) 
+Int3 roundNormCoordsToInt(Vec3 position)
 {
-    return (Int3){ (int32)floorf(norm_coords.x + 0.5f), (int32)floorf(norm_coords.y + 0.5f), (int32)floorf(norm_coords.z + 0.5f) }; 
+    return (Int3){ (int32)roundf(position.x), (int32)roundf(position.y), (int32)roundf(position.z) };
 }
 
 bool intCoordsWithinLevelBounds(Int3 coords) 
@@ -1897,7 +1898,7 @@ Camera lerpCamera(Camera a, Camera b, float t, float target_plane_y)
 RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance)
 {
     RaycastHit output = {0};
-    Int3 current_cube = normCoordsToInt(start);
+    Int3 current_cube = roundNormCoordsToInt(start);
     start.x += 0.5;
     start.y += 0.5;
     start.z += 0.5;
@@ -2651,15 +2652,6 @@ TileType laserColorToType(Color color)
     }
 }
 
-Int3 roundNormCoordsToInt(Vec3 position)
-{
-    Int3 coords = {0};
-    coords.x = (int32)roundf(position.x);
-    coords.y = (int32)roundf(position.y);
-    coords.z = (int32)roundf(position.z);
-    return coords;
-}
-
 // will return negative of component along NORTH, WEST, and DOWN.
 float getSignedComponentAlongDirection(Direction direction, Vec3 vector)
 {
@@ -2723,14 +2715,6 @@ Vec3 getNormCoordsWithEntityCoordAlongAxis(Direction direction, Vec3 current_nor
     Vec3 mirror_coords_along_axis = vec3ScalarMultiply(directionToVector(direction), getSignedComponentAlongDirection(direction, mirror_position));
     return vec3Add(norm_coords_not_along_axis, mirror_coords_along_axis);
 }
-
-/*
-int32 findNextFreeInLaserBuffer()
-{
-    FOR(laser_buffer_index, MAX_SOURCE_COUNT) if (laser_buffer[laser_buffer_index].color == NO_COLOR) return laser_buffer_index;
-    return -1;
-}
-*/
 
 // handles where lasers go. the complicated part of this function handles when mirrors are moving around, and offsets the lasers visually by a bit.
 // TODO: insert small sphere at mirror reflection point
@@ -3040,61 +3024,88 @@ void updateLaserBuffer()
 
 // FALLING LOGIC
 
-// returns true iff object is able to fall as usual, but object collides with something instead.
-bool doFallingEntity(Entity* entity, bool do_animation)
+bool canFall(Entity* e)
 {
-    if (entity->removed) return false;
-    Int3 next_coords = getNextCoords(entity->coords, DOWN);
+    if (e->removed) return false;
+    Int3 next_coords = getNextCoords(e->coords, DOWN); 
+
+    // if tile below is not nothing - and it's not a removed entity, which should be treated as NONE - return early
+    // TODO: is there a good reason we don't just set the buffer to be NONE at this position? it shouldn't still be the entity type
     if (!intCoordsWithinLevelBounds(next_coords)) return false;
-    if (!(isPushable(getTileType(next_coords)) && getEntityAtCoords(next_coords)->removed) && getTileType(next_coords) != NONE) return true;
+    bool removed_entity = false;
+	if (isEntity(getTileType(next_coords)) && getEntityAtCoords(next_coords)->removed) removed_entity = true;
+    if (getTileType(next_coords) != NONE && !removed_entity) return false;
+
+    // don't do fall if trailing hitbox below TODO: see if this causes weirdness with new trailing hitbox system (now being more aggressive where trailing hitboxes are placed).
+    // in that case, add another check for closeness via position of the entity which cause the trailing hitbox
     TrailingHitbox _;
-    if (trailingHitboxAtCoords(next_coords, &_) && entity->id != PLAYER_ID) return true;
+    if (trailingHitboxAtCoords(next_coords, &_) /*&& e->id != PLAYER_ID*/) return false; // TODO: is this extra player check necessary?
+
+    return true;
+}
+
+void doFallingEntity(Entity* entity, bool do_animation)
+{
+    if (!canFall(entity)) return;
+
+    Entity* player = &next_world_state.player;
+
+    Int3 next_coords = getNextCoords(entity->coords, DOWN);
 
     int32 stack_size = getPushableStackSize(entity->coords);
     Int3 current_start_coords = entity->coords;
     Int3 current_end_coords = next_coords; 
     FOR(stack_fall_index, stack_size)
     {
-        Entity* entity_in_stack = getEntityAtCoords(current_start_coords);
-        if (entity_in_stack->removed) return false; // should never happen, shouldn't have removed entity in the middle of a stack somewhere
-        if (entity_in_stack->in_motion) return false; 
-        if (entity_in_stack == &next_world_state.pack && !pack_detached && stack_fall_index != 0) return false;
-        if (entity_in_stack == &next_world_state.player && !next_world_state.player.hit_by_red) time_until_allow_game_input = FALL_ANIMATION_TIME;
+        Entity* e_in_stack = getEntityAtCoords(current_start_coords);
+
+        // if any entities in the stack are removed, or moving, don't do the fall
+        if (e_in_stack->removed) return; // should never happen; shouldn't have removed entity in the middle of a stack somewhere
+        if (e_in_stack->in_motion) return; 
+
+        // if the enitity is pack, and pack in attached (and this isn't the entity on which the function was called), cut the stack size short below this, so the pack doesn't get dragged down
+        // similarly, if player is red, above a stack which is falling, break to allow the stack below to fall, but keep the player floating.
+        if (e_in_stack->id == PACK_ID && !pack_detached && stack_fall_index != 0) break;
+        if (e_in_stack->id == PLAYER_ID && player->hit_by_red) break;
+
+        // if player is in the stack, disable movement until fall has taken place
+        if (player->first_fall_already_done) time_until_allow_game_input = FIRST_FALL_ANIMATION_TIME;
+        else time_until_allow_game_input = FALL_ANIMATION_TIME;
 
         // check if this is going to be first fall
-        if (!entity_in_stack->first_fall_already_done)
+        if (!e_in_stack->first_fall_already_done)
         {
+            // first fall animation
             if (do_animation) 
             {
-                createFirstFallAnimation(intCoordsToNorm(current_start_coords), &entity_in_stack->position_norm, entity_in_stack->id);
-                createTrailingHitbox(entity_in_stack->id, current_start_coords, TRAILING_HITBOX_TIME + 5, getTileType(entity_in_stack->coords));
+                createFirstFallAnimation(intCoordsToNorm(current_start_coords), &e_in_stack->position_norm, e_in_stack->id);
+                createTrailingHitbox(e_in_stack->id, current_start_coords, FIRST_FALL_ANIMATION_TIME, getTileType(e_in_stack->coords));
             }
-            entity_in_stack->first_fall_already_done = true;
-            entity_in_stack->in_motion = STANDARD_IN_MOTION_TIME + 5;
-            entity_in_stack->moving_direction = DOWN; 
+            e_in_stack->first_fall_already_done = true;
+            e_in_stack->in_motion = FIRST_FALL_ANIMATION_TIME + 1; // TODO: i think these are because in_motion will get to 0 instead of 1 on the last frame - check if that's true
+            e_in_stack->moving_direction = DOWN; 
         }
         else
         {
+            // standard falling animation
             if (do_animation)
             {
-                createInterpolationAnimation(intCoordsToNorm(current_start_coords),
-                                             intCoordsToNorm(current_end_coords),
-                                             &entity_in_stack->position_norm,
+                createInterpolationAnimation(intCoordsToNorm(current_start_coords), intCoordsToNorm(current_end_coords), &e_in_stack->position_norm,
                                              IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                             entity_in_stack->id, FALL_ANIMATION_TIME);
-                createTrailingHitbox(entity_in_stack->id, current_start_coords, TRAILING_HITBOX_TIME, getTileType(entity_in_stack->coords));
+                                             e_in_stack->id, FALL_ANIMATION_TIME);
+                createTrailingHitbox(e_in_stack->id, current_start_coords, TRAILING_HITBOX_TIME, getTileType(e_in_stack->coords));
             }
-            entity_in_stack->first_fall_already_done = true;
-            entity_in_stack->in_motion = STANDARD_IN_MOTION_TIME + 1;
-            entity_in_stack->moving_direction = DOWN; 
+            e_in_stack->first_fall_already_done = true;
+            e_in_stack->in_motion = FALL_ANIMATION_TIME + 1;
+            e_in_stack->moving_direction = DOWN; 
         }
 
-		moveEntityInBufferAndState(entity_in_stack, current_end_coords, entity_in_stack->direction);
+		moveEntityInBufferAndState(e_in_stack, current_end_coords, e_in_stack->direction);
 
         current_end_coords = current_start_coords;
         current_start_coords = getNextCoords(current_start_coords, UP);
     }
-    return false;
+    return;
 }
 
 void doFallingObjects(bool do_animation)
@@ -3108,12 +3119,6 @@ void doFallingObjects(bool do_animation)
 
             if (entity->locked || entity->removed) continue;
             doFallingEntity(entity, do_animation);
-
-            if (getTileType(getNextCoords(entity->coords, DOWN)) == VOID && !entity->in_motion)
-            {
-                setTileType(NONE, entity->coords);
-                entity->removed = true;
-            }
         }
     }
 }
@@ -3603,7 +3608,7 @@ bool performUndo(int32 undo_animation_time)
         if (e)
         {
             Vec3 old_position = e->position_norm;
-            Int3 old_coords = normCoordsToInt(e->position_norm);
+            Int3 old_coords = roundNormCoordsToInt(e->position_norm);
             Vec4 old_rotation = e->rotation_quat;
             bool was_at_different_coords = !int3IsEqual(e->coords, delta->old_coords);
             bool was_at_different_direction = (e->direction != delta->old_direction);
@@ -3685,7 +3690,7 @@ bool performUndo(int32 undo_animation_time)
                                 createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, PLAYER_ID, undo_animation_time);
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                                 // handle trailing hitbox
-                                createTrailingHitbox(PLAYER_ID, normCoordsToInt(old_position), 3, PLAYER); // TODO: figure out timings in this code
+                                createTrailingHitbox(PLAYER_ID, roundNormCoordsToInt(old_position), TRAILING_HITBOX_TIME, PLAYER);
                             }
                         }
                         else if (e->id == PACK_ID)
@@ -3706,7 +3711,7 @@ bool performUndo(int32 undo_animation_time)
                             }
 
                             Direction player_to_old_pack_dir = getDirectionFromCoordDiff(delta->old_coords, old_player_coords);
-                            Direction player_to_new_pack_dir = getDirectionFromCoordDiff(normCoordsToInt(old_position), old_player_coords);
+                            Direction player_to_new_pack_dir = getDirectionFromCoordDiff(roundNormCoordsToInt(old_position), old_player_coords);
 
                             int32 clockwise_calculation = player_to_new_pack_dir - player_to_old_pack_dir;
                             bool clockwise = (clockwise_calculation == -1 || clockwise_calculation == 3);
@@ -3747,7 +3752,7 @@ bool performUndo(int32 undo_animation_time)
                                 {
                                     createTrailingHitbox(PACK_ID, int3Add(int3ScalarMultiply(AXIS_Y, height_index), old_coords), undo_animation_time, PACK);
                                 }
-                                //createTrailingHitbox(PACK_ID, normCoordsToInt(mid_position), undo_animation_time, PACK); this causes fall sometimes, and this block isn't really needed i think
+                                //createTrailingHitbox(PACK_ID, roundNormCoordsToInt(mid_position), undo_animation_time, PACK); this causes fall sometimes, and this block isn't really needed i think
                                 createTrailingHitbox(PACK_ID, getNextCoords(pack->coords, oppositeDirection(player_to_new_pack_dir)), undo_animation_time, PACK); 
                                 createTrailingHitbox(PACK_ID, pack->coords, undo_animation_time, PACK);
                             }
@@ -3770,7 +3775,7 @@ bool performUndo(int32 undo_animation_time)
                                 createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, PACK_ID, undo_animation_time);
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                                 // handle trailing hitbox
-                                createTrailingHitbox(PACK_ID, normCoordsToInt(old_position), TRAILING_HITBOX_TIME, PACK);
+                                createTrailingHitbox(PACK_ID, roundNormCoordsToInt(old_position), TRAILING_HITBOX_TIME, PACK);
                             }
                         }
                         else if (dy != 0 && (dx != 0 || dz != 0))
@@ -3793,7 +3798,7 @@ bool performUndo(int32 undo_animation_time)
                             createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, e->id, undo_animation_time);
                             e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                             // handle trailing hitbox
-                            createTrailingHitbox(e->id, normCoordsToInt(old_position), TRAILING_HITBOX_TIME, type);
+                            createTrailingHitbox(e->id, roundNormCoordsToInt(old_position), TRAILING_HITBOX_TIME, type);
                         }
                     }
                 }
@@ -4465,8 +4470,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
         if (editor_state.editor_mode == NO_MODE)
         {
             // assuming game undo and restart (still no undo in editor)
-            if (time_until_allow_game_input == 0 && tick_input->z_press)
+            if (time_until_allow_undo_or_restart_input == 0 && tick_input->z_press)
             {
+                // UNDO
                 int32 undo_animation_time = 0;
                 if (undos_performed <= 2) undo_animation_time = 8;
                 else if (undos_performed <= 4) undo_animation_time = 7;
@@ -4479,13 +4485,14 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     undos_performed++;
                 }
                 silence_unlocks_due_to_restart_or_undo = true;
+                time_until_allow_undo_or_restart_input = undo_animation_time;
                 time_until_allow_game_input = undo_animation_time;
 
             	undo_press_timer = undo_animation_time + TIME_AFTER_UNDO_UNTIL_PHYSICS_START;
             }
-            if (time_until_allow_game_input == 0 && tick_input->r_press)
+            if (time_until_allow_undo_or_restart_input == 0 && tick_input->r_press)
             {
-                // restart
+                // RESTART 
                 if (!restart_last_turn) 
                 {
                     recordActionForUndo(&world_state, true, false, false);
@@ -4524,15 +4531,16 @@ void gameFrame(double delta_time, TickInput* tick_input)
               	camera = save_camera; 
                 restart_last_turn = true;
                 silence_unlocks_due_to_restart_or_undo = true;
-                time_until_allow_game_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_undo_or_restart_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_game_input = 0; // overwrites -1 if restart from position where input was disallowed
             }
-			if (time_until_allow_game_input == 0 && tick_input->escape_press && !in_overworld)
+			if (time_until_allow_meta_input == 0 && tick_input->escape_press && !in_overworld)
             {
                 // leave current level if not in overworld. TODO: why is saving solved levels required here?
                 char save_solved_levels[64][64] = {0};
                 memcpy(save_solved_levels, next_world_state.solved_levels, sizeof(save_solved_levels));
                 levelChangePrep("overworld");
-                time_until_allow_game_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 gameInitializeState("overworld");
                 memcpy(next_world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
                 writeSolvedLevelsToFile();
@@ -5111,8 +5119,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         else player_will_fall_next_turn = false;
 
                         // not red and pack attached: player always falls, if no bypass. pack only falls if player falls
-                        if (!bypass_player_fall && !doFallingEntity(player, true))
+                        if (!bypass_player_fall && canFall(player))
                         {
+                            doFallingEntity(player, true);
                             doFallingEntity(pack, true);
                         }
                     }
@@ -5282,40 +5291,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
             if (!pack_detached) pack->first_fall_already_done = false;
         }
 
-        // delete player / pack if above void
-        if (!player->hit_by_red)
-        {
-            if ((getTileType(getNextCoords(player->coords, DOWN)) == VOID || getTileType(getNextCoords(player->coords, DOWN)) == WATER) && !presentInAnimations(PLAYER_ID)) 
-            {
-                setTileType(NONE, player->coords);
-                setTileDirection(NORTH, player->coords);
-                player->removed = true;
-            }
-        }
-        if (pack_detached)
-        {
-            if (!player->hit_by_blue)
-            {
-                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID || getTileType(getNextCoords(pack->coords, DOWN)) == WATER) && !presentInAnimations(PACK_ID)) 
-                {
-                    setTileType(NONE, pack->coords);
-                    setTileDirection(NORTH, pack->coords);
-                    pack->removed = true;
-                }
-            }
-        }
-        else
-        {
-            if (!player->hit_by_red)
-            {
-                if ((getTileType(getNextCoords(pack->coords, DOWN)) == VOID || getTileType(getNextCoords(pack->coords, DOWN)) == WATER) && !presentInAnimations(PACK_ID))
-                {
-                    setTileType(NONE, pack->coords);
-                    setTileDirection(NORTH, pack->coords);
-                    pack->removed = true;
-                }
-            }
-        }
+        // disallow input if player above void / water
+        TileType tile_type_below_player = getTileType(getNextCoords(player->coords, DOWN));
+        if (tile_type_below_player == VOID || tile_type_below_player == WATER) time_until_allow_game_input = -1;
 
         // win block logic
         if (getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK)
@@ -5477,6 +5455,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
             snprintf(mirror_info, sizeof(mirror_info), "mirror 1 pos norm: %.2f, %.2f, %.2f, mirror 2 pos norm: %.2f, %.2f, %.2f", m1.position_norm.x, m1.position_norm.y, m1.position_norm.z, m2.position_norm.x, m2.position_norm.y, m2.position_norm.z);
             createDebugText(mirror_info);
 
+            char timer_info[256] = {0};
+            snprintf(timer_info, sizeof(timer_info), "game: %i, meta: %i, undo/restart: %i", time_until_allow_game_input, time_until_allow_meta_input, time_until_allow_undo_or_restart_input);
+            createDebugText(timer_info);
+
             /*
             // camera pos info
             char camera_text[256] = {0};
@@ -5511,6 +5493,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             snprintf(edit_text, sizeof(edit_text), "selected id: %d; coords: %d, %d, %d", editor_state.selected_id, editor_state.selected_coords.x, editor_state.selected_coords.y, editor_state.selected_coords.z);
             createDebugText(edit_text);
 
+            /*
             // debug lasers
             FOR(lb_index, 64)
             {
@@ -5520,6 +5503,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 snprintf(lb_text, sizeof(lb_text), "laser start coords: %.2f, %.2f, %.2f, laser end coords: %.2f, %.2f, %.2f", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z);
                 if (do_debug_text) createDebugText(lb_text);
             }
+            */
 
 			/*
             // show undo deltas in buffer
@@ -5587,6 +5571,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         physics_accumulator -= physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP;
 
         if (time_until_allow_game_input > 0) time_until_allow_game_input--;
+        if (time_until_allow_undo_or_restart_input > 0) time_until_allow_undo_or_restart_input--;
 	}
 
     // SAVING STUFF (depends on changed state, so after loop)
