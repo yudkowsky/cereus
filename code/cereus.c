@@ -3024,9 +3024,9 @@ bool canFall(Entity* e)
     if (e->removed) return false;
     Int3 next_coords = getNextCoords(e->coords, DOWN); 
 
-    // if tile below is not nothing - return early
+    // only allow fall if below is nothing, or void
     if (!intCoordsWithinLevelBounds(next_coords)) return false;
-    if (getTileType(next_coords) != NONE /*&& !removed_entity*/) return false;
+    if (getTileType(next_coords) != NONE && getTileType(next_coords) != VOID /*&& !removed_entity*/) return false;
 
     // don't do fall if trailing hitbox below
     TrailingHitbox _;
@@ -3045,6 +3045,23 @@ void doFallingEntity(Entity* entity, bool do_animation)
 {
     // canFall will only return true for the bottom entity in a stack. so whenever this check is passed, the first entity is always the one in the bottom of the stack.
     if (!canFall(entity)) return;
+
+    // remove if above void; early return for this entity, but call doFallingEntity for the entity above, if there is one, so that it doesn't get its fall interrupted
+    Int3 below = getNextCoords(entity->coords, DOWN);
+    if (getTileType(below) == VOID)
+    {
+        setTileType(NONE, entity->coords);
+        setTileDirection(NO_DIRECTION, entity->coords);
+        entity->removed = true;
+        Int3 above = getNextCoords(entity->coords, UP);
+
+        if (isPushable(getTileType(above)))
+        {
+            Entity* above_entity = getEntityAtCoords(above);
+            if (above_entity) doFallingEntity(above_entity, do_animation);
+        }
+        return;
+    }
 
     Entity* player = &next_world_state.player;
 
