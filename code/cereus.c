@@ -3024,17 +3024,13 @@ bool canFall(Entity* e)
     if (e->removed) return false;
     Int3 next_coords = getNextCoords(e->coords, DOWN); 
 
-    // if tile below is not nothing - and it's not a removed entity, which should be treated as NONE - return early
-    // TODO: is there a good reason we don't just set the buffer to be NONE at this position? it shouldn't still be the entity type
+    // if tile below is not nothing - return early
     if (!intCoordsWithinLevelBounds(next_coords)) return false;
-    bool removed_entity = false;
-	if (isEntity(getTileType(next_coords)) && getEntityAtCoords(next_coords)->removed) removed_entity = true;
-    if (getTileType(next_coords) != NONE && !removed_entity) return false;
+    if (getTileType(next_coords) != NONE /*&& !removed_entity*/) return false;
 
-    // don't do fall if trailing hitbox below TODO: see if this causes weirdness with new trailing hitbox system (now being more aggressive where trailing hitboxes are placed).
-    // in that case, add another check for closeness via position of the entity which cause the trailing hitbox
+    // don't do fall if trailing hitbox below
     TrailingHitbox _;
-    if (trailingHitboxAtCoords(next_coords, &_) /*&& e->id != PLAYER_ID*/) return false; // TODO: is this extra player check necessary?
+    if (trailingHitboxAtCoords(next_coords, &_)) return false;
 
     return true;
 }
@@ -3047,6 +3043,7 @@ void resetFirstFall(Entity* e)
 
 void doFallingEntity(Entity* entity, bool do_animation)
 {
+    // canFall will only return true for the bottom entity in a stack. so whenever this check is passed, the first entity is always the one in the bottom of the stack.
     if (!canFall(entity)) return;
 
     Entity* player = &next_world_state.player;
@@ -3058,7 +3055,7 @@ void doFallingEntity(Entity* entity, bool do_animation)
     Int3 current_end_coords = next_coords; 
 
     // decide first fall for the entire stack
-    bool is_first_fall = !entity->first_fall_already_done; // TODO: need to always call entities in order for this to work... should organise the stack better.
+    bool is_first_fall = !entity->first_fall_already_done;
     int32 fall_time = is_first_fall ? FIRST_FALL_ANIMATION_TIME : FALL_ANIMATION_TIME;
 
     FOR(stack_fall_index, stack_size)
