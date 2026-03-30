@@ -2373,11 +2373,6 @@ void resetPlayerAndPackMotion()
     }
 }
 
-void resetFirstFall(Entity* e)
-{
-    if ((!e->in_motion && getTileType(getNextCoords(e->coords, DOWN)) != NONE) || next_world_state.player.hit_by_blue) e->first_fall_already_done = false;
-}
-
 PushResult canPush(Int3 coords, Direction direction)
 {
     Int3 current_coords = coords;
@@ -3044,6 +3039,12 @@ bool canFall(Entity* e)
     return true;
 }
 
+void resetFirstFall(Entity* e)
+{
+    if ((!e->in_motion && getTileType(getNextCoords(e->coords, DOWN)) != NONE) && !canFall(e)) e->first_fall_already_done = false;
+    if (next_world_state.player.hit_by_blue) e->first_fall_already_done = false;
+}
+
 void doFallingEntity(Entity* entity, bool do_animation)
 {
     if (!canFall(entity)) return;
@@ -3055,6 +3056,11 @@ void doFallingEntity(Entity* entity, bool do_animation)
     int32 stack_size = getPushableStackSize(entity->coords);
     Int3 current_start_coords = entity->coords;
     Int3 current_end_coords = next_coords; 
+
+    // decide first fall for the entire stack
+    bool is_first_fall = !entity->first_fall_already_done; // TODO: need to always call entities in order for this to work... should organise the stack better.
+    int32 fall_time = is_first_fall ? FIRST_FALL_ANIMATION_TIME : FALL_ANIMATION_TIME;
+
     FOR(stack_fall_index, stack_size)
     {
         Entity* e_in_stack = getEntityAtCoords(current_start_coords);
@@ -3069,36 +3075,27 @@ void doFallingEntity(Entity* entity, bool do_animation)
         if (e_in_stack->id == PLAYER_ID && player->hit_by_red) break;
 
         // if player is in the stack, disable movement until fall has taken place
-        if (player->first_fall_already_done) time_until_allow_game_input = FIRST_FALL_ANIMATION_TIME;
-        else time_until_allow_game_input = FALL_ANIMATION_TIME;
+        if (e_in_stack->id == PLAYER_ID) time_until_allow_game_input = fall_time;
 
-        // check if this is going to be first fall
-        if (!e_in_stack->first_fall_already_done)
+        if (do_animation)
         {
-            // first fall animation
-            if (do_animation) 
-            {
+			if (is_first_fall)
+			{
                 createFirstFallAnimation(intCoordsToNorm(current_start_coords), &e_in_stack->position_norm, e_in_stack->id);
                 createTrailingHitbox(e_in_stack->id, current_start_coords, FIRST_FALL_ANIMATION_TIME, getTileType(e_in_stack->coords));
             }
-            e_in_stack->first_fall_already_done = true;
-            e_in_stack->in_motion = FIRST_FALL_ANIMATION_TIME + 1; // TODO: i think these are because in_motion will get to 0 instead of 1 on the last frame - check if that's true
-            e_in_stack->moving_direction = DOWN; 
-        }
-        else
-        {
-            // standard falling animation
-            if (do_animation)
+			else
             {
                 createInterpolationAnimation(intCoordsToNorm(current_start_coords), intCoordsToNorm(current_end_coords), &e_in_stack->position_norm,
                                              IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
                                              e_in_stack->id, FALL_ANIMATION_TIME);
                 createTrailingHitbox(e_in_stack->id, current_start_coords, TRAILING_HITBOX_TIME, getTileType(e_in_stack->coords));
             }
-            e_in_stack->first_fall_already_done = true;
-            e_in_stack->in_motion = FALL_ANIMATION_TIME + 1;
-            e_in_stack->moving_direction = DOWN; 
         }
+
+        e_in_stack->first_fall_already_done = true;
+        e_in_stack->in_motion = fall_time;
+        e_in_stack->moving_direction = DOWN;
 
 		moveEntityInBufferAndState(e_in_stack, current_end_coords, e_in_stack->direction);
 
@@ -3115,10 +3112,9 @@ void doFallingObjects(bool do_animation)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            Entity* entity = &object_group_to_fall[to_fall_index][entity_index];
-
-            if (entity->locked || entity->removed) continue;
-            doFallingEntity(entity, do_animation);
+            Entity* e = &object_group_to_fall[to_fall_index][entity_index];
+            if (e->locked || e->removed) continue;
+            doFallingEntity(e, do_animation);
         }
     }
 }
@@ -5245,8 +5241,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
         // do animations
         // the animation system is just an array, where the frames_left decrement each frame. 
-        // animations[index].position[frames left of animation] is the position that writes to animations[index].position_to_change, which is a pointer to the position_norm field of an entity.
-        // same goes for rotation. this whole system will be changed when i have more sophisticated animations
 		for (int animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
         {
             Animation* a = &animations[animation_index];
@@ -5449,11 +5443,19 @@ void gameFrame(double delta_time, TickInput* tick_input)
             snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, moving_time: %d, moving_direction: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack->in_motion, pack->moving_direction);
             createDebugText(pack_text);
 
+            /*
             char mirror_info[256] = {0};
             Entity m1 = next_world_state.mirrors[0];
             Entity m2 = next_world_state.mirrors[1];
             snprintf(mirror_info, sizeof(mirror_info), "mirror 1 pos norm: %.2f, %.2f, %.2f, mirror 2 pos norm: %.2f, %.2f, %.2f", m1.position_norm.x, m1.position_norm.y, m1.position_norm.z, m2.position_norm.x, m2.position_norm.y, m2.position_norm.z);
             createDebugText(mirror_info);
+            */
+
+            char box_info[256] = {0};
+			Entity box1 = next_world_state.boxes[0];
+			Entity box2 = next_world_state.boxes[1];
+            snprintf(box_info, sizeof(box_info), "box 1 in motion: %i, box 1 moving direction: %i, box 2 in motion: %i, box 2 moving direction: %i", box1.in_motion, box1.moving_direction, box2.in_motion, box2.moving_direction);
+            createDebugText(box_info);
 
             char timer_info[256] = {0};
             snprintf(timer_info, sizeof(timer_info), "game: %i, meta: %i, undo/restart: %i", time_until_allow_game_input, time_until_allow_meta_input, time_until_allow_undo_or_restart_input);
