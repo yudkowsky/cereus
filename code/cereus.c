@@ -166,6 +166,7 @@ typedef struct
 }
 TrailingHitbox;
 
+/*
 typedef struct
 {
     int32 id;
@@ -176,6 +177,7 @@ typedef struct
     Vec4 rotation[32];
 }
 Animation;
+*/
 
 typedef enum
 {
@@ -521,7 +523,6 @@ int32 time_until_allow_undo_or_restart_input = 0;
 EditorState editor_state = {0};
 LaserBuffer laser_buffer[512] = {0}; // 512 = 64 max sources * 16 max laser turns
 TrailingHitbox trailing_hitboxes[32]; 
-Animation animations[32];
 
 GameProgress game_progress = WORLD_0;
 bool in_overworld = false;
@@ -1031,7 +1032,7 @@ Vec3 directionToVector(Direction direction)
     }
 }
 
-Vec4 directionToQuaternion(Direction direction, bool roll_z)
+Vec4 directionToQuaternion(Direction direction) 
 {
     float yaw = 0.0f;
     float roll = 0.0f;
@@ -1053,7 +1054,7 @@ Vec4 directionToQuaternion(Direction direction, bool roll_z)
         }
         case SOUTH: 
         {
-            yaw = 0.5f   * TAU;
+            yaw = 0.5f * TAU;
             do_yaw = true;
             break;
         }
@@ -1079,7 +1080,7 @@ Vec4 directionToQuaternion(Direction direction, bool roll_z)
     }
 
     if (do_yaw && !do_roll) return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), yaw);
-    if (!do_yaw && do_roll) return quaternionFromAxisAngle(intCoordsToNorm(roll_z ? AXIS_Z : AXIS_X), roll);
+    if (!do_yaw && do_roll) return quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), roll);
     return IDENTITY_QUATERNION;
 }
 
@@ -1091,7 +1092,7 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
         entity_group[entity_index].coords = coords;
         entity_group[entity_index].position_norm = intCoordsToNorm(coords); 
         entity_group[entity_index].direction = direction;
-        entity_group[entity_index].rotation_quat = directionToQuaternion(direction, true);
+        entity_group[entity_index].rotation_quat = directionToQuaternion(direction);
         entity_group[entity_index].color = color;
         entity_group[entity_index].id = entity_index + entityIdOffset(entity_group, color);
         entity_group[entity_index].unlocked_by[0] = '\0';
@@ -1105,7 +1106,7 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
 void setEntityVecsFromInts(Entity* e)
 {
     e->position_norm = intCoordsToNorm(e->coords);
-    e->rotation_quat = directionToQuaternion(e->direction, true);
+    e->rotation_quat = directionToQuaternion(e->direction);
 }
 
 // FILE I/O
@@ -1380,7 +1381,7 @@ void loadResetBlockInfo(FILE* file)
                                 entity_group[entity_index].coords = reset_start_coords;
                                 entity_group[entity_index].position_norm = intCoordsToNorm(reset_start_coords);
                                 entity_group[entity_index].direction = reset_entity_direction;
-                                entity_group[entity_index].rotation_quat = directionToQuaternion(reset_entity_direction, true);
+                                entity_group[entity_index].rotation_quat = directionToQuaternion(reset_entity_direction);
                                 entity_group[entity_index].color = color;
                                 entity_group[entity_index].removed = true;
                                 entity_group[entity_index].unlocked_by[0] = '\0';
@@ -2082,283 +2083,13 @@ bool trailingHitboxAtCoords(Int3 coords, TrailingHitbox* trailing_hitbox)
 
 // ANIMATIONS
 
-// returns animation_index and queue_time
-int32* findNextFreeInAnimations(int32* next_free_array, int32 entity_id) 
-{
-    int32 animation_index = -1;
-    int32 queue_time = 0;
-    for (int find_anim_index = 0; find_anim_index < MAX_ANIMATION_COUNT; find_anim_index++)
-    {
-        if (animation_index == -1 && animations[find_anim_index].frames_left == 0)
-        {
-            animation_index = find_anim_index;
-            animations[animation_index] = (Animation){0};
-        }
-        if (animations[find_anim_index].id == entity_id && animations[find_anim_index].frames_left != 0) 
-        {
-            if (queue_time < animations[find_anim_index].frames_left) queue_time = animations[find_anim_index].frames_left;
-        }
-    }
-    next_free_array[0] = animation_index;
-    next_free_array[1] = queue_time;
-    return next_free_array;
-}
 
-int32 presentInAnimations(int32 entity_id)
-{
-    int32 frames = 0;
-    FOR(find_anim_index, MAX_ANIMATION_COUNT) 
-    {
-        Animation* a = &animations[find_anim_index];
-        if (a->id == entity_id && a->frames_left > frames) frames = a->frames_left; 
-    }
-    return frames;
-}
-
-void zeroAnimations(int32 id) 
-{
-    FOR(animation_index, MAX_ANIMATION_COUNT) if (animations[animation_index].id == id) memset(&animations[animation_index], 0, sizeof(Animation));
-}
-
-// automatically queues if given object is already being moved around. assumes object is entity, because requires id - easily fixable if required. assumes max two animations on any given object (max one queued)
-void createInterpolationAnimation(Vec3 position_a, Vec3 position_b, Vec3* position_to_change, Vec4 rotation_a, Vec4 rotation_b, Vec4* rotation_to_change, int32 entity_id, int32 animation_frames)
-{
-    int32 next_free_array[2] = {0};
-    int32* next_free_output = findNextFreeInAnimations(next_free_array, entity_id);
-    int32 animation_index = next_free_output[0];
-    int32 queue_time = next_free_output[1];
-
-    animations[animation_index].id = entity_id;
-    animations[animation_index].frames_left = animation_frames + queue_time; 
-
-    Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(position_b, position_a), (float)(1.0f/animation_frames));
-
-    if (!vec3IsZero(translation_per_frame))
-    {
-        animations[animation_index].position_to_change = position_to_change;
-        for (int frame_index = 0; frame_index < animation_frames; frame_index++)
-        {
-            animations[animation_index].position[animation_frames-(1+frame_index)] 
-            = vec3Add(position_a, vec3ScalarMultiply(translation_per_frame, (float)(1+frame_index)));
-        }
-    }
-    if (!quaternionIsZero(quaternionSubtract(rotation_b, rotation_a)))
-    {
-        animations[animation_index].rotation_to_change = rotation_to_change;
-        if (quaternionDot(rotation_a, rotation_b) < 0.0f) rotation_b = quaternionScalarMultiply(rotation_b, -1.0f);
-        for (int frame_index = 0; frame_index < animation_frames; frame_index++)
-        {
-            float param = (float)(frame_index + 1) / animation_frames;
-            animations[animation_index].rotation[animation_frames-(1+frame_index)] 
-            = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(rotation_a, 1.0f - param), quaternionScalarMultiply(rotation_b, param)));
-        }
-    }
-}
-
-void createPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direction pack_direction, bool clockwise, Vec3* position_to_change, Vec4* rotation_to_change, int32 entity_id, int32 animation_frames)
-{
-    int32 next_free_array[2] = {0};
-    int32* next_free_output = findNextFreeInAnimations(next_free_array, entity_id);
-    int32 animation_index = next_free_output[0];
-    int32 queue_time = next_free_output[1];
-
-    animations[animation_index].id = entity_id;
-    animations[animation_index].frames_left = animation_frames + queue_time; 
-    animations[animation_index].rotation_to_change = rotation_to_change;
-    animations[animation_index].position_to_change = position_to_change;
-
-    Vec3 pivot_point = player_position;
-    Vec3 pivot_to_pack_start = vec3Subtract(pack_position, player_position);
-    float d_theta_per_frame = (TAU*0.25f)/(float)animation_frames;
-    float angle_sign = clockwise ? 1.0f : -1.0f;
-    Direction previous_pack_direction = NO_DIRECTION;
-
-    if (clockwise) 
-    {
-        previous_pack_direction = pack_direction - 1;
-        if (previous_pack_direction == NO_DIRECTION) previous_pack_direction = EAST;
-    }
-    else 
-    {
-        previous_pack_direction = pack_direction + 1;
-        if (previous_pack_direction == UP) previous_pack_direction = NORTH;
-    }
-
-    for (int frame_index = 0; frame_index < animation_frames; frame_index++)
-    {
-        // rotation
-        Vec4 quat_prev = directionToQuaternion(oppositeDirection(previous_pack_direction), true);
-        Vec4 quat_next = directionToQuaternion(oppositeDirection(pack_direction), true);
-        if (quaternionDot(quat_prev, quat_next) < 0.0f) quat_next = quaternionNegate(quat_next); // resolve quat sign issue 
-        float param = (float)(frame_index + 1) / (float)(animation_frames);
-        animations[animation_index].rotation[animation_frames-(1+frame_index)] 
-            = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(quat_prev, 1.0f - param), quaternionScalarMultiply(quat_next, param)));
-
-        // translation
-        float theta = angle_sign * (frame_index+1) * d_theta_per_frame;
-        Vec4 roll = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), theta);
-        Vec3 relative_rotation = vec3RotateByQuaternion(pivot_to_pack_start, roll);
-        animations[animation_index].position[animation_frames-(1+frame_index)] = vec3Add(pivot_point, relative_rotation);
-    }
-}
-
-void createFailedWalkAnimation(Vec3 start_position, Vec3 next_position, Vec3* position_to_change, int32 entity_id)
-{
-    int32 next_free_array[2] = {0};
-    int32* next_free_output = findNextFreeInAnimations(next_free_array, entity_id);
-    int32 animation_index = next_free_output[0];
-    int32 queue_time = next_free_output[1];
-
-    animations[animation_index].id = entity_id;
-    animations[animation_index].frames_left = FAILED_ANIMATION_TIME + queue_time; 
-    animations[animation_index].position_to_change = position_to_change;
-
-    Vec3 translation_per_frame = vec3ScalarMultiply(vec3Subtract(next_position, start_position), (float)(1.0f/FAILED_ANIMATION_TIME) / 2);
-
-    for (int frame_index = 0; frame_index < FAILED_ANIMATION_TIME / 2; frame_index++)
-    {
-        Vec3 position = vec3Add(start_position, vec3ScalarMultiply(translation_per_frame, (float)(1+frame_index)));
-        animations[animation_index].position[FAILED_ANIMATION_TIME-(1+frame_index)] = position;
-        animations[animation_index].position[1+frame_index] = position;
-    }
-    animations[animation_index].position[0] = start_position;
-}
-
-void doFailedWalkAnimations(Direction direction)
-{
-    int32 stack_size = getPushableStackSize(next_world_state.player.coords); // counts player as member of stack
-    Int3 current_coords = next_world_state.player.coords;
-    FOR(stack_index, stack_size) 
-    {
-        createFailedWalkAnimation(intCoordsToNorm(current_coords), intCoordsToNorm(getNextCoords(current_coords, direction)), &getEntityAtCoords(current_coords)->position_norm, getEntityAtCoords(current_coords)->id);
-        current_coords = getNextCoords(current_coords, UP);
-    }
-    if (!pack_detached) createFailedWalkAnimation(intCoordsToNorm(next_world_state.pack.coords), intCoordsToNorm(getNextCoords(next_world_state.pack.coords, direction)), &next_world_state.pack.position_norm, PACK_ID);
-
-    next_world_state.player.moving_direction = NO_DIRECTION;
-}
-
-void createFailedStaticRotationAnimation(Vec4 start_rotation, Vec4 input_direction_as_quat, Vec4* rotation_to_change, int32 entity_id)
-{
-    int32 next_free_array[2] = {0};
-    int32* next_free_output = findNextFreeInAnimations(next_free_array, entity_id);
-    int32 animation_index = next_free_output[0];
-    int32 queue_time = next_free_output[1];
-
-    animations[animation_index].id = entity_id;
-    animations[animation_index].frames_left = FAILED_ANIMATION_TIME + queue_time; 
-    animations[animation_index].rotation_to_change = rotation_to_change;
-
-    if (quaternionDot(start_rotation, input_direction_as_quat) < 0.0f) input_direction_as_quat = quaternionScalarMultiply(input_direction_as_quat, -1.0f);
-    for (int frame_index = 0; frame_index < FAILED_ANIMATION_TIME / 2; frame_index++)
-    {
-        // similar interpolation for loop, but fill both the end and start of the array, so it bounces back
-        float param = ((float)(frame_index + 1) / FAILED_ANIMATION_TIME) / 2;
-        Vec4 rotation = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(start_rotation, 1.0f - param), quaternionScalarMultiply(input_direction_as_quat, param)));
-        animations[animation_index].rotation[FAILED_ANIMATION_TIME - (1+frame_index)] = rotation;
-        animations[animation_index].rotation[1+frame_index] = rotation;
-    }
-    animations[animation_index].rotation[0] = start_rotation;
-}
-
-void createFailedPackRotationAnimation(Vec3 player_position, Vec3 pack_position, Direction pack_direction, bool clockwise, Vec3* position_to_change, Vec4* rotation_to_change, int32 entity_id)
-{
-    int32 next_free_array[2] = {0};
-    int32* next_free_output = findNextFreeInAnimations(next_free_array, entity_id);
-    int32 animation_index = next_free_output[0];
-    int32 queue_time = next_free_output[1];
-
-    animations[animation_index].id = entity_id;
-    animations[animation_index].frames_left = FAILED_ANIMATION_TIME + queue_time; 
-    animations[animation_index].rotation_to_change = rotation_to_change;
-    animations[animation_index].position_to_change = position_to_change;
-
-    Vec3 pivot_point = player_position;
-    Vec3 pivot_to_pack_start = vec3Subtract(pack_position, player_position);
-    float d_theta_per_frame = (TAU*0.25f)/(float)TURN_ANIMATION_TIME;
-    float angle_sign = clockwise ? 1.0f : -1.0f;
-    Direction previous_pack_direction = NORTH;
-    if (clockwise) 
-    {
-        previous_pack_direction = pack_direction - 1;
-        if (previous_pack_direction == -1) previous_pack_direction = EAST;
-    }
-    else 
-    {
-        previous_pack_direction = pack_direction + 1;
-        if (previous_pack_direction == 4) previous_pack_direction = NORTH;
-    }
-
-    for (int frame_index = 0; frame_index < FAILED_ANIMATION_TIME / 2; frame_index++)
-    {
-        // rotation
-        Vec4 quat_prev = directionToQuaternion(oppositeDirection(previous_pack_direction), true);
-        Vec4 quat_next = directionToQuaternion(oppositeDirection(pack_direction), true);
-        if (quaternionDot(quat_prev, quat_next) < 0.0f) quat_next = quaternionNegate(quat_next); // resolve quat sign issue 
-        float param = ((float)(frame_index + 1) / FAILED_ANIMATION_TIME) / 2;
-        Vec4 rotation = quaternionNormalize(quaternionAdd(quaternionScalarMultiply(quat_prev, 1.0f - param), quaternionScalarMultiply(quat_next, param)));
-        animations[animation_index].rotation[FAILED_ANIMATION_TIME-(1+frame_index)] = rotation;
-        animations[animation_index].rotation[1+frame_index] = rotation;
-
-        // translation
-        float theta = (angle_sign * (frame_index+1) * d_theta_per_frame) / 2;
-        Vec4 roll = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), theta);
-        Vec3 relative_rotation = vec3RotateByQuaternion(pivot_to_pack_start, roll);
-        animations[animation_index].position[FAILED_ANIMATION_TIME-(1+frame_index)] = vec3Add(pivot_point, relative_rotation);
-        animations[animation_index].position[1+frame_index] = vec3Add(pivot_point, relative_rotation);
-    }
-    animations[animation_index].rotation[0] = directionToQuaternion(oppositeDirection(previous_pack_direction), true);
-    animations[animation_index].position[0] = pack_position;
-}
-
-void doFailedTurnAnimations(Direction input_direction, bool clockwise)
-{
-    int32 stack_size = getPushableStackSize(next_world_state.player.coords);
-    Int3 current_coords = next_world_state.player.coords;
-    FOR(stack_index, stack_size)
-    {
-        Entity* current_entity = getEntityAtCoords(current_coords);
-        Direction next_direction = getNextRotationalDirection(current_entity->direction, clockwise);
-        createFailedStaticRotationAnimation(directionToQuaternion(current_entity->direction, true), directionToQuaternion(next_direction, true), &current_entity->rotation_quat, current_entity->id);
-        current_coords = getNextCoords(current_coords, UP);
-    }
-    createFailedPackRotationAnimation(intCoordsToNorm(next_world_state.player.coords), 
-            intCoordsToNorm(next_world_state.pack.coords), 
-            oppositeDirection(input_direction), clockwise, 
-            &next_world_state.pack.position_norm, &next_world_state.pack.rotation_quat, PACK_ID);
-}
-
-// hard codes first fall = 12 frames total (8 acceleration, 4 at terminal velocity of 1/8 b/f)
-void createFirstFallAnimation(Vec3 start_position, Vec3* position_to_change, int32 entity_id)
-{
-    int32 next_free_array[2] = {0};
-    int32* next_free_output = findNextFreeInAnimations(next_free_array, entity_id);
-    int32 animation_index = next_free_output[0];
-    int32 queue_time = next_free_output[1];
-
-    animations[animation_index].id = entity_id;
-    animations[animation_index].frames_left = 12 + queue_time; 
-    animations[animation_index].position_to_change = position_to_change;
-
-    FOR(first_8_frames_index, 8)
-    {
-        Vec3 delta_y = { 0.0f, -(float)(first_8_frames_index * first_8_frames_index) / 128, 0.0f };
-        animations[animation_index].position[12-first_8_frames_index] = vec3Add(start_position, delta_y);
-    }
-    FOR(next_4_frames_index, 4)
-    {
-        Vec3 delta_y = { 0.0f, -(float)(next_4_frames_index + 4) / 8, 0.0f };
-        animations[animation_index].position[12-(next_4_frames_index+8)] = vec3Add(start_position, delta_y);
-    }
-    animations[animation_index].position[0] = vec3Add(start_position, vec3Negate(intCoordsToNorm(AXIS_Y)));
-}
 
 // PUSH ENTITES
 
-void changeMoving(Entity* e)
+void changeMoving(Entity* e) // TODO(anims): got rid of presentInAnimations checek on in motion, and this no longer sets in_motion to any value, only decrements it if it's moving
 {
-    if (presentInAnimations(e->id) && e->in_motion == 0 && !(e->moving_direction == NO_DIRECTION)) e->in_motion = presentInAnimations(e->id);
-    else if (e->in_motion > 0) e->in_motion--;
+    if (e->in_motion > 0) e->in_motion--;
     else e->moving_direction = NO_DIRECTION;
 }
 
@@ -2455,11 +2186,7 @@ void pushOnce(Int3 coords, Direction direction, int32 animation_time)
 
     int32 id = getEntityId(entity_to_push.new_coords);
     TileType trailing_hitbox_type = getTileType(entity_to_push.new_coords);
-    createInterpolationAnimation(intCoordsToNorm(entity_to_push.previous_coords),
-                                 intCoordsToNorm(entity_to_push.new_coords),
-                                 &entity_to_push.entity->position_norm,
-                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                 id, animation_time); 
+	// TODO(anims): create interpolation animation from entity_to_push previous coords to entity_to_push new coords, with animation time
     int32 trailing_hitbox_time = (animation_time / 2) + 1;
     createTrailingHitbox(id, coords, trailing_hitbox_time, trailing_hitbox_type);
 }
@@ -2504,9 +2231,7 @@ void pushUp(Int3 coords, int32 animation_time)
         Entity* e = getEntityAtCoords(current_coords);
         Int3 coords_above = getNextCoords(current_coords, UP);
         moveEntityInBufferAndState(e, coords_above, dir);
-        createInterpolationAnimation(intCoordsToNorm(current_coords), intCoordsToNorm(coords_above), &e->position_norm,
-                					 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                     e->id, animation_time);
+        // TODO(anims): create interpolation animation from current coords to coords above, with animation_time
     	createTrailingHitbox(e->id, current_coords, (animation_time / 2) + 1, tile);
         current_coords = getNextCoords(current_coords, DOWN);
     }
@@ -3095,14 +2820,12 @@ void doFallingEntity(Entity* entity, bool do_animation)
         {
 			if (is_first_fall)
 			{
-                createFirstFallAnimation(intCoordsToNorm(current_start_coords), &e_in_stack->position_norm, e_in_stack->id);
+                // TODO(anims): first fall animation
                 createTrailingHitbox(e_in_stack->id, current_start_coords, FIRST_FALL_ANIMATION_TIME, getTileType(e_in_stack->coords));
             }
 			else
             {
-                createInterpolationAnimation(intCoordsToNorm(current_start_coords), intCoordsToNorm(current_end_coords), &e_in_stack->position_norm,
-                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                             e_in_stack->id, FALL_ANIMATION_TIME);
+                // TODO(anims): normal fall animation (lerp)
                 createTrailingHitbox(e_in_stack->id, current_start_coords, TRAILING_HITBOX_TIME, getTileType(e_in_stack->coords));
             }
         }
@@ -3318,7 +3041,7 @@ void gameInitializeState(char* level_name)
             entity_group[count].coords = bufferIndexToCoords(buffer_index);
             entity_group[count].position_norm = intCoordsToNorm(entity_group[count].coords);
             entity_group[count].direction = next_world_state.buffer[buffer_index + 1]; 
-            entity_group[count].rotation_quat = directionToQuaternion(entity_group[count].direction, true);
+            entity_group[count].rotation_quat = directionToQuaternion(entity_group[count].direction);
             entity_group[count].color = getEntityColor(entity_group[count].coords);
             entity_group[count].id = getEntityCount(entity_group) + entityIdOffset(entity_group, entity_group[count].color);
         	entity_group[count].removed = false;
@@ -3329,7 +3052,7 @@ void gameInitializeState(char* level_name)
             player->coords = bufferIndexToCoords(buffer_index);
             player->position_norm = intCoordsToNorm(player->coords);
             player->direction = next_world_state.buffer[buffer_index + 1];
-            player->rotation_quat = directionToQuaternion(player->direction, true);
+            player->rotation_quat = directionToQuaternion(player->direction);
             player->id = PLAYER_ID;
         }
         else if (next_world_state.buffer[buffer_index] == PACK)
@@ -3337,7 +3060,7 @@ void gameInitializeState(char* level_name)
             pack->coords = bufferIndexToCoords(buffer_index);
             pack->position_norm = intCoordsToNorm(pack->coords);
             pack->direction = next_world_state.buffer[buffer_index + 1];
-            pack->rotation_quat = directionToQuaternion(pack->direction, true);
+            pack->rotation_quat = directionToQuaternion(pack->direction);
             pack->id = PACK_ID;
         }
     }
@@ -3571,7 +3294,7 @@ bool performUndo(int32 undo_animation_time)
     if (undo_buffer.header_count == 0) return false;
 
     // clear animations + trailing hitboxes
-    memset(animations, 0, sizeof(animations));
+    // TODO(anims): clear all animations
     memset(trailing_hitboxes, 0, sizeof(trailing_hitboxes));
 
 	// get most recent action header
@@ -3626,7 +3349,7 @@ bool performUndo(int32 undo_animation_time)
             e->coords = delta->old_coords;
             e->position_norm = intCoordsToNorm(e->coords); // this gets overwritten later, but is used as endpoint for queued animations
             e->direction = delta->old_direction;
-            e->rotation_quat = directionToQuaternion(e->direction, true);
+            e->rotation_quat = directionToQuaternion(e->direction);
             e->removed = delta->was_removed;
 
             if (!delta->was_removed)
@@ -3655,8 +3378,7 @@ bool performUndo(int32 undo_animation_time)
                                 Vec3 mid_position = { e->position_norm.x, old_position.y, e->position_norm.z };
                                 int32 first_animation_time = undo_animation_time / 2;
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
-                                createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, first_animation_time);
-                                createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, second_animation_time);
+                                // TODO(anims): interpolation anims (old pos -> mid pos -> e.position_norm)
                                 e->moving_direction = NO_DIRECTION;
                                 // handle trailing hitboxes
                                 for (int32 height_index = 0; height_index < -dy + 1; height_index++)
@@ -3671,8 +3393,7 @@ bool performUndo(int32 undo_animation_time)
                                 Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
                                 int32 first_animation_time = undo_animation_time / 2;
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
-                                createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, first_animation_time);
-                                createInterpolationAnimation(VEC3_0, VEC3_0, 0, old_rotation, e->rotation_quat, &e->rotation_quat, PLAYER_ID, second_animation_time);
+                                // TODO(anims): iterpolation anims (old pos -> mid pos, rot: mid pos-> e.rotation_quat)
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                                 // handle trailing hitboxes
                                 for (int32 height_index = 0; height_index < dy + 1; height_index++)
@@ -3686,8 +3407,7 @@ bool performUndo(int32 undo_animation_time)
                                 Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
                                 int32 first_animation_time = undo_animation_time / 2;
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
-                                createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, first_animation_time);
-                                createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PLAYER_ID, second_animation_time);
+                                // TODO(anims): interpolation anims (old -> mid -> pos norm)
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                                 // handle trailing hitboxes
                                 for (int32 height_index = 0; height_index < dy + 1; height_index++) // seems to generate an extra trailing hitbox above sometimes. but that's okay
@@ -3697,7 +3417,7 @@ bool performUndo(int32 undo_animation_time)
                             }
                             else // player moving normally
                             {
-                                createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, PLAYER_ID, undo_animation_time);
+                                // TODO(anims): interpolation anim (old -> pos norm)
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                                 // handle trailing hitbox
                                 createTrailingHitbox(PLAYER_ID, roundNormCoordsToInt(old_position), TRAILING_HITBOX_TIME, PLAYER);
@@ -3728,7 +3448,7 @@ bool performUndo(int32 undo_animation_time)
 
                             if (dy == 0 && dx != 0 && dz != 0) // if both dx and dz != 0 (but still dy == 0) this must be a turn
                             {
-                                createPackRotationAnimation(intCoordsToNorm(old_player_coords), old_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, undo_animation_time);
+                                // TODO(anims): interpolation anim (basic pack turn)
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                                 // handle trailing hitboxes
                                 createTrailingHitbox(PACK_ID, old_coords, TRAILING_HITBOX_TIME, PACK);
@@ -3740,8 +3460,7 @@ bool performUndo(int32 undo_animation_time)
                                 Vec3 mid_position = { e->position_norm.x, old_position.y, e->position_norm.z };
                                 int32 first_animation_time = undo_animation_time / 2;
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
-                                createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PACK_ID, first_animation_time);
-                                createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, PACK_ID, second_animation_time);
+                                // TODO(anims): interpolation anims (old -> mid -> pos norm)
                                 e->moving_direction = NO_DIRECTION;
                                 // handle trailing hitboxes
                                 for (int32 height_index = 0; height_index < -dy + 1; height_index++)
@@ -3754,8 +3473,7 @@ bool performUndo(int32 undo_animation_time)
                                 Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
                                 int32 first_animation_time = undo_animation_time / 2;
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
-                                createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, first_animation_time);
-                                createPackRotationAnimation(intCoordsToNorm(old_player_coords), mid_position, oppositeDirection(delta->old_direction), clockwise, &e->position_norm, &e->rotation_quat, PACK_ID, second_animation_time);
+                                // TODO(anims): interpolation and rotation anims (old -> mid, then pack turn)
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                                 // handle trailing hitboxes
                                 for (int32 height_index = 0; height_index < dy; height_index++)
@@ -3771,8 +3489,7 @@ bool performUndo(int32 undo_animation_time)
                                 Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
                                 int32 first_animation_time = undo_animation_time / 2;
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
-                                createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, first_animation_time);
-                                createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, second_animation_time);
+                                // TODO(anims): interpolation anims (old -> mid -> pos norm)
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                                 // handle trailing hitboxes
                                 for (int32 height_index = 0; height_index < dy + 1; height_index++)
@@ -3782,7 +3499,7 @@ bool performUndo(int32 undo_animation_time)
                             }
                             else // pack moving normally
                             {
-                                createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, PACK_ID, undo_animation_time);
+                                // TODO(anims): interpolation anim (old -> pos norm)
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                                 // handle trailing hitbox
                                 createTrailingHitbox(PACK_ID, roundNormCoordsToInt(old_position), TRAILING_HITBOX_TIME, PACK);
@@ -3794,8 +3511,7 @@ bool performUndo(int32 undo_animation_time)
                             Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
                             int32 first_animation_time = undo_animation_time / 2;
                             int32 second_animation_time = undo_animation_time - first_animation_time;
-                            createInterpolationAnimation(old_position, mid_position, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, first_animation_time);
-                            createInterpolationAnimation(mid_position, e->position_norm, &e->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0, e->id, second_animation_time);
+                            // TODO(anims): interpolation anims (old -> mid -> pos norm)
                             e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                             // handle trailing hitboxes
                             for (int32 height_index = 0; height_index < dy + 1; height_index++)
@@ -3805,7 +3521,7 @@ bool performUndo(int32 undo_animation_time)
                         }
                         else
                         {
-                            createInterpolationAnimation(old_position, e->position_norm, &e->position_norm, old_rotation, e->rotation_quat, &e->rotation_quat, e->id, undo_animation_time);
+                            // TODO(anims): interpolation anim (old -> pos norm)
                             e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                             // handle trailing hitbox
                             createTrailingHitbox(e->id, roundNormCoordsToInt(old_position), TRAILING_HITBOX_TIME, type);
@@ -3849,7 +3565,7 @@ void levelChangePrep(char next_level[64])
     if (strcmp(next_level, "overworld") == 0) in_overworld = true;
     else in_overworld = false;
 
-    memset(animations, 0, sizeof(animations));
+    // TODO(anims): cancel all animations
 }
 
 // HEAD ROTATION / MOVEMENT
@@ -3903,18 +3619,14 @@ void doHeadRotation(bool clockwise)
         int32 id = getEntityId(current_tile_coords);
 
         // for mirror
-        if (!up_or_down) createInterpolationAnimation(VEC3_0, VEC3_0, 0, 
-                                                     directionToQuaternion(current_direction, true), directionToQuaternion(next_direction, true), &entity->rotation_quat,
-                                                     id, TURN_ANIMATION_TIME);
+        if (!up_or_down) {} // TODO(anims): special case for mirrors, since getting the rotation animation was different. queue the same type of animation here
         else 
         {
             Vec4 start = entity->rotation_quat;
             float sign = clockwise ? 1.0f : -1.0f;
             Vec4 delta = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), sign * 0.25f * TAU);
             Vec4 end = quaternionNormalize(quaternionMultiply(delta, start));
-            createInterpolationAnimation(VEC3_0, VEC3_0, 0,
-                                         start, end, &entity->rotation_quat,
-                                         id, TURN_ANIMATION_TIME);
+            // TODO(anims): rotation animation
         }
 
         setTileDirection(next_direction, current_tile_coords);
@@ -3937,9 +3649,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
 
     if (!player->hit_by_blue) doHeadMovement(input_direction, true, animation_time);
 
-    createInterpolationAnimation(intCoordsToNorm(player->coords), intCoordsToNorm(next_player_coords), &player->position_norm,
-                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                 PLAYER_ID, animation_time);
+    // TODO(anims): interpolation anim (coords -> next player coords)
     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
     moveEntityInBufferAndState(player, next_player_coords, player->direction);
     player->moving_direction = input_direction;
@@ -3949,9 +3659,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
     if (!pack_detached)
     {
         Int3 next_pack_coords = getNextCoords(pack->coords, input_direction);
-        createInterpolationAnimation(intCoordsToNorm(pack->coords), intCoordsToNorm(next_pack_coords), &pack->position_norm,
-                                     IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                     PACK_ID, animation_time);
+        // TODO(anims): interpolation anim (coords -> next pack coords)
         createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
         moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
         pack->moving_direction = input_direction;
@@ -4187,7 +3895,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         if (entity != 0)
                         {
                             entity->direction = direction;
-                            entity->rotation_quat = directionToQuaternion(direction, true);
+                            entity->rotation_quat = directionToQuaternion(direction);
                         }
                     }
                     else if (tile == LADDER)
@@ -4508,7 +4216,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     recordActionForUndo(&world_state, true, false, false);
                 }
                 createDebugPopup("level restarted", NO_TYPE);
-                memset(animations, 0, sizeof(animations));
+                // TODO(animations): clear all animations
                 Camera save_camera = camera;
 
                 gameInitializeState(next_world_state.level_name);
@@ -4586,12 +4294,12 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                                 moveEntityInBufferAndState(player, player_ghost_coords, player_ghost_direction);
                                 setEntityVecsFromInts(player);
-                                zeroAnimations(PLAYER_ID);
+                                // TODO(anims): zero animations for player
                                 if (!pack_detached)
                                 {
                                     moveEntityInBufferAndState(pack, pack_ghost_coords, pack_ghost_direction);
                                     setEntityVecsFromInts(pack);
-                                    zeroAnimations(PACK_ID);
+                                    // TODO(anims): zero animations for pack
                                 }
                             }
                             // tp sends player ontop of themselves - should count as a successful tp, but no point changing state, and don't samve to undo buffer.
@@ -4689,10 +4397,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             {
                                 // leap of faith logic
                                 memcpy(&leap_of_faith_snapshot, &world_state, sizeof(WorldState));
-                                Animation animations_snapshot[32] = {0};
-                                memcpy(&animations_snapshot, &animations, sizeof(Animation) * MAX_ANIMATION_COUNT);
+                                // TODO(anims): clear all animations
+
                                 // ignoring trailing hitboxes in the setup because they are relatively short-lived to the 9 or so frames of fast forward. but if one is created on frams 7+ then
-                                // this could be a mistake, because the player won't actually be red when she walks off the edge (disparity betwenn this simulation and the actual logic)
+                                // this could be a mistake, because the player won't actually be red when she walks off the edge (disparity between this simulation and the actual logic)
                                 TrailingHitbox trailing_hitboxes_snapshot[32] = {0};
                                 memcpy (&trailing_hitboxes_snapshot, &trailing_hitboxes, sizeof(TrailingHitbox) * MAX_TRAILING_HITBOX_COUNT);
 
@@ -4718,6 +4426,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                     pack->position_norm = intCoordsToNorm(pack->coords);
                                 }
 
+                                // TODO(anims): in new system, do something like this system is doing; need to fastforward position_norm to where it would be by time taken to push
+                                /*
                                 // fastforward everything in animations by amount of time taken to push
                                 for (int32 animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
                                 {
@@ -4734,6 +4444,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                         if (a->rotation_to_change != 0) *a->rotation_to_change = a->rotation[a->frames_left - MOVE_OR_PUSH_ANIMATION_TIME];
                                     }
                                 }
+                                */
 
                                 // ignore trailing hitboxes
                                 memset(&trailing_hitboxes, 0, sizeof(TrailingHitbox) * MAX_TRAILING_HITBOX_COUNT);
@@ -4746,7 +4457,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                                 // restore state no matter what, since even if worked i want to run the animations properly now anyway
                                 memcpy(&next_world_state, &leap_of_faith_snapshot, sizeof(WorldState));
-                                memcpy(&animations, &animations_snapshot, sizeof(Animation) * MAX_ANIMATION_COUNT);
+                                // TODO(anims): would want to restore animations here
                                 memcpy(&trailing_hitboxes, &trailing_hitboxes_snapshot, sizeof(TrailingHitbox) * MAX_TRAILING_HITBOX_COUNT);
 
                                 if (leap_of_faith_worked)
@@ -4759,7 +4470,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 else 
                                 {
                                     resetPlayerAndPackMotion();
-                                    doFailedWalkAnimations(player->direction);
+                                    // TODO(anims): failed walk animation for player
                                     time_until_allow_game_input = FAILED_ANIMATION_TIME;
                                 }
                             }
@@ -4786,9 +4497,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             {
                                 createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
                                 moveEntityInBufferAndState(player, coords_above, player->direction);
-                                createInterpolationAnimation(intCoordsToNorm(getNextCoords(player->coords, DOWN)),
-                                                             intCoordsToNorm(player->coords), &player->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                             PLAYER_ID, CLIMB_ANIMATION_TIME);
+                                // TODO(anims): interpolation anim (coords below player to player) - this should happen before moving the player, and have it from player coords to above player, i feel. no functional difference
 
                                 player->in_motion = CLIMB_ANIMATION_TIME;
                                 player->moving_direction = UP;
@@ -4797,9 +4506,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 {
                                     createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
                                     moveEntityInBufferAndState(pack, getNextCoords(pack->coords, UP), pack->direction);
-                                    createInterpolationAnimation(intCoordsToNorm(getNextCoords(pack->coords, DOWN)),
-                                                                 intCoordsToNorm(pack->coords), &pack->position_norm, IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                                 PACK_ID, CLIMB_ANIMATION_TIME);
+                                    // TODO(anims): interpolation anim (coords below pack to pack) - same caveat as above
 
                                     pack->in_motion = CLIMB_ANIMATION_TIME;
                                     pack->moving_direction = UP;
@@ -4818,7 +4525,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 						else if (do_failed_animations) 
                         {
                             resetPlayerAndPackMotion();
-                            doFailedWalkAnimations(player->direction);
+                            // TODO(anims): failed walk animation for player
                             time_until_allow_game_input = FAILED_ANIMATION_TIME;
                         }
                     }
@@ -4844,11 +4551,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 if (!player->hit_by_blue) doHeadRotation(clockwise);
                             }
 
-                            createInterpolationAnimation(VEC3_0, VEC3_0, 0, 
-                                                         directionToQuaternion(player->direction, true), 
-                                                         directionToQuaternion(input_direction, true), 
-                                                         &player->rotation_quat,
-                                                         1, TURN_ANIMATION_TIME); 
+                            // TODO(anims): rotation animation (player->dir, input dir)
 
                             player->direction = input_direction;
                             setTileDirection(player->direction, player->coords);
@@ -4951,7 +4654,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                             recordActionForUndo(&world_state, false, false, false);
                                             pushAll(diagonal_coords, oppositeDirection(input_direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false);
                                         }
-                                        doFailedTurnAnimations(input_direction, clockwise);
+                                        // TODO(anims): failed turn animation
                                     }
                                     else
                                     {
@@ -4964,20 +4667,13 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                             if (!player->hit_by_blue) doHeadRotation(clockwise);
                                         }
 
-                                        createInterpolationAnimation(VEC3_0, VEC3_0, 0, 
-                                                                     directionToQuaternion(player->direction, true), 
-                                                                     directionToQuaternion(input_direction, true), 
-                                                                     &player->rotation_quat,
-                                                                     PLAYER_ID, TURN_ANIMATION_TIME); 
+                                        // TODO(anims): rotation animation (player->dir -> input dir)
 
                                         player->direction = input_direction;
                                         setTileDirection(player->direction, player->coords);
                                         player->moving_direction = NO_DIRECTION;
 
-                                        createPackRotationAnimation(intCoordsToNorm(player->coords), 
-                                                                    intCoordsToNorm(pack->coords), 
-                                                                    oppositeDirection(input_direction), clockwise, 
-                                                                    &pack->position_norm, &pack->rotation_quat, PACK_ID, TURN_ANIMATION_TIME);
+                                        // TODO(anims): pack rotation animation
 
                                         if (push_diagonal)   pack_turn_state.do_diagonal_push_on_turn = true;
                                         if (push_orthogonal) pack_turn_state.do_orthogonal_push_on_turn = true;
@@ -4990,8 +4686,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 }
                                 else
                                 {
-                                    // failed turn animation
-                                    doFailedTurnAnimations(input_direction, clockwise);
+                                    // TODO(anims): failed turn animation
                                 }
                             }
                         }
@@ -5035,11 +4730,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                     Int3 next_pack_coords = getNextCoords(pack->coords, backwards_direction);
                                     moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
 
-                                    createInterpolationAnimation(intCoordsToNorm(getNextCoords(pack->coords, player->direction)),
-                                                                 intCoordsToNorm(pack->coords),
-                                                                 &pack->position_norm,
-                                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                                 PACK_ID, MOVE_OR_PUSH_ANIMATION_TIME);
+                                    // TODO(anims): interpolation anim (pack coords tw player -> pack coords) - should happen before moveEntityInBufferAndState, would feel more logical i think
 
                                     pack->in_motion = MOVE_OR_PUSH_ANIMATION_TIME;
                                     pack->moving_direction = backwards_direction;
@@ -5049,11 +4740,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 next_player_coords = getNextCoords(player->coords, backwards_direction);
                                 moveEntityInBufferAndState(player, next_player_coords, player->direction);
 
-                                createInterpolationAnimation(intCoordsToNorm(getNextCoords(player->coords, player->direction)),
-                                                             intCoordsToNorm(player->coords),
-                                                             &player->position_norm,
-                                                             IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                             PLAYER_ID, MOVE_OR_PUSH_ANIMATION_TIME);
+                                // TODO(anims): interpolation anim (player coords in player direction -> player coords) - again, order should be reversed
 
                                 player->in_motion = MOVE_OR_PUSH_ANIMATION_TIME;
                                 player->moving_direction = backwards_direction;
@@ -5066,14 +4753,14 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             else
                             {
                                 resetPlayerAndPackMotion();
-                                doFailedWalkAnimations(oppositeDirection(player->direction));
+                                // TODO(anims): failed walk animation (in opposite direction to player)
                                 time_until_allow_game_input = FAILED_ANIMATION_TIME;
                             }
                         }
                         else
                         {
                             resetPlayerAndPackMotion();
-                            doFailedWalkAnimations(oppositeDirection(player->direction));
+                            // TODO(anims): failed walk animation (in opposite direction to player)
                             time_until_allow_game_input = FAILED_ANIMATION_TIME;
                         }
                     }
@@ -5082,6 +4769,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         }
 
         // pack turn sequence
+        // TODO: is most of this magic still needed after the new trailing hitbox setups / after new animation system?
         // the pack_intermediate_states_timer numbers control when during a turn does the backpack push things, and what tile(s) does the backpack occupy for the purposes of laser passthrough
 
         // numbers are magic and based on how long it takes for the pack to turn. this is because it's kind of hard to make a good looking generalization, e.g. just using 
@@ -5213,11 +4901,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     }
                     moveEntityInBufferAndState(player, coords_above, player->direction);
 
-                    createInterpolationAnimation(intCoordsToNorm(getNextCoords(player->coords, DOWN)),
-                                                 intCoordsToNorm(player->coords),
-                                                 &player->position_norm,
-                                                 IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                 PLAYER_ID, CLIMB_ANIMATION_TIME);
+                    // TODO(anims): interpolate animation upwards - this should happen before moveEntity...
 
                     player->in_motion = CLIMB_ANIMATION_TIME;
                     player->moving_direction = UP;
@@ -5227,11 +4911,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         Int3 coords_above_pack = getNextCoords(pack->coords, UP);
                         moveEntityInBufferAndState(pack, coords_above_pack, pack->direction);
 
-                        createInterpolationAnimation(intCoordsToNorm(getNextCoords(pack->coords, DOWN)),
-                                                     intCoordsToNorm(pack->coords),
-                                                     &pack->position_norm,
-                                                     IDENTITY_QUATERNION, IDENTITY_QUATERNION, 0,
-                                                     PACK_ID, CLIMB_ANIMATION_TIME);
+                        // TODO(anims): interpolation anim upwards
 
                         pack->in_motion = CLIMB_ANIMATION_TIME;
                         pack->moving_direction = UP;
@@ -5243,61 +4923,66 @@ void gameFrame(double delta_time, TickInput* tick_input)
             {
                 // can't move or climb more
                 resetPlayerAndPackMotion();
-                doFailedWalkAnimations(player->direction);
+                // TODO(anims): failed walk animation in direction of player
                 time_until_allow_game_input = FAILED_ANIMATION_TIME;
             }
         }
 
-        // pack detach logic
+        // pack attachment logic
         TileType tile_behind_player = getTileType(getNextCoords(player->coords, oppositeDirection(player->direction)));
         if (!pack_detached && pack_turn_state.pack_intermediate_states_timer == 0 && tile_behind_player != PACK) pack_detached = true;
         else if (pack_detached && tile_behind_player == PACK) pack_detached = false;
 
-        // do animations
-        // the animation system is just an array, where the frames_left decrement each frame. 
-		for (int animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
+        // do animations and handle in_motion, moving_direction, etc.. for now, set pos norm to the coords
         {
-            Animation* a = &animations[animation_index];
-			if (a->frames_left == 0) continue;
-			if (a->position_to_change != 0) 
+            // all standard entities
+            Entity* all_entity_groups[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.sources, next_world_state.win_blocks };
+            FOR(falling_object_index, 4)
             {
-                Vec3 next_pos = a->position[a->frames_left-1];
-                if (!vec3IsZero(next_pos)) *a->position_to_change = next_pos; 
-                //*a->position_to_change = a->position[a->frames_left-1];
-            }
-			if (a->rotation_to_change != 0) 
-            {
-				*a->rotation_to_change = a->rotation[a->frames_left-1];
-            }
-            animations[animation_index].frames_left--;
-        }
+                Entity* entity_group = all_entity_groups[falling_object_index];
+                FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) 
+                {
+                    Entity* e = &entity_group[entity_index];
+                    e->position_norm = intCoordsToNorm(e->coords);
+                    e->rotation_quat = directionToQuaternion(e->direction);
 
-        // decrement in_motion / moving_direction and reset first_fall_already_done for pushable entities, if they should be reset
-        Entity* falling_entity_groups[6] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.glass_blocks, next_world_state.sources, next_world_state.win_blocks, next_world_state.reset_blocks };
-        FOR(falling_object_index, 6)
-        {
-            Entity* entity_group = falling_entity_groups[falling_object_index];
-            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) 
-            {
-                changeMoving(&entity_group[entity_index]);
-                resetFirstFall(&entity_group[entity_index]);
+                    changeMoving(e);
+                    resetFirstFall(e);
+                }
             }
-        }
-        changeMoving(player);
-        resetFirstFall(player);
-		changeMoving(pack);
-        resetFirstFall(pack);
-        if (pack_turn_state.pack_intermediate_states_timer > 0)
-        {
-            pack->in_motion = 0;
-            pack->moving_direction = NO_DIRECTION;
-        }
-        // if player red, reset first fall timer (and pack, if it is attached)
-        if (player->hit_by_red)
-		{
-            player->first_fall_already_done = false;
-            if (!pack_detached) pack->first_fall_already_done = false;
-        }
+	
+            // player handling
+            {
+                player->position_norm = intCoordsToNorm(player->coords);
+                player->rotation_quat = directionToQuaternion(player->direction);
+
+                changeMoving(player);
+                resetFirstFall(player);
+            }
+
+            // pack handling
+
+            {
+                pack->position_norm = intCoordsToNorm(pack->coords);
+                pack->rotation_quat = directionToQuaternion(pack->direction);
+
+                changeMoving(pack);
+                resetFirstFall(pack);
+            }
+
+            // some edge case handling. TODO: handle at least the second case in the pack attachment logic?
+            if (pack_turn_state.pack_intermediate_states_timer > 0)
+            {
+                pack->in_motion = 0;
+                pack->moving_direction = NO_DIRECTION;
+            }
+            // if player red, reset first fall timer (and pack, if it is attached)
+            if (player->hit_by_red)
+            {
+                player->first_fall_already_done = false;
+                if (!pack_detached) pack->first_fall_already_done = false;
+            }
+    	}
 
         // disallow input if player above void / water
         TileType tile_type_below_player = getTileType(getNextCoords(player->coords, DOWN));
@@ -5334,8 +5019,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             saved_overworld_camera_mode = MAIN_WAITING;
                         }
                     }
-					zeroAnimations(PLAYER_ID);
-                    zeroAnimations(PACK_ID);
+                    // TODO(anims): zero animations of player and pack. probably should clear all animations, period?
                     levelChangePrep(wb->next_level);
                     time_until_allow_game_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                     gameInitializeState(wb->next_level);
@@ -5743,8 +5427,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
             float length = vec3Length(diff);
             Vec3 scale = { LASER_WIDTH, LASER_WIDTH, length };
             Vec4 rotation = {0};
-			if (lb.direction == UP || lb.direction == DOWN) rotation = directionToQuaternion(lb.direction, false);
-			else rotation = directionToQuaternion(lb.direction, true);
+			if (lb.direction == UP || lb.direction == DOWN) rotation = directionToQuaternion(lb.direction);
+			else rotation = directionToQuaternion(lb.direction);
 
             Vec3 color_without_alpha = colorToRGB(lb.color);
             float alpha = 1.0f;
@@ -5787,9 +5471,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
             {
                 if (game_shader_mode != OLD && getCube3DId(draw_tile) == CUBE_3D_WATER) 
                 {
-                    drawAsset(MODEL_3D_WATER, WATER_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false), VEC4_0, false, VEC4_0, VEC4_0);
+                    drawAsset(MODEL_3D_WATER, WATER_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1]), VEC4_0, false, VEC4_0, VEC4_0);
                 }
-                drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1], false), VEC4_0, false, VEC4_0, VEC4_0);
+                drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1]), VEC4_0, false, VEC4_0, VEC4_0);
             }
         }
 
@@ -5811,8 +5495,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
             else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
 
             // technically should maybe generate ghost AABBs here, if i ever want ghost to render under water
-            if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction, false), VEC4_0, false, VEC4_0, VEC4_0);
-            if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction, false),   VEC4_0, false, VEC4_0, VEC4_0);
+            if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction), VEC4_0, false, VEC4_0, VEC4_0);
+            if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction),   VEC4_0, false, VEC4_0, VEC4_0);
         }
         if (!world_state.pack.removed) 
         {
