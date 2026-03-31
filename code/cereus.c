@@ -111,10 +111,9 @@ typedef struct
     Vec4 rotation_quat;
     bool removed;
 
-    int32 in_motion;
-    Direction moving_direction;
-
-    bool first_fall_already_done; // first fall is slower (accelerates to terminal velocity). all other falls are lerped
+    // movement state
+    Vec3 velocity;
+    bool falling;
 
     // for sources/lasers
     Color color;
@@ -825,7 +824,7 @@ bool isSource(TileType type)
 // only checks tile types - doesn't do what canPush does
 bool isPushable(TileType type)
 {
-    if (type== BOX || type == GLASS || type == MIRROR || type == PACK || isSource(type)) return true;
+    if (type== BOX || type == MIRROR || type == PACK || isSource(type)) return true;
     else return false;
 }
 
@@ -2087,22 +2086,7 @@ bool trailingHitboxAtCoords(Int3 coords, TrailingHitbox* trailing_hitbox)
 
 // PUSH ENTITES
 
-void changeMoving(Entity* e) // TODO(anims): got rid of presentInAnimations checek on in motion, and this no longer sets in_motion to any value, only decrements it if it's moving
-{
-    if (e->in_motion > 0) e->in_motion--;
-    else e->moving_direction = NO_DIRECTION;
-}
-
-void resetPlayerAndPackMotion()
-{
-    next_world_state.player.in_motion = 0;
-    next_world_state.player.moving_direction = NO_DIRECTION;
-    if (!pack_detached)
-    {
-        next_world_state.pack.in_motion = 0;
-        next_world_state.pack.moving_direction = NO_DIRECTION;
-    }
-}
+// TODO: taking vec3IsZero of e->velocity is incorrect; i don't only want to move objects if they aren't moving at all - there should be a more intelligent check later.
 
 PushResult canPush(Int3 coords, Direction direction)
 {
@@ -2110,21 +2094,21 @@ PushResult canPush(Int3 coords, Direction direction)
     TileType current_tile = getTileType(current_coords);
     for (int push_index = 0; push_index < MAX_ENTITY_PUSH_COUNT; push_index++) 
     {
-        Entity* entity = getEntityAtCoords(current_coords);
-        if (isEntity(current_tile) && entity->locked) return FAILED_PUSH;
+        Entity* e = getEntityAtCoords(current_coords);
+        if (isEntity(current_tile) && e->locked) return FAILED_PUSH;
 
-        if (entity->in_motion > 0) return PAUSE_PUSH;
+        if (!vec3IsZero(e->velocity)) return PAUSE_PUSH;
         if (isPushable(getTileType(current_coords)) && getTileType(getNextCoords(current_coords, DOWN)) == NONE && !next_world_state.player.hit_by_blue) return PAUSE_PUSH;
 
         current_coords = getNextCoords(current_coords, direction);
         current_tile = getTileType(current_coords);
 
-        Int3 coords_ahead = getNextCoords(entity->coords, direction);
-        if (isPushable(getTileType(coords_ahead)) && getEntityAtCoords(coords_ahead)->in_motion) return PAUSE_PUSH;
-        Int3 coords_below = getNextCoords(entity->coords, DOWN);
-        if (isPushable(getTileType(coords_below)) && getEntityAtCoords(coords_below)->in_motion) return PAUSE_PUSH;
-        Int3 coords_below_and_ahead = getNextCoords(getNextCoords(entity->coords, DOWN), direction);
-        if (isPushable(getTileType(coords_below_and_ahead)) && getEntityAtCoords(coords_below_and_ahead)->in_motion) return PAUSE_PUSH;
+        Int3 coords_ahead = getNextCoords(e->coords, direction);
+        if (isPushable(getTileType(coords_ahead)) && !vec3IsZero(getEntityAtCoords(coords_ahead)->velocity)) return PAUSE_PUSH;
+        Int3 coords_below = getNextCoords(e->coords, DOWN);
+        if (isPushable(getTileType(coords_below)) && !vec3IsZero(getEntityAtCoords(coords_below)->velocity)) return PAUSE_PUSH;
+        Int3 coords_below_and_ahead = getNextCoords(getNextCoords(e->coords, DOWN), direction);
+        if (isPushable(getTileType(coords_below_and_ahead)) && !vec3IsZero(getEntityAtCoords(coords_below_and_ahead)->velocity)) return PAUSE_PUSH;
 
         if (!intCoordsWithinLevelBounds(current_coords)) return FAILED_PUSH;
 
@@ -2157,6 +2141,8 @@ PushResult canPushUp(Int3 coords)
     else return FAILED_PUSH;
 }
 
+// TODO(anims): probably no longer need these two separate functions, for with / without animations, because will be handled relative to the player.
+// 				still somewhat unclear if there's a reason trailing hitboxes aren't in the without-anim case - probably this doesn't matter, because they're handled in a smarter way now
 Push pushOnceWithoutAnimation(Int3 coords, Direction direction, int32 time)
 {
     Push entity_to_push = {0};
@@ -2166,9 +2152,6 @@ Push pushOnceWithoutAnimation(Int3 coords, Direction direction, int32 time)
     entity_to_push.previous_coords = coords;
     entity_to_push.entity = entity; 
     entity_to_push.new_coords = getNextCoords(coords, direction);
-
-    entity->in_motion = time;
-    entity->moving_direction = direction;
 
     setTileType(NONE, entity_to_push.previous_coords);
     setTileDirection(NORTH, entity_to_push.previous_coords);
@@ -2187,6 +2170,8 @@ void pushOnce(Int3 coords, Direction direction, int32 animation_time)
     int32 id = getEntityId(entity_to_push.new_coords);
     TileType trailing_hitbox_type = getTileType(entity_to_push.new_coords);
 	// TODO(anims): create interpolation animation from entity_to_push previous coords to entity_to_push new coords, with animation time
+    // 				actually, probably don't want to do any animation work here. instead, add this id to some list of entities tied to the player, and update them relative to the player position
+    // 				(with tilting / other animation relative to their speed, or something)
     int32 trailing_hitbox_time = (animation_time / 2) + 1;
     createTrailingHitbox(id, coords, trailing_hitbox_time, trailing_hitbox_type);
 }
@@ -2760,13 +2745,7 @@ bool canFall(Entity* e)
     return true;
 }
 
-void resetFirstFall(Entity* e)
-{
-    if ((!e->in_motion && getTileType(getNextCoords(e->coords, DOWN)) != NONE) && !canFall(e)) e->first_fall_already_done = false;
-    if (next_world_state.player.hit_by_blue) e->first_fall_already_done = false;
-}
-
-void doFallingEntity(Entity* entity, bool do_animation)
+void setFalling(Entity* entity)
 {
     // canFall will only return true for the bottom entity in a stack. so whenever this check is passed, the first entity is always the one in the bottom of the stack.
     if (!canFall(entity)) return;
@@ -2783,7 +2762,7 @@ void doFallingEntity(Entity* entity, bool do_animation)
         if (isPushable(getTileType(above)))
         {
             Entity* above_entity = getEntityAtCoords(above);
-            if (above_entity) doFallingEntity(above_entity, do_animation);
+            if (above_entity) setFalling(above_entity);
         }
         return;
     }
@@ -2796,9 +2775,7 @@ void doFallingEntity(Entity* entity, bool do_animation)
     Int3 current_start_coords = entity->coords;
     Int3 current_end_coords = next_coords; 
 
-    // decide first fall for the entire stack
-    bool is_first_fall = !entity->first_fall_already_done;
-    int32 fall_time = is_first_fall ? FIRST_FALL_ANIMATION_TIME : FALL_ANIMATION_TIME;
+    //int32 fall_time = 8; // TODO(anims): decide time for th based on velocity (this is just some random number for now)
 
     FOR(stack_fall_index, stack_size)
     {
@@ -2806,52 +2783,36 @@ void doFallingEntity(Entity* entity, bool do_animation)
 
         // if any entities in the stack are removed, or moving, don't do the fall
         if (e_in_stack->removed) return; // should never happen; shouldn't have removed entity in the middle of a stack somewhere
-        if (e_in_stack->in_motion) return; 
 
-        // if the enitity is pack, and pack in attached (and this isn't the entity on which the function was called), cut the stack size short below this, so the pack doesn't get dragged down
+        // if the enitity is pack, and pack in attached (and this isn't the entity on which the function was called), cut the stack size short here, so the pack doesn't get dragged down
         // similarly, if player is red, above a stack which is falling, break to allow the stack below to fall, but keep the player floating.
         if (e_in_stack->id == PACK_ID && !pack_detached && stack_fall_index != 0) break;
         if (e_in_stack->id == PLAYER_ID && player->hit_by_red) break;
 
-        // if player is in the stack, disable movement until fall has taken place
-        if (e_in_stack->id == PLAYER_ID) time_until_allow_game_input = fall_time;
-
-        if (do_animation)
-        {
-			if (is_first_fall)
-			{
-                // TODO(anims): first fall animation
-                createTrailingHitbox(e_in_stack->id, current_start_coords, FIRST_FALL_ANIMATION_TIME, getTileType(e_in_stack->coords));
-            }
-			else
-            {
-                // TODO(anims): normal fall animation (lerp)
-                createTrailingHitbox(e_in_stack->id, current_start_coords, TRAILING_HITBOX_TIME, getTileType(e_in_stack->coords));
-            }
-        }
-
-        e_in_stack->first_fall_already_done = true;
-        e_in_stack->in_motion = fall_time;
-        e_in_stack->moving_direction = DOWN;
-
-		moveEntityInBufferAndState(e_in_stack, current_end_coords, e_in_stack->direction);
+        e_in_stack->falling = true;
 
         current_end_coords = current_start_coords;
         current_start_coords = getNextCoords(current_start_coords, UP);
+        
+        // TODO(anims): what need to be done when object moves that was previously handled here
+        // 				animations
+        // 				trailing hitbox based on velocity
+        // 				disable inputs if player is falling (probably don't want to fully disable inputs, but for now do, with same time as for the th)
+        // 				actually move the object
     }
     return;
 }
 
-void doFallingObjects(bool do_animation)
+void setFallingForAllPushables()
 {
-    Entity* object_group_to_fall[6] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.glass_blocks, next_world_state.sources, next_world_state.win_blocks, next_world_state.reset_blocks };
-    FOR(to_fall_index, 6)
+    Entity* entity_group_to_fall[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.sources, next_world_state.win_blocks };
+    FOR(to_fall_index, 4)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            Entity* e = &object_group_to_fall[to_fall_index][entity_index];
+            Entity* e = &entity_group_to_fall[to_fall_index][entity_index];
             if (e->locked || e->removed) continue;
-            doFallingEntity(e, do_animation);
+            setFalling(e);
         }
     }
 }
@@ -3366,6 +3327,8 @@ bool performUndo(int32 undo_animation_time)
 
                     if (dx != 0 || dy != 0 || dz != 0 || was_at_different_direction) // only do any sort of interpolation if the object moved / changed direction 
                     {
+                        // TODO(anims): just ignoring this for now - will have to use a different system
+                        /*
                         if (dx != 0 && dy != 0 && dz != 0) e->in_motion = undo_animation_time;
 
                         // a lot of edge case handling for how to interpolate undos
@@ -3526,6 +3489,7 @@ bool performUndo(int32 undo_animation_time)
                             // handle trailing hitbox
                             createTrailingHitbox(e->id, roundNormCoordsToInt(old_position), TRAILING_HITBOX_TIME, type);
                         }
+                        */
                     }
                 }
             }
@@ -3635,6 +3599,7 @@ void doHeadRotation(bool clockwise)
     }
 }
 
+// TODO(anims): probably doesn't need animations on / animation time
 void doHeadMovement(Direction direction, bool animations_on, int32 animation_time)
 {
     Int3 coords_above_player = getNextCoords(next_world_state.player.coords, UP);
@@ -3649,21 +3614,15 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
 
     if (!player->hit_by_blue) doHeadMovement(input_direction, true, animation_time);
 
-    // TODO(anims): interpolation anim (coords -> next player coords)
     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
     moveEntityInBufferAndState(player, next_player_coords, player->direction);
-    player->moving_direction = input_direction;
-    changeMoving(player);
 
     // move pack also if pack is attached
     if (!pack_detached)
     {
         Int3 next_pack_coords = getNextCoords(pack->coords, input_direction);
-        // TODO(anims): interpolation anim (coords -> next pack coords)
         createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
         moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
-        pack->moving_direction = input_direction;
-        changeMoving(pack);
     }
 
     if (record_for_undo) recordActionForUndo(&world_state, false, false, false);
@@ -4264,7 +4223,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 writeSolvedLevelsToFile();
             }
 
-            if (time_until_allow_game_input == 0 && (tick_input->w_press || tick_input->a_press || tick_input->s_press || tick_input->d_press) && player->in_motion == 0 && player->in_motion == 0 && !player->removed)
+            if (time_until_allow_game_input == 0 && (tick_input->w_press || tick_input->a_press || tick_input->s_press || tick_input->d_press) && vec3IsZero(player->velocity)) // TODO(anims): don't actually guard on vec3IsZero, need some smarter system
             {
 				// MOVEMENT 
                 Direction input_direction = 0;
@@ -4333,8 +4292,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             {
                                 Int3 coords_ahead = next_player_coords;
                                 Int3 coords_below_and_ahead = getNextCoords(next_player_coords, DOWN);
-                                if (isPushable(getTileType(coords_ahead)) && getEntityAtCoords(coords_ahead)->in_motion) move_player = false;
-                                else if (isPushable(getTileType(coords_below_and_ahead)) && getEntityAtCoords(coords_below_and_ahead)->moving_direction != NO_DIRECTION) move_player = false;
+                                // TODO(anims): currently guards against any movement at all on objects that could be pushable. probably give some more leniency here
+                                if (isPushable(getTileType(coords_ahead)) && !vec3IsZero(getEntityAtCoords(coords_ahead)->velocity)) move_player = false;
+                                else if (isPushable(getTileType(coords_below_and_ahead)) && !vec3IsZero(getEntityAtCoords(coords_below_and_ahead)->velocity)) move_player = false;
                                 else
                                 {
                                     move_player = true;
@@ -4385,7 +4345,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                             bool allow_movement = true;
                             if (tile_below_next_coords == NONE && !player->hit_by_red) allow_movement = false;
-                            if (isEntity(tile_below_next_coords) && getEntityAtCoords(coords_below_next_coords)->moving_direction != NO_DIRECTION) allow_movement = false;
+                            if (isEntity(tile_below_next_coords) && !vec3IsZero(getEntityAtCoords(coords_below_next_coords)->velocity)) allow_movement = false;
 
                             if (allow_movement || cheating)
                             {
@@ -4409,9 +4369,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 if (!player->hit_by_blue)
                                 {
                                     // still doing animations, because need the position norm to update - but will skip ahead in the animation. if doesn't work, clear back to animations savestate
+                                    setFallingForAllPushables();
+                                    if (pack_detached) setFalling(pack);
                                     bool animations_on = true;
-                                    doFallingObjects(animations_on);
-                                    if (pack_detached) doFallingEntity(pack, animations_on);
                                     doHeadMovement(input_direction, animations_on, 1);
                                 }
 
@@ -4469,7 +4429,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 }
                                 else 
                                 {
-                                    resetPlayerAndPackMotion();
                                     // TODO(anims): failed walk animation for player
                                     time_until_allow_game_input = FAILED_ANIMATION_TIME;
                                 }
@@ -4497,19 +4456,13 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             {
                                 createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
                                 moveEntityInBufferAndState(player, coords_above, player->direction);
-                                // TODO(anims): interpolation anim (coords below player to player) - this should happen before moving the player, and have it from player coords to above player, i feel. no functional difference
-
-                                player->in_motion = CLIMB_ANIMATION_TIME;
-                                player->moving_direction = UP;
+                                // TODO(anims): figure out flags for climbing, maybe, similar to e.falling?
 
                                 if (!pack_detached)
                                 {
                                     createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
                                     moveEntityInBufferAndState(pack, getNextCoords(pack->coords, UP), pack->direction);
-                                    // TODO(anims): interpolation anim (coords below pack to pack) - same caveat as above
-
-                                    pack->in_motion = CLIMB_ANIMATION_TIME;
-                                    pack->moving_direction = UP;
+                                    // TODO(anims): same as above? probably don't need anything special, just use the player flag and grab the pack, too, if attached
                                 }
 
                                 recordActionForUndo(&world_state, false, false, true);
@@ -4524,7 +4477,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         }
 						else if (do_failed_animations) 
                         {
-                            resetPlayerAndPackMotion();
                             // TODO(anims): failed walk animation for player
                             time_until_allow_game_input = FAILED_ANIMATION_TIME;
                         }
@@ -4552,10 +4504,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             }
 
                             // TODO(anims): rotation animation (player->dir, input dir)
-
                             player->direction = input_direction;
                             setTileDirection(player->direction, player->coords);
-                            player->moving_direction = NO_DIRECTION;
 
                             recordActionForUndo(&world_state, false, false, false);
                         }
@@ -4572,8 +4522,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             bool pause_turn = false;
                             TrailingHitbox _;
                             if (trailingHitboxAtCoords(diagonal_coords, &_)) pause_turn = true;
-                            else if (isEntity(getTileType(orthogonal_coords)) && getEntityAtCoords(orthogonal_coords)->in_motion) pause_turn = true;
-                            else if (isEntity(getTileType(diagonal_coords))   && getEntityAtCoords(diagonal_coords)->in_motion)   pause_turn = true;
+                            else if (isEntity(getTileType(orthogonal_coords)) && !vec3IsZero(getEntityAtCoords(orthogonal_coords)->velocity)) pause_turn = true;
+                            else if (isEntity(getTileType(diagonal_coords))   && !vec3IsZero(getEntityAtCoords(diagonal_coords)->velocity))   pause_turn = true;
 
                             if (!pause_turn)
                             {
@@ -4671,7 +4621,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                                         player->direction = input_direction;
                                         setTileDirection(player->direction, player->coords);
-                                        player->moving_direction = NO_DIRECTION;
 
                                         // TODO(anims): pack rotation animation
 
@@ -4700,7 +4649,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         // backwards movement: allow only when climbing down a ladder. right now just move, and let player fall (functionally the same, but animation is goofy)
                         Direction backwards_direction = oppositeDirection(player->direction);
                         Int3 coords_below = getNextCoords(player->coords, DOWN);
-                        if (player->moving_direction == NO_DIRECTION && getTileType(coords_below) == LADDER && getTileDirection(coords_below) == input_direction && (pack_detached || (!pack_detached && getTileType(getNextCoords(pack->coords, DOWN)) == NONE)))
+                        if (vec3IsZero(player->velocity) && getTileType(coords_below) == LADDER && getTileDirection(coords_below) == input_direction && (pack_detached || (!pack_detached && getTileType(getNextCoords(pack->coords, DOWN)) == NONE)))
                         {
                             bool can_move = false;
                             bool do_push = false;
@@ -4730,11 +4679,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                     Int3 next_pack_coords = getNextCoords(pack->coords, backwards_direction);
                                     moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
 
-                                    // TODO(anims): interpolation anim (pack coords tw player -> pack coords) - should happen before moveEntityInBufferAndState, would feel more logical i think
-
-                                    pack->in_motion = MOVE_OR_PUSH_ANIMATION_TIME;
-                                    pack->moving_direction = backwards_direction;
-                                    pack->first_fall_already_done = true;
+                                    // TODO(anims): interpolation anim (pack coords tw player -> pack coords)
                                 }
 
                                 next_player_coords = getNextCoords(player->coords, backwards_direction);
@@ -4742,24 +4687,18 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                                 // TODO(anims): interpolation anim (player coords in player direction -> player coords) - again, order should be reversed
 
-                                player->in_motion = MOVE_OR_PUSH_ANIMATION_TIME;
-                                player->moving_direction = backwards_direction;
-                                player->first_fall_already_done = true;
-
                                 recordActionForUndo(&world_state, false, false, false);
 
                                 time_until_allow_game_input = MOVE_OR_PUSH_ANIMATION_TIME;
                             }
                             else
                             {
-                                resetPlayerAndPackMotion();
                                 // TODO(anims): failed walk animation (in opposite direction to player)
                                 time_until_allow_game_input = FAILED_ANIMATION_TIME;
                             }
                         }
                         else
                         {
-                            resetPlayerAndPackMotion();
                             // TODO(anims): failed walk animation (in opposite direction to player)
                             time_until_allow_game_input = FAILED_ANIMATION_TIME;
                         }
@@ -4805,7 +4744,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
         if (do_falling_logic)
         {
-            if (!player->hit_by_blue) doFallingObjects(true);
+            if (!player->hit_by_blue) setFallingForAllPushables();
 
             if (pack_turn_state.pack_intermediate_states_timer == 0)
             {
@@ -4819,8 +4758,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         // not red and pack attached: player always falls, if no bypass. pack only falls if player falls
                         if (!bypass_player_fall && canFall(player))
                         {
-                            doFallingEntity(player, true);
-                            doFallingEntity(pack, true);
+                            setFalling(player);
+                            setFalling(pack);
                         }
                     }
                     else
@@ -4828,8 +4767,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) player_will_fall_next_turn = true;
                         else player_will_fall_next_turn = false;
                         // not red and pack not attached, so pack and player both always fall
-                        if (!bypass_player_fall) doFallingEntity(player, true);
-                        doFallingEntity(pack, true);
+                        if (!bypass_player_fall) setFalling(player);
+                        setFalling(pack);
                     }
                 }
                 else
@@ -4838,13 +4777,15 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     // red, so pack only falls if is detached from player
                     if (pack_detached)
                     {
-                        doFallingEntity(pack, true);
+                        setFalling(pack);
                     }
                 }
             }
         }
 
         // climb logic
+        // TODO(anims): need something like a player.climbing flag for this gate instead. for now: disabling climbing
+        /*
         if (player->moving_direction == UP && player->in_motion == 1)
         {
             bool do_push = false;
@@ -4927,13 +4868,14 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 time_until_allow_game_input = FAILED_ANIMATION_TIME;
             }
         }
+		*/
 
         // pack attachment logic
         TileType tile_behind_player = getTileType(getNextCoords(player->coords, oppositeDirection(player->direction)));
         if (!pack_detached && pack_turn_state.pack_intermediate_states_timer == 0 && tile_behind_player != PACK) pack_detached = true;
         else if (pack_detached && tile_behind_player == PACK) pack_detached = false;
 
-        // do animations and handle in_motion, moving_direction, etc.. for now, set pos norm to the coords
+        // do animations and handle state regarding movement
         {
             // all standard entities
             Entity* all_entity_groups[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.sources, next_world_state.win_blocks };
@@ -4945,42 +4887,50 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     Entity* e = &entity_group[entity_index];
                     e->position_norm = intCoordsToNorm(e->coords);
                     e->rotation_quat = directionToQuaternion(e->direction);
-
-                    changeMoving(e);
-                    resetFirstFall(e);
                 }
             }
-	
+
             // player handling
             {
-                player->position_norm = intCoordsToNorm(player->coords);
-                player->rotation_quat = directionToQuaternion(player->direction);
+                // TODO: make const
+                float PLAYER_MAX_SPEED = 0.15f;
+                float PLAYER_ACCELERATION = 0.06f;
+                float PLAYER_DECELERATION = 0.06f;
 
-                changeMoving(player);
-                resetFirstFall(player);
+                Direction input_direction = NO_DIRECTION;
+                if 		(tick_input->w_press) input_direction = NORTH; 
+                else if (tick_input->a_press) input_direction = WEST; 
+                else if (tick_input->s_press) input_direction = SOUTH; 
+                else if (tick_input->d_press) input_direction = EAST; 
+
+                bool no_inputs = input_direction == NO_DIRECTION;
+                bool player_is_still = vec3IsZero(player->velocity);
+                float velocity_along_input_direction = getSignedComponentAlongDirection(input_direction, player->velocity);
+
+                Vec3 velocity_if_accelerate = vec3Add(player->velocity, vec3ScalarMultiply(directionToVector(input_direction), PLAYER_ACCELERATION)); // velocity += direction * acceleration 
+            	Vec3 clamped_velocity_if_accelerate = getSignedComponentAlongDirection(input_direction, velocity_if_accelerate) > PLAYER_MAX_SPEED ? vec3ScalarMultiply(directionToVector(input_direction), PLAYER_MAX_SPEED) : velocity_if_accelerate;
+
+                if (!no_inputs && (player_is_still || velocity_along_input_direction > 0))
+                {
+                	player->velocity = clamped_velocity_if_accelerate;
+                }
+                else
+                {
+                    // smooth deceleration: solve for transitional velocity such that decelerating each subsequent frame covers exactly the remaining distance.
+                    // formula: v_t = (d + a*n*(n-1) / 2) / n, where n is the number of deceleration ticks
+                    // seach for the unique n where v_t falls in the valid range [(n-1)*a, n*a].
+                    // n should always be found - if player is in a situation where no amount of deceleration (of PLAYER_DECELERATION) would suffice to get her onto the tile, she should instead be targetting the next tile...
+                    // but this is a case that i need to worry about, probably - i need to make sure that there's no timing window where you can release a movement key too late, but still have the player targetting the tile...
+                    // probably should just decelerate in a certain amount of frames, and bounce back if required, or something? 
+
+                    // note: if this works as expected, deceleration will appear slower by 1/2 tick on average, because the transitional step will have somewhere between max-v and full-deceleration-v - so will appear as if decel is a slightly longer period than accel.
+                }
             }
 
             // pack handling
-
             {
                 pack->position_norm = intCoordsToNorm(pack->coords);
                 pack->rotation_quat = directionToQuaternion(pack->direction);
-
-                changeMoving(pack);
-                resetFirstFall(pack);
-            }
-
-            // some edge case handling. TODO: handle at least the second case in the pack attachment logic?
-            if (pack_turn_state.pack_intermediate_states_timer > 0)
-            {
-                pack->in_motion = 0;
-                pack->moving_direction = NO_DIRECTION;
-            }
-            // if player red, reset first fall timer (and pack, if it is attached)
-            if (player->hit_by_red)
-            {
-                player->first_fall_already_done = false;
-                if (!pack_detached) pack->first_fall_already_done = false;
             }
     	}
 
@@ -5133,6 +5083,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             createDebugText(game_text);
 
             // entity info
+            /*
             char player_text[256] = {0};
             snprintf(player_text, sizeof(player_text), "player info: coords: %d, %d, %d, moving time: %d, moving direction: %d", player->coords.x, player->coords.y, player->coords.z, player->in_motion, player->moving_direction);
             createDebugText(player_text);
@@ -5140,6 +5091,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             char pack_text[256] = {0};
             snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, moving_time: %d, moving_direction: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack->in_motion, pack->moving_direction);
             createDebugText(pack_text);
+            */
 
             /*
             char mirror_info[256] = {0};
@@ -5149,11 +5101,13 @@ void gameFrame(double delta_time, TickInput* tick_input)
             createDebugText(mirror_info);
             */
 
+            /*
             char box_info[256] = {0};
 			Entity box1 = next_world_state.boxes[0];
 			Entity box2 = next_world_state.boxes[1];
             snprintf(box_info, sizeof(box_info), "box 1 in motion: %i, box 1 moving direction: %i, box 2 in motion: %i, box 2 moving direction: %i", box1.in_motion, box1.moving_direction, box2.in_motion, box2.moving_direction);
             createDebugText(box_info);
+            */
 
             char timer_info[256] = {0};
             snprintf(timer_info, sizeof(timer_info), "game: %i, meta: %i, undo/restart: %i", time_until_allow_game_input, time_until_allow_meta_input, time_until_allow_undo_or_restart_input);
