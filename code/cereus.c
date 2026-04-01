@@ -764,6 +764,11 @@ Vec3 vec3Hadamard(Vec3 a, Vec3 b)
     return (Vec3){ a.x*b.x, a.y*b.y, a.z*b.z };
 }
 
+int32 triangleNumber(int32 n)
+{
+    return n * (n + 1) / 2;
+}
+
 // BUFFER / STATE INTERFACING
 
 int32 coordsToBufferIndexType(Int3 coords)
@@ -2357,6 +2362,17 @@ TileType laserColorToType(Color color)
     }
 }
 
+float getComponentAlongDirection(Direction direction, Vec3 vector)
+{
+    switch (direction)
+    {
+        case SOUTH: case NORTH: return vector.z;
+        case WEST:  case EAST:  return vector.x;
+        case UP:    case DOWN:  return vector.y;
+        default: return 0;
+    }
+}
+
 // will return negative of component along NORTH, WEST, and DOWN.
 float getSignedComponentAlongDirection(Direction direction, Vec3 vector)
 {
@@ -3642,6 +3658,21 @@ void updatePackDetached()
     else pack_detached = true;
 }
 
+// returns distance travelled
+float oneDimensionalDecelerationSimulation(float initial_velocity, float deceleration)
+{
+    float velocity = initial_velocity;
+    float position = 0;
+    while (true) // TODO: probably want to not have this break so easily. but for now i want to catch problems here
+    {
+        // apply deceleration first before the first velocity. this means that the first frame will have some deceleration, as opposed to keeping the same initial velocity for a frame
+        velocity -= deceleration;
+        if (velocity <= 0) break;
+        position += velocity;
+    }
+    return position;
+}
+
 // GAME LOGIC
 
 void gameFrame(double delta_time, TickInput* tick_input)
@@ -4233,58 +4264,29 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 else if (tick_input->s_press) input_direction = SOUTH; 
                 else if (tick_input->d_press) input_direction = EAST; 
 
-                if (input_direction == player->direction)
+                if (input_direction == player->direction) // TODO: this would be clearer as a switch
                 {
-                    if (calculateGhosts())
+                    if 		(tick_input->w_press) next_player_coords = getNextCoords(player->coords, NORTH);
+                    else if (tick_input->a_press) next_player_coords = getNextCoords(player->coords, WEST);
+                    else if (tick_input->s_press) next_player_coords = getNextCoords(player->coords, SOUTH);
+                    else if (tick_input->d_press) next_player_coords = getNextCoords(player->coords, EAST);
+
+                    bool allow_movement = false;
+
+                    // allow movement if pos norm are within some threshold of the targetted block
+                    float distance_when_movement_is_allowed = 0.5f; // TODO(anims): change depending on when deceleration needs to start happening
+                    Vec3 difference = vec3Subtract(intCoordsToNorm(player->coords), player->position_norm);
+                    if (getSignedComponentAlongDirection(input_direction, difference) < distance_when_movement_is_allowed) allow_movement = true;
+
+                    // disallow movement if also moving in some other direction currently; TODO(anims): should be more lenient here
+                    if (!vec3IsZero(vec3ZeroComponentAlongDirection(input_direction, player->velocity))) allow_movement = false;
+
+                    if (allow_movement)
                     {
-                        // seek towards start of laser to get endpoint, and then go to the endpoint
-                        // check if endpoint is valid before teleport (i.e, if pack can go there. if over air, teleport anyway)
-
-                        bool allow_tp = false;
-                        TileType player_ghost_tile = getTileType(player_ghost_coords);
-                        TileType pack_ghost_tile = getTileType(pack_ghost_coords);
-                        if ((player_ghost_tile == NONE || player_ghost_tile == PLAYER) && (pack_ghost_tile == NONE || pack_ghost_tile == PLAYER || pack_ghost_tile == PACK)) allow_tp = true;
-
-                        if (allow_tp)
-                        {
-                            if (!int3IsEqual(player_ghost_coords, player->coords))
-                            {
-                                recordActionForUndo(&world_state, false, true, false);
-
-                                moveEntityInBufferAndState(player, player_ghost_coords, player_ghost_direction);
-                                setEntityVecsFromInts(player);
-                                // TODO(anims): zero animations for player
-                                if (!pack_detached)
-                                {
-                                    moveEntityInBufferAndState(pack, pack_ghost_coords, pack_ghost_direction);
-                                    setEntityVecsFromInts(pack);
-                                    // TODO(anims): zero animations for pack
-                                }
-                            }
-                            // tp sends player ontop of themselves - should count as a successful tp, but no point changing state, and don't samve to undo buffer.
-                            time_until_allow_game_input = SUCCESSFUL_TP_TIME;
-
-                            // make sure laser buffer is up to date after the teleport
-                            updateLaserBuffer();
-                        }
-                        else
-                        {
-                            // tp obstructed
-                            time_until_allow_game_input = FAILED_TP_TIME;
-                        }
-                    }
-                    else
-                    {
-                        // no ghosts, but still need to check if player is green at all 
-                        bool do_push = false;
                         bool move_player = false;
+                        bool do_push = false;
                         bool climb = false;
-                        bool do_failed_animations = false;
-                        int32 animation_time = 0;
-                        if 		(tick_input->w_press) next_player_coords = getNextCoords(player->coords, NORTH);
-                        else if (tick_input->a_press) next_player_coords = getNextCoords(player->coords, WEST);
-                        else if (tick_input->s_press) next_player_coords = getNextCoords(player->coords, SOUTH);
-                        else if (tick_input->d_press) next_player_coords = getNextCoords(player->coords, EAST);
+
                         TileType next_tile = getTileType(next_player_coords);
                         if (!player_will_fall_next_turn) switch (next_tile)
                         {
@@ -4298,7 +4300,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 else
                                 {
                                     move_player = true;
-                                    animation_time = MOVE_OR_PUSH_ANIMATION_TIME;
                                 }
                                 break;
                             }
@@ -4320,20 +4321,19 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 {
                                     do_push = true;
                                     move_player = true;
-                                    animation_time = MOVE_OR_PUSH_ANIMATION_TIME;
                                 }
-                                else if (push_check == FAILED_PUSH) do_failed_animations = true;
+                                else if (push_check == FAILED_PUSH) { /* TODO(anims): failed animations case */ }
                                 break;
                             }
                             case LADDER:
                             {
                                 if (getTileDirection(next_player_coords) == oppositeDirection(player->direction)) climb = true;
-                                else do_failed_animations = true;
+                                else // TODO(anims): failed animations case
                                 break;
                             }
                             default:
                             {
-                                do_failed_animations = true;
+                                // TODO(anims): failed animations case
                                 break;
                             }
                         }
@@ -4343,12 +4343,13 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             Int3 coords_below_next_coords = getNextCoords(next_player_coords, DOWN);
                             TileType tile_below_next_coords = getTileType(coords_below_next_coords);
 
-                            bool allow_movement = true;
+                            bool allow_movement = true; // TODO: rename
                             if (tile_below_next_coords == NONE && !player->hit_by_red) allow_movement = false;
                             if (isEntity(tile_below_next_coords) && !vec3IsZero(getEntityAtCoords(coords_below_next_coords)->velocity)) allow_movement = false;
 
                             if (allow_movement || cheating)
                             {
+                                int32 animation_time = 8; // TODO(anims): these functions shouldn't use animations; time_until_allow_game_input probably shouldn't exist.
                                 if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
                                 doStandardMovement(input_direction, next_player_coords, animation_time, true);
                                 time_until_allow_game_input = animation_time;
@@ -4422,6 +4423,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                                 if (leap_of_faith_worked)
                                 {
+                                    int32 animation_time = 8; // TODO(anims): these functions shouldn't use animations; time_until_allow_game_input probably shouldn't exist.
                                     if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
                                     doStandardMovement(input_direction, next_player_coords, animation_time, true);
                                     bypass_player_fall = true; 
@@ -4475,13 +4477,19 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 //time_until_allow_game_input = FAILED_CLIMB_TIME;
                             }
                         }
+                        /*
 						else if (do_failed_animations) 
                         {
                             // TODO(anims): failed walk animation for player
                             time_until_allow_game_input = FAILED_ANIMATION_TIME;
                         }
+                        */
                     }
                 }
+
+                // TODO: temporarily disabled all other movement logic
+
+                /*
                 else if (input_direction != oppositeDirection(player->direction)) // check if turning (as opposed to trying to reverse)
                 {
                     // player is turning
@@ -4704,6 +4712,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         }
                     }
                 }
+                */
             }
         }
 
@@ -4895,36 +4904,88 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 // TODO: make const
                 float PLAYER_MAX_SPEED = 0.15f;
                 float PLAYER_ACCELERATION = 0.06f;
-                float PLAYER_DECELERATION = 0.06f;
+                float PLAYER_MAX_DECELERATION = 0.06f;
 
-                Direction input_direction = NO_DIRECTION;
-                if 		(tick_input->w_press) input_direction = NORTH; 
-                else if (tick_input->a_press) input_direction = WEST; 
-                else if (tick_input->s_press) input_direction = SOUTH; 
-                else if (tick_input->d_press) input_direction = EAST; 
-
-                bool no_inputs = input_direction == NO_DIRECTION;
-                bool player_is_still = vec3IsZero(player->velocity);
-                float velocity_along_input_direction = getSignedComponentAlongDirection(input_direction, player->velocity);
-
-                Vec3 velocity_if_accelerate = vec3Add(player->velocity, vec3ScalarMultiply(directionToVector(input_direction), PLAYER_ACCELERATION)); // velocity += direction * acceleration 
-            	Vec3 clamped_velocity_if_accelerate = getSignedComponentAlongDirection(input_direction, velocity_if_accelerate) > PLAYER_MAX_SPEED ? vec3ScalarMultiply(directionToVector(input_direction), PLAYER_MAX_SPEED) : velocity_if_accelerate;
-
-                if (!no_inputs && (player_is_still || velocity_along_input_direction > 0))
+                // need to loop over 4 directions and handle directional velocity. right now, only one at a time here will ever be actuated, but should maybe be able to keep the same system later
+                for (Direction direction_index = 0; direction_index < 4; direction_index++)
                 {
-                	player->velocity = clamped_velocity_if_accelerate;
-                }
-                else
-                {
-                    // smooth deceleration: solve for transitional velocity such that decelerating each subsequent frame covers exactly the remaining distance.
-                    // formula: v_t = (d + a*n*(n-1) / 2) / n, where n is the number of deceleration ticks
-                    // seach for the unique n where v_t falls in the valid range [(n-1)*a, n*a].
-                    // n should always be found - if player is in a situation where no amount of deceleration (of PLAYER_DECELERATION) would suffice to get her onto the tile, she should instead be targetting the next tile...
-                    // but this is a case that i need to worry about, probably - i need to make sure that there's no timing window where you can release a movement key too late, but still have the player targetting the tile...
-                    // probably should just decelerate in a certain amount of frames, and bounce back if required, or something? 
+                    // only handle velocity / position if offset from the coords
+                    float position_along_direction = getComponentAlongDirection(direction_index, player->position_norm);
+                    float coords_along_direction = getComponentAlongDirection(direction_index, intCoordsToNorm(player->coords));
+                    float difference_in_position = coords_along_direction - position_along_direction;
 
-                    // note: if this works as expected, deceleration will appear slower by 1/2 tick on average, because the transitional step will have somewhere between max-v and full-deceleration-v - so will appear as if decel is a slightly longer period than accel.
+                    float sign = direction_index == NORTH || direction_index == WEST ? -1.0f : 1.0f;
+
+                    if (difference_in_position * sign <= 0) continue; // will continue if west starts picking up a difference in the east direction (and north of south direction)
+
+                    // get velocity of case where we fully accelerate on this frame. clamp velocity to max speed
+                    Vec3 velocity_to_add = vec3ScalarMultiply(directionToVector(direction_index), PLAYER_ACCELERATION); // may be negative, if direction is N or W
+                    Vec3 unclamped_speculative_velocity = vec3Add(player->velocity, velocity_to_add);					// in that case, velocity is also negative, so add works correctly.
+                    float unclamped_speculative_velocity_along_direction = getComponentAlongDirection(direction_index, unclamped_speculative_velocity); // may be negative
+                    float speculative_velocity_along_direction = unclamped_speculative_velocity_along_direction;
+                    if (sign == -1.0f) speculative_velocity_along_direction = speculative_velocity_along_direction < -PLAYER_MAX_SPEED ? -PLAYER_MAX_SPEED : speculative_velocity_along_direction;
+                    else			   speculative_velocity_along_direction = speculative_velocity_along_direction >  PLAYER_MAX_SPEED ?  PLAYER_MAX_SPEED : speculative_velocity_along_direction;
+
+                    // want to accelerate if still can get to player->coords if were to accelerate
+                    // so figure out if player would overshoot if she were to accelerate, then fully decelerate after that
+                    // TODO: this is actually only called once - can probably skip the sign multiplication if this isn't a separate function
+                    float offset_from_current_position_if_accelerate = sign * oneDimensionalDecelerationSimulation(sign * speculative_velocity_along_direction, PLAYER_MAX_DECELERATION);
+                    float position_after_accelerate_then_immediately_decelerate = offset_from_current_position_if_accelerate + position_along_direction;
+                    bool would_overshoot = false;
+                    if (sign == -1.0f)
+                    {
+                        if (position_after_accelerate_then_immediately_decelerate < coords_along_direction) would_overshoot = true;
+					}
+                    else
+                    {
+                        if (position_after_accelerate_then_immediately_decelerate > coords_along_direction) would_overshoot = true;
+                    }
+
+                    if (!would_overshoot)
+                    {
+                        // no overshooting: accelerate fully
+                        if (direction_index == NORTH || direction_index == SOUTH) player->velocity.z = speculative_velocity_along_direction;
+                        else player->velocity.x = speculative_velocity_along_direction;
+                    }
+                    else
+                    {
+                        // overshooting. so decelerate constantly towards target position in such a way that the player ends up perfectly at the position.
+                        // for a given pos diff, init velocity, and n frames: accel = (nframes * velocity - pos diff) / triangle(nframes)
+                        float deceleration = 0;
+                        int32 frames_count = 10;
+                        float velocity = getComponentAlongDirection(direction_index, player->velocity);
+                        while (true) // TODO: another while true to clamp later
+                        {
+                            float test_deceleration = ((velocity * frames_count) - difference_in_position) / triangleNumber(frames_count);
+                            if (fabs(test_deceleration) > PLAYER_MAX_DECELERATION) break;
+                            deceleration = test_deceleration;
+                            frames_count--;
+                        }
+
+                        // use found deceleration on the velocity
+                        if (direction_index == NORTH || direction_index == SOUTH) 
+                        {
+                            player->velocity.z -= deceleration;
+                            if (player->velocity.z * sign < 0)
+                            {
+                                player->velocity.z = 0;
+                                player->position_norm.z = coords_along_direction;
+                            }
+                        }
+                        else 
+                        {
+							player->velocity.x -= deceleration;
+                            if (player->velocity.x * sign < 0)
+                            {
+                                player->velocity.x = 0;
+                                player->position_norm.x = coords_along_direction;
+                            }
+                        }
+                    }
                 }
+
+                // apply velocity to position
+                player->position_norm = vec3Add(player->position_norm, player->velocity);
             }
 
             // pack handling
@@ -5083,11 +5144,11 @@ void gameFrame(double delta_time, TickInput* tick_input)
             createDebugText(game_text);
 
             // entity info
-            /*
             char player_text[256] = {0};
-            snprintf(player_text, sizeof(player_text), "player info: coords: %d, %d, %d, moving time: %d, moving direction: %d", player->coords.x, player->coords.y, player->coords.z, player->in_motion, player->moving_direction);
+            snprintf(player_text, sizeof(player_text), "player info: coords: %d, %d, %d, velocity: %f, %f, %f", player->coords.x, player->coords.y, player->coords.z, player->velocity.x, player->velocity.y, player->velocity.z);
             createDebugText(player_text);
 
+            /*
             char pack_text[256] = {0};
             snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, moving_time: %d, moving_direction: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack->in_motion, pack->moving_direction);
             createDebugText(pack_text);
