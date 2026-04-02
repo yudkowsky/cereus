@@ -3665,10 +3665,10 @@ float oneDimensionalDecelerationSimulation(float initial_velocity, float deceler
     float position = 0;
     while (true) // TODO: probably want to not have this break so easily. but for now i want to catch problems here
     {
-        // apply deceleration first before the first velocity. this means that the first frame will have some deceleration, as opposed to keeping the same initial velocity for a frame
+        // trying to apply pos before velocity. this gives 1f where the velocity continues as is, making for a more aggressive test (less aggressive acceleration)
+        position += velocity;
         velocity -= deceleration;
         if (velocity <= 0) break;
-        position += velocity;
     }
     return position;
 }
@@ -4904,7 +4904,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 // TODO: make const
                 float PLAYER_MAX_SPEED = 0.15f;
                 float PLAYER_ACCELERATION = 0.06f;
-                float PLAYER_MAX_DECELERATION = 0.06f;
+                float PLAYER_MAX_DECELERATION = 0.07f; // should be approx the same; offset comes from always clamping before max deceleration rather than it being an average
 
                 // need to loop over 4 directions and handle directional velocity. right now, only one at a time here will ever be actuated, but should maybe be able to keep the same system later
                 for (Direction direction_index = 0; direction_index < 4; direction_index++)
@@ -4934,51 +4934,60 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     bool would_overshoot = false;
                     if (sign == -1.0f)
                     {
-                        if (position_after_accelerate_then_immediately_decelerate < coords_along_direction) would_overshoot = true;
+                        if (position_after_accelerate_then_immediately_decelerate - 0.001f < coords_along_direction) would_overshoot = true;
 					}
                     else
                     {
-                        if (position_after_accelerate_then_immediately_decelerate > coords_along_direction) would_overshoot = true;
+                        if (position_after_accelerate_then_immediately_decelerate + 0.001f > coords_along_direction) would_overshoot = true;
                     }
-
+                    
                     if (!would_overshoot)
                     {
                         // no overshooting: accelerate fully
                         if (direction_index == NORTH || direction_index == SOUTH) player->velocity.z = speculative_velocity_along_direction;
                         else player->velocity.x = speculative_velocity_along_direction;
+
+                        createDebugText("not overshooting");
                     }
                     else
                     {
+                        createDebugText("overshooting");
+
                         // overshooting. so decelerate constantly towards target position in such a way that the player ends up perfectly at the position.
                         // for a given pos diff, init velocity, and n frames: accel = (nframes * velocity - pos diff) / triangle(nframes)
                         float deceleration = 0;
-                        int32 frames_count = 10;
-                        float velocity = getComponentAlongDirection(direction_index, player->velocity);
-                        while (true) // TODO: another while true to clamp later
-                        {
-                            float test_deceleration = ((velocity * frames_count) - difference_in_position) / triangleNumber(frames_count);
-                            if (fabs(test_deceleration) > PLAYER_MAX_DECELERATION) break;
-                            deceleration = test_deceleration;
-                            frames_count--;
-                        }
+                        float initial_velocity = getComponentAlongDirection(direction_index, player->velocity);
 
-                        // use found deceleration on the velocity
-                        if (direction_index == NORTH || direction_index == SOUTH) 
+                        if (sign * initial_velocity - PLAYER_MAX_DECELERATION < 0)
                         {
-                            player->velocity.z -= deceleration;
-                            if (player->velocity.z * sign < 0)
+                            if (direction_index == NORTH || direction_index == SOUTH)
                             {
                                 player->velocity.z = 0;
                                 player->position_norm.z = coords_along_direction;
+
                             }
-                        }
-                        else 
-                        {
-							player->velocity.x -= deceleration;
-                            if (player->velocity.x * sign < 0)
+                            else
                             {
                                 player->velocity.x = 0;
                                 player->position_norm.x = coords_along_direction;
+                            }
+                        }
+                        else
+                        {
+                            for (int32 frames_count = 10; frames_count > 2; frames_count--)
+                            {
+                                float test_deceleration = ((sign * initial_velocity * frames_count) - sign * difference_in_position) / triangleNumber(frames_count - 1);
+                                if (test_deceleration > PLAYER_MAX_DECELERATION) break;
+                                deceleration = test_deceleration;
+                            }
+                            // use found deceleration on the velocity
+                            if (direction_index == NORTH || direction_index == SOUTH) 
+                            {
+                                player->velocity.z -= sign * deceleration;
+                            }
+                            else 
+                            {
+                                player->velocity.x -= sign * deceleration;
                             }
                         }
                     }
@@ -4990,8 +4999,12 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
             // pack handling
             {
-                pack->position_norm = intCoordsToNorm(pack->coords);
-                pack->rotation_quat = directionToQuaternion(pack->direction);
+                if (!pack_detached)
+                {
+                    Vec3 pack_coords = vec3Subtract(player->position_norm, directionToVector(player->direction));
+                    pack->position_norm = pack_coords;
+                    pack->rotation_quat = directionToQuaternion(pack->direction);
+                }
             }
     	}
 
@@ -5145,7 +5158,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
             // entity info
             char player_text[256] = {0};
-            snprintf(player_text, sizeof(player_text), "player info: coords: %d, %d, %d, velocity: %f, %f, %f", player->coords.x, player->coords.y, player->coords.z, player->velocity.x, player->velocity.y, player->velocity.z);
+            snprintf(player_text, sizeof(player_text), "player info: pos norm: %f, %f, %f, velocity: %f, %f, %f", player->position_norm.x, player->position_norm.y, player->position_norm.z, player->velocity.x, player->velocity.y, player->velocity.z);
             createDebugText(player_text);
 
             /*
