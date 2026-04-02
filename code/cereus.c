@@ -393,10 +393,10 @@ const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 const float LASER_WIDTH = 0.25;
 const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
 
-const float PLAYER_MAX_SPEED = 0.12f;
+const float PLAYER_MAX_SPEED = 0.19f;
 const float PLAYER_ACCELERATION = 0.04f;
 const float PLAYER_MAX_DECELERATION = 0.04f; // should be approx the same; offset comes from always clamping before max deceleration rather than it being an average.
-                                       // if this is the same number, deceleration will be slower than acceleration
+    	                                     // if this is the same number, deceleration will be slower than acceleration
 // TODO(anims): i think all of these won't be needed anymore?
 const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
 const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
@@ -475,7 +475,7 @@ double physics_accumulator = 0;
 double timer_accumulator = 0;
 double global_time = 0; // will not work as a 'time elapsed' counter in editor mode because it grows slower during time slowdown
 
-const char debug_level_name[64] = "red-mirror";
+const char debug_level_name[64] = "testing";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
@@ -3620,7 +3620,7 @@ void doHeadRotation(bool clockwise)
     }
 }
 
-// TODO(anims): probably doesn't need animations on / animation time
+// TODO(anims): doesn't need animations on / animation time
 void doHeadMovement(Direction direction, bool animations_on, int32 animation_time)
 {
     Int3 coords_above_player = getNextCoords(next_world_state.player.coords, UP);
@@ -3663,21 +3663,18 @@ void updatePackDetached()
     else pack_detached = true;
 }
 
-// TODO: merge some of these below functions
-
-// returns distance travelled
+// expects positive value for deceleration
 float oneDimensionalDecelerationSimulation(float initial_velocity, float deceleration)
 {
     float velocity = initial_velocity;
-    float position = 0;
-    while (true) // TODO: probably want to not have this break so easily. but for now i want to catch problems here
+    float offset = 0;
+    while (true)
     {
-        // trying to apply pos before velocity. this gives 1f where the velocity continues as is, making for a more aggressive test (less aggressive acceleration)
-        position += velocity;
+        offset += velocity;
         velocity -= deceleration;
         if (velocity <= 0) break;
     }
-    return position;
+    return offset;
 }
 
 float calculateSpeculativeVelocityAlongDirection(Direction direction, float sign)
@@ -3686,7 +3683,7 @@ float calculateSpeculativeVelocityAlongDirection(Direction direction, float sign
 
     // get velocity of case where we fully accelerate on this frame. clamp velocity to max speed
     Vec3 velocity_to_add = vec3ScalarMultiply(directionToVector(direction), PLAYER_ACCELERATION); // may be negative, if direction is N or W
-    Vec3 unclamped_speculative_velocity = vec3Add(player->velocity, velocity_to_add);					// in that case, velocity is also negative, so add works correctly.
+    Vec3 unclamped_speculative_velocity = vec3Add(player->velocity, velocity_to_add);			  // in that case, velocity is also negative, so add works correctly.
     float unclamped_speculative_velocity_along_direction = getComponentAlongDirection(direction, unclamped_speculative_velocity); // may be negative
     float speculative_velocity_along_direction = unclamped_speculative_velocity_along_direction;
     if (sign == -1.0f) speculative_velocity_along_direction = speculative_velocity_along_direction < -PLAYER_MAX_SPEED ? -PLAYER_MAX_SPEED : speculative_velocity_along_direction;
@@ -3696,8 +3693,9 @@ float calculateSpeculativeVelocityAlongDirection(Direction direction, float sign
 
 bool wouldOvershoot(float speculative_velocity_along_direction, float position_along_direction, float coords_along_direction, float sign)
 {
-    float offset_from_current_position_if_accelerate = sign * oneDimensionalDecelerationSimulation(sign * speculative_velocity_along_direction, PLAYER_MAX_DECELERATION);
+    float offset_from_current_position_if_accelerate = oneDimensionalDecelerationSimulation(speculative_velocity_along_direction, PLAYER_MAX_DECELERATION);
     float position_after_accelerate_then_immediately_decelerate = offset_from_current_position_if_accelerate + position_along_direction;
+
     bool would_overshoot = false;
     if (sign == -1.0f)
     {
@@ -4302,24 +4300,23 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 else if (tick_input->s_press) input_direction = SOUTH; 
                 else if (tick_input->d_press) input_direction = EAST; 
 
-                if (input_direction == player->direction) // TODO: this would be clearer as a switch
+                if (input_direction == player->direction)
                 {
-                    if 		(tick_input->w_press) next_player_coords = getNextCoords(player->coords, NORTH);
-                    else if (tick_input->a_press) next_player_coords = getNextCoords(player->coords, WEST);
-                    else if (tick_input->s_press) next_player_coords = getNextCoords(player->coords, SOUTH);
-                    else if (tick_input->d_press) next_player_coords = getNextCoords(player->coords, EAST);
-
-                    bool allow_movement = false;
+                    next_player_coords = getNextCoords(player->coords, input_direction);
 
 					// allow movement if, given acceleration this frame along input direction, we would overshoot
+                    // TODO: think about what want to do about pressing a button many times to go faster. maybe the max velocity could change, or something?
+                    bool allow_movement = false;
+
                     float sign = input_direction == NORTH || input_direction == WEST ? -1.0f : 1.0f;
                     float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(input_direction, sign);
                     float position_along_direction = getComponentAlongDirection(input_direction, player->position_norm);
                     float coords_along_direction = getComponentAlongDirection(input_direction, intCoordsToNorm(player->coords));
+
                     bool would_overshoot = wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign);
                     if (would_overshoot) allow_movement = true;
 
-                    // disallow movement if also moving in some other direction currently; TODO(anims): should be more lenient here
+                    // disallow movement if also moving in some other direction currently (not likely to happen; would need to turn first)
                     if (!vec3IsZero(vec3ZeroComponentAlongDirection(input_direction, player->velocity))) allow_movement = false;
 
                     if (allow_movement)
@@ -4333,15 +4330,11 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         {
                             case NONE:
                             {
-                                Int3 coords_ahead = next_player_coords;
-                                Int3 coords_below_and_ahead = getNextCoords(next_player_coords, DOWN);
-                                // TODO(anims): currently guards against any movement at all on objects that could be pushable. probably give some more leniency here
-                                if (isPushable(getTileType(coords_ahead)) && !vec3IsZero(getEntityAtCoords(coords_ahead)->velocity)) move_player = false;
-                                else if (isPushable(getTileType(coords_below_and_ahead)) && !vec3IsZero(getEntityAtCoords(coords_below_and_ahead)->velocity)) move_player = false;
-                                else
-                                {
-                                    move_player = true;
-                                }
+                                // only don't allow movement if there's a trailing hitbox there. TODO: this is probably too aggressive of a check. see how it feels (maybe gate by frames left?)
+                                TrailingHitbox th = {0};
+                                if (trailingHitboxAtCoords(next_player_coords, &th)) move_player = false;
+                                else move_player = true;
+
                                 break;
                             }
                             case BOX:
@@ -4962,51 +4955,37 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         // no overshooting: accelerate fully
                         if (direction_index == NORTH || direction_index == SOUTH) player->velocity.z = speculative_velocity_along_direction;
                         else player->velocity.x = speculative_velocity_along_direction;
+                        player->position_norm = vec3Add(player->position_norm, player->velocity);
                     }
                     else
                     {
-                        // overshooting: decelerate constantly towards target position in such a way that the player ends up perfectly at the position.
-                        // for a given pos diff, init velocity, and n frames: accel = (nframes * velocity - pos diff) / triangle(nframes)
-                        // unless could get to negative velocity by decelerating at max speed, in which case do that instead
-                        float deceleration = 0;
-                        float initial_velocity = getComponentAlongDirection(direction_index, player->velocity);
+                        float current_speed = sign * getComponentAlongDirection(direction_index, player->velocity);
+                        float remaining_distance = sign * difference_in_position;
+                        float stopping_distance = oneDimensionalDecelerationSimulation(current_speed, PLAYER_MAX_DECELERATION);
+                        float distance_error = remaining_distance - stopping_distance;
+                        int32 frames_to_stop = (int32)ceilf(current_speed / PLAYER_MAX_DECELERATION);
+                        if (frames_to_stop < 1) frames_to_stop = 1;
+                        float movement_adjustment = distance_error / (float)frames_to_stop;
 
-                        if (sign * initial_velocity - PLAYER_MAX_DECELERATION < 0)
+                        // decelerate velocity along the clean ramp
+                        float decelerated_speed = current_speed - PLAYER_MAX_DECELERATION;
+                        if (decelerated_speed < 0) decelerated_speed = 0;
+
+                        // move position by velocity + adjustment, then set velocity to decelerated value
+                        float actual_movement = current_speed + movement_adjustment;
+
+                        if (direction_index == NORTH || direction_index == SOUTH)
                         {
-                            if (direction_index == NORTH || direction_index == SOUTH)
-                            {
-                                player->velocity.z = 0;
-                                player->position_norm.z = coords_along_direction;
-                            }
-                            else
-                            {
-                                player->velocity.x = 0;
-                                player->position_norm.x = coords_along_direction;
-                            }
+                            player->position_norm.z += sign * actual_movement;
+                            player->velocity.z = sign * decelerated_speed;
                         }
                         else
                         {
-                            for (int32 frames_count = 10; frames_count > 2; frames_count--)
-                            {
-                                float test_deceleration = ((sign * initial_velocity * frames_count) - sign * difference_in_position) / triangleNumber(frames_count - 1);
-                                if (test_deceleration > PLAYER_MAX_DECELERATION) break;
-                                deceleration = test_deceleration;
-                            }
-                            // use found deceleration on the velocity
-                            if (direction_index == NORTH || direction_index == SOUTH) 
-                            {
-                                player->velocity.z -= sign * deceleration;
-                            }
-                            else 
-                            {
-                                player->velocity.x -= sign * deceleration;
-                            }
+                            player->position_norm.x += sign * actual_movement;
+                            player->velocity.x = sign * decelerated_speed;
                         }
                     }
                 }
-
-                // apply velocity to position
-                player->position_norm = vec3Add(player->position_norm, player->velocity);
             }
 
             // pack handling
