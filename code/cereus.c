@@ -4254,7 +4254,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 writeSolvedLevelsToFile();
             }
 
-            if (time_until_allow_game_input == 0 && (tick_input->w_press || tick_input->a_press || tick_input->s_press || tick_input->d_press) && vec3IsZero(player->velocity)) // TODO(anims): don't actually guard on vec3IsZero, need some smarter system
+
+            if (tick_input->w_press || tick_input->a_press || tick_input->s_press || tick_input->d_press) // TODO(anims): don't actually guard on vec3IsZero, need some smarter system
             {
 				// MOVEMENT 
                 Direction input_direction = 0;
@@ -4274,9 +4275,15 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     bool allow_movement = false;
 
                     // allow movement if pos norm are within some threshold of the targetted block
-                    float distance_when_movement_is_allowed = 0.5f; // TODO(anims): change depending on when deceleration needs to start happening
+                    float distance_when_movement_is_allowed = 0.3f; // TODO(anims): change depending on when deceleration needs to start happening
+
                     Vec3 difference = vec3Subtract(intCoordsToNorm(player->coords), player->position_norm);
-                    if (getSignedComponentAlongDirection(input_direction, difference) < distance_when_movement_is_allowed) allow_movement = true;
+                    float difference_along_direction = getSignedComponentAlongDirection(input_direction, difference);
+                    if (difference_along_direction < distance_when_movement_is_allowed) allow_movement = true;
+
+                    char dist_info[256];
+                    snprintf(dist_info, sizeof(dist_info), "calculated difference: %f, allow movement now: %i", difference_along_direction, allow_movement);
+                    createDebugText(dist_info);
 
                     // disallow movement if also moving in some other direction currently; TODO(anims): should be more lenient here
                     if (!vec3IsZero(vec3ZeroComponentAlongDirection(input_direction, player->velocity))) allow_movement = false;
@@ -4902,9 +4909,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
             // player handling
             {
                 // TODO: make const
-                float PLAYER_MAX_SPEED = 0.15f;
-                float PLAYER_ACCELERATION = 0.06f;
-                float PLAYER_MAX_DECELERATION = 0.07f; // should be approx the same; offset comes from always clamping before max deceleration rather than it being an average
+                float PLAYER_MAX_SPEED = 0.12f;
+                float PLAYER_ACCELERATION = 0.04f;
+                float PLAYER_MAX_DECELERATION = 0.04f; // should be approx the same; offset comes from always clamping before max deceleration rather than it being an average.
+                                                       // if this is the same number, deceleration will be slower than acceleration
 
                 // need to loop over 4 directions and handle directional velocity. right now, only one at a time here will ever be actuated, but should maybe be able to keep the same system later
                 for (Direction direction_index = 0; direction_index < 4; direction_index++)
