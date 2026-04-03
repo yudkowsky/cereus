@@ -1288,12 +1288,8 @@ void loadAllEntities()
     vulkan_state.loaded_models[MODEL_3D_WATER_BOTTOM - MODEL_3D_VOID] = loadModel("data/assets/water-bottom.glb");
 
     vulkan_state.loaded_models[MODEL_3D_SOURCE_RED     - MODEL_3D_VOID] = loadModel("data/assets/red-source.glb");
-    vulkan_state.loaded_models[MODEL_3D_SOURCE_GREEN   - MODEL_3D_VOID] = loadModel("data/assets/green-source.glb");
     vulkan_state.loaded_models[MODEL_3D_SOURCE_BLUE    - MODEL_3D_VOID] = loadModel("data/assets/blue-source.glb");
     vulkan_state.loaded_models[MODEL_3D_SOURCE_MAGENTA - MODEL_3D_VOID] = loadModel("data/assets/magenta-source.glb");
-    vulkan_state.loaded_models[MODEL_3D_SOURCE_YELLOW  - MODEL_3D_VOID] = loadModel("data/assets/yellow-source.glb");
-    vulkan_state.loaded_models[MODEL_3D_SOURCE_CYAN    - MODEL_3D_VOID] = loadModel("data/assets/cyan-source.glb");
-    vulkan_state.loaded_models[MODEL_3D_SOURCE_WHITE   - MODEL_3D_VOID] = loadModel("data/assets/white-source.glb");
 
     vulkan_state.laser_cylinder_model = loadModel("data/assets/laser-cylinder.glb");
 }
@@ -3824,7 +3820,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
         if (type == OUTLINE_3D)
         {
             bool render_model = false;
-            if (sprite_id >= MODEL_3D_VOID && sprite_id <= MODEL_3D_SOURCE_WHITE) render_model = true;
+            if (sprite_id >= MODEL_3D_VOID && sprite_id <= MODEL_3D_SOURCE_MAGENTA) render_model = true;
             if (vulkan_state.loaded_models[sprite_id - MODEL_3D_VOID].index_count <= 0) render_model = false;
             if (render_model)
             {

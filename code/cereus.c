@@ -38,30 +38,20 @@ typedef enum
     MIRROR,
     GLASS,
     PACK,
-    PERM_MIRROR,
     WATER,
     WIN_BLOCK,
 
     SOURCE_RED,
-    SOURCE_GREEN,
     SOURCE_BLUE,
     SOURCE_MAGENTA,
-    SOURCE_YELLOW,
-    SOURCE_CYAN,
-    SOURCE_WHITE,
 
     LOCKED_BLOCK,
-    RESET_BLOCK,
     LADDER,
     WON_BLOCK,
 
     LASER_RED,
-    LASER_GREEN,
     LASER_BLUE,
     LASER_MAGENTA,
-    LASER_YELLOW,
-    LASER_CYAN,
-    LASER_WHITE
 }
 TileType;
 
@@ -69,25 +59,10 @@ typedef enum
 {
     NO_COLOR = 0,
     RED      = 1,
-    GREEN    = 2,
-	BLUE     = 3,
-	MAGENTA  = 4,
-    YELLOW   = 5,
-    CYAN     = 6,
-    WHITE    = 7
+	BLUE     = 2,
+	MAGENTA  = 3,
 }
 Color;
-
-typedef struct
-{
-    bool north;
-    bool west;
-    bool south;
-    bool east;
-    bool up;
-    bool down;
-}
-GreenHit;
 
 // used for the reset blocks, which aren't currently active in the game
 typedef struct
@@ -100,19 +75,20 @@ typedef struct
 }
 ResetInfo;
 
-// coords are integer coordinates of the entity, position_norm is the floating point coords in world space.
-// likewise direction is one of 6 orientations, rotation_quat is the actual rotation passed to renderer.
+// coords are integer coordinates of the entity, position is the floating point coords in world space.
+// likewise direction is one of 6 orientations, rotation is the actual rotation passed to renderer.
 typedef struct
 {
     int32 id;
     Int3 coords;
-    Vec3 position_norm;
+    Vec3 position;
     Direction direction;
-    Vec4 rotation_quat;
+    Vec4 rotation;
     bool removed;
 
     // movement state
     Vec3 velocity;
+    Vec3 angular_velocity;
     bool falling;
 
     // for sources/lasers
@@ -120,7 +96,6 @@ typedef struct
 
     // for player
     bool hit_by_red;
-    GreenHit green_hit;
     bool hit_by_blue;
 
     // for win blocks
@@ -147,7 +122,6 @@ typedef struct
     Entity glass_blocks[64];
     Entity win_blocks[64];
     Entity locked_blocks[64];
-    Entity reset_blocks[64];
 
     char level_name[64];
 
@@ -310,7 +284,6 @@ DebugPopup;
 typedef struct
 {
     bool red;
-    bool green;
     bool blue;
 }
 LaserColor;
@@ -343,7 +316,6 @@ typedef struct
 	uint8 entity_count;
     uint32 delta_start_pos;
     bool level_changed;
-    bool was_teleport;
     bool was_reset;
     bool was_climb;
 }
@@ -393,7 +365,7 @@ const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 const float LASER_WIDTH = 0.25;
 const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
 
-const float PLAYER_MAX_SPEED = 0.19f;
+const float PLAYER_MAX_SPEED = 0.12f;
 const float PLAYER_ACCELERATION = 0.04f;
 const float PLAYER_MAX_DECELERATION = 0.04f; // should be approx the same; offset comes from always clamping before max deceleration rather than it being an average.
     	                                     // if this is the same number, deceleration will be slower than acceleration
@@ -426,7 +398,6 @@ const int32 MAX_LASER_TURNS_ALLOWED = 16;
 const int32 MAX_PUSHABLE_STACK_SIZE = 32;
 const int32 MAX_TRAILING_HITBOX_COUNT = 32;
 const int32 MAX_LEVEL_COUNT = 64;
-const int32 MAX_RESET_COUNT = 16;
 const int32 MAX_DEBUG_POPUP_COUNT = 32;
 
 const Int3 AXIS_X = { 1, 0, 0 };
@@ -446,7 +417,6 @@ const int32 ID_OFFSET_GLASS 	   = 100 * 3;
 const int32 ID_OFFSET_SOURCE  	   = 100 * 4;
 const int32 ID_OFFSET_WIN_BLOCK    = 100 * 12;
 const int32 ID_OFFSET_LOCKED_BLOCK = 100 * 13;
-const int32 ID_OFFSET_RESET_BLOCK  = 100 * 14;
 
 const int32 FONT_FIRST_ASCII = 32;
 const int32 FONT_LAST_ASCII = 126;
@@ -463,8 +433,6 @@ const int32 WIN_BLOCK_CHUNK_SIZE = 76;
 const char WIN_BLOCK_CHUNK_TAG[4] = "WINB";
 const int32 LOCKED_INFO_CHUNK_SIZE = 76;
 const char LOCKED_INFO_CHUNK_TAG[4] = "LOKB";
-const int32 RESET_INFO_SINGLE_ENTRY_SIZE = 6;
-const char RESET_INFO_CHUNK_TAG[4] = "RESB";
 
 const int32 OVERWORLD_SCREEN_SIZE_X = 21;
 const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
@@ -828,19 +796,19 @@ void moveEntityInBufferAndState(Entity* e, Int3 end_coords, Direction end_direct
 
 bool isSource(TileType type) 
 {
-    return (type == SOURCE_RED || type == SOURCE_GREEN || type == SOURCE_BLUE || type == SOURCE_MAGENTA || type == SOURCE_YELLOW || type == SOURCE_CYAN|| type == SOURCE_WHITE);
+    return (type == SOURCE_RED || type == SOURCE_BLUE || type == SOURCE_MAGENTA);
 }
 
 // only checks tile types - doesn't do what canPush does
 bool isPushable(TileType type)
 {
-    if (type== BOX || type == MIRROR || type == PACK || isSource(type)) return true;
+    if (type == BOX || type == MIRROR || type == PACK || isSource(type)) return true;
     else return false;
 }
 
 bool isEntity(TileType type)
 {
-    if (type == BOX || type == GLASS || type == MIRROR || type == PACK || type == PLAYER || type == WIN_BLOCK || type == LOCKED_BLOCK || type == RESET_BLOCK || isSource(type)) return true;
+    if (type == BOX || type == MIRROR || type == PACK || type == PLAYER || type == WIN_BLOCK || type == LOCKED_BLOCK || isSource(type)) return true;
     else return false;
 }
 
@@ -861,12 +829,8 @@ TileType getTileTypeFromId(int32 id)
         switch (source_color)
         {
             case RED: 	  return SOURCE_RED;
-            case GREEN:   return SOURCE_GREEN;
             case BLUE:    return SOURCE_BLUE;
             case MAGENTA: return SOURCE_MAGENTA;
-            case YELLOW:  return SOURCE_YELLOW;
-            case CYAN: 	  return SOURCE_CYAN;
-            case WHITE:   return SOURCE_WHITE;
             default: return NONE;
         }
     }
@@ -875,7 +839,6 @@ TileType getTileTypeFromId(int32 id)
     else if (check == ID_OFFSET_GLASS) 	 	  return GLASS;
     else if (check == ID_OFFSET_WIN_BLOCK) 	  return WIN_BLOCK;
     else if (check == ID_OFFSET_LOCKED_BLOCK) return LOCKED_BLOCK;
-    else if (check == ID_OFFSET_RESET_BLOCK)  return RESET_BLOCK;
     else return NONE;
 }
 
@@ -884,12 +847,8 @@ Color getEntityColor(Int3 coords)
     switch (getTileType(coords))
     {
         case SOURCE_RED:     return RED;
-        case SOURCE_GREEN:   return GREEN;
         case SOURCE_BLUE:	 return BLUE;
         case SOURCE_MAGENTA: return MAGENTA;
-        case SOURCE_YELLOW:  return YELLOW;
-        case SOURCE_CYAN:    return CYAN;
-        case SOURCE_WHITE:	 return WHITE;
         default: return NO_COLOR;
     }
 }
@@ -906,7 +865,6 @@ Entity* getEntityAtCoords(Int3 coords)
         case GLASS: 	   entity_group = next_world_state.glass_blocks;  break;
         case WIN_BLOCK:    entity_group = next_world_state.win_blocks;    break;
         case LOCKED_BLOCK: entity_group = next_world_state.locked_blocks; break;
-        case RESET_BLOCK:  entity_group = next_world_state.reset_blocks;  break;
         case PLAYER: return &next_world_state.player;
         case PACK:	 return &next_world_state.pack;
         default: return 0;
@@ -940,7 +898,6 @@ Entity* getEntityFromId(int32 id)
         else if (switch_value >= ID_OFFSET_SOURCE && switch_value < ID_OFFSET_WIN_BLOCK) entity_group = next_world_state.sources;
         else if (switch_value == ID_OFFSET_WIN_BLOCK) 	 entity_group = next_world_state.win_blocks;
         else if (switch_value == ID_OFFSET_LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
-        else if (switch_value == ID_OFFSET_RESET_BLOCK)  entity_group = next_world_state.reset_blocks;
 
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
@@ -1004,12 +961,8 @@ int32 sourceColorIdOffset(Color color)
     switch (color)
     {
         case RED: 	  return RED * 100; 
-        case GREEN:   return GREEN * 100;
         case BLUE: 	  return BLUE * 100;
         case MAGENTA: return MAGENTA * 100;
-        case YELLOW:  return YELLOW * 100;
-        case CYAN: 	  return CYAN * 100;
-        case WHITE:   return WHITE * 100;
         default: return 0;
     }
 }
@@ -1021,7 +974,6 @@ int32 entityIdOffset(Entity *entity, Color color)
     else if (entity == next_world_state.glass_blocks)  return ID_OFFSET_GLASS;
     else if (entity == next_world_state.win_blocks)    return ID_OFFSET_WIN_BLOCK;
     else if (entity == next_world_state.locked_blocks) return ID_OFFSET_LOCKED_BLOCK;
-    else if (entity == next_world_state.reset_blocks)  return ID_OFFSET_RESET_BLOCK;
     else if (entity == next_world_state.sources)  	   return ID_OFFSET_SOURCE + sourceColorIdOffset(color);
     return 0;
 }
@@ -1099,9 +1051,9 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
     {
         if (entity_group[entity_index].id != -1) continue;
         entity_group[entity_index].coords = coords;
-        entity_group[entity_index].position_norm = intCoordsToNorm(coords); 
+        entity_group[entity_index].position= intCoordsToNorm(coords); 
         entity_group[entity_index].direction = direction;
-        entity_group[entity_index].rotation_quat = directionToQuaternion(direction);
+        entity_group[entity_index].rotation= directionToQuaternion(direction);
         entity_group[entity_index].color = color;
         entity_group[entity_index].id = entity_index + entityIdOffset(entity_group, color);
         entity_group[entity_index].unlocked_by[0] = '\0';
@@ -1111,11 +1063,11 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
     return 0;
 }
 
-// updates position_norm and rotation_quat to be float/quaternion versions of integer coords/direction enum
+// updates position and rotation to be float/quaternion versions of integer coords/direction enum
 void setEntityVecsFromInts(Entity* e)
 {
-    e->position_norm = intCoordsToNorm(e->coords);
-    e->rotation_quat = directionToQuaternion(e->direction);
+    e->position= intCoordsToNorm(e->coords);
+    e->rotation = directionToQuaternion(e->direction);
 }
 
 // FILE I/O
@@ -1320,97 +1272,6 @@ void loadLockedInfoPaths(FILE* file)
     }
 }
 
-int32 findNextFreeInResetBlock(Entity* rb)
-{
-    FOR(to_reset_index, MAX_RESET_COUNT) if (rb->reset_info[to_reset_index].id == -1) return to_reset_index;
-    return -1;
-}
-
-void loadResetBlockInfo(FILE* file)
-{
-    int32 positions[64] = {0};
-    int32 rb_count = getCountAndPositionOfChunk(file, RESET_INFO_CHUNK_TAG, positions);
-
-    FOR(rb_index_file, rb_count)
-    {
-        fseek(file, positions[rb_index_file] + 4, SEEK_SET);
-
-        int32 size = 0;
-        fread(&size, 4, 1, file);
-        int32 reset_entity_count = (size/4 - 3) / RESET_INFO_SINGLE_ENTRY_SIZE;
-
-        Int3 rb_coords = {0};
-        fread(&rb_coords.x, 4, 1, file);
-        fread(&rb_coords.y, 4, 1, file);
-        fread(&rb_coords.z, 4, 1, file);
-
-        FOR(rb_index_state, MAX_ENTITY_INSTANCE_COUNT)
-        {
-            if (int3IsEqual(rb_coords, next_world_state.reset_blocks[rb_index_state].coords))
-            {
-                Entity* rb = getEntityAtCoords(rb_coords);
-                FOR(reset_entity_index, reset_entity_count)
-                {
-                    int32 stored_id = -1;
-                    Int3 reset_start_coords = {0};
-                    TileType reset_entity_type = NONE;
-                    Direction reset_entity_direction = NO_DIRECTION;
-                    fread(&stored_id, 4, 1, file);
-                    fread(&reset_start_coords.x, 4, 1, file);
-                    fread(&reset_start_coords.y, 4, 1, file);
-                    fread(&reset_start_coords.z, 4, 1, file);
-                    fread(&reset_entity_type, 4, 1, file);
-                    fread(&reset_entity_direction, 4, 1, file);
-
-                    Entity* reset_e = getEntityFromId(stored_id);
-                    if (reset_e == 0 && stored_id >= 0)
-                    {
-                        // entity was removed, recreate it as removed
-                        Entity* entity_group = 0;
-                        Color color = NO_COLOR;
-                        int32 switch_value = (stored_id / 100) * 100;
-                        if      (switch_value == ID_OFFSET_BOX)          entity_group = next_world_state.boxes;
-                        else if (switch_value == ID_OFFSET_MIRROR)       entity_group = next_world_state.mirrors;
-                        else if (switch_value == ID_OFFSET_GLASS)        entity_group = next_world_state.glass_blocks;
-                        else if (switch_value >= ID_OFFSET_SOURCE && switch_value < ID_OFFSET_WIN_BLOCK)
-                        {
-                            entity_group = next_world_state.sources;
-                            color = (stored_id - ID_OFFSET_SOURCE) / 100;
-                        }
-                        else if (switch_value == ID_OFFSET_WIN_BLOCK)    entity_group = next_world_state.win_blocks;
-                        else if (switch_value == ID_OFFSET_LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
-                        else if (switch_value == ID_OFFSET_RESET_BLOCK)  entity_group = next_world_state.reset_blocks;
-
-                        if (entity_group)
-                        {
-                            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
-                            {
-                                if (entity_group[entity_index].id != -1) continue;
-                                entity_group[entity_index].id = stored_id;
-                                entity_group[entity_index].coords = reset_start_coords;
-                                entity_group[entity_index].position_norm = intCoordsToNorm(reset_start_coords);
-                                entity_group[entity_index].direction = reset_entity_direction;
-                                entity_group[entity_index].rotation_quat = directionToQuaternion(reset_entity_direction);
-                                entity_group[entity_index].color = color;
-                                entity_group[entity_index].removed = true;
-                                entity_group[entity_index].unlocked_by[0] = '\0';
-                                reset_e = &entity_group[entity_index];
-                                break;
-                            }
-                        }
-                    }
-
-                    rb->reset_info[reset_entity_index].id = (reset_e != 0) ? reset_e->id : -1;
-                    rb->reset_info[reset_entity_index].start_coords = reset_start_coords;
-                    rb->reset_info[reset_entity_index].start_type = reset_entity_type;
-                    rb->reset_info[reset_entity_index].start_direction = reset_entity_direction;
-                }
-                break;
-            }
-        }
-    }
-}
-
 // keep level_dim in later versions also. can then just write buffer_index rather than the full coords and backsolve on load.
 void writeBufferToFile(FILE* file, int32 version)
 {
@@ -1484,67 +1345,8 @@ void writeLockedInfoToFile(FILE* file, Entity* e)
 // reset blocks currently aren't used in the game. they were a block that could reset individual blocks to their start positions when interacted with. 
 // this was used in the overworld, but there's now a very different structure to the overworld which means that this is hardly necessary as a mechanic
 
-// if save_reset_block_state, save current positions of reset block as their new homes. otherwise, save their position to file, but keep their old homes
-void writeResetInfoToFile(FILE* file, Entity* rb, bool save_reset_block_state)
-{
-    int32 count = 0;
-    FOR(to_reset_index, MAX_RESET_COUNT)
-    {
-        if (rb->reset_info[to_reset_index].id == -1) continue;
-        else count++;
-    }
-    if (count == 0) return;
-
-	fwrite(RESET_INFO_CHUNK_TAG, 4, 1, file);
-
-    int32 size = 4 * (3 + (RESET_INFO_SINGLE_ENTRY_SIZE * count));
-    fwrite(&size, 4, 1, file);
-
-    fwrite(&rb->coords.x, 4, 1, file);
-    fwrite(&rb->coords.y, 4, 1, file);
-    fwrite(&rb->coords.z, 4, 1, file);
-
-    FOR(to_reset_index, MAX_RESET_COUNT)
-    {
-        if (rb->reset_info[to_reset_index].id == -1) continue;
-
-        int32 id_to_write = rb->reset_info[to_reset_index].id;
-        fwrite(&id_to_write, 4, 1, file);
-
-        if (save_reset_block_state)
-        {
-            Entity* e = getEntityFromId(id_to_write);
-            if (e)
-            {
-                TileType type = getTileType(e->coords);
-                fwrite(&e->coords.x, 4, 1, file);
-                fwrite(&e->coords.y, 4, 1, file);
-                fwrite(&e->coords.z, 4, 1, file);
-                fwrite(&type, 4, 1, file);
-                fwrite(&e->direction, 4, 1, file);
-            }
-            else
-            {
-                fwrite(&rb->reset_info[to_reset_index].start_coords.x, 4, 1, file);
-                fwrite(&rb->reset_info[to_reset_index].start_coords.y, 4, 1, file);
-                fwrite(&rb->reset_info[to_reset_index].start_coords.z, 4, 1, file);
-                fwrite(&rb->reset_info[to_reset_index].start_type, 4, 1, file);
-                fwrite(&rb->reset_info[to_reset_index].start_direction, 4, 1, file);
-            }
-        }
-        else
-        {
-            fwrite(&rb->reset_info[to_reset_index].start_coords.x, 4, 1, file);
-            fwrite(&rb->reset_info[to_reset_index].start_coords.y, 4, 1, file);
-            fwrite(&rb->reset_info[to_reset_index].start_coords.z, 4, 1, file);
-            fwrite(&rb->reset_info[to_reset_index].start_type, 4, 1, file);
-            fwrite(&rb->reset_info[to_reset_index].start_direction, 4, 1, file);
-        }
-    }
-}
-
 // doesn't change the camera
-bool saveLevelRewrite(char* path, bool save_reset_block_state)
+bool saveLevelRewrite(char* path)
 {
     FILE* file = fopen(path, "wb");
     if (!file) return false;
@@ -1580,13 +1382,6 @@ bool saveLevelRewrite(char* path, bool save_reset_block_state)
             if (e->unlocked_by[0] == '\0') continue;
             writeLockedInfoToFile(file, e);
         }
-    }
-
-    FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
-    {
-        Entity* rb = &next_world_state.reset_blocks[entity_index];
-        if (rb->removed) continue;
-        writeResetInfoToFile(file, rb, save_reset_block_state);
     }
 
     fclose(file);
@@ -1674,16 +1469,11 @@ SpriteId getSprite2DId(TileType tile)
         case WATER:        return SPRITE_2D_WATER;
         case WIN_BLOCK:    return SPRITE_2D_WIN_BLOCK;
         case LOCKED_BLOCK: return SPRITE_2D_LOCKED_BLOCK;
-        case RESET_BLOCK:  return SPRITE_2D_RESET_BLOCK;
         case LADDER:	   return SPRITE_2D_LADDER;
 
         case SOURCE_RED:	 return SPRITE_2D_SOURCE_RED;
-        case SOURCE_GREEN:	 return SPRITE_2D_SOURCE_GREEN;
         case SOURCE_BLUE:	 return SPRITE_2D_SOURCE_BLUE;
         case SOURCE_MAGENTA: return SPRITE_2D_SOURCE_MAGENTA;
-        case SOURCE_YELLOW:	 return SPRITE_2D_SOURCE_YELLOW;
-        case SOURCE_CYAN:	 return SPRITE_2D_SOURCE_CYAN;
-        case SOURCE_WHITE:	 return SPRITE_2D_SOURCE_WHITE;
         default: return 0;
     }
 }
@@ -1704,25 +1494,12 @@ SpriteId getCube3DId(TileType tile)
         case WATER:        return CUBE_3D_WATER;
         case WIN_BLOCK:    return CUBE_3D_WIN_BLOCK;
         case LOCKED_BLOCK: return CUBE_3D_LOCKED_BLOCK;
-        case RESET_BLOCK:  return CUBE_3D_RESET_BLOCK;
         case LADDER: 	   return CUBE_3D_LADDER;
         case WON_BLOCK:    return CUBE_3D_WON_BLOCK;
 
-        case LASER_RED:     return CUBE_3D_LASER_RED;
-        case LASER_GREEN:	return CUBE_3D_LASER_GREEN;
-        case LASER_BLUE:	return CUBE_3D_LASER_BLUE;
-        case LASER_MAGENTA:	return CUBE_3D_LASER_MAGENTA;
-        case LASER_YELLOW:	return CUBE_3D_LASER_YELLOW;
-        case LASER_CYAN:	return CUBE_3D_LASER_CYAN;
-        case LASER_WHITE:	return CUBE_3D_LASER_WHITE;
-
         case SOURCE_RED:	 return CUBE_3D_SOURCE_RED;
-        case SOURCE_GREEN:	 return CUBE_3D_SOURCE_GREEN;
         case SOURCE_BLUE:	 return CUBE_3D_SOURCE_BLUE;
         case SOURCE_MAGENTA: return CUBE_3D_SOURCE_MAGENTA;
-        case SOURCE_YELLOW:	 return CUBE_3D_SOURCE_YELLOW;
-        case SOURCE_CYAN:	 return CUBE_3D_SOURCE_CYAN;
-        case SOURCE_WHITE:	 return CUBE_3D_SOURCE_WHITE;
         default: return 0;
     }
 }
@@ -1743,25 +1520,12 @@ SpriteId getModelId(TileType tile)
         case WATER:        return MODEL_3D_WATER;
         case WIN_BLOCK:    return MODEL_3D_WIN_BLOCK;
         case LOCKED_BLOCK: return MODEL_3D_LOCKED_BLOCK;
-        case RESET_BLOCK:  return MODEL_3D_RESET_BLOCK;
         case LADDER: 	   return MODEL_3D_LADDER;
         case WON_BLOCK:    return MODEL_3D_WON_BLOCK;
 
-        case LASER_RED:     return MODEL_3D_LASER_RED;
-        case LASER_GREEN:	return MODEL_3D_LASER_GREEN;
-        case LASER_BLUE:	return MODEL_3D_LASER_BLUE;
-        case LASER_MAGENTA:	return MODEL_3D_LASER_MAGENTA;
-        case LASER_YELLOW:	return MODEL_3D_LASER_YELLOW;
-        case LASER_CYAN:	return MODEL_3D_LASER_CYAN;
-        case LASER_WHITE:	return MODEL_3D_LASER_WHITE;
-
         case SOURCE_RED:	 return MODEL_3D_SOURCE_RED;
-        case SOURCE_GREEN:	 return MODEL_3D_SOURCE_GREEN;
         case SOURCE_BLUE:	 return MODEL_3D_SOURCE_BLUE;
         case SOURCE_MAGENTA: return MODEL_3D_SOURCE_MAGENTA;
-        case SOURCE_YELLOW:	 return MODEL_3D_SOURCE_YELLOW;
-        case SOURCE_CYAN:	 return MODEL_3D_SOURCE_CYAN;
-        case SOURCE_WHITE:	 return MODEL_3D_SOURCE_WHITE;
         default: return 0;
     }
 }
@@ -2004,7 +1768,7 @@ void editorPlaceOnlyInstanceOfTile(Entity* entity, Int3 coords, TileType tile, i
         next_world_state.buffer[buffer_index + 1] = NORTH;
     }
     entity->coords = coords;
-    entity->position_norm = intCoordsToNorm(coords);
+    entity->position = intCoordsToNorm(coords);
     entity->id = id;
     entity->removed = false;
     setTileType(editor_state.picked_tile, coords);
@@ -2322,17 +2086,14 @@ Direction getNextLaserDirectionMirror(Direction laser_direction, Direction mirro
     }
 }
 
+// TODO: these two functions are only used once. inline them?
 LaserColor colorToLaserColor(Color color)
 {
     switch (color)
     {
-        case RED:     return (LaserColor){ .red = true,  .green = false, .blue = false };
-        case GREEN:   return (LaserColor){ .red = false, .green = true,  .blue = false };
-        case BLUE:    return (LaserColor){ .red = false, .green = false, .blue = true  };
-        case MAGENTA: return (LaserColor){ .red = true,  .green = false, .blue = true  };
-        case YELLOW:  return (LaserColor){ .red = true,  .green = true,  .blue = false };
-        case CYAN:    return (LaserColor){ .red = false, .green = true,  .blue = true  };
-        case WHITE:   return (LaserColor){ .red = true,  .green = true,  .blue = true  };
+        case RED:     return (LaserColor){ .red = true,  .blue = false };
+        case BLUE:    return (LaserColor){ .red = false, .blue = true  };
+        case MAGENTA: return (LaserColor){ .red = true,  .blue = true  };
         default: return (LaserColor){0};
     }
 }
@@ -2342,28 +2103,9 @@ Vec3 colorToRGB(Color color)
     switch (color)
     {
         case RED:     return (Vec3){ 1.0f, 0.0f, 0.0f };
-        case GREEN:   return (Vec3){ 0.0f, 1.0f, 0.0f };
         case BLUE:    return (Vec3){ 0.0f, 0.0f, 1.0f };
         case MAGENTA: return (Vec3){ 1.0f, 0.0f, 1.0f };
-        case YELLOW:  return (Vec3){ 1.0f, 1.0f, 0.0f };
-        case CYAN:    return (Vec3){ 0.0f, 1.0f, 1.0f };
-        case WHITE:   return (Vec3){ 1.0f, 1.0f, 1.0f };
         default: return VEC3_0;
-    }
-}
-
-TileType laserColorToType(Color color)
-{
-    switch (color)
-    {
-        case RED:     return LASER_RED;
-        case GREEN:   return LASER_GREEN;
-        case BLUE:    return LASER_BLUE;
-        case MAGENTA: return LASER_MAGENTA;
-        case YELLOW:  return LASER_YELLOW;
-        case CYAN:    return LASER_CYAN;
-        case WHITE:   return LASER_WHITE;
-        default: return NONE;
     }
 }
 
@@ -2453,7 +2195,6 @@ void updateLaserBuffer()
 
     player->hit_by_red   = false;
     player->hit_by_blue  = false;
-    player->green_hit = (GreenHit){0};
 
     // if a source is a non-primary color, create primary sources of the constituent colors 
     // TODO: probably shouldn't rebuild this buffer every time function is called, could just update when sources are moved / on level rebuild
@@ -2474,29 +2215,6 @@ void updateLaserBuffer()
 			sources_as_primary[primary_index] = *s;
             sources_as_primary[primary_index++].color = BLUE;
         }
-		else if (s->color == YELLOW)
-        {
-			sources_as_primary[primary_index] = *s;
-            sources_as_primary[primary_index++].color = RED;
-			sources_as_primary[primary_index] = *s;
-            sources_as_primary[primary_index++].color = GREEN;
-        }
-		else if (s->color == CYAN)
-        {
-			sources_as_primary[primary_index] = *s;
-            sources_as_primary[primary_index++].color = GREEN;
-			sources_as_primary[primary_index] = *s;
-            sources_as_primary[primary_index++].color = BLUE;
-        }
-		else if (s->color == WHITE)
-        {
-			sources_as_primary[primary_index] = *s;
-            sources_as_primary[primary_index++].color = RED;
-			sources_as_primary[primary_index] = *s;
-            sources_as_primary[primary_index++].color = GREEN;
-			sources_as_primary[primary_index] = *s;
-            sources_as_primary[primary_index++].color = BLUE;
-        }
     }
 
     FOR(source_index, MAX_SOURCE_COUNT) // iterate over laser (primary) sources
@@ -2504,7 +2222,7 @@ void updateLaserBuffer()
         Entity* source = &sources_as_primary[source_index];
 
         Direction current_direction = source->direction;
-        Vec3 current_norm_coords = source->position_norm;
+        Vec3 current_norm_coords = source->position;
         Int3 current_tile_coords = roundNormCoordsToInt(current_norm_coords);
 
         // idea here: mirrors and lasers when pushed can collide with themselves because they take up two tiles while the trailing hitbox is active
@@ -2520,7 +2238,7 @@ void updateLaserBuffer()
 
             // start of some segment: always move one tile forward from where we are before we start checking for anything
             float laser_source_start_offset = game_shader_mode == OLD ? 0.5f : 0.4f;
-            if (laser_turn_index == 0) lb->start_coords = vec3Add(source->position_norm, vec3ScalarMultiply(directionToVector(current_direction), laser_source_start_offset));
+            if (laser_turn_index == 0) lb->start_coords = vec3Add(source->position, vec3ScalarMultiply(directionToVector(current_direction), laser_source_start_offset));
             else lb->start_coords = current_norm_coords;
             lb->direction = current_direction;
             lb->color = source->color;
@@ -2568,40 +2286,21 @@ void updateLaserBuffer()
 
                     if (hit_type == PLAYER)
                     {
-                        float distance_from_player = getDistanceFromLaserAlongAxis(current_direction, current_norm_coords, player->position_norm);
+                        float distance_from_player = getDistanceFromLaserAlongAxis(current_direction, current_norm_coords, player->position);
                         if (distance_from_player > 0.5f)
                         {
                             // passthrough
                             continue;
                         }
 
-                        Vec3 coords_without_offset = getNormCoordsWithEntityCoordAlongAxis(current_direction, current_norm_coords, player->position_norm);
+                        Vec3 coords_without_offset = getNormCoordsWithEntityCoordAlongAxis(current_direction, current_norm_coords, player->position);
                         lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), -0.375f));
-                        current_norm_coords = player->position_norm;
+                        current_norm_coords = player->position;
 
                         // set player color based on laser
                         LaserColor laser_color = colorToLaserColor(lb->color);
-                        if (laser_color.red)
-                        {
-                            player->hit_by_red = true;
-                        }
-                        if (laser_color.green) 
-                        {
-                            switch (current_direction)
-                            {
-                                case NORTH: player->green_hit.north = true; break;
-                                case WEST:  player->green_hit.west  = true; break;
-                                case SOUTH: player->green_hit.south = true; break;
-                                case EAST:  player->green_hit.east  = true; break;
-                                case UP:    player->green_hit.up    = true; break;
-                                case DOWN:  player->green_hit.down  = true; break;
-                                default: break;
-                            }
-                        }
-                        if (laser_color.blue)
-                        {
-                            player->hit_by_blue  = true;
-                        }
+                        if (laser_color.red)  player->hit_by_red = true;
+                        if (laser_color.blue) player->hit_by_blue  = true;
                         advance_tile = false;
                         break;
                     }
@@ -2618,7 +2317,7 @@ void updateLaserBuffer()
                         bool end_here = false;
                         if (mirror->id == id_to_skip) passthrough = true;
 
-                        float distance_from_mirror_along_axes = getDistanceFromLaserAlongAxis(current_direction, current_norm_coords, mirror->position_norm);
+                        float distance_from_mirror_along_axes = getDistanceFromLaserAlongAxis(current_direction, current_norm_coords, mirror->position);
                         if (distance_from_mirror_along_axes > 0.5) passthrough = true;
 
                         if (passthrough)
@@ -2633,7 +2332,7 @@ void updateLaserBuffer()
                         {
                             // hit side of mirror which doesnt reflect
                             // TODO: because of angled shape of mirror, this check is too aggressive - should passthrough if distance from the plane the mirror sits on is >0.2 or something
-                            Vec3 coords_without_offset = getNormCoordsWithEntityCoordAlongAxis(current_direction, current_norm_coords, mirror->position_norm);
+                            Vec3 coords_without_offset = getNormCoordsWithEntityCoordAlongAxis(current_direction, current_norm_coords, mirror->position);
                             lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), -0.38f));
                             advance_tile = false;
                             break;
@@ -2647,30 +2346,30 @@ void updateLaserBuffer()
                         }
                         else if (distance_from_mirror_along_axes == 0)
                         {
-                            lb->end_coords = mirror->position_norm;
+                            lb->end_coords = mirror->position;
 
                             // find end clip plane
                             Vec3 mirror_normal = vec3Normalize(vec3Add(directionToVector(next_laser_direction), directionToVector(oppositeDirection(current_direction))));
                             float origin_offset = -vec3Inner(mirror_normal, lb->end_coords);
                             lb->end_clip_plane = (Vec4){ mirror_normal.x, mirror_normal.y, mirror_normal.z, origin_offset };
 
-                            current_norm_coords = mirror->position_norm;
+                            current_norm_coords = mirror->position;
                             current_direction = next_laser_direction;
                             advance_tile = false;
                             no_more_turns = false;
                             break;
                         }
 
-                        // get difference along next_laser_direction of current_norm_coords vs mirror->position_norm.
+                        // get difference along next_laser_direction of current_norm_coords vs mirror->position.
                         // this will be relevantly signed because getSignedComponentAlongDirection gives signed output.
                         // add that difference to norm_coords along current_direction. again signs are accounted for because directionToVector gives signed output.
                         // differences along the other axis (the one orthogonal to both current dir and next dir) are ignored, because they don't change point of reflection
                         // to get norm coords, add corresponding difference, plus norm_coord_difference along the axes that aren't current_direction axis
-                        Vec3 norm_coord_difference = vec3Subtract(current_norm_coords, mirror->position_norm);
+                        Vec3 norm_coord_difference = vec3Subtract(current_norm_coords, mirror->position);
                         float difference_along_next_laser_direction_axis = getSignedComponentAlongDirection(next_laser_direction, norm_coord_difference);
                         Vec3 corresponding_difference_along_current_direction_axis = vec3ScalarMultiply(directionToVector(current_direction), difference_along_next_laser_direction_axis);
                         Vec3 norm_coord_difference_not_along_current_direction_axis = vec3ZeroComponentAlongDirection(current_direction, norm_coord_difference);
-                        current_norm_coords = vec3Add(mirror->position_norm, vec3Add(norm_coord_difference_not_along_current_direction_axis, corresponding_difference_along_current_direction_axis));
+                        current_norm_coords = vec3Add(mirror->position, vec3Add(norm_coord_difference_not_along_current_direction_axis, corresponding_difference_along_current_direction_axis));
 
                         // compute for clip plane before overwriting current_direction
                         Vec3 mirror_normal = vec3Normalize(vec3Add(directionToVector(next_laser_direction), directionToVector(oppositeDirection(current_direction))));
@@ -2709,7 +2408,7 @@ void updateLaserBuffer()
                             if (e->id == id_to_skip) passthrough = true;
 
                             // default distance check for passthrough
-                            float distance_from_entity = getDistanceFromLaserAlongAxis(current_direction, current_norm_coords, e->position_norm);
+                            float distance_from_entity = getDistanceFromLaserAlongAxis(current_direction, current_norm_coords, e->position);
                             if (distance_from_entity > 0.5) passthrough = true;
 
                             if (passthrough)
@@ -2718,7 +2417,7 @@ void updateLaserBuffer()
                                 continue;
                             }
 
-                            coords_without_offset = getNormCoordsWithEntityCoordAlongAxis(current_direction, current_norm_coords, e->position_norm);
+                            coords_without_offset = getNormCoordsWithEntityCoordAlongAxis(current_direction, current_norm_coords, e->position);
                             offset = -0.5f;
                             if (e->id == PACK_ID) offset = -0.375f;
                         }
@@ -2838,50 +2537,6 @@ void setFallingForAllPushables()
     }
 }
 
-// GHOSTS
-
-// returns true if player is able to try to tp (i.e. player is facing tw green beam). doesn't consider any obstructed tps.
-bool calculateGhosts()
-{
-    Entity* player = &next_world_state.player;
-
-    // render and calculate ghosts
-    bool facing_green = false;
-    switch (player->direction)
-    {
-        case NORTH: if (player->green_hit.south) facing_green = true; break;
-        case WEST:  if (player->green_hit.east)  facing_green = true; break;
-        case SOUTH: if (player->green_hit.north) facing_green = true; break;
-        case EAST:  if (player->green_hit.west)  facing_green = true; break;
-        case UP:    if (player->green_hit.down)  facing_green = true; break;
-        case DOWN:  if (player->green_hit.up)    facing_green = true; break;
-        default: break;
-    }
-    if (!facing_green) return false;
-
-    Int3 current_coords = player->coords; 
-    Direction current_direction = player->direction;
-    FOR(seek_index, MAX_LASER_TRAVEL_DISTANCE)
-    {
-        current_coords = getNextCoords(current_coords, current_direction);
-        TileType current_tile = getTileType(current_coords);
-        if (current_tile == MIRROR)
-        {
-            current_direction = getNextLaserDirectionMirror(current_direction, getTileDirection(current_coords));
-            continue;
-        }
-        if (current_tile != NONE) break;
-    }
-    player_ghost_coords = getNextCoords(current_coords, oppositeDirection(current_direction));
-    player_ghost_direction = current_direction;
-    if (!pack_detached) 
-    {
-        pack_ghost_coords = getNextCoords(player_ghost_coords, oppositeDirection(current_direction));
-        pack_ghost_direction = current_direction;
-    }
-    return true;
-}
-
 // TEXT HELPERS FOR EDIT_BUFFER
 
 void editAppendChar(char character)
@@ -2993,7 +2648,6 @@ void gameInitializeState(char* level_name)
     memset(next_world_state.sources,  	   0, sizeof(next_world_state.sources));
     memset(next_world_state.win_blocks,    0, sizeof(next_world_state.win_blocks));
     memset(next_world_state.locked_blocks, 0, sizeof(next_world_state.locked_blocks));
-    memset(next_world_state.reset_blocks,  0, sizeof(next_world_state.reset_blocks));
     FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
     {
         next_world_state.boxes[entity_index].id 		= -1;
@@ -3002,8 +2656,6 @@ void gameInitializeState(char* level_name)
         next_world_state.sources[entity_index].id		= -1;
         next_world_state.win_blocks[entity_index].id	= -1;
         next_world_state.locked_blocks[entity_index].id	= -1;
-        next_world_state.reset_blocks[entity_index].id	= -1;
-        FOR(to_reset_index, MAX_RESET_COUNT) next_world_state.reset_blocks[entity_index].reset_info[to_reset_index].id = -1;
     }
 
     Entity *entity_group = 0;
@@ -3015,15 +2667,14 @@ void gameInitializeState(char* level_name)
         else if (buffer_contents == GLASS)	 	  entity_group = next_world_state.glass_blocks;
         else if (buffer_contents == WIN_BLOCK)    entity_group = next_world_state.win_blocks;
         else if (buffer_contents == LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
-        else if (buffer_contents == RESET_BLOCK)  entity_group = next_world_state.reset_blocks;
         else if (isSource(buffer_contents))  	  entity_group = next_world_state.sources;
         if (entity_group != 0)
         {
             int32 count = getEntityCount(entity_group);
             entity_group[count].coords = bufferIndexToCoords(buffer_index);
-            entity_group[count].position_norm = intCoordsToNorm(entity_group[count].coords);
+            entity_group[count].position = intCoordsToNorm(entity_group[count].coords);
             entity_group[count].direction = next_world_state.buffer[buffer_index + 1]; 
-            entity_group[count].rotation_quat = directionToQuaternion(entity_group[count].direction);
+            entity_group[count].rotation = directionToQuaternion(entity_group[count].direction);
             entity_group[count].color = getEntityColor(entity_group[count].coords);
             entity_group[count].id = getEntityCount(entity_group) + entityIdOffset(entity_group, entity_group[count].color);
         	entity_group[count].removed = false;
@@ -3032,17 +2683,17 @@ void gameInitializeState(char* level_name)
         else if (next_world_state.buffer[buffer_index] == PLAYER)
         {
             player->coords = bufferIndexToCoords(buffer_index);
-            player->position_norm = intCoordsToNorm(player->coords);
+            player->position = intCoordsToNorm(player->coords);
             player->direction = next_world_state.buffer[buffer_index + 1];
-            player->rotation_quat = directionToQuaternion(player->direction);
+            player->rotation = directionToQuaternion(player->direction);
             player->id = PLAYER_ID;
         }
         else if (next_world_state.buffer[buffer_index] == PACK)
         {
             pack->coords = bufferIndexToCoords(buffer_index);
-            pack->position_norm = intCoordsToNorm(pack->coords);
+            pack->position = intCoordsToNorm(pack->coords);
             pack->direction = next_world_state.buffer[buffer_index + 1];
-            pack->rotation_quat = directionToQuaternion(pack->direction);
+            pack->rotation = directionToQuaternion(pack->direction);
             pack->id = PACK_ID;
         }
     }
@@ -3066,7 +2717,6 @@ void gameInitializeState(char* level_name)
     }
     loadWinBlockPaths(file);
     loadLockedInfoPaths(file);
-    loadResetBlockInfo(file);
     fclose(file);
 
     loadSolvedLevelsFromFile();
@@ -3119,11 +2769,11 @@ void gameRedraw(DisplayInfo display_from_platform)
 // note, this is pretty lazy; could be smarter about exactly what enities need a delta, and only store those, and that would be supported in this system, but it's sometimes pretty 
 // difficult to know what entities will be affected by an action and thus need a delta without just simulating forward. this is a solveable problem, but for now i'm just storing deltas for every entity.
 //
-// on undo, restore the old states and create interpolation animations from the current position_norm of the entities. the longer port of the performUndo function is dealing with
+// on undo, restore the old states and create interpolation animations from the current position of the entities. the longer port of the performUndo function is dealing with
 // edge cases based on the start / end coords. for example, if a box has travelled down and right in one action, it must have been pushed and then fallen - it cannot have fallen and been moved on one
 // action. so i split the interpolation animation into two parts, and always do the up movement first, then the left movement, since the box will have gone right->down in every such case.
 // 
-// actions that shouldn't interpolate on undo (teleports and resets) don't get interpolated.
+// actions that shouldn't interpolate on undo (e.g. resets) don't get interpolated.
 
 // writes one delta into the circular buffer
 void recordEntityDelta(Entity* e)
@@ -3156,8 +2806,7 @@ void evictOldestUndoAction()
 
 // called after a noraml (non-level-change) action
 // diffs world_state vs. next_world_state and stores deltas for every entity that changed
-// was_reset and was_teleport currently do the same thing: cancel interpolation animations for the player (and pack if attached) for that action.
-void recordActionForUndo(WorldState* old_state, bool action_was_reset, bool action_was_teleport, bool action_was_climb)
+void recordActionForUndo(WorldState* old_state, bool action_was_reset, bool action_was_climb)
 {
     if (undo_buffer.header_count >= MAX_UNDO_ACTIONS) evictOldestUndoAction();
 
@@ -3170,8 +2819,8 @@ void recordActionForUndo(WorldState* old_state, bool action_was_reset, bool acti
     entity_count += 2;
 
 	// other entities
-    Entity* groups[7] = { old_state->boxes, old_state->mirrors, old_state->glass_blocks, old_state->sources, old_state->win_blocks, old_state->locked_blocks, old_state->reset_blocks };
-    FOR(group_index, 7)
+    Entity* groups[5] = { old_state->boxes, old_state->mirrors, old_state->sources, old_state->win_blocks, old_state->locked_blocks };
+    FOR(group_index, 5)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
@@ -3186,7 +2835,6 @@ void recordActionForUndo(WorldState* old_state, bool action_was_reset, bool acti
     undo_buffer.headers[header_index].entity_count = (uint8)entity_count;
     undo_buffer.headers[header_index].delta_start_pos = delta_start;
     undo_buffer.headers[header_index].level_changed = false;
-    undo_buffer.headers[header_index].was_teleport = action_was_teleport;
     undo_buffer.headers[header_index].was_reset = action_was_reset;
     undo_buffer.headers[header_index].was_climb = action_was_climb;
     undo_buffer.level_change_indices[header_index] = 0xFF;
@@ -3238,8 +2886,8 @@ void recordLevelChangeForUndo(char* current_level_name, bool level_was_just_solv
     recordEntityDelta(&next_world_state.pack);
     entity_count += 2;
 
-    Entity* groups[7] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.glass_blocks, next_world_state.sources, next_world_state.win_blocks, next_world_state.locked_blocks, next_world_state.reset_blocks };
-    FOR(group_index, 7)
+    Entity* groups[5] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.sources, next_world_state.win_blocks, next_world_state.locked_blocks };
+    FOR(group_index, 5)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
@@ -3322,16 +2970,16 @@ bool performUndo(int32 undo_animation_time)
         Entity* e = getEntityFromId(delta->id);
         if (e)
         {
-            Vec3 old_position = e->position_norm;
-            Int3 old_coords = roundNormCoordsToInt(e->position_norm);
-            Vec4 old_rotation = e->rotation_quat;
+            Vec3 old_position = e->position;
+            Int3 old_coords = roundNormCoordsToInt(e->position);
+            Vec4 old_rotation = e->rotation;
             bool was_at_different_coords = !int3IsEqual(e->coords, delta->old_coords);
             bool was_at_different_direction = (e->direction != delta->old_direction);
 
             e->coords = delta->old_coords;
-            e->position_norm = intCoordsToNorm(e->coords); // this gets overwritten later, but is used as endpoint for queued animations
+            e->position = intCoordsToNorm(e->coords); // this gets overwritten later, but is used as endpoint for queued animations
             e->direction = delta->old_direction;
-            e->rotation_quat = directionToQuaternion(e->direction);
+            e->rotation = directionToQuaternion(e->direction);
             e->removed = delta->was_removed;
 
             if (!delta->was_removed)
@@ -3340,11 +2988,11 @@ bool performUndo(int32 undo_animation_time)
                 setTileType(type, delta->old_coords);
                 setTileDirection(delta->old_direction, delta->old_coords);
 
-                if (!header->level_changed && !header->was_teleport && !header->was_reset && (was_at_different_coords || was_at_different_direction))
+                if (!header->level_changed && !header->was_reset && (was_at_different_coords || was_at_different_direction))
                 {
-                    int32 dx = (int32)roundf(e->position_norm.x - old_position.x);
-                    int32 dy = (int32)roundf(e->position_norm.y - old_position.y + 0.49f);
-                    int32 dz = (int32)roundf(e->position_norm.z - old_position.z);
+                    int32 dx = (int32)roundf(e->position.x - old_position.x);
+                    int32 dy = (int32)roundf(e->position.y - old_position.y + 0.49f);
+                    int32 dz = (int32)roundf(e->position.z - old_position.z);
 
                     if (dx != 0 || dy != 0 || dz != 0 || was_at_different_direction) // only do any sort of interpolation if the object moved / changed direction 
                     {
@@ -3359,10 +3007,10 @@ bool performUndo(int32 undo_animation_time)
                             if (header->was_climb)
                             {
                                 // player climb
-                                Vec3 mid_position = { e->position_norm.x, old_position.y, e->position_norm.z };
+                                Vec3 mid_position = { e->position.x, old_position.y, e->position.z };
                                 int32 first_animation_time = undo_animation_time / 2;
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
-                                // TODO(anims): interpolation anims (old pos -> mid pos -> e.position_norm)
+                                // TODO(anims): interpolation anims (old pos -> mid pos -> e.position)
                                 e->moving_direction = NO_DIRECTION;
                                 // handle trailing hitboxes
                                 for (int32 height_index = 0; height_index < -dy + 1; height_index++)
@@ -3374,10 +3022,10 @@ bool performUndo(int32 undo_animation_time)
                             else if (dy != 0 && was_at_different_direction)
                             {
                                 // player turn and fall
-                                Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
+                                Vec3 mid_position = { old_position.x, e->position.y, old_position.z };
                                 int32 first_animation_time = undo_animation_time / 2;
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
-                                // TODO(anims): iterpolation anims (old pos -> mid pos, rot: mid pos-> e.rotation_quat)
+                                // TODO(anims): iterpolation anims (old pos -> mid pos, rot: mid pos-> e.rotation)
                                 e->moving_direction = getDirectionFromCoordDiff(e->coords, old_coords);
                                 // handle trailing hitboxes
                                 for (int32 height_index = 0; height_index < dy + 1; height_index++)
@@ -3388,7 +3036,7 @@ bool performUndo(int32 undo_animation_time)
                             else if (dy != 0 && (dx != 0 || dz != 0))
                             {
                                 // player move and fall
-                                Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
+                                Vec3 mid_position = { old_position.x, e->position.y, old_position.z };
                                 int32 first_animation_time = undo_animation_time / 2;
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
                                 // TODO(anims): interpolation anims (old -> mid -> pos norm)
@@ -3441,7 +3089,7 @@ bool performUndo(int32 undo_animation_time)
                             }
                             else if (header->was_climb)
                             {
-                                Vec3 mid_position = { e->position_norm.x, old_position.y, e->position_norm.z };
+                                Vec3 mid_position = { e->position.x, old_position.y, e->position.z };
                                 int32 first_animation_time = undo_animation_time / 2;
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
                                 // TODO(anims): interpolation anims (old -> mid -> pos norm)
@@ -3454,7 +3102,7 @@ bool performUndo(int32 undo_animation_time)
                             }
                             else if (dy != 0 && dx != 0 && dz != 0) // if both dx and dz != 0 this must be a turn. also a fall, because dy != 0
                             {
-                                Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
+                                Vec3 mid_position = { old_position.x, e->position.y, old_position.z };
                                 int32 first_animation_time = undo_animation_time / 2;
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
                                 // TODO(anims): interpolation and rotation anims (old -> mid, then pack turn)
@@ -3470,7 +3118,7 @@ bool performUndo(int32 undo_animation_time)
                             }
                             else if (dy != 0 && (dx != 0 || dz != 0)) // pack move and fall
                             {
-                                Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
+                                Vec3 mid_position = { old_position.x, e->position.y, old_position.z };
                                 int32 first_animation_time = undo_animation_time / 2;
                                 int32 second_animation_time = undo_animation_time - first_animation_time;
                                 // TODO(anims): interpolation anims (old -> mid -> pos norm)
@@ -3492,7 +3140,7 @@ bool performUndo(int32 undo_animation_time)
                         else if (dy != 0 && (dx != 0 || dz != 0))
                         {
                             // object move and fall
-                            Vec3 mid_position = { old_position.x, e->position_norm.y, old_position.z };
+                            Vec3 mid_position = { old_position.x, e->position.y, old_position.z };
                             int32 first_animation_time = undo_animation_time / 2;
                             int32 second_animation_time = undo_animation_time - first_animation_time;
                             // TODO(anims): interpolation anims (old -> mid -> pos norm)
@@ -3607,7 +3255,7 @@ void doHeadRotation(bool clockwise)
         if (!up_or_down) {} // TODO(anims): special case for mirrors, since getting the rotation animation was different. queue the same type of animation here
         else 
         {
-            Vec4 start = entity->rotation_quat;
+            Vec4 start = entity->rotation;
             float sign = clockwise ? 1.0f : -1.0f;
             Vec4 delta = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), sign * 0.25f * TAU);
             Vec4 end = quaternionNormalize(quaternionMultiply(delta, start));
@@ -3646,7 +3294,7 @@ void doStandardMovement(Direction input_direction, Int3 next_player_coords, int3
         moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
     }
 
-    if (record_for_undo) recordActionForUndo(&world_state, false, false, false);
+    if (record_for_undo) recordActionForUndo(&world_state, false, false);
 }
 
 void updatePackDetached()
@@ -3862,7 +3510,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     if (entity != 0)
                     {
                         entity->coords = (Int3){0};
-                        entity->position_norm = (Vec3){0};
+                        entity->position = (Vec3){0};
                         entity->removed = true;
                     }
                     setTileType(NONE, raycast_output.hit_coords);
@@ -3892,7 +3540,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 case GLASS: 	   entity_group = next_world_state.glass_blocks;  break;
                                 case WIN_BLOCK:    entity_group = next_world_state.win_blocks;    break;
                                 case LOCKED_BLOCK: entity_group = next_world_state.locked_blocks; break;
-                                case RESET_BLOCK:  entity_group = next_world_state.reset_blocks;  break;
                                 default: entity_group = 0;
                             }
                             if (entity_group != 0) 
@@ -3920,7 +3567,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         if (entity != 0)
                         {
                             entity->direction = direction;
-                            entity->rotation_quat = directionToQuaternion(direction);
+                            entity->rotation = directionToQuaternion(direction);
                         }
                     }
                     else if (tile == LADDER)
@@ -3964,44 +3611,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 else
                 {
                     editor_state.selected_id = -1;
-                }
-            }
-
-            else if (tick_input->right_mouse_press)
-            {
-                Vec3 neg_z_basis = {0, 0, -1};
-                RaycastHit raycast_output = raycastHitCube(camera_with_ow_offset.coords, vec3RotateByQuaternion(neg_z_basis, camera_with_ow_offset.rotation), MAX_RAYCAST_SEEK_LENGTH);
-                Entity* rb = 0;
-                if (editor_state.selected_id > 0) rb = getEntityFromId(editor_state.selected_id);
-                if (rb != 0 && getTileType(rb->coords) == RESET_BLOCK)
-                {
-                    Entity* new_e = getEntityAtCoords(raycast_output.hit_coords);
-                    if (new_e != 0)
-                    {
-                        int32 present_in_rb = -1;
-                        FOR(present_check_index, MAX_RESET_COUNT) if (rb->reset_info[present_check_index].id == new_e->id) 
-                        {
-                            present_in_rb = present_check_index;
-                            break;
-                        }
-                        if (present_in_rb == -1)
-                        {
-                            int32 next_free = findNextFreeInResetBlock(rb);
-                            if (next_free != -1) 
-                            {
-                                rb->reset_info[next_free].id = new_e->id;
-                                rb->reset_info[next_free].start_coords = new_e->coords;
-                                rb->reset_info[next_free].start_type = editor_state.picked_tile;
-                                rb->reset_info[next_free].start_direction = new_e->direction;
-                            }
-                        }
-                        else
-                        {
-                            rb->reset_info[present_in_rb].id = -1;
-                        }
-                        time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                    }
-                    // did not click on entity
                 }
             }
 
@@ -4238,7 +3847,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 // RESTART 
                 if (!restart_last_turn) 
                 {
-                    recordActionForUndo(&world_state, true, false, false);
+                    recordActionForUndo(&world_state, true, false);
                 }
                 createDebugPopup("level restarted", NO_TYPE);
                 // TODO(animations): clear all animations
@@ -4304,17 +3913,21 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 {
                     next_player_coords = getNextCoords(player->coords, input_direction);
 
-					// allow movement if, given acceleration this frame along input direction, we would overshoot
                     // TODO: think about what want to do about pressing a button many times to go faster. maybe the max velocity could change, or something?
                     bool allow_movement = false;
 
+                    // allow movement if, given acceleration this frame along input direction, we would overshoot.
+                    // i.e. 
                     float sign = input_direction == NORTH || input_direction == WEST ? -1.0f : 1.0f;
                     float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(input_direction, sign);
-                    float position_along_direction = getComponentAlongDirection(input_direction, player->position_norm);
+                    float position_along_direction = getComponentAlongDirection(input_direction, player->position);
                     float coords_along_direction = getComponentAlongDirection(input_direction, intCoordsToNorm(player->coords));
 
                     bool would_overshoot = wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign);
                     if (would_overshoot) allow_movement = true;
+
+                    // don't allow movement if have any angular velocity TODO: gate this less aggressively - would probably want to allow if rotation is within some range of targeted velocity
+                    if (!vec3IsZero(player->angular_velocity)) allow_movement = false;
 
                     // disallow movement if also moving in some other direction currently (not likely to happen; would need to turn first)
                     if (!vec3IsZero(vec3ZeroComponentAlongDirection(input_direction, player->velocity))) allow_movement = false;
@@ -4342,12 +3955,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             case PACK:
                             case MIRROR:
                             case SOURCE_RED:
-                            case SOURCE_GREEN:
                             case SOURCE_BLUE:
                             case SOURCE_MAGENTA:
-                            case SOURCE_YELLOW:
-                            case SOURCE_CYAN:
-                            case SOURCE_WHITE:
                             {
                                 // figure out if push, pause, or fail here.
                             	PushResult push_check = canPushStack(next_player_coords, input_direction);
@@ -4412,16 +4021,16 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                                 moveEntityInBufferAndState(player, next_player_coords, player->direction);
 
-                                player->position_norm = intCoordsToNorm(player->coords); // instead of creating animation for this, i'll just set position norm to where it will be after the animation
+                                player->position = intCoordsToNorm(player->coords); // instead of creating animation for this, i'll just set position norm to where it will be after the animation
 
                                 if (!pack_detached)
                                 {
                                     Int3 next_pack_coords = getNextCoords(next_player_coords, oppositeDirection(input_direction));
                                     moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
-                                    pack->position_norm = intCoordsToNorm(pack->coords);
+                                    pack->position = intCoordsToNorm(pack->coords);
                                 }
 
-                                // TODO(anims): in new system, do something like this system is doing; need to fastforward position_norm to where it would be by time taken to push
+                                // TODO(anims): in new system, do something like this system is doing; need to fastforward position to where it would be by time taken to push
                                 /*
                                 // fastforward everything in animations by amount of time taken to push
                                 for (int32 animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
@@ -4501,7 +4110,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                     // TODO(anims): same as above? probably don't need anything special, just use the player flag and grab the pack, too, if attached
                                 }
 
-                                recordActionForUndo(&world_state, false, false, true);
+                                recordActionForUndo(&world_state, false, true);
 
                                 time_until_allow_game_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
                             }
@@ -4521,9 +4130,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     }
                 }
 
-                // TODO: temporarily disabled all other movement logic
-
-                /*
                 else if (input_direction != oppositeDirection(player->direction)) // check if turning (as opposed to trying to reverse)
                 {
                     // player is turning
@@ -4549,7 +4155,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             player->direction = input_direction;
                             setTileDirection(player->direction, player->coords);
 
-                            recordActionForUndo(&world_state, false, false, false);
+                            recordActionForUndo(&world_state, false, false);
                         }
                         else
                         {
@@ -4589,12 +4195,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                     case MIRROR:
 
                                     case SOURCE_RED:
-                                    case SOURCE_GREEN:
                                     case SOURCE_BLUE:
                                     case SOURCE_MAGENTA:
-                                    case SOURCE_YELLOW:
-                                    case SOURCE_CYAN:
-                                    case SOURCE_WHITE:
                                     {
                                         PushResult push_result = canPushStack(diagonal_coords, diagonal_push_direction);
                                         if (push_result == CAN_PUSH)
@@ -4619,12 +4221,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                     case MIRROR:
 
                                     case SOURCE_RED:
-                                    case SOURCE_GREEN:
                                     case SOURCE_BLUE:
                                     case SOURCE_MAGENTA:
-                                    case SOURCE_YELLOW:
-                                    case SOURCE_CYAN:
-                                    case SOURCE_WHITE:
                                     {
                                         PushResult push_result = canPushStack(orthogonal_coords, orthogonal_push_direction);
                                         if (push_result == CAN_PUSH)
@@ -4643,14 +4241,14 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                     {
                                         if (push_diagonal) 
                                         {
-                                            recordActionForUndo(&world_state, false, false, false);
+                                            recordActionForUndo(&world_state, false, false);
                                             pushAll(diagonal_coords, oppositeDirection(input_direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false);
                                         }
                                         // TODO(anims): failed turn animation
                                     }
                                     else
                                     {
-                                        recordActionForUndo(&world_state, false, false, false);
+                                        recordActionForUndo(&world_state, false, false);
 
                                         createTrailingHitbox(PACK_ID, pack->coords, FIRST_TRAILING_PACK_TURN_HITBOX_TIME, PACK);
 
@@ -4684,6 +4282,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     }
                     time_until_allow_game_input = TURN_ANIMATION_TIME;
         		}
+
+                // TODO(anims): temporarily disabled all other movement
+
+                /*
                 else if (input_direction == oppositeDirection(player->direction))
                 {
                     if (!player_will_fall_next_turn)
@@ -4729,7 +4331,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                                 // TODO(anims): interpolation anim (player coords in player direction -> player coords) - again, order should be reversed
 
-                                recordActionForUndo(&world_state, false, false, false);
+                                recordActionForUndo(&world_state, false, false);
 
                                 time_until_allow_game_input = MOVE_OR_PUSH_ANIMATION_TIME;
                             }
@@ -4928,8 +4530,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) 
                 {
                     Entity* e = &entity_group[entity_index];
-                    e->position_norm = intCoordsToNorm(e->coords);
-                    e->rotation_quat = directionToQuaternion(e->direction);
+                    e->position = intCoordsToNorm(e->coords);
+                    e->rotation = directionToQuaternion(e->direction);
                 }
             }
 
@@ -4939,7 +4541,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 for (Direction direction_index = 0; direction_index < 4; direction_index++)
                 {
                     // only handle velocity / position if offset from the coords
-                    float position_along_direction = getComponentAlongDirection(direction_index, player->position_norm);
+                    float position_along_direction = getComponentAlongDirection(direction_index, player->position);
                     float coords_along_direction = getComponentAlongDirection(direction_index, intCoordsToNorm(player->coords));
                     float difference_in_position = coords_along_direction - position_along_direction;
 
@@ -4955,7 +4557,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         // no overshooting: accelerate fully
                         if (direction_index == NORTH || direction_index == SOUTH) player->velocity.z = speculative_velocity_along_direction;
                         else player->velocity.x = speculative_velocity_along_direction;
-                        player->position_norm = vec3Add(player->position_norm, player->velocity);
+                        player->position = vec3Add(player->position, player->velocity);
                     }
                     else
                     {
@@ -4976,12 +4578,12 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                         if (direction_index == NORTH || direction_index == SOUTH)
                         {
-                            player->position_norm.z += sign * actual_movement;
+                            player->position.z += sign * actual_movement;
                             player->velocity.z = sign * decelerated_speed;
                         }
                         else
                         {
-                            player->position_norm.x += sign * actual_movement;
+                            player->position.x += sign * actual_movement;
                             player->velocity.x = sign * decelerated_speed;
                         }
                     }
@@ -4992,9 +4594,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
             {
                 if (!pack_detached)
                 {
-                    Vec3 pack_coords = vec3Subtract(player->position_norm, directionToVector(player->direction));
-                    pack->position_norm = pack_coords;
-                    pack->rotation_quat = directionToQuaternion(pack->direction);
+                    Vec3 pack_coords = vec3Subtract(player->position, directionToVector(player->direction));
+                    pack->position = pack_coords;
+                    pack->rotation = directionToQuaternion(pack->direction);
                 }
             }
     	}
@@ -5022,7 +4624,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     {
                         char level_path[64] = {0};
                         buildLevelPathFromName(next_world_state.level_name, &level_path, false);
-                        saveLevelRewrite(level_path, false);
+                        saveLevelRewrite(level_path);
                         if (camera_mode == ALT_WAITING) 
                         {
                             saved_overworld_camera = saved_alt_camera;
@@ -5123,11 +4725,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
         // decide which ghosts to render, if ghosts should be rendered
         do_player_ghost = false;
         do_pack_ghost = false;
-		if (calculateGhosts())
-        {
-            do_player_ghost = true;
-            if (!pack_detached) do_pack_ghost = true;
-        }
 
         // update gameProgress based on which levels are solved, and current coords of the player
         if (findInSolvedLevels("pack-intro-i") == -1) game_progress = WORLD_0;
@@ -5149,7 +4746,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
             // entity info
             char player_text[256] = {0};
-            snprintf(player_text, sizeof(player_text), "player info: pos norm: %f, %f, %f, velocity: %f, %f, %f", player->position_norm.x, player->position_norm.y, player->position_norm.z, player->velocity.x, player->velocity.y, player->velocity.z);
+            snprintf(player_text, sizeof(player_text), "player info: pos norm: %f, %f, %f, velocity: %f, %f, %f", player->position.x, player->position.y, player->position.z, player->velocity.x, player->velocity.y, player->velocity.z);
             createDebugText(player_text);
 
             /*
@@ -5162,7 +4759,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             char mirror_info[256] = {0};
             Entity m1 = next_world_state.mirrors[0];
             Entity m2 = next_world_state.mirrors[1];
-            snprintf(mirror_info, sizeof(mirror_info), "mirror 1 pos norm: %.2f, %.2f, %.2f, mirror 2 pos norm: %.2f, %.2f, %.2f", m1.position_norm.x, m1.position_norm.y, m1.position_norm.z, m2.position_norm.x, m2.position_norm.y, m2.position_norm.z);
+            snprintf(mirror_info, sizeof(mirror_info), "mirror 1 pos norm: %.2f, %.2f, %.2f, mirror 2 pos norm: %.2f, %.2f, %.2f", m1.position.x, m1.position.y, m1.position.z, m2.position.x, m2.position.y, m2.position.z);
             createDebugText(mirror_info);
             */
 
@@ -5260,17 +4857,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         char unlocked_by_text[256] = {0};
                         snprintf(unlocked_by_text, sizeof(unlocked_by_text), "unlocked_by: %s", e->unlocked_by);
                         createDebugText(unlocked_by_text);
-
-                        if (getTileType(e->coords) == RESET_BLOCK)
-                        {
-                            FOR(reset_index, MAX_RESET_COUNT)
-                            {
-                                if (e->reset_info[reset_index].id == -1) continue;
-                                char reset_id_text[256] = {0};
-                                snprintf(reset_id_text, sizeof(reset_id_text), "id of nr. %d reset: %d", reset_index, e->reset_info[reset_index].id);
-                                createDebugText(reset_id_text);
-                            }
-                        }
                     }
                     else
                     {
@@ -5394,12 +4980,12 @@ void gameFrame(double delta_time, TickInput* tick_input)
         // write level to file on i press
         if (time_until_allow_meta_input == 0 && (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT) && tick_input->i_press) 
         {
-            saveLevelRewrite(level_path, true);
-            saveLevelRewrite(relative_level_path, true);
+            saveLevelRewrite(level_path);
+            saveLevelRewrite(relative_level_path);
             if (in_overworld)
             {
-                saveLevelRewrite(overworld_zero_path, true);
-                saveLevelRewrite(overworld_zero_relative_path, true);
+                saveLevelRewrite(overworld_zero_path);
+                saveLevelRewrite(overworld_zero_relative_path);
 
                 // overwrite overworld_zero's world state with the new saved one
                 memcpy(&overworld_zero, &world_state, sizeof(WorldState));
@@ -5453,7 +5039,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             float alpha = 1.0f;
             Vec4 color_with_alpha = { color_without_alpha.x, color_without_alpha.y, color_without_alpha.z, alpha };
 
-            drawAsset(CUBE_3D_LASER_GREEN, LASER, center, scale, rotation, color_with_alpha, false, lb.start_clip_plane, lb.end_clip_plane);
+            drawAsset(0, LASER, center, scale, rotation, color_with_alpha, false, lb.start_clip_plane, lb.end_clip_plane); // the model doesnt matter
         }
 
         // draw most things (not player or pack) TODO: after models can include pack here because can be DEFAULT_SCALE. after actual shaders for the color of the player can also include player here
@@ -5465,7 +5051,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             {
                 Entity* e = getEntityAtCoords(bufferIndexToCoords(tile_index));
                 bool do_aabb = false;
-                if (canBeUnderwater(draw_tile) && e->position_norm.y < 2.0f)
+                if (canBeUnderwater(draw_tile) && e->position.y < 2.0f)
                 {
                     do_aabb = true;
                 }
@@ -5479,11 +5065,11 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                 if (game_shader_mode == OLD)
                 {
-                    drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC4_0, do_aabb, VEC4_0, VEC4_0); 
+                    drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position, DEFAULT_SCALE, e->rotation, VEC4_0, do_aabb, VEC4_0, VEC4_0); 
                 }
                 else
                 {
-                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position_norm, DEFAULT_SCALE, e->rotation_quat, VEC4_0, do_aabb, VEC4_0, VEC4_0);
+                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, VEC4_0, do_aabb, VEC4_0, VEC4_0);
                 }
             }
             else
@@ -5499,29 +5085,19 @@ void gameFrame(double delta_time, TickInput* tick_input)
         if (!world_state.player.removed)
         {
             bool do_player_aabb = false;
-            if (player->position_norm.y < 2.0f) do_player_aabb = true;
+            if (player->position.y < 2.0f) do_player_aabb = true;
 
             // TODO: this is terrible (fix with shaders)
-            bool hit_by_green = false;
-            if (player->green_hit.north || player->green_hit.west || player->green_hit.south || player->green_hit.east || player->green_hit.up || player->green_hit.down) hit_by_green = true;
-            if      (player->hit_by_red && hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_WHITE,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
-            else if (player->hit_by_red && hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_YELLOW,  CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
-            else if (player->hit_by_red &&      	       player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
-            else if (             		   hit_by_green && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_CYAN,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
-            else if (player->hit_by_red                 	  				  ) drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
-            else if (             		   hit_by_green             		  ) drawAsset(CUBE_3D_PLAYER_GREEN,   CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
-            else if (                            		   player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
-            else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position_norm, PLAYER_SCALE, player->rotation_quat, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
-
-            // technically should maybe generate ghost AABBs here, if i ever want ghost to render under water
-            if (do_player_ghost) drawAsset(CUBE_3D_PLAYER_GHOST, CUBE_3D, intCoordsToNorm(player_ghost_coords), PLAYER_SCALE, directionToQuaternion(player_ghost_direction), VEC4_0, false, VEC4_0, VEC4_0);
-            if (do_pack_ghost)   drawAsset(CUBE_3D_PACK_GHOST,   CUBE_3D, intCoordsToNorm(pack_ghost_coords),   PLAYER_SCALE, directionToQuaternion(pack_ghost_direction),   VEC4_0, false, VEC4_0, VEC4_0);
+            else if (player->hit_by_red && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
+            else if (player->hit_by_red)  						drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
+            else if (player->hit_by_blue) 						drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
+            else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
         }
         if (!world_state.pack.removed) 
         {
             bool do_pack_aabb = false;
-            if (player->position_norm.y < 2.0f) do_pack_aabb = true;
-            drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position_norm, PLAYER_SCALE, world_state.pack.rotation_quat, VEC4_0, do_pack_aabb, VEC4_0, VEC4_0);
+            if (player->position.y < 2.0f) do_pack_aabb = true;
+            drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position, PLAYER_SCALE, world_state.pack.rotation, VEC4_0, do_pack_aabb, VEC4_0, VEC4_0);
         }
 
         // draw camera boundary lines
@@ -5609,8 +5185,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         {
             // crosshair
             Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
-            Vec3 center_screen = { ((float)game_display.client_width / 2), ((float)game_display.client_height / 2), 0.0f }; // weird numbers are just adjustment because raycast starts slightly offset 
-                                                                                                        		 // i think this is due to windowed mode, but could be issue with raycast.
+            Vec3 center_screen = { ((float)game_display.client_width / 2), ((float)game_display.client_height / 2), 0.0f };
         	drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, color_with_alpha, false, VEC4_0, VEC4_0);
 
             // picked block
@@ -5624,21 +5199,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 if (game_shader_mode != OLD) selected_id = getModelId(getTileTypeFromId(editor_state.selected_id));
                 Entity* selected_e = 0;
                 if (editor_state.selected_id > 0) selected_e = getEntityFromId(editor_state.selected_id);
-                if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position_norm, DEFAULT_SCALE, selected_e->rotation_quat, VEC4_0, false, VEC4_0, VEC4_0);
-
-                if ((editor_state.selected_id / ID_OFFSET_RESET_BLOCK) * ID_OFFSET_RESET_BLOCK == ID_OFFSET_RESET_BLOCK)
-                {
-                    Entity* rb = getEntityFromId(editor_state.selected_id);
-                    FOR(to_reset_index, MAX_RESET_COUNT)
-                	{
-                        ResetInfo ri = rb->reset_info[to_reset_index];
-                        if (ri.id == -1) continue;
-                        Entity* to_reset_e = getEntityFromId(ri.id);
-                        SpriteId to_reset_id = getCube3DId(MIRROR);
-                        if (game_shader_mode != OLD) to_reset_id = getModelId(getTileTypeFromId(to_reset_e->id));
-                        drawAsset(to_reset_id, OUTLINE_3D, to_reset_e->position_norm, DEFAULT_SCALE, to_reset_e->rotation_quat, VEC4_0, false, VEC4_0, VEC4_0);
-                    }
-                }
+                if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position, DEFAULT_SCALE, selected_e->rotation, VEC4_0, false, VEC4_0, VEC4_0);
             }
         }
 
