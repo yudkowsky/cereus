@@ -48,10 +48,6 @@ typedef enum
     LOCKED_BLOCK,
     LADDER,
     WON_BLOCK,
-
-    LASER_RED,
-    LASER_BLUE,
-    LASER_MAGENTA,
 }
 TileType;
 
@@ -258,13 +254,6 @@ DebugPopup;
 
 // LASER STRUCTS
 
-typedef struct
-{
-    bool red;
-    bool blue;
-}
-LaserColor;
-
 // assumes 0 width
 typedef struct
 {
@@ -346,19 +335,8 @@ const float PLAYER_MAX_SPEED = 0.12f;
 const float PLAYER_ACCELERATION = 0.04f;
 const float PLAYER_MAX_DECELERATION = 0.04f; // should be approx the same; offset comes from always clamping before max deceleration rather than it being an average.
     	                                     // if this is the same number, deceleration will be slower than acceleration
-// TODO(anims): i think all of these won't be needed anymore?
 const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
 const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
-const int32 MOVE_OR_PUSH_ANIMATION_TIME = 9;
-const int32 TURN_ANIMATION_TIME = 9; // somewhat hard coded, tied to PUSH_FROM_TURN...
-const int32 FALL_ANIMATION_TIME = 8; 
-const int32 FIRST_FALL_ANIMATION_TIME = 12;
-const int32 CLIMB_ANIMATION_TIME = 9;
-const int32 PUSH_FROM_TURN_ANIMATION_TIME = 6;
-const int32 FAILED_ANIMATION_TIME = 8;
-const int32 STANDARD_IN_MOTION_TIME = 7;
-const int32 SUCCESSFUL_TP_TIME = 8;
-const int32 FAILED_TP_TIME = 8;
 
 const int32 TRAILING_HITBOX_TIME = 5;
 const int32 FIRST_TRAILING_PACK_TURN_HITBOX_TIME = 2;
@@ -368,7 +346,6 @@ const int32 TIME_AFTER_UNDO_UNTIL_PHYSICS_START = 4;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 64;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
-const int32 MAX_ANIMATION_COUNT = 32;
 const int32 MAX_SOURCE_COUNT = 32;
 const int32 MAX_LASER_TRAVEL_DISTANCE = 256;
 const int32 MAX_LASER_TURNS_ALLOWED = 16;
@@ -527,11 +504,6 @@ Int3 roundNormCoordsToInt(Vec3 position)
 bool intCoordsWithinLevelBounds(Int3 coords) 
 {
     return (coords.x >= 0 && coords.y >= 0 && coords.z >= 0 && coords.x < level_dim.x && coords.y < level_dim.y && coords.z < level_dim.z); 
-}
-
-bool normCoordsWithinLevelBounds(Vec3 coords) 
-{
-    return (coords.x > 0 && coords.y > 0 && coords.z >= 0 && coords.x < level_dim.x && coords.y < level_dim.y && coords.z < level_dim.z); 
 }
 
 bool int3IsEqual(Int3 a, Int3 b) 
@@ -725,7 +697,7 @@ int32 coordsToBufferIndexType(Int3 coords)
 }
 int32 coordsToBufferIndexDirection(Int3 coords)
 {
-    return 2*(level_dim.x*level_dim.z*coords.y + level_dim.x*coords.z + coords.x) + 1; 
+    return coordsToBufferIndexType(coords) + 1;
 }
 
 Int3 bufferIndexToCoords(int32 buffer_index)
@@ -777,20 +749,17 @@ bool isSource(TileType type)
 // only checks tile types - doesn't do what canPush does
 bool isPushable(TileType type)
 {
-    if (type == BOX || type == MIRROR || type == PACK || isSource(type)) return true;
-    else return false;
+    return (type == BOX || type == MIRROR || type == PACK || isSource(type));
 }
 
 bool isEntity(TileType type)
 {
-    if (type == BOX || type == MIRROR || type == PACK || type == PLAYER || type == WIN_BLOCK || type == LOCKED_BLOCK || isSource(type)) return true;
-    else return false;
+    return (type == BOX || type == MIRROR || type == PACK || type == PLAYER || type == WIN_BLOCK || type == LOCKED_BLOCK || isSource(type));
 }
 
 bool canBeUnderwater(TileType type)
 {
-    if (type == PLAYER || type == PACK || type == BOX || type == MIRROR || isSource(type)) return true;
-    else return false;
+    return (type == PLAYER || type == PACK || type == BOX || type == MIRROR || isSource(type));
 }
 
 TileType getTileTypeFromId(int32 id)
@@ -868,10 +837,7 @@ Entity* getEntityFromId(int32 id)
         else if (switch_value == ID_OFFSET_WIN_BLOCK) 	 entity_group = next_world_state.win_blocks;
         else if (switch_value == ID_OFFSET_LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
 
-        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
-        {
-            if (entity_group[entity_index].id == id) return &entity_group[entity_index];
-        }
+        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) if (entity_group[entity_index].id == id) return &entity_group[entity_index];
         return 0;
     }
 }
@@ -1001,13 +967,6 @@ void buildLevelPathFromName(char level_name[64], char (*level_path)[64], bool ov
     if (overwrite_source) memcpy(prefix, source_start_level_path_buffer, sizeof(prefix));
     else			      memcpy(prefix, relative_start_level_path_buffer, sizeof(prefix));
     snprintf(*level_path, sizeof(*level_path), "%s%s.level", prefix, level_name);
-}
-
-bool readChunkHeader(FILE* file, char out_tag[4], int32 *out_size)
-{
-    if (fread(out_tag, 4, 1, file) != 1) return false; // EOF
-    if (fread(out_size, 4, 1, file) != 1) return false; // truncated
-    return true;
 }
 
 // gets position and count of some chunk tag. cursor placed right before chunk tag
@@ -1355,11 +1314,6 @@ void clearSolvedLevels()
 
 // DRAW ASSET
 
-AssetType assetAtlas(SpriteId id)
-{
-    return (id < (ASSET_COUNT - SPRITE_2D_FONT_LAST)) ? SPRITE_2D : CUBE_3D;
-}
-
 SpriteId getSprite2DId(TileType tile)
 {
     switch (tile)
@@ -1685,19 +1639,15 @@ int32 getPushableStackSize(Int3 first_entity_coords)
 
 // TRAILING HITBOXES
 
-int32 findNextFreeInTrailingHitboxes()
+void createTrailingHitbox(int32 id, Int3 coords, int32 frames, TileType type)
 {
+    int32 hitbox_index = -1;
     FOR(find_hitbox_index, MAX_TRAILING_HITBOX_COUNT)
     {
         if (trailing_hitboxes[find_hitbox_index].frames != 0) continue;
-        return find_hitbox_index;
+        hitbox_index = find_hitbox_index;
     }
-    return 0;
-}
-
-void createTrailingHitbox(int32 id, Int3 coords, int32 frames, TileType type)
-{
-    int32 hitbox_index = findNextFreeInTrailingHitboxes();
+    if (hitbox_index == -1) return;
     trailing_hitboxes[hitbox_index].id = id;
     trailing_hitboxes[hitbox_index].coords = coords;
     trailing_hitboxes[hitbox_index].frames = frames;
@@ -1916,29 +1866,6 @@ Direction getNextLaserDirectionMirror(Direction laser_direction, Direction mirro
     }
 }
 
-// TODO: these two functions are only used once. inline them?
-LaserColor colorToLaserColor(Color color)
-{
-    switch (color)
-    {
-        case RED:     return (LaserColor){ .red = true,  .blue = false };
-        case BLUE:    return (LaserColor){ .red = false, .blue = true  };
-        case MAGENTA: return (LaserColor){ .red = true,  .blue = true  };
-        default: return (LaserColor){0};
-    }
-}
-
-Vec3 colorToRGB(Color color)
-{
-    switch (color)
-    {
-        case RED:     return (Vec3){ 1.0f, 0.0f, 0.0f };
-        case BLUE:    return (Vec3){ 0.0f, 0.0f, 1.0f };
-        case MAGENTA: return (Vec3){ 1.0f, 0.0f, 1.0f };
-        default: return VEC3_0;
-    }
-}
-
 float getComponentAlongDirection(Direction direction, Vec3 vector)
 {
     switch (direction)
@@ -2128,9 +2055,26 @@ void updateLaserBuffer()
                         current_norm_coords = player->position;
 
                         // set player color based on laser
-                        LaserColor laser_color = colorToLaserColor(lb->color);
-                        if (laser_color.red)  player->hit_by_red = true;
-                        if (laser_color.blue) player->hit_by_blue  = true;
+                        switch (lb->color)
+                        {
+                            case RED:     
+                            {
+                                player->hit_by_red = true; 
+                                break;
+                            }
+                            case BLUE:    
+                            {
+                            	player->hit_by_blue = true; 
+                                break;
+                            }
+                            case MAGENTA: 
+                            {
+                                player->hit_by_red = true;
+                                player->hit_by_blue = true;
+                                break;
+                            }
+                            default: break;
+                        }
                         advance_tile = false;
                         break;
                     }
@@ -2396,13 +2340,6 @@ void updateTextInput(TickInput *input)
     {
         editBackspace();
     }
-}
-
-int32 glyphSprite(char character)
-{
-    unsigned char uc = (unsigned char)character;
-    if (uc < FONT_FIRST_ASCII || uc > FONT_LAST_ASCII) uc = '?';
-    return (SpriteId)(uc - FONT_FIRST_ASCII);
 }
 
 void initUndoBuffer()
@@ -4235,6 +4172,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
             }
         }
 
+        // update pack detached after falling TODO: it's not clear this is the best place for this - does any other action maybe detach pack? maybe climbing?
+        updatePackDetached();
+
         // climb logic
         // TODO(anims): need something like a player.climbing flag for this gate instead. for now: disabling climbing
         /*
@@ -4318,11 +4258,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
             }
         }
 		*/
-
-        // pack attachment logic
-        TileType tile_behind_player = getTileType(getNextCoords(player->coords, oppositeDirection(player->direction)));
-        if (pack_attached && pack_turn_state.pack_intermediate_states_timer == 0 && tile_behind_player != PACK) pack_attached= false;
-        else if (!pack_attached && tile_behind_player == PACK) pack_attached = true;
 
         // do animations and handle state regarding movement
         {
@@ -4823,7 +4758,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         FOR(laser_buffer_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED)
         {
             LaserBuffer lb = laser_buffer[laser_buffer_index];
-            if (lb.color == NO_COLOR) continue;
+            if (lb.color == NO_COLOR) continue; // laser buffer is not dense - this is check that there is actually something here
 
             Vec3 diff = vec3Subtract(lb.end_coords, lb.start_coords);
             Vec3 center = vec3Add(lb.start_coords, vec3ScalarMultiply(diff, 0.5));
@@ -4834,7 +4769,14 @@ void gameFrame(double delta_time, TickInput* tick_input)
 			if (lb.direction == UP || lb.direction == DOWN) rotation = directionToQuaternion(lb.direction);
 			else rotation = directionToQuaternion(lb.direction);
 
-            Vec3 color_without_alpha = colorToRGB(lb.color);
+            Vec3 color_without_alpha = {0};
+            switch (lb.color)
+            {
+                case RED:     color_without_alpha = (Vec3){ 1.0f, 0.0f, 0.0f }; break;
+                case BLUE:    color_without_alpha = (Vec3){ 0.0f, 0.0f, 1.0f }; break;
+                case MAGENTA: color_without_alpha = (Vec3){ 1.0f, 0.0f, 1.0f }; break;
+                default: break;
+            }
             float alpha = 1.0f;
             Vec4 color_with_alpha = { color_without_alpha.x, color_without_alpha.y, color_without_alpha.z, alpha };
 
