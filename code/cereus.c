@@ -64,17 +64,6 @@ typedef enum
 }
 Color;
 
-// used for the reset blocks, which aren't currently active in the game
-typedef struct
-{
-    int32 id;
-    Int3 start_coords;
-    TileType start_type;
-    Direction start_direction;
-    Int3 current_coords;
-}
-ResetInfo;
-
 // coords are integer coordinates of the entity, position is the floating point coords in world space.
 // likewise direction is one of 6 orientations, rotation is the actual rotation passed to renderer.
 typedef struct
@@ -104,9 +93,6 @@ typedef struct
     // for locked blocks (and other entities that are locked)
     bool locked;
     char unlocked_by[64]; 
-
-    // for reset blocks;
-    ResetInfo reset_info[16];
 }
 Entity;
 
@@ -159,15 +145,6 @@ typedef enum
     FAILED_PUSH = 2
 }
 PushResult;
-
-typedef struct
-{
-    Int3 previous_coords;
-    Int3 new_coords;
-    TileType type;
-    Entity* entity;
-}
-Push;
 
 // this is a bunch of state to do with handling what gets pushed when during the turn. pack_intermediate_states_timer is the main thing: it just ticks down while the player is turning.
 // later there is a loop with some numbers that look nice for when things should be turning, based on this timer. the objects don't get pushed the same frame the player turns,
@@ -488,7 +465,6 @@ int32 undos_performed = 0;
 int32 undo_press_timer = 0;
 bool restart_last_turn = false;
 
-int32 time_until_allow_game_input = 0; // setting this to -1 means no more movement will be allowed at all
 int32 time_until_allow_meta_input = 0;
 int32 time_until_allow_undo_or_restart_input = 0;
 
@@ -498,9 +474,10 @@ TrailingHitbox trailing_hitboxes[32];
 
 GameProgress game_progress = WORLD_0;
 bool in_overworld = false;
-bool pack_detached = false;
-
+bool pack_attached = true;
+bool allow_movement = true;
 bool cheating = false;
+
 ShaderMode game_shader_mode = OLD;
 bool draw_trailing_hitboxes = false;
 
@@ -529,91 +506,6 @@ Vec2 debug_popup_start_coords = {0};
 DebugPopup debug_popups[32];
 const float DEBUG_POPUP_STEP_SIZE = 30.0f;
 const int32 DEFAULT_POPUP_TIME = 100;
-
-// CAMERA HELPERS
-
-void cameraBasisFromYaw(float yaw, Vec3* right, Vec3* forward)
-{
-    float sine_yaw = sinf(yaw), cosine_yaw = cosf(yaw);
-    *right   = (Vec3){ cosine_yaw, 0,   -sine_yaw };
-    *forward = (Vec3){ -sine_yaw,  0, -cosine_yaw };
-}
-
-Vec4 quaternionFromAxisAngle(Vec3 axis, float angle)
-{
-    float sine = sinf(angle*0.5f), cosine = cosf(angle*0.5f);
-    return (Vec4){ axis.x*sine, axis.y*sine, axis.z*sine, cosine};
-}
-
-bool quaternionIsZero(Vec4 quaternion)
-{
-    return (quaternion.x == 0 && quaternion.y == 0 && quaternion.z == 0 && quaternion.w == 0);
-}
-
-Vec4 quaternionScalarMultiply(Vec4 quaternion, float scalar)
-{
-    return (Vec4){ quaternion.x*scalar, quaternion.y*scalar, quaternion.z*scalar, quaternion.w*scalar };
-}
-
-Vec4 quaternionAdd(Vec4 a, Vec4 b)
-{
-    return (Vec4){ a.x+b.x, a.y+b.y, a.z+b.z, a.w+b.w };
-}
-
-Vec4 quaternionSubtract(Vec4 a, Vec4 b)
-{
-    return (Vec4){ a.x-b.x, a.y-b.y, a.z-b.z, a.w-b.w };
-}
-
-float quaternionDot(Vec4 a, Vec4 b)
-{
-    return a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w;
-}
-
-Vec4 quaternionConjugate(Vec4 quaternion)
-{
-    return (Vec4){ -quaternion.x, -quaternion.y, -quaternion.z, quaternion.w };
-}
-
-Vec4 quaternionNegate(Vec4 quaternion)
-{
-    return (Vec4){ -quaternion.x, -quaternion.y, -quaternion.z, -quaternion.w };
-}
-
-Vec4 quaternionMultiply(Vec4 a, Vec4 b)
-{
-    return (Vec4){ a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
-        		   a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
-        		   a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
-        		   a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z};
-}
-
-Vec4 quaternionNormalize(Vec4 quaternion)
-{
-    float length_squared = quaternion.x*quaternion.x + quaternion.y*quaternion.y + quaternion.z*quaternion.z + quaternion.w*quaternion.w;
-    if (length_squared <= 1e-8f) return (Vec4){0, 0, 0, 1}; 
-    float inverse_length = 1.0f / sqrtf(length_squared);
-    return quaternionScalarMultiply(quaternion, inverse_length);
-}
-
-Vec3 vec3OuterProduct(Vec3 a, Vec3 b)
-{
-    return (Vec3){ a.y*b.z - a.z*b.y, a.z*b.x - a.x*b.z, a.x*b.y - a.y*b.x };
-}
-
-Vec3 vec3RotateByQuaternion(Vec3 input_vector, Vec4 quaternion)
-{
-    Vec3 quaternion_vector_part = (Vec3){ quaternion.x, quaternion.y, quaternion.z };
-    float quaternion_scalar_part = quaternion.w;
-    Vec3 q_cross_v = vec3OuterProduct(quaternion_vector_part, input_vector);
-    Vec3 temp_vector = (Vec3){ q_cross_v.x + quaternion_scalar_part * input_vector.x,
-    q_cross_v.y + quaternion_scalar_part * input_vector.y,
-    q_cross_v.z + quaternion_scalar_part * input_vector.z};
-    Vec3 q_cross_t = vec3OuterProduct(quaternion_vector_part, temp_vector);
-    return (Vec3){ input_vector.x + 2.0f * q_cross_t.x,
-    input_vector.y + 2.0f * q_cross_t.y,
-    input_vector.z + 2.0f * q_cross_t.z};
-}
 
 // MATH HELPER FUNCTIONS
 
@@ -699,11 +591,6 @@ Vec3 vec3Subtract(Vec3 a, Vec3 b)
     return (Vec3){ a.x-b.x, a.y-b.y, a.z-b.z }; 
 }
 
-Vec3 vec3Abs(Vec3 a) 
-{
-    return (Vec3){ floatAbs(a.x), floatAbs(a.y), floatAbs(a.z) }; 
-}
-
 Int3 int3ScalarMultiply(Int3 position, int32 scalar) 
 {
     return (Int3){ position.x*scalar, position.y*scalar, position.z*scalar }; 
@@ -714,9 +601,19 @@ Vec3 vec3ScalarMultiply(Vec3 position, float scalar)
     return (Vec3){ position.x*scalar, position.y*scalar, position.z*scalar }; 
 }
 
+Vec3 vec3Abs(Vec3 a) 
+{
+    return (Vec3){ floatAbs(a.x), floatAbs(a.y), floatAbs(a.z) }; 
+}
+
 float vec3Inner(Vec3 a, Vec3 b)
 {
 	return a.x*b.x + a.y*b.y + a.z*b.z;
+}
+
+Vec3 vec3OuterProduct(Vec3 a, Vec3 b)
+{
+    return (Vec3){ a.y*b.z - a.z*b.y, a.z*b.x - a.x*b.z, a.x*b.y - a.y*b.x };
 }
 
 float vec3Length(Vec3 v)
@@ -732,14 +629,55 @@ Vec3 vec3Normalize(Vec3 v)
     return vec3ScalarMultiply(v, inverse_length);
 }
 
-Vec3 vec3Hadamard(Vec3 a, Vec3 b)
+// CAMERA HELPERS
+
+// TODO: redo quaternion code before animation handling
+void cameraBasisFromYaw(float yaw, Vec3* right, Vec3* forward)
 {
-    return (Vec3){ a.x*b.x, a.y*b.y, a.z*b.z };
+    float sine_yaw = sinf(yaw), cosine_yaw = cosf(yaw);
+    *right   = (Vec3){ cosine_yaw, 0,   -sine_yaw };
+    *forward = (Vec3){ -sine_yaw,  0, -cosine_yaw };
 }
 
-int32 triangleNumber(int32 n)
+Vec4 quaternionFromAxisAngle(Vec3 axis, float angle)
 {
-    return n * (n + 1) / 2;
+    float sine = sinf(angle*0.5f), cosine = cosf(angle*0.5f);
+    return (Vec4){ axis.x*sine, axis.y*sine, axis.z*sine, cosine};
+}
+
+Vec4 quaternionScalarMultiply(Vec4 quaternion, float scalar)
+{
+    return (Vec4){ quaternion.x*scalar, quaternion.y*scalar, quaternion.z*scalar, quaternion.w*scalar };
+}
+
+Vec4 quaternionMultiply(Vec4 a, Vec4 b)
+{
+    return (Vec4){ a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
+        		   a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
+        		   a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
+        		   a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z};
+}
+
+Vec4 quaternionNormalize(Vec4 quaternion)
+{
+    float length_squared = quaternion.x*quaternion.x + quaternion.y*quaternion.y + quaternion.z*quaternion.z + quaternion.w*quaternion.w;
+    if (length_squared <= 1e-8f) return (Vec4){0, 0, 0, 1}; 
+    float inverse_length = 1.0f / sqrtf(length_squared);
+    return quaternionScalarMultiply(quaternion, inverse_length);
+}
+
+Vec3 vec3RotateByQuaternion(Vec3 input_vector, Vec4 quaternion)
+{
+    Vec3 quaternion_vector_part = (Vec3){ quaternion.x, quaternion.y, quaternion.z };
+    float quaternion_scalar_part = quaternion.w;
+    Vec3 q_cross_v = vec3OuterProduct(quaternion_vector_part, input_vector);
+    Vec3 temp_vector = (Vec3){ q_cross_v.x + quaternion_scalar_part * input_vector.x,
+    q_cross_v.y + quaternion_scalar_part * input_vector.y,
+    q_cross_v.z + quaternion_scalar_part * input_vector.z};
+    Vec3 q_cross_t = vec3OuterProduct(quaternion_vector_part, temp_vector);
+    return (Vec3){ input_vector.x + 2.0f * q_cross_t.x,
+    input_vector.y + 2.0f * q_cross_t.y,
+    input_vector.z + 2.0f * q_cross_t.z};
 }
 
 // BUFFER / STATE INTERFACING
@@ -877,12 +815,6 @@ Entity* getEntityAtCoords(Int3 coords)
     return 0;
 }
 
-int32 getEntityId(Int3 coords)
-{
-    Entity *entity = getEntityAtCoords(coords);
-    return entity->id;
-}
-
 Entity* getEntityFromId(int32 id)
 {
     if (id < 0) return 0;
@@ -907,12 +839,6 @@ Entity* getEntityFromId(int32 id)
     }
 }
 
-Direction getEntityDirection(Int3 coords) 
-{
-    Entity *entity = getEntityAtCoords(coords);
-    return entity->direction;
-}
-
 Direction oppositeDirection(Direction direction)
 {
     switch (direction)
@@ -923,25 +849,8 @@ Direction oppositeDirection(Direction direction)
         case EAST:  return WEST;
         case UP:    return DOWN;
         case DOWN:  return UP;
-
         default: return NO_DIRECTION;
     }
-}
-
-Direction getNextRotationalDirection(Direction direction, bool clockwise)
-{
-    Direction next_direction = NO_DIRECTION;
-    if (!clockwise)
-    {
-        next_direction = direction - 1;
-        if (next_direction == -1) next_direction = EAST;
-    }
-    else
-    {
-        next_direction = direction + 1;
-        if (next_direction == 4) next_direction = NORTH;
-    }
-    return next_direction;
 }
 
 // gets count of currently active (not id == -1 or removed)
@@ -1341,9 +1250,6 @@ void writeLockedInfoToFile(FILE* file, Entity* e)
     memcpy(unlocked_by, e->unlocked_by, 63);
     fwrite(unlocked_by, 1, 64, file);
 }
-
-// reset blocks currently aren't used in the game. they were a block that could reset individual blocks to their start positions when interacted with. 
-// this was used in the overworld, but there's now a very different structure to the overworld which means that this is hardly necessary as a mechanic
 
 // doesn't change the camera
 bool saveLevelRewrite(char* path)
@@ -1915,64 +1821,28 @@ PushResult canPushUp(Int3 coords)
     else return FAILED_PUSH;
 }
 
-// TODO(anims): probably no longer need these two separate functions, for with / without animations, because will be handled relative to the player.
-// 				still somewhat unclear if there's a reason trailing hitboxes aren't in the without-anim case - probably this doesn't matter, because they're handled in a smarter way now
-Push pushOnceWithoutAnimation(Int3 coords, Direction direction, int32 time)
-{
-    Push entity_to_push = {0};
-
-    Entity* entity = getEntityAtCoords(coords);
-    entity_to_push.type = getTileType(coords);
-    entity_to_push.previous_coords = coords;
-    entity_to_push.entity = entity; 
-    entity_to_push.new_coords = getNextCoords(coords, direction);
-
-    setTileType(NONE, entity_to_push.previous_coords);
-    setTileDirection(NORTH, entity_to_push.previous_coords);
-
-    setTileType(entity_to_push.type, entity_to_push.new_coords);
-    setTileDirection(entity->direction, entity_to_push.new_coords);
-    entity->coords = entity_to_push.new_coords;
-
-    return entity_to_push;
-}
-
-void pushOnce(Int3 coords, Direction direction, int32 animation_time)
-{
-    Push entity_to_push = pushOnceWithoutAnimation(coords, direction, animation_time);
-
-    int32 id = getEntityId(entity_to_push.new_coords);
-    TileType trailing_hitbox_type = getTileType(entity_to_push.new_coords);
-	// TODO(anims): create interpolation animation from entity_to_push previous coords to entity_to_push new coords, with animation time
-    // 				actually, probably don't want to do any animation work here. instead, add this id to some list of entities tied to the player, and update them relative to the player position
-    // 				(with tilting / other animation relative to their speed, or something)
-    int32 trailing_hitbox_time = (animation_time / 2) + 1;
-    createTrailingHitbox(id, coords, trailing_hitbox_time, trailing_hitbox_type);
-}
-
-// assumes at least the lowest layer of the stack is able to be pushed. checks if next is NONE, if so stops. 
-void pushAll(Int3 coords, Direction direction, int32 animation_time, bool animations_on, bool limit_stack_size_to_one)
+// assumes able to be pushed 
+void pushAll(Int3 coords, Direction direction)
 {
     Int3 current_coords = coords;
-    int32 push_size = 0;
+    int32 push_count = 0;
     FOR(push_index, MAX_ENTITY_PUSH_COUNT)
     {
         if (getTileType(current_coords) == NONE) break;
         current_coords = getNextCoords(current_coords, direction);
-        push_size++;
+        push_count++;
     }
     current_coords = getNextCoords(current_coords, oppositeDirection(direction));
-    for (int32 inverse_push_index = push_size; inverse_push_index != 0; inverse_push_index--)
+    for (int32 inverse_push_index = push_count; inverse_push_index != 0; inverse_push_index--)
     {
         int32 stack_size = getPushableStackSize(current_coords);
         Int3 current_stack_coords = current_coords;
         FOR(stack_index, stack_size)
         {
-            if (getTileType(getNextCoords(current_stack_coords, direction)) != NONE) break;
-            if (animations_on) pushOnce(current_stack_coords, direction, animation_time);
-            else pushOnceWithoutAnimation(current_stack_coords, direction, animation_time);
+            Entity* e = getEntityAtCoords(current_stack_coords);
+            moveEntityInBufferAndState(e, coords, direction);
+            // TODO: create trailing hitbox
             current_stack_coords = getNextCoords(current_stack_coords, UP);
-            if (limit_stack_size_to_one && stack_index == 0) break;
         }
         current_coords = getNextCoords(current_coords, oppositeDirection(direction));
     }
@@ -2506,7 +2376,7 @@ void setFalling(Entity* entity)
 
         // if the enitity is pack, and pack in attached (and this isn't the entity on which the function was called), cut the stack size short here, so the pack doesn't get dragged down
         // similarly, if player is red, above a stack which is falling, break to allow the stack below to fall, but keep the player floating.
-        if (e_in_stack->id == PACK_ID && !pack_detached && stack_fall_index != 0) break;
+        if (e_in_stack->id == PACK_ID && pack_attached && stack_fall_index != 0) break;
         if (e_in_stack->id == PLAYER_ID && player->hit_by_red) break;
 
         e_in_stack->falling = true;
@@ -3249,7 +3119,7 @@ void doHeadRotation(bool clockwise)
             default: break;
         }
 
-        int32 id = getEntityId(current_tile_coords);
+        int32 id = getEntityAtCoords(current_tile_coords)->id;
 
         // for mirror
         if (!up_or_down) {} // TODO(anims): special case for mirrors, since getting the rotation animation was different. queue the same type of animation here
@@ -3268,28 +3138,28 @@ void doHeadRotation(bool clockwise)
     }
 }
 
-// TODO(anims): doesn't need animations on / animation time
-void doHeadMovement(Direction direction, bool animations_on, int32 animation_time)
-{
-    Int3 coords_above_player = getNextCoords(next_world_state.player.coords, UP);
-    if (!isPushable(getTileType(coords_above_player))) return;
-    if (canPushStack(coords_above_player, direction) == CAN_PUSH) pushAll(coords_above_player, direction, animation_time, animations_on, false);
-}
-
-void doStandardMovement(Direction input_direction, Int3 next_player_coords, int32 animation_time, bool record_for_undo)
+void doStandardMovement(Direction direction, Int3 next_player_coords, bool record_for_undo)
 {
     Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
 
-    if (!player->hit_by_blue) doHeadMovement(input_direction, true, animation_time);
+    // maybe move stack above the player's head
+    Int3 coords_above_player = getNextCoords(player->coords, UP);
+    bool do_on_head_movement = false;
+    if (isPushable(getTileType(coords_above_player))) do_on_head_movement = true;
+    if (player->hit_by_blue) do_on_head_movement = false;
+    if (do_on_head_movement) 
+    {
+        if(canPushStack(coords_above_player, direction)) pushAll(coords_above_player, direction);
+    }
 
     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
     moveEntityInBufferAndState(player, next_player_coords, player->direction);
 
     // move pack also if pack is attached
-    if (!pack_detached)
+    if (pack_attached)
     {
-        Int3 next_pack_coords = getNextCoords(pack->coords, input_direction);
+        Int3 next_pack_coords = getNextCoords(pack->coords, direction);
         createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
         moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
     }
@@ -3304,11 +3174,11 @@ void updatePackDetached()
     TileType tile_behind_player = getTileType(getNextCoords(next_world_state.player.coords, oppositeDirection(next_world_state.player.direction)));
     if (tile_behind_player == PACK) 
     {
-        pack_detached = false;
+        pack_attached = true;
         setTileDirection(player->direction, pack->coords);
         pack->direction = player->direction;
     }
-    else pack_detached = true;
+    else pack_attached = false;
 }
 
 // expects positive value for deceleration
@@ -3605,7 +3475,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                 if (isEntity(getTileType(raycast_output.hit_coords)))
                 {
-                    editor_state.selected_id = getEntityId(raycast_output.hit_coords);
+                    editor_state.selected_id = getEntityAtCoords(raycast_output.hit_coords)->id;
                     editor_state.selected_coords = raycast_output.hit_coords;
                 }
                 else
@@ -3838,9 +3708,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
                 silence_unlocks_due_to_restart_or_undo = true;
                 time_until_allow_undo_or_restart_input = undo_animation_time;
-                time_until_allow_game_input = undo_animation_time;
-
             	undo_press_timer = undo_animation_time + TIME_AFTER_UNDO_UNTIL_PHYSICS_START;
+                allow_movement = true;
             }
             if (time_until_allow_undo_or_restart_input == 0 && tick_input->r_press)
             {
@@ -3884,7 +3753,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 restart_last_turn = true;
                 silence_unlocks_due_to_restart_or_undo = true;
                 time_until_allow_undo_or_restart_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                time_until_allow_game_input = 0; // overwrites -1 if restart from position where input was disallowed
+                allow_movement = true;
             }
 			if (time_until_allow_meta_input == 0 && tick_input->escape_press && !in_overworld)
             {
@@ -3896,10 +3765,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 gameInitializeState("overworld");
                 memcpy(next_world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
                 writeSolvedLevelsToFile();
+                allow_movement = true;
             }
 
-
-            if (tick_input->w_press || tick_input->a_press || tick_input->s_press || tick_input->d_press)
+            if (allow_movement && (tick_input->w_press || tick_input->a_press || tick_input->s_press || tick_input->d_press))
             {
 				// MOVEMENT 
                 Direction input_direction = 0;
@@ -3913,28 +3782,26 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 {
                     next_player_coords = getNextCoords(player->coords, input_direction);
 
-                    // TODO: think about what want to do about pressing a button many times to go faster. maybe the max velocity could change, or something?
-                    bool allow_movement = false;
+                    bool allow_input = false;
 
                     // allow movement if, given acceleration this frame along input direction, we would overshoot.
-                    // i.e. 
                     float sign = input_direction == NORTH || input_direction == WEST ? -1.0f : 1.0f;
                     float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(input_direction, sign);
                     float position_along_direction = getComponentAlongDirection(input_direction, player->position);
                     float coords_along_direction = getComponentAlongDirection(input_direction, intCoordsToNorm(player->coords));
 
                     bool would_overshoot = wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign);
-                    if (would_overshoot) allow_movement = true;
+                    if (would_overshoot) allow_input = true;
 
                     // don't allow movement if have any angular velocity TODO: gate this less aggressively - would probably want to allow if rotation is within some range of targeted velocity
-                    if (!vec3IsZero(player->angular_velocity)) allow_movement = false;
+                    if (!vec3IsZero(player->angular_velocity)) allow_input = false;
 
                     // disallow movement if also moving in some other direction currently (not likely to happen; would need to turn first)
-                    if (!vec3IsZero(vec3ZeroComponentAlongDirection(input_direction, player->velocity))) allow_movement = false;
+                    if (!vec3IsZero(vec3ZeroComponentAlongDirection(input_direction, player->velocity))) allow_input = false;
 
-                    if (allow_movement)
+                    if (allow_input)
                     {
-                        bool move_player = false;
+                        bool try_walk = false;
                         bool do_push = false;
                         bool climb = false;
 
@@ -3945,9 +3812,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             {
                                 // only don't allow movement if there's a trailing hitbox there. TODO: this is probably too aggressive of a check. see how it feels (maybe gate by frames left?)
                                 TrailingHitbox th = {0};
-                                if (trailingHitboxAtCoords(next_player_coords, &th)) move_player = false;
-                                else move_player = true;
-
+                                if (trailingHitboxAtCoords(next_player_coords, &th)) try_walk = false;
+                                else try_walk = true;
                                 break;
                             }
                             case BOX:
@@ -3959,17 +3825,19 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             case SOURCE_MAGENTA:
                             {
                                 // figure out if push, pause, or fail here.
+                                // implicit: if PAUSE_PUSH, just don't do any particular animations differently. TODO: this might feel unresponsive, maybe buffer the input or something?
                             	PushResult push_check = canPushStack(next_player_coords, input_direction);
                                 if (push_check == CAN_PUSH) 
                                 {
                                     do_push = true;
-                                    move_player = true;
+                                    try_walk = true;
                                 }
                                 else if (push_check == FAILED_PUSH) { /* TODO(anims): failed animations case */ }
                                 break;
                             }
                             case LADDER:
                             {
+                                // if ladder is facing towards the player, do the climb
                                 if (getTileDirection(next_player_coords) == oppositeDirection(player->direction)) climb = true;
                                 else // TODO(anims): failed animations case
                                 break;
@@ -3980,23 +3848,23 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 break;
                             }
                         }
-						if (move_player)
+						if (try_walk)
                         {
                             // don't allow walking off edge
                             Int3 coords_below_next_coords = getNextCoords(next_player_coords, DOWN);
                             TileType tile_below_next_coords = getTileType(coords_below_next_coords);
 
-                            bool allow_movement = true; // TODO: rename
-                            if (tile_below_next_coords == NONE && !player->hit_by_red) allow_movement = false;
-                            if (isEntity(tile_below_next_coords) && !vec3IsZero(getEntityAtCoords(coords_below_next_coords)->velocity)) allow_movement = false;
+                            bool allow_walk = true;
+                            if (tile_below_next_coords == NONE && !player->hit_by_red) allow_walk = false;
+                            if (isEntity(tile_below_next_coords) && !vec3IsZero(getEntityAtCoords(coords_below_next_coords)->velocity)) allow_walk = false;
 
-                            if (allow_movement || cheating)
+                            if (allow_walk || cheating)
                             {
-                                int32 animation_time = 8; // TODO(anims): these functions shouldn't use animations; time_until_allow_game_input probably shouldn't exist.
-                                if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
-                                doStandardMovement(input_direction, next_player_coords, animation_time, true);
-                                time_until_allow_game_input = animation_time;
+                                if (do_push) pushAll(next_player_coords, input_direction);
+                                doStandardMovement(input_direction, next_player_coords, true);
                             }
+                            // TODO: temporarily disabled leap of faith
+                            /*
                             else
                             {
                                 // leap of faith logic
@@ -4008,22 +3876,23 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 TrailingHitbox trailing_hitboxes_snapshot[32] = {0};
                                 memcpy (&trailing_hitboxes_snapshot, &trailing_hitboxes, sizeof(TrailingHitbox) * MAX_TRAILING_HITBOX_COUNT);
 
-                                if (do_push) pushAll(next_player_coords, input_direction, MOVE_OR_PUSH_ANIMATION_TIME, true, false);
+                                if (do_push) pushAll(next_player_coords, input_direction);
 
                                 if (!player->hit_by_blue)
                                 {
                                     // still doing animations, because need the position norm to update - but will skip ahead in the animation. if doesn't work, clear back to animations savestate
                                     setFallingForAllPushables();
-                                    if (pack_detached) setFalling(pack);
+                                    if (!pack_attached) setFalling(pack);
                                     bool animations_on = true;
-                                    doHeadMovement(input_direction, animations_on, 1);
+                                    // TODO: can't this be a doStandardMovement call? 
+                                    //doHeadMovement(input_direction, animations_on, 1);
                                 }
 
                                 moveEntityInBufferAndState(player, next_player_coords, player->direction);
 
                                 player->position = intCoordsToNorm(player->coords); // instead of creating animation for this, i'll just set position norm to where it will be after the animation
 
-                                if (!pack_detached)
+                                if (pack_attached)
                                 {
                                     Int3 next_pack_coords = getNextCoords(next_player_coords, oppositeDirection(input_direction));
                                     moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
@@ -4031,7 +3900,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 }
 
                                 // TODO(anims): in new system, do something like this system is doing; need to fastforward position to where it would be by time taken to push
-                                /*
                                 // fastforward everything in animations by amount of time taken to push
                                 for (int32 animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
                                 {
@@ -4048,7 +3916,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                         if (a->rotation_to_change != 0) *a->rotation_to_change = a->rotation[a->frames_left - MOVE_OR_PUSH_ANIMATION_TIME];
                                     }
                                 }
-                                */
 
                                 // ignore trailing hitboxes
                                 memset(&trailing_hitboxes, 0, sizeof(TrailingHitbox) * MAX_TRAILING_HITBOX_COUNT);
@@ -4066,18 +3933,17 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                                 if (leap_of_faith_worked)
                                 {
-                                    int32 animation_time = 8; // TODO(anims): these functions shouldn't use animations; time_until_allow_game_input probably shouldn't exist.
-                                    if (do_push) pushAll(next_player_coords, input_direction, animation_time, true, false);
+                                    int32 animation_time = 8; // TODO(anims): these functions shouldn't use animations
+                                    if (do_push) pushAll(next_player_coords, input_direction);
                                     doStandardMovement(input_direction, next_player_coords, animation_time, true);
                                     bypass_player_fall = true; 
-                                    time_until_allow_game_input = MOVE_OR_PUSH_ANIMATION_TIME;
                                 }
                                 else 
                                 {
                                     // TODO(anims): failed walk animation for player
-                                    time_until_allow_game_input = FAILED_ANIMATION_TIME;
                                 }
                             }
+                        	*/
                         }
 						else if (climb)
                         {
@@ -4103,7 +3969,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 moveEntityInBufferAndState(player, coords_above, player->direction);
                                 // TODO(anims): figure out flags for climbing, maybe, similar to e.falling?
 
-                                if (!pack_detached)
+                                if (pack_attached)
                                 {
                                     createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
                                     moveEntityInBufferAndState(pack, getNextCoords(pack->coords, UP), pack->direction);
@@ -4111,22 +3977,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 }
 
                                 recordActionForUndo(&world_state, false, true);
-
-                                time_until_allow_game_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
-                            }
-                            else
-                            {
-                                //doFailedClimbUpAnimation();
-                                //time_until_allow_game_input = FAILED_CLIMB_TIME;
                             }
                         }
-                        /*
-						else if (do_failed_animations) 
-                        {
-                            // TODO(anims): failed walk animation for player
-                            time_until_allow_game_input = FAILED_ANIMATION_TIME;
-                        }
-                        */
                     }
                 }
 
@@ -4143,7 +3995,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         int32 clockwise_calculation = player->direction - input_direction;
                         if (clockwise_calculation == -1 || clockwise_calculation == 3) clockwise = true;
 
-                        if (pack_detached)
+                        if (!pack_attached)
                         {
                             // if pack detached, always allow turn
                             if (isPushable(getTileType(getNextCoords(player->coords, UP)))) 
@@ -4242,7 +4094,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                         if (push_diagonal) 
                                         {
                                             recordActionForUndo(&world_state, false, false);
-                                            pushAll(diagonal_coords, oppositeDirection(input_direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false);
+                                            pushAll(diagonal_coords, oppositeDirection(input_direction));
                                         }
                                         // TODO(anims): failed turn animation
                                     }
@@ -4280,7 +4132,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             }
                         }
                     }
-                    time_until_allow_game_input = TURN_ANIMATION_TIME;
         		}
 
                 // TODO(anims): temporarily disabled all other movement
@@ -4313,7 +4164,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             {
                                 if (do_push)
                                 {
-                                    if (canPushStack(coords_behind_pack, backwards_direction) == CAN_PUSH) pushAll(coords_behind_pack, backwards_direction, MOVE_OR_PUSH_ANIMATION_TIME, true, false);
+                                    if (canPushStack(coords_behind_pack, backwards_direction) == CAN_PUSH) pushAll(coords_behind_pack, backwards_direction);
                                 }
                                 if (!player->hit_by_blue) doHeadMovement(backwards_direction, true, MOVE_OR_PUSH_ANIMATION_TIME);
             
@@ -4332,19 +4183,15 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 // TODO(anims): interpolation anim (player coords in player direction -> player coords) - again, order should be reversed
 
                                 recordActionForUndo(&world_state, false, false);
-
-                                time_until_allow_game_input = MOVE_OR_PUSH_ANIMATION_TIME;
                             }
                             else
                             {
                                 // TODO(anims): failed walk animation (in opposite direction to player)
-                                time_until_allow_game_input = FAILED_ANIMATION_TIME;
                             }
                         }
                         else
                         {
                             // TODO(anims): failed walk animation (in opposite direction to player)
-                            time_until_allow_game_input = FAILED_ANIMATION_TIME;
                         }
                     }
                 }
@@ -4364,7 +4211,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             if (pack_turn_state.pack_intermediate_states_timer == 7)
             {
                 createTrailingHitbox(PACK_ID, pack->coords, 4, PACK);
-				if (pack_turn_state.do_diagonal_push_on_turn) pushAll(pack_turn_state.pack_intermediate_coords, oppositeDirection(player->direction), PUSH_FROM_TURN_ANIMATION_TIME, true, false);
+				if (pack_turn_state.do_diagonal_push_on_turn) pushAll(pack_turn_state.pack_intermediate_coords, oppositeDirection(player->direction));
             }
             else if (pack_turn_state.pack_intermediate_states_timer == 5)
             {
@@ -4372,7 +4219,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             }
             else if (pack_turn_state.pack_intermediate_states_timer == 4)
             {
-                if (pack_turn_state.do_orthogonal_push_on_turn) pushAll(pack_turn_state.pack_hitbox_turning_to_coords, pack_turn_state.pack_orthogonal_push_direction, PUSH_FROM_TURN_ANIMATION_TIME, true, false);
+                if (pack_turn_state.do_orthogonal_push_on_turn) pushAll(pack_turn_state.pack_hitbox_turning_to_coords, pack_turn_state.pack_orthogonal_push_direction);
             }
             else if (pack_turn_state.pack_intermediate_states_timer == 3)
             {
@@ -4395,7 +4242,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             {
                 if (!player->hit_by_red)
                 {
-                    if (!pack_detached)
+                    if (pack_attached)
                     {
                         if (getTileType(getNextCoords(player->coords, DOWN)) == NONE) player_will_fall_next_turn = true; 
                         else player_will_fall_next_turn = false;
@@ -4420,7 +4267,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 {
                     player_will_fall_next_turn = false;
                     // red, so pack only falls if is detached from player
-                    if (pack_detached)
+                    if (!pack_attached)
                     {
                         setFalling(pack);
                     }
@@ -4458,9 +4305,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
             if (can_move)
             {
                 int32 animation_time = MOVE_OR_PUSH_ANIMATION_TIME;
-                if (do_push) pushAll(next_coords, player->direction, animation_time, true, false);
+                if (do_push) pushAll(next_coords, player->direction);
                 doStandardMovement(player->direction, next_coords, animation_time, false);
-                time_until_allow_game_input = animation_time;
             }
             else if (try_climb_more)
             {
@@ -4502,7 +4348,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         pack->in_motion = CLIMB_ANIMATION_TIME;
                         pack->moving_direction = UP;
                     }
-                    time_until_allow_game_input = CLIMB_ANIMATION_TIME + MOVE_OR_PUSH_ANIMATION_TIME;
                 }
             }
             else
@@ -4510,31 +4355,17 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 // can't move or climb more
                 resetPlayerAndPackMotion();
                 // TODO(anims): failed walk animation in direction of player
-                time_until_allow_game_input = FAILED_ANIMATION_TIME;
             }
         }
 		*/
 
         // pack attachment logic
         TileType tile_behind_player = getTileType(getNextCoords(player->coords, oppositeDirection(player->direction)));
-        if (!pack_detached && pack_turn_state.pack_intermediate_states_timer == 0 && tile_behind_player != PACK) pack_detached = true;
-        else if (pack_detached && tile_behind_player == PACK) pack_detached = false;
+        if (pack_attached && pack_turn_state.pack_intermediate_states_timer == 0 && tile_behind_player != PACK) pack_attached= false;
+        else if (!pack_attached && tile_behind_player == PACK) pack_attached = true;
 
         // do animations and handle state regarding movement
         {
-            // all standard entities
-            Entity* all_entity_groups[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.sources, next_world_state.win_blocks };
-            FOR(falling_object_index, 4)
-            {
-                Entity* entity_group = all_entity_groups[falling_object_index];
-                FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) 
-                {
-                    Entity* e = &entity_group[entity_index];
-                    e->position = intCoordsToNorm(e->coords);
-                    e->rotation = directionToQuaternion(e->direction);
-                }
-            }
-
             // player handling
             {
                 // need to loop over 4 directions and handle directional velocity. right now, only one at a time here will ever be actuated, but should maybe be able to keep the same system later
@@ -4592,29 +4423,42 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
             // pack handling
             {
-                if (!pack_detached)
+                if (pack_attached)
                 {
                     Vec3 pack_coords = vec3Subtract(player->position, directionToVector(player->direction));
                     pack->position = pack_coords;
                     pack->rotation = directionToQuaternion(pack->direction);
                 }
             }
+
+            // all standard entities
+            Entity* all_entity_groups[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.sources, next_world_state.win_blocks };
+            FOR(falling_object_index, 4)
+            {
+                Entity* entity_group = all_entity_groups[falling_object_index];
+                FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) 
+                {
+                    Entity* e = &entity_group[entity_index];
+                    e->position = intCoordsToNorm(e->coords);
+                    e->rotation = directionToQuaternion(e->direction);
+                }
+            }
     	}
 
         // disallow input if player above void / water
         TileType tile_type_below_player = getTileType(getNextCoords(player->coords, DOWN));
-        if (tile_type_below_player == VOID || tile_type_below_player == WATER) time_until_allow_game_input = -1;
+        if (tile_type_below_player == VOID || tile_type_below_player == WATER) allow_movement = false;
 
         // win block logic
         if (getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK)
         {
-            if (tick_input->q_press && time_until_allow_game_input == 0)
+            if (tick_input->q_press && time_until_allow_meta_input == 0)
             {
                 // go to win_block.next_level if conditions are met
                 Entity* wb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
                 bool do_win_block_usage = true;
                 if (editor_state.editor_mode != NO_MODE) do_win_block_usage = false;
-                if (pack_detached) do_win_block_usage = false;
+                if (!pack_attached) do_win_block_usage = false;
                 if (wb->locked) do_win_block_usage = false;
                 if (wb->next_level[0] == 0) do_win_block_usage = false; // don't go through if there is no next level here yet
 
@@ -4638,11 +4482,11 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     }
                     // TODO(anims): zero animations of player and pack. probably should clear all animations, period?
                     levelChangePrep(wb->next_level);
-                    time_until_allow_game_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                     gameInitializeState(wb->next_level);
+                    time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 }
             }
-            else if (tick_input->f_press && time_until_allow_game_input == 0)
+            else if (tick_input->f_press && time_until_allow_meta_input == 0)
             {
                 // add win_block.next_level to solved_levels. this is a debug bind
                 bool solve_level = true;
@@ -4658,7 +4502,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     }
                     writeSolvedLevelsToFile();
                     createDebugPopup("level solved!", NO_TYPE);
-                    time_until_allow_game_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                    time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 }
             }
         }
@@ -4772,7 +4616,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             */
 
             char timer_info[256] = {0};
-            snprintf(timer_info, sizeof(timer_info), "game: %i, meta: %i, undo/restart: %i", time_until_allow_game_input, time_until_allow_meta_input, time_until_allow_undo_or_restart_input);
+            snprintf(timer_info, sizeof(timer_info), "meta: %i, undo/restart: %i", time_until_allow_meta_input, time_until_allow_undo_or_restart_input);
             createDebugText(timer_info);
 
             /*
@@ -4875,7 +4719,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
         physics_accumulator -= physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP;
 
-        if (time_until_allow_game_input > 0) time_until_allow_game_input--;
         if (time_until_allow_undo_or_restart_input > 0) time_until_allow_undo_or_restart_input--;
 	}
 
@@ -5050,26 +4893,29 @@ void gameFrame(double delta_time, TickInput* tick_input)
             if (isEntity(draw_tile))
             {
                 Entity* e = getEntityAtCoords(bufferIndexToCoords(tile_index));
-                bool do_aabb = false;
-                if (canBeUnderwater(draw_tile) && e->position.y < 2.0f)
+				if (e) // TODO: guard is here while i translate over some levels, since i offset all of the enums, but the level files are still the same
                 {
-                    do_aabb = true;
-                }
+                    bool do_aabb = false;
+                    if (canBeUnderwater(draw_tile) && e->position.y < 2.0f)
+                    {
+                        do_aabb = true;
+                    }
 
-                if (e->locked) draw_tile = LOCKED_BLOCK;
-                if (draw_tile == WIN_BLOCK)
-                {
-                    if (in_overworld && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
-                    else if (!in_overworld && findInSolvedLevels(next_world_state.level_name) != -1) draw_tile = WON_BLOCK;
-                }
+                    if (e->locked) draw_tile = LOCKED_BLOCK;
+                    if (draw_tile == WIN_BLOCK)
+                    {
+                        if (in_overworld && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
+                        else if (!in_overworld && findInSolvedLevels(next_world_state.level_name) != -1) draw_tile = WON_BLOCK;
+                    }
 
-                if (game_shader_mode == OLD)
-                {
-                    drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position, DEFAULT_SCALE, e->rotation, VEC4_0, do_aabb, VEC4_0, VEC4_0); 
-                }
-                else
-                {
-                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, VEC4_0, do_aabb, VEC4_0, VEC4_0);
+                    if (game_shader_mode == OLD)
+                    {
+                        drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position, DEFAULT_SCALE, e->rotation, VEC4_0, do_aabb, VEC4_0, VEC4_0); 
+                    }
+                    else
+                    {
+                        drawAsset(getModelId(draw_tile), MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, VEC4_0, do_aabb, VEC4_0, VEC4_0);
+                    }
                 }
             }
             else
