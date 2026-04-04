@@ -622,15 +622,7 @@ Vec3 vec3Normalize(Vec3 v)
     return vec3ScalarMultiply(v, inverse_length);
 }
 
-// CAMERA HELPERS
-
-// sets basis for movement which changes with angle, i.e. w will always travel straight ahead, at the same y level
-void cameraBasisFromYaw(float yaw, Vec3* right, Vec3* forward)
-{
-    float sine_yaw = sinf(yaw), cosine_yaw = cosf(yaw);
-    *right   = (Vec3){ cosine_yaw, 0,   -sine_yaw };
-    *forward = (Vec3){ -sine_yaw,  0, -cosine_yaw };
-}
+// QUATERNION MATH
 
 Vec4 quaternionConjugate(Vec4 q)
 {
@@ -664,13 +656,65 @@ Vec4 quaternionNormalize(Vec4 q)
     return (Vec4){ q.x * inverse_length, q.y * inverse_length, q.z * inverse_length, q.w * inverse_length };
 }
 
-// TODO: could use the optimised version when i understand quaternions better. for now, this is more transparent, and 
+// TODO: could use the optimised version when i understand quaternions better. for now, this is more transparent
 Vec3 vec3RotateByQuaternion(Vec3 v, Vec4 q)
 {
     Vec4 v_as_quaternion = (Vec4){ v.x, v.y, v.z, 0 };
     Vec4 q_conjugate = quaternionConjugate(q);
     Vec4 out_v = quaternionMultiply(quaternionMultiply(q, v_as_quaternion), q_conjugate);
     return (Vec3){ out_v.x, out_v.y, out_v.z };
+}
+
+// CAMERA STUFF 
+
+Vec4 buildCameraQuaternion(Camera input_camera)
+{
+    Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), input_camera.yaw);
+    Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), input_camera.pitch);
+    return quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
+}
+
+// assumes looking toward plane (otherwise negative t value)
+Vec3 cameraLookingAtPointOnPlane(Camera input_camera, float plane_y)
+{
+    Vec3 neg_z_axis = intCoordsToNorm(int3Negate(AXIS_Z)); // standard camera axis before any rotation
+    Vec3 forward = vec3RotateByQuaternion(neg_z_axis, buildCameraQuaternion(input_camera)); // get the cameras forward vector
+    float t = (plane_y - input_camera.coords.y) / forward.y; // get t value for intersection
+    return (Vec3)
+    {
+        input_camera.coords.x + forward.x * t,
+        input_camera.coords.y + forward.y * t,
+        input_camera.coords.z + forward.z * t
+    };
+}
+
+Camera lerpCamera(Camera a, Camera b, float t, float target_plane_y)
+{
+    Camera result = {0};
+    result.coords.x = a.coords.x + (b.coords.x - a.coords.x) * t;
+    result.coords.y = a.coords.y + (b.coords.y - a.coords.y) * t;
+    result.coords.z = a.coords.z + (b.coords.z - a.coords.z) * t;
+    result.fov      = a.fov      + (b.fov      - a.fov)      * t;
+
+    Vec3 target_a = cameraLookingAtPointOnPlane(a, target_plane_y);
+    Vec3 target_b = cameraLookingAtPointOnPlane(b, target_plane_y);
+    Vec3 target = vec3Add(target_a, vec3ScalarMultiply(vec3Subtract(target_b, target_a), t));
+
+    // build rotation from looked at point
+    Vec3 forward = vec3Normalize(vec3Subtract(target, result.coords));
+    result.yaw   = (float)atan2((double)-forward.x, (double)-forward.z);
+    result.pitch = (float)asin((double)forward.y);
+    result.rotation = buildCameraQuaternion(result);
+
+    return result;
+}
+
+// sets basis for movement which changes with angle, i.e. w will always travel straight ahead, at the same y level
+void cameraBasisFromYaw(float yaw, Vec3* right, Vec3* forward)
+{
+    float sine_yaw = sinf(yaw), cosine_yaw = cosf(yaw);
+    *right   = (Vec3){ cosine_yaw, 0,   -sine_yaw };
+    *forward = (Vec3){ -sine_yaw,  0, -cosine_yaw };
 }
 
 // BUFFER / STATE INTERFACING
@@ -895,56 +939,20 @@ Vec3 directionToVector(Direction direction)
     }
 }
 
+// TODO: do actually need to change axis of rotation for U/D cases with mirror vs. sources. could think about alternative solutions, but there's no real good reason they should match - the rotations
+// 		 encode different things. also think about this just not being relevant, if have one 'standing' mirror and one 'up/down' mirror (would also mean 1-sided mirrors are automatic, if want them)
 Vec4 directionToQuaternion(Direction direction) 
 {
-    float yaw = 0.0f;
-    float roll = 0.0f;
-    bool do_yaw = false;
-    bool do_roll = false;
     switch (direction)
     {
-        case NORTH: 
-        {
-            yaw = 0.0f;
-            do_yaw = true;
-            break;
-        }
-        case WEST: 
-        {
-            yaw = 0.25f  * TAU;
-            do_yaw = true;
-            break;
-        }
-        case SOUTH: 
-        {
-            yaw = 0.5f * TAU;
-            do_yaw = true;
-            break;
-        }
-        case EAST:
-        {
-            yaw = -0.25f * TAU;
-            do_yaw = true;
-            break;
-        }
-        case UP:
-        {
-            roll = 0.25f * TAU;
-            do_roll = true;
-            break;
-        }
-        case DOWN:
-        {
-            roll = -0.25f * TAU;
-            do_roll = true;
-            break;
-        }
-        default: return (Vec4){ 0, 0, 0, 0 };
+        case NORTH: return IDENTITY_QUATERNION;
+        case WEST:  return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y),  0.25f * TAU);
+        case SOUTH: return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y),  0.50f * TAU);
+        case EAST:  return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), -0.25f * TAU);
+        case UP:	return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Z),  0.25f * TAU);
+        case DOWN:	return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Z), -0.25f * TAU);
+        default: return (Vec4){ 0, 0, 0, 1 };
     }
-
-    if (do_yaw && !do_roll) return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), yaw);
-    if (!do_yaw && do_roll) return quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), roll);
-    return IDENTITY_QUATERNION;
 }
 
 int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction direction, Color color) 
@@ -1521,49 +1529,6 @@ void createDebugPopup(char* string, PopupType popup_type)
 void createTutorialPopup()
 {
 
-}
-
-// CAMERA STUFF 
-
-Vec4 buildCameraQuaternion(Camera input_camera)
-{
-    Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), input_camera.yaw);
-    Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), input_camera.pitch);
-    return quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
-}
-
-// assumes looking toward plane (otherwise negative t value)
-// some of the double conversions here probably aren't required
-Vec3 cameraLookingAtPointOnPlane(Camera input_camera, float plane_y)
-{
-    Vec3 forward = vec3RotateByQuaternion((intCoordsToNorm(int3Negate(AXIS_Z))), buildCameraQuaternion(input_camera));
-    double t = ((double)plane_y - (double)input_camera.coords.y) / (double)forward.y;
-    return (Vec3){
-        (float)((double)input_camera.coords.x + (double)forward.x * t),
-        (float)((double)input_camera.coords.y + (double)forward.y * t),
-        (float)((double)input_camera.coords.z + (double)forward.z * t)
-    };
-}
-
-Camera lerpCamera(Camera a, Camera b, float t, float target_plane_y)
-{
-    Camera result = {0};
-    result.coords.x = a.coords.x + (b.coords.x - a.coords.x) * t;
-    result.coords.y = a.coords.y + (b.coords.y - a.coords.y) * t;
-    result.coords.z = a.coords.z + (b.coords.z - a.coords.z) * t;
-    result.fov      = a.fov      + (b.fov      - a.fov)      * t;
-
-    Vec3 target_a = cameraLookingAtPointOnPlane(a, target_plane_y);
-    Vec3 target_b = cameraLookingAtPointOnPlane(b, target_plane_y);
-    Vec3 target = vec3Add(target_a, vec3ScalarMultiply(vec3Subtract(target_b, target_a), t));
-
-    // build rotation from looked at point
-    Vec3 forward = vec3Normalize(vec3Subtract(target, result.coords));
-    result.yaw   = (float)atan2((double)-forward.x, (double)-forward.z);
-    result.pitch = (float)asin((double)forward.y);
-    result.rotation = buildCameraQuaternion(result);
-
-    return result;
 }
 
 // RAYCAST ALGORITHM FOR EDITOR
@@ -4548,7 +4513,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
         // reset undos performed if no longer holding z undos
         if (undos_performed > 0 && !tick_input->z_press) undos_performed = 0;
-        // decrement undo timer if > 0
+        // decrement undo timer if > 0. the timer value means that even a few frames after releasing undo, gravity isn't applied.
         if (undo_press_timer > 0) undo_press_timer--;
 
         // update overworld player coords for camera offset if player not removed. if player is removed, these coords persist, so that camera doesn't jump wildly when changing player pos in editor
@@ -4560,10 +4525,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
         {
             ow_player_coords_for_offset = INT3_0;
         }
-
-        // decide which ghosts to render, if ghosts should be rendered
-        do_player_ghost = false;
-        do_pack_ghost = false;
 
         // update gameProgress based on which levels are solved, and current coords of the player
         if (findInSolvedLevels("pack-intro-i") == -1) game_progress = WORLD_0;
