@@ -448,8 +448,7 @@ Int3 ow_player_coords_for_offset = {0};
 
 float camera_lerp_t = 0.0f;
 const float CAMERA_T_TIMESTEP = 0.05f;
-int32 camera_target_plane = 0; // y level of xz plane which calculates targeted point during camera interpolation function 
-                               // TODO: should probably be something defined by level, not just player coords at startup
+int32 camera_target_plane = 0; // y level of xz plane which calculates targeted point during camera interpolation function TODO: should probably be something defined by level
 
 DrawCommand draw_commands[16768] = {0};
 int32 draw_command_count = 0;
@@ -469,6 +468,7 @@ int32 time_until_allow_meta_input = 0;
 int32 time_until_allow_undo_or_restart_input = 0;
 
 EditorState editor_state = {0};
+
 LaserBuffer laser_buffer[512] = {0}; // 512 = 64 max sources * 16 max laser turns
 TrailingHitbox trailing_hitboxes[32]; 
 
@@ -476,22 +476,17 @@ GameProgress game_progress = WORLD_0;
 bool in_overworld = false;
 bool pack_attached = true;
 bool allow_movement = true;
-bool cheating = false;
+PackTurnState pack_turn_state = {0};
+bool player_will_fall_next_turn = false;
+bool bypass_player_fall = false;
+
+// handle pushed entities
+bool player_pushing = false;
+int32 entites_tied_to_player_movement[32] = {0};
 
 ShaderMode game_shader_mode = OLD;
 bool draw_trailing_hitboxes = false;
-
-bool player_will_fall_next_turn = false;
-bool bypass_player_fall;
-PackTurnState pack_turn_state = {0};
-
-// ghosts from tp
-Int3 player_ghost_coords = {0};
-Int3 pack_ghost_coords = {0};
-Direction player_ghost_direction = {0};
-Direction pack_ghost_direction = {0};
-bool do_player_ghost = false;
-bool do_pack_ghost = false;
+bool cheating = false;
 
 // debug text
 Vec2 debug_text_start_coords = {0};
@@ -511,14 +506,12 @@ const int32 DEFAULT_POPUP_TIME = 100;
 
 float floatMax(float a, float b)
 {
-    if (a > b) return a;
-    else return b;
+    return a > b ? a : b;
 }
 
 float floatAbs(float f)
 {
-    if (f < 0) return -f;
-    else return f;
+    return f > 0 ? f : -f;
 }
 
 Vec3 intCoordsToNorm(Int3 int_coords) 
@@ -631,7 +624,7 @@ Vec3 vec3Normalize(Vec3 v)
 
 // CAMERA HELPERS
 
-// TODO: redo quaternion code before animation handling
+// sets basis for movement which changes with angle, i.e. w will always travel straight ahead, at the same y level
 void cameraBasisFromYaw(float yaw, Vec3* right, Vec3* forward)
 {
     float sine_yaw = sinf(yaw), cosine_yaw = cosf(yaw);
@@ -639,45 +632,45 @@ void cameraBasisFromYaw(float yaw, Vec3* right, Vec3* forward)
     *forward = (Vec3){ -sine_yaw,  0, -cosine_yaw };
 }
 
+Vec4 quaternionConjugate(Vec4 q)
+{
+    return (Vec4){ -q.x, -q.y, -q.z, q.w };
+}
+
+// any 3D axis
 Vec4 quaternionFromAxisAngle(Vec3 axis, float angle)
 {
-    float sine = sinf(angle*0.5f), cosine = cosf(angle*0.5f);
-    return (Vec4){ axis.x*sine, axis.y*sine, axis.z*sine, cosine};
+    float sin = sinf(angle * 0.5f);
+    float cos = cosf(angle * 0.5f);
+    return (Vec4){ axis.x * sin, axis.y * sin, axis.z * sin, cos};
 }
 
-Vec4 quaternionScalarMultiply(Vec4 quaternion, float scalar)
+Vec4 quaternionMultiply(Vec4 q_a, Vec4 q_b)
 {
-    return (Vec4){ quaternion.x*scalar, quaternion.y*scalar, quaternion.z*scalar, quaternion.w*scalar };
+    return (Vec4)
+    { 
+        (q_a.w * q_b.x) + (q_a.x * q_b.w) + (q_a.y * q_b.z) - (q_a.z * q_b.y),
+        (q_a.w * q_b.y) - (q_a.x * q_b.z) + (q_a.y * q_b.w) + (q_a.z * q_b.x),
+        (q_a.w * q_b.z) + (q_a.x * q_b.y) - (q_a.y * q_b.x) + (q_a.z * q_b.w),
+        (q_a.w * q_b.w) - (q_a.x * q_b.x) - (q_a.y * q_b.y) - (q_a.z * q_b.z) 
+    };
 }
 
-Vec4 quaternionMultiply(Vec4 a, Vec4 b)
+Vec4 quaternionNormalize(Vec4 q)
 {
-    return (Vec4){ a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
-        		   a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
-        		   a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
-        		   a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z};
-}
-
-Vec4 quaternionNormalize(Vec4 quaternion)
-{
-    float length_squared = quaternion.x*quaternion.x + quaternion.y*quaternion.y + quaternion.z*quaternion.z + quaternion.w*quaternion.w;
-    if (length_squared <= 1e-8f) return (Vec4){0, 0, 0, 1}; 
+    float length_squared = (q.x * q.x) + (q.y * q.y) + (q.z * q.z) + (q.w * q.w);
+    if (length_squared <= 1e-8f) return IDENTITY_QUATERNION;
     float inverse_length = 1.0f / sqrtf(length_squared);
-    return quaternionScalarMultiply(quaternion, inverse_length);
+    return (Vec4){ q.x * inverse_length, q.y * inverse_length, q.z * inverse_length, q.w * inverse_length };
 }
 
-Vec3 vec3RotateByQuaternion(Vec3 input_vector, Vec4 quaternion)
+// TODO: could use the optimised version when i understand quaternions better. for now, this is more transparent, and 
+Vec3 vec3RotateByQuaternion(Vec3 v, Vec4 q)
 {
-    Vec3 quaternion_vector_part = (Vec3){ quaternion.x, quaternion.y, quaternion.z };
-    float quaternion_scalar_part = quaternion.w;
-    Vec3 q_cross_v = vec3OuterProduct(quaternion_vector_part, input_vector);
-    Vec3 temp_vector = (Vec3){ q_cross_v.x + quaternion_scalar_part * input_vector.x,
-    q_cross_v.y + quaternion_scalar_part * input_vector.y,
-    q_cross_v.z + quaternion_scalar_part * input_vector.z};
-    Vec3 q_cross_t = vec3OuterProduct(quaternion_vector_part, temp_vector);
-    return (Vec3){ input_vector.x + 2.0f * q_cross_t.x,
-    input_vector.y + 2.0f * q_cross_t.y,
-    input_vector.z + 2.0f * q_cross_t.z};
+    Vec4 v_as_quaternion = (Vec4){ v.x, v.y, v.z, 0 };
+    Vec4 q_conjugate = quaternionConjugate(q);
+    Vec4 out_v = quaternionMultiply(quaternionMultiply(q, v_as_quaternion), q_conjugate);
+    return (Vec3){ out_v.x, out_v.y, out_v.z };
 }
 
 // BUFFER / STATE INTERFACING
@@ -1840,7 +1833,9 @@ void pushAll(Int3 coords, Direction direction)
         FOR(stack_index, stack_size)
         {
             Entity* e = getEntityAtCoords(current_stack_coords);
-            moveEntityInBufferAndState(e, coords, direction);
+            Int3 next_coords = getNextCoords(e->coords, direction);
+            moveEntityInBufferAndState(e, next_coords, e->direction);
+
             // TODO: create trailing hitbox
             current_stack_coords = getNextCoords(current_stack_coords, UP);
         }
@@ -3761,10 +3756,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 char save_solved_levels[64][64] = {0};
                 memcpy(save_solved_levels, next_world_state.solved_levels, sizeof(save_solved_levels));
                 levelChangePrep("overworld");
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 gameInitializeState("overworld");
                 memcpy(next_world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
                 writeSolvedLevelsToFile();
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 allow_movement = true;
             }
 
