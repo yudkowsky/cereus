@@ -121,19 +121,6 @@ typedef struct
 }
 TrailingHitbox;
 
-/*
-typedef struct
-{
-    int32 id;
-    int32 frames_left;
-    Vec3* position_to_change;
-    Vec4* rotation_to_change;
-    Vec3 position[32];
-    Vec4 rotation[32];
-}
-Animation;
-*/
-
 typedef enum
 {
     CAN_PUSH = 0,
@@ -141,6 +128,13 @@ typedef enum
     FAILED_PUSH = 2
 }
 PushResult;
+
+typedef struct
+{	
+    int32 id;
+    Direction direction;
+}
+PushEntity;
 
 // this is a bunch of state to do with handling what gets pushed when during the turn. pack_intermediate_states_timer is the main thing: it just ticks down while the player is turning.
 // later there is a loop with some numbers that look nice for when things should be turning, based on this timer. the objects don't get pushed the same frame the player turns,
@@ -460,7 +454,7 @@ bool bypass_player_fall = false;
 
 // handle pushed entities
 bool player_pushing = false;
-int32 entities_tied_to_player_movement[32] = {0};
+PushEntity entities_tied_to_player_movement[32] = {0};
 
 ShaderMode game_shader_mode = OLD;
 bool draw_trailing_hitboxes = false;
@@ -1756,16 +1750,20 @@ void pushAll(Int3 coords, Direction direction)
             bool already_tracked = false;
             FOR(next_free_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
             {
-                if (entities_tied_to_player_movement[next_free_index] == e->id) 
+                if (entities_tied_to_player_movement[next_free_index].id == e->id) 
                 {
                     already_tracked = true;
                     break; // doesn't guarantee not already having written something to next_free. so need the already_tracked guard 
                 }
-                if (entities_tied_to_player_movement[next_free_index] > 0) continue;
+                if (entities_tied_to_player_movement[next_free_index].id > 0) continue;
                 next_free = next_free_index;
                 break;
             }
-            if (!already_tracked) entities_tied_to_player_movement[next_free] = e->id;
+            if (!already_tracked) 
+            {
+                entities_tied_to_player_movement[next_free].id = e->id;
+                entities_tied_to_player_movement[next_free].direction = direction;
+            }
 
             // TODO: create trailing hitbox
 
@@ -4302,9 +4300,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
         {
             // PLAYER ANIMATIONS
 
-            // store before-move player coords for entity movement later
-            Vec3 player_position_before_move = player->position;
-
             // player handling: directional movement
             FOR(direction_index, 4)
             {
@@ -4365,22 +4360,26 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
             FOR(to_push_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
             {
-                int32 id = entities_tied_to_player_movement[to_push_index];
+                int32 id = entities_tied_to_player_movement[to_push_index].id;
                 if (id <= 0) continue;
+                Direction push_direction = entities_tied_to_player_movement[to_push_index].direction;
+				
                 Entity* e = getEntityFromId(id);
-                Vec3 difference_in_entity_position = vec3Subtract(intCoordsToNorm(e->coords), e->position);
-                Vec3 player_travel_this_frame = vec3Subtract(player->position, player_position_before_move);
-                Direction entity_movement_direction = NO_DIRECTION;
-                FOR(direction_index, 6) if (getComponentAlongDirection(direction_index, difference_in_entity_position) > 0) entity_movement_direction = direction_index; // assumes one axis of movement
-                float player_movement_along_direction = getComponentAlongDirection(entity_movement_direction, player_travel_this_frame);
-                e->position = vec3AddFloatToVec3AlongDirection(entity_movement_direction, player_movement_along_direction, e->position);
+                float difference_in_player_position = getComponentAlongDirection(push_direction, player->position) - getComponentAlongDirection(push_direction, intCoordsToNorm(player->coords));
+                Vec3 entity_target = intCoordsToNorm(e->coords);
+                if (difference_in_player_position != 0) 
+                {
+                    Vec3 test_position = vec3AddFloatToVec3AlongDirection(push_direction, difference_in_player_position, entity_target);
+                    if (getComponentAlongDirection(push_direction, vec3Subtract(test_position, e->position)) > 0) e->position = test_position; // make sure entitiy doesn't snap backwards
+                }
+                else e->position = intCoordsToNorm(e->coords);
             }
 
             // check if player has stopped moving, and if so clear the push state
             if (vec3IsZero(vec3Subtract(player->position, intCoordsToNorm(player->coords))))
             {
                 player_pushing = false;
-                memset(&entities_tied_to_player_movement, 0, sizeof(int32) * MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT);
+                memset(&entities_tied_to_player_movement, 0, sizeof(PushEntity) * MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT);
             }
     	}
 
