@@ -73,7 +73,6 @@ typedef struct
 
     // movement state
     Vec3 velocity;
-    Vec3 angular_velocity;
     bool falling;
 
     // for sources/lasers
@@ -133,6 +132,7 @@ typedef struct
 {	
     int32 id;
     Direction direction;
+    bool on_head;
 }
 PushEntity;
 
@@ -331,11 +331,7 @@ const float PLAYER_MAX_DECELERATION = 0.04f; // should be approx the same; offse
     	                                     // if this is the same number, deceleration will be slower than acceleration
 const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
 const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
-
 const int32 TRAILING_HITBOX_TIME = 5;
-const int32 FIRST_TRAILING_PACK_TURN_HITBOX_TIME = 2;
-const int32 TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN = 2;
-const int32 PACK_TIME_IN_INTERMEDIATE_STATE = 4;
 const int32 TIME_AFTER_UNDO_UNTIL_PHYSICS_START = 4;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 64;
@@ -597,7 +593,7 @@ Vec4 quaternionConjugate(Vec4 q)
 }
 
 // any 3D axis
-Vec4 quaternionFromAxisAngle(Vec3 axis, float angle)
+Vec4 quaternionFromAxis(Vec3 axis, float angle)
 {
     float sin = sinf(angle * 0.5f);
     float cos = cosf(angle * 0.5f);
@@ -636,8 +632,8 @@ Vec3 vec3RotateByQuaternion(Vec3 v, Vec4 q)
 
 Vec4 buildCameraQuaternion(Camera input_camera)
 {
-    Vec4 quaternion_yaw   = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), input_camera.yaw);
-    Vec4 quaternion_pitch = quaternionFromAxisAngle(intCoordsToNorm(AXIS_X), input_camera.pitch);
+    Vec4 quaternion_yaw   = quaternionFromAxis(intCoordsToNorm(AXIS_Y), input_camera.yaw);
+    Vec4 quaternion_pitch = quaternionFromAxis(intCoordsToNorm(AXIS_X), input_camera.pitch);
     return quaternionNormalize(quaternionMultiply(quaternion_yaw, quaternion_pitch));
 }
 
@@ -907,11 +903,11 @@ Vec4 directionToQuaternion(Direction direction)
     switch (direction)
     {
         case NORTH: return IDENTITY_QUATERNION;
-        case WEST:  return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y),  0.25f * TAU);
-        case SOUTH: return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y),  0.50f * TAU);
-        case EAST:  return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), -0.25f * TAU);
-        case UP:	return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Z),  0.25f * TAU);
-        case DOWN:	return quaternionFromAxisAngle(intCoordsToNorm(AXIS_Z), -0.25f * TAU);
+        case WEST:  return quaternionFromAxis(intCoordsToNorm(AXIS_Y),  0.25f * TAU);
+        case SOUTH: return quaternionFromAxis(intCoordsToNorm(AXIS_Y),  0.50f * TAU);
+        case EAST:  return quaternionFromAxis(intCoordsToNorm(AXIS_Y), -0.25f * TAU);
+        case UP:	return quaternionFromAxis(intCoordsToNorm(AXIS_Z),  0.25f * TAU);
+        case DOWN:	return quaternionFromAxis(intCoordsToNorm(AXIS_Z), -0.25f * TAU);
         default: return (Vec4){ 0, 0, 0, 1 };
     }
 }
@@ -1763,6 +1759,7 @@ void pushAll(Int3 coords, Direction direction)
             {
                 entities_tied_to_player_movement[next_free].id = e->id;
                 entities_tied_to_player_movement[next_free].direction = direction;
+                entities_tied_to_player_movement[next_free].on_head = false;
             }
 
             // TODO: create trailing hitbox
@@ -3005,72 +3002,7 @@ void levelChangePrep(char next_level[64])
     // TODO(anims): cancel all animations
 }
 
-// HEAD ROTATION / MOVEMENT
-
-// handles situation when an object is on top of your head, in which case it moves and rotates with you.
-void doHeadRotation(bool clockwise)
-{
-    int32 stack_size = getPushableStackSize(getNextCoords(next_world_state.player.coords, UP));
-
-    Int3 current_tile_coords = getNextCoords(next_world_state.player.coords, UP);
-    FOR(stack_rotate_index, stack_size)
-    {
-        Entity* entity = getEntityAtCoords(current_tile_coords);
-        bool up_or_down = false;
-        Direction current_direction = getTileDirection(current_tile_coords);
-        Direction next_direction = NO_DIRECTION;
-        switch (current_direction)
-        {
-            case NORTH:
-            case WEST:
-            case SOUTH:
-            case EAST:
-            {
-                if (clockwise) 
-                {
-                    next_direction = current_direction + 1;
-                    if (next_direction == UP) next_direction = NORTH;
-                }
-                else 
-                {
-                    next_direction = current_direction - 1;
-                    if (next_direction == -1) next_direction = EAST;
-                }
-                break;
-            }
-            case UP:
-            {
-                next_direction = DOWN;
-                up_or_down = true;
-                break;
-            }
-            case DOWN:
-            {
-                next_direction = UP;
-                up_or_down = true;
-                break;
-            }
-            default: break;
-        }
-
-        int32 id = getEntityAtCoords(current_tile_coords)->id;
-
-        // for mirror
-        if (!up_or_down) {} // TODO(anims): special case for mirrors, since getting the rotation animation was different. queue the same type of animation here
-        else 
-        {
-            Vec4 start = entity->rotation;
-            float sign = clockwise ? 1.0f : -1.0f;
-            Vec4 delta = quaternionFromAxisAngle(intCoordsToNorm(AXIS_Y), sign * 0.25f * TAU);
-            Vec4 end = quaternionNormalize(quaternionMultiply(delta, start));
-            // TODO(anims): rotation animation
-        }
-
-        setTileDirection(next_direction, current_tile_coords);
-        entity->direction = next_direction;
-        current_tile_coords = getNextCoords(current_tile_coords, UP);
-    }
-}
+// MOVEMENT
 
 void doStandardMovement(Direction direction, Int3 next_player_coords, bool record_for_undo)
 {
@@ -3145,8 +3077,8 @@ float calculateSpeculativeVelocityAlongDirection(Direction direction, float sign
 
 bool wouldOvershoot(float speculative_velocity_along_direction, float position_along_direction, float coords_along_direction, float sign)
 {
-    float offset_from_current_position_if_accelerate = oneDimensionalDecelerationSimulation(speculative_velocity_along_direction, PLAYER_MAX_DECELERATION);
-    float position_after_accelerate_then_immediately_decelerate = offset_from_current_position_if_accelerate + position_along_direction;
+    float offset_from_current_position_if_accelerate = oneDimensionalDecelerationSimulation(sign * speculative_velocity_along_direction, PLAYER_MAX_DECELERATION);
+    float position_after_accelerate_then_immediately_decelerate = sign * offset_from_current_position_if_accelerate + position_along_direction;
 
     bool would_overshoot = false;
     if (sign == -1.0f)
@@ -3726,7 +3658,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     if (wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign)) allow_input = true;
 
                     // don't allow movement if have any angular velocity TODO: gate this less aggressively - would probably want to allow if rotation is within some range of targeted velocity
-                    if (!vec3IsZero(player->angular_velocity)) allow_input = false;
+                    //if (!vec3IsZero(player->angular_velocity)) allow_input = false;
 
                     // disallow movement if also moving in some other direction currently - probably just guards against moving while falling
                     if (!vec3IsZero(vec3ZeroComponentAlongDirection(input_direction, player->velocity))) allow_input = false;
@@ -3916,35 +3848,24 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         }
                     }
                 }
-                else if (input_direction != oppositeDirection(player->direction)) // check if turning (as opposed to trying to reverse)
+                else if (input_direction != oppositeDirection(player->direction))
                 {
                     // TURN MOVEMENT
 
                     bool allow_turn = true;
-                    if (getTileType(getNextCoords(player->coords, DOWN)) == NONE && !player->hit_by_red) allow_turn = false;
-                    if (allow_turn || cheating)
+                    if (player->falling) allow_turn = false;
+                    if (allow_turn)
                     {
-                        Direction polarity_direction = NORTH;
-                        int32 clockwise = false;
-                        int32 clockwise_calculation = player->direction - input_direction;
-                        if (clockwise_calculation == -1 || clockwise_calculation == 3) clockwise = true;
-
                         if (!pack_attached)
                         {
                             // if pack detached, always allow turn
-                            if (isPushable(getTileType(getNextCoords(player->coords, UP)))) 
-                            {
-                                if (!player->hit_by_blue) doHeadRotation(clockwise);
-                            }
-
-                            // TODO(anims): rotation animation (player->dir, input dir)
                             player->direction = input_direction;
                             setTileDirection(player->direction, player->coords);
-
                             recordActionForUndo(&world_state, false, false);
                         }
                         else
                         {
+                            /*
                             if (clockwise) polarity_direction = (input_direction + 1) % 4;
                             else 		   polarity_direction = (input_direction + 3) % 4;
 
@@ -4036,8 +3957,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                     {
                                         recordActionForUndo(&world_state, false, false);
 
-                                        createTrailingHitbox(PACK_ID, pack->coords, FIRST_TRAILING_PACK_TURN_HITBOX_TIME, PACK);
-
                                         if (isPushable(getTileType(getNextCoords(player->coords, UP)))) 
                                         {
                                             if (!player->hit_by_blue) doHeadRotation(clockwise);
@@ -4050,10 +3969,15 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                                         // TODO(anims): pack rotation animation
 
+                                        createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
+                                        createTrailingHitbox(PACK_ID, diagonal_coords, TRAILING_HITBOX_TIME, PACK);
+                                        createTrailingHitbox(PACK_ID, orthogonal_coords, TRAILING_HITBOX_TIME, PACK);
+
                                         if (push_diagonal)   pack_turn_state.do_diagonal_push_on_turn = true;
                                         if (push_orthogonal) pack_turn_state.do_orthogonal_push_on_turn = true;
 
-                                        pack_turn_state.pack_intermediate_states_timer = TIME_BEFORE_ORTHOGONAL_PUSH_STARTS_IN_TURN + PACK_TIME_IN_INTERMEDIATE_STATE + 1;
+                                        // 2 frames before orthogonal push, 4 frames in intermediate state, and 1 frame to finish interpolation
+                                        pack_turn_state.pack_intermediate_states_timer = 7;
                                         pack_turn_state.pack_intermediate_coords = diagonal_coords;
                                         pack_turn_state.pack_orthogonal_push_direction = orthogonal_push_direction;
                                         pack_turn_state.pack_hitbox_turning_to_coords = orthogonal_coords;
@@ -4064,15 +3988,16 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                     // TODO(anims): failed turn animation
                                 }
                             }
+                        	*/
                         }
                     }
         		}
 
                 // TODO(anims): temporarily disabled all other movement
 
-                /*
                 else if (input_direction == oppositeDirection(player->direction))
                 {
+                    /*
                     if (!player_will_fall_next_turn)
                     {
                         // backwards movement: allow only when climbing down a ladder. right now just move, and let player fall (functionally the same, but animation is goofy)
@@ -4128,8 +4053,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             // TODO(anims): failed walk animation (in opposite direction to player)
                         }
                     }
+                    */
                 }
-                */
             }
         }
 
@@ -4164,6 +4089,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         }
 
         // falling logic
+        /*
         bool do_falling_logic = true;
         if (undo_press_timer > 0) do_falling_logic = false; // only do gravity if there's not been an undo recently
         if (cheating) do_falling_logic = false;
@@ -4208,6 +4134,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
             }
         }
+        */
 
         // update pack detached after falling TODO: it's not clear this is the best place for this - does any other action maybe detach pack? maybe climbing?
         updatePackDetached();
@@ -4298,8 +4225,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
         // do animations and handle state regarding movement
         {
-            // PLAYER ANIMATIONS
-
             // player handling: directional movement
             FOR(direction_index, 4)
             {
@@ -4326,7 +4251,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     float stopping_distance = oneDimensionalDecelerationSimulation(current_speed, PLAYER_MAX_DECELERATION);
                     float distance_error = remaining_distance - stopping_distance;
                     int32 frames_to_stop = (int32)ceilf(current_speed / PLAYER_MAX_DECELERATION);
-                    if (frames_to_stop < 1) frames_to_stop = 1;
                     float movement_adjustment = distance_error / (float)frames_to_stop;
 
                     // decelerate velocity along the clean ramp
@@ -4344,10 +4268,29 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
             // player handling: rotations
             {
+                // TODO: make const
+                float MAX_ANGULAR_VELOCITY = 0.05f * TAU;
 
+                // TEMP ONLY DOING THIS FOR NO PACK RIGHT NOW
+                Vec4 current_rotation = player->rotation;
+                Vec4 target_rotation = directionToQuaternion(player->direction); 
+                Vec4 from_current_to_target = quaternionMultiply(target_rotation, quaternionConjugate(current_rotation)); // transform * current = target, so transform = target * current^-1
+                float total_angle = 2.0f * atan2f(from_current_to_target.y, from_current_to_target.w);
+                float frame_count = ceilf(fabs(total_angle) / MAX_ANGULAR_VELOCITY);
+                if (frame_count <= 1)
+                {
+                    player->rotation = target_rotation;
+                }
+                else
+                {
+                    float step_angle = total_angle / frame_count;
+                    Vec4 rotation_this_frame = quaternionFromAxis(intCoordsToNorm(AXIS_Y), step_angle);
+                    player->rotation = quaternionMultiply(rotation_this_frame, player->rotation);
+                }
             }
 
             // PACK ANIMATIONS, IF ATTACHED
+            // TODO: this below and above should probably just be one 'rotation handling' case
 
             if (pack_attached)
             {
@@ -4357,29 +4300,27 @@ void gameFrame(double delta_time, TickInput* tick_input)
             }
 
             // PUSHED ENTITY ANIMATIONS
-
             FOR(to_push_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
             {
                 int32 id = entities_tied_to_player_movement[to_push_index].id;
                 if (id <= 0) continue;
-                Direction push_direction = entities_tied_to_player_movement[to_push_index].direction;
-				
+
                 Entity* e = getEntityFromId(id);
+                Direction push_direction = entities_tied_to_player_movement[to_push_index].direction;
                 float difference_in_player_position = getComponentAlongDirection(push_direction, player->position) - getComponentAlongDirection(push_direction, intCoordsToNorm(player->coords));
-                Vec3 entity_target = intCoordsToNorm(e->coords);
                 if (difference_in_player_position != 0) 
                 {
+                    Vec3 entity_target = intCoordsToNorm(e->coords);
                     Vec3 test_position = vec3AddFloatToVec3AlongDirection(push_direction, difference_in_player_position, entity_target);
                     if (getComponentAlongDirection(push_direction, vec3Subtract(test_position, e->position)) > 0) e->position = test_position; // make sure entitiy doesn't snap backwards
                 }
                 else e->position = intCoordsToNorm(e->coords);
             }
-
             // check if player has stopped moving, and if so clear the push state
             if (vec3IsZero(vec3Subtract(player->position, intCoordsToNorm(player->coords))))
             {
                 player_pushing = false;
-                memset(&entities_tied_to_player_movement, 0, sizeof(PushEntity) * MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT);
+                FOR(pushed_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT) if (entities_tied_to_player_movement[pushed_index].on_head == false) entities_tied_to_player_movement[pushed_index].id = 0;
             }
     	}
 
