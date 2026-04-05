@@ -110,7 +110,6 @@ typedef struct
 }
 WorldState;
 
-// trailing hitboxes are to leave something interactible in a location even if the actual object has moved on to a different integer coord. this is helpful mostly for update laser buffer
 typedef struct
 {
     int32 id;
@@ -136,9 +135,7 @@ typedef struct
 }
 PushEntity;
 
-// this is a bunch of state to do with handling what gets pushed when during the turn. pack_intermediate_states_timer is the main thing: it just ticks down while the player is turning.
-// later there is a loop with some numbers that look nice for when things should be turning, based on this timer. the objects don't get pushed the same frame the player turns,
-// so need to store the coords of what to push, and what direction to push it (if it is pushing during this turn)
+// a bunch of state to do with handling what gets pushed when during when the player is turning
 typedef struct
 {
     int32 pack_intermediate_states_timer;
@@ -315,9 +312,7 @@ typedef struct UndoBuffer
 UndoBuffer;
 
 // CONSTS AND GLOBALS
-DisplayInfo game_display = {0};
-
-const float TAU = 6.2831853071f;
+#define TAU 6.2831853071f
 
 const Vec3 DEFAULT_SCALE = { 1.0f,  1.0f,  1.0f  };
 const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
@@ -326,6 +321,7 @@ const float LASER_WIDTH = 0.25;
 const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
 
 const float PLAYER_MAX_SPEED = 0.12f;
+const float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f; // last number is no. frames for a full turn
 const float PLAYER_ACCELERATION = 0.04f;
 const float PLAYER_MAX_DECELERATION = 0.04f; // should be approx the same; offset comes from always clamping before max deceleration rather than it being an average.
     	                                     // if this is the same number, deceleration will be slower than acceleration
@@ -399,6 +395,8 @@ const char overworld_zero_name[64] = "overworld-zero";
 const float CAMERA_SENSITIVITY = 0.005f;
 const float CAMERA_MOVE_STEP = 0.2f;
 const float CAMERA_FOV = 15.0f;
+
+DisplayInfo game_display = {0};
 
 Camera camera = {0};
 Camera camera_with_ow_offset = {0};
@@ -1674,52 +1672,26 @@ bool trailingHitboxAtCoords(Int3 coords, TrailingHitbox* trailing_hitbox)
 
 // PUSH ENTITES
 
-// TODO: taking vec3IsZero of e->velocity is incorrect; i don't only want to move objects if they aren't moving at all - there should be a more intelligent check later.
-
 PushResult canPush(Int3 coords, Direction direction)
 {
     Int3 current_coords = coords;
     TileType current_tile = getTileType(current_coords);
-    for (int push_index = 0; push_index < MAX_ENTITY_PUSH_COUNT; push_index++) 
+    FOR(push_index, MAX_ENTITY_PUSH_COUNT)
     {
         Entity* e = getEntityAtCoords(current_coords);
         if (isEntity(current_tile) && e->locked) return FAILED_PUSH;
 
-        if (!vec3IsZero(e->velocity)) return PAUSE_PUSH;
-        if (isPushable(getTileType(current_coords)) && getTileType(getNextCoords(current_coords, DOWN)) == NONE && !next_world_state.player.hit_by_blue) return PAUSE_PUSH;
-
         current_coords = getNextCoords(current_coords, direction);
-        current_tile = getTileType(current_coords);
-
-        Int3 coords_ahead = getNextCoords(e->coords, direction);
-        if (isPushable(getTileType(coords_ahead)) && !vec3IsZero(getEntityAtCoords(coords_ahead)->velocity)) return PAUSE_PUSH;
-        Int3 coords_below = getNextCoords(e->coords, DOWN);
-        if (isPushable(getTileType(coords_below)) && !vec3IsZero(getEntityAtCoords(coords_below)->velocity)) return PAUSE_PUSH;
-        Int3 coords_below_and_ahead = getNextCoords(getNextCoords(e->coords, DOWN), direction);
-        if (isPushable(getTileType(coords_below_and_ahead)) && !vec3IsZero(getEntityAtCoords(coords_below_and_ahead)->velocity)) return PAUSE_PUSH;
-
         if (!intCoordsWithinLevelBounds(current_coords)) return FAILED_PUSH;
 
+        current_tile = getTileType(current_coords);
         if (current_tile == NONE) return CAN_PUSH;
         if (current_tile == GRID || current_tile == WALL || current_tile == LADDER ) return FAILED_PUSH;
     }
     return FAILED_PUSH; // only here if hit the max entity push count
 }
 
-PushResult canPushStack(Int3 coords, Direction direction)
-{
-    int32 stack_size = getPushableStackSize(coords);
-    Int3 current_coords = coords;
-    FOR(stack_index, stack_size)
-    {
-        PushResult push_result = canPush(current_coords, direction);
-        if (push_result == PAUSE_PUSH) return PAUSE_PUSH;
-        if(stack_index == 0) if (push_result == FAILED_PUSH) return FAILED_PUSH;
-        current_coords = getNextCoords(current_coords, UP);
-    }
-    return CAN_PUSH;
-}
-
+// TODO: should be in canPush with UP as direction
 PushResult canPushUp(Int3 coords)
 {
 	int32 stack_size = getPushableStackSize(coords);
@@ -1730,7 +1702,7 @@ PushResult canPushUp(Int3 coords)
 }
 
 // assumes able to be pushed 
-void pushAll(Int3 coords, Direction direction)
+void pushAll(Int3 coords, Direction direction, bool on_head)
 {
     Int3 current_coords = coords;
     int32 push_count = 0;
@@ -1751,7 +1723,7 @@ void pushAll(Int3 coords, Direction direction)
             Int3 next_coords = getNextCoords(e->coords, direction);
             moveEntityInBufferAndState(e, next_coords, e->direction);
 
-            // add object to 'pushed by player' id array. also, check if it's already being tracked - if so don't add it.
+            // add object to 'pushed by player' id array, unelss it's already being tracked
             int32 next_free = 0;
             bool already_tracked = false;
             FOR(next_free_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
@@ -1769,7 +1741,7 @@ void pushAll(Int3 coords, Direction direction)
             {
                 entities_tied_to_player_movement[next_free].id = e->id;
                 entities_tied_to_player_movement[next_free].direction = direction;
-                entities_tied_to_player_movement[next_free].on_head = false;
+                entities_tied_to_player_movement[next_free].on_head = on_head;
             }
 
             // TODO: create trailing hitbox
@@ -1797,63 +1769,6 @@ void pushUp(Int3 coords)
         // TODO(anims): create interpolation animation from current coords to coords above, with animation_time
     	createTrailingHitbox(e->id, current_coords, TRAILING_HITBOX_TIME, tile);
         current_coords = getNextCoords(current_coords, DOWN);
-    }
-}
-
-// assumes 6-dim dir
-Direction getNextMirrorState(Direction start_direction, Direction push_direction)
-{
-    switch (start_direction)
-    {
-        case NORTH: switch (push_direction)
-        {
-            case NORTH: return SOUTH;
-            case SOUTH: return SOUTH;
-            case WEST:  return UP;
-            case EAST:  return DOWN;
-            default:    return 0;
-        }
-        case SOUTH: switch (push_direction)
-        {
-            case NORTH: return NORTH;
-            case SOUTH: return NORTH;
-            case WEST:  return DOWN;
-            case EAST:  return UP;
-            default: 	return 0;
-        }
-        case WEST: switch (push_direction)
-        {
-            case NORTH: return UP;
-            case SOUTH: return DOWN;
-            case WEST:  return EAST;
-            case EAST:  return EAST;
-            default: 	return 0;
-        }
-        case EAST: switch (push_direction)
-        {
-            case NORTH: return DOWN;
-            case SOUTH: return UP;
-            case WEST:  return WEST;
-            case EAST:  return WEST;
-            default: 	return 0;
-        }
-        case UP: switch (push_direction)
-     	{
-        	case NORTH: return EAST;
-         	case SOUTH: return WEST;
-         	case WEST:  return SOUTH;
-         	case EAST:  return NORTH;
-         	default: 	return 0;
-     	}
-        case DOWN: switch (push_direction)
-       	{
-           	case NORTH: return WEST;
-           	case SOUTH: return EAST;
-           	case WEST:  return NORTH;
-           	case EAST:  return SOUTH;
-           	default: 	return 0;
-       	}
-        default: return 0;
     }
 }
 
@@ -2459,7 +2374,7 @@ void gameInitializeState(char* level_name)
     memset(next_world_state.sources,  	   0, sizeof(next_world_state.sources));
     memset(next_world_state.win_blocks,    0, sizeof(next_world_state.win_blocks));
     memset(next_world_state.locked_blocks, 0, sizeof(next_world_state.locked_blocks));
-    FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+    FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) // TODO: do i still need id -1 as a gate, now that i'm just using .removed everywhere?
     {
         next_world_state.boxes[entity_index].id 		= -1;
         next_world_state.mirrors[entity_index].id 		= -1;
@@ -2637,7 +2552,6 @@ void recordActionForUndo(WorldState* old_state, bool action_was_reset, bool acti
         {
             Entity* e = &groups[group_index][entity_index];
             if (e->id == -1) continue;
-
             recordEntityDelta(e);
             entity_count++;
         }
@@ -3021,12 +2935,13 @@ void doStandardMovement(Direction direction, Int3 next_player_coords, bool recor
 
     // maybe move stack above the player's head
     Int3 coords_above_player = getNextCoords(player->coords, UP);
+
     bool do_on_head_movement = false;
     if (isPushable(getTileType(coords_above_player))) do_on_head_movement = true;
     if (player->hit_by_blue) do_on_head_movement = false;
-    if (do_on_head_movement) 
+    if (do_on_head_movement) if (canPush(coords_above_player, direction) == CAN_PUSH) 
     {
-        if(canPushStack(coords_above_player, direction)) pushAll(coords_above_player, direction);
+        pushAll(coords_above_player, direction, true);
     }
 
     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
@@ -3392,7 +3307,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         }
     }
 
-    // KEYBINDS - separate check for time_until_allow_meta_input because might have been modified above, and if so want to skip this
+    // EDITOR KEYBINDS - separate check for time_until_allow_meta_input because might have been modified above, and if so want to skip this
     if (time_until_allow_meta_input == 0 && editor_state.editor_mode != SELECT_WRITE)
     {
         // editor mode toggle
@@ -3700,7 +3615,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             {
                                 // figure out if push, pause, or fail here.
                                 // implicit: if PAUSE_PUSH, just don't do anything in particular. TODO: this might feel unresponsive, maybe buffer the input or something?
-                            	PushResult push_check = canPushStack(next_player_coords, input_direction);
+                            	PushResult push_check = canPush(next_player_coords, input_direction);
                                 if (push_check == CAN_PUSH) 
                                 {
                                     do_push = true;
@@ -3734,7 +3649,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                             if (allow_walk || cheating)
                             {
-                                if (do_push) pushAll(next_player_coords, input_direction);
+                                if (do_push) pushAll(next_player_coords, input_direction, false);
                                 doStandardMovement(input_direction, next_player_coords, true);
                             }
                             // TODO: temporarily disabled leap of faith
@@ -4079,7 +3994,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             if (pack_turn_state.pack_intermediate_states_timer == 7)
             {
                 createTrailingHitbox(PACK_ID, pack->coords, 4, PACK);
-				if (pack_turn_state.do_diagonal_push_on_turn) pushAll(pack_turn_state.pack_intermediate_coords, oppositeDirection(player->direction));
+				if (pack_turn_state.do_diagonal_push_on_turn) pushAll(pack_turn_state.pack_intermediate_coords, oppositeDirection(player->direction), false);
             }
             else if (pack_turn_state.pack_intermediate_states_timer == 5)
             {
@@ -4087,7 +4002,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             }
             else if (pack_turn_state.pack_intermediate_states_timer == 4)
             {
-                if (pack_turn_state.do_orthogonal_push_on_turn) pushAll(pack_turn_state.pack_hitbox_turning_to_coords, pack_turn_state.pack_orthogonal_push_direction);
+                if (pack_turn_state.do_orthogonal_push_on_turn) pushAll(pack_turn_state.pack_hitbox_turning_to_coords, pack_turn_state.pack_orthogonal_push_direction, false);
             }
             else if (pack_turn_state.pack_intermediate_states_timer == 3)
             {
@@ -4277,9 +4192,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
             // player handling: rotations
             {
-                // TODO: make const
-                float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f;
-
                 // TEMP ONLY DOING THIS FOR NO PACK RIGHT NOW
                 Vec4 target_rotation = directionToQuaternion(player->direction); 
                 if (quaternionInnerProduct( player->rotation, target_rotation) < 0 ) target_rotation = quaternionNegate(target_rotation); // make sure quaternions on same hemisphere
