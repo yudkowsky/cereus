@@ -592,6 +592,11 @@ Vec4 quaternionConjugate(Vec4 q)
     return (Vec4){ -q.x, -q.y, -q.z, q.w };
 }
 
+Vec4 quaternionNegate(Vec4 q)
+{
+    return (Vec4){ -q.x, -q.y, -q.z, -q.w };
+}
+
 // any 3D axis
 Vec4 quaternionFromAxis(Vec3 axis, float angle)
 {
@@ -609,6 +614,11 @@ Vec4 quaternionMultiply(Vec4 q_a, Vec4 q_b)
         (q_a.w * q_b.z) + (q_a.x * q_b.y) - (q_a.y * q_b.x) + (q_a.z * q_b.w),
         (q_a.w * q_b.w) - (q_a.x * q_b.x) - (q_a.y * q_b.y) - (q_a.z * q_b.z) 
     };
+}
+
+float quaternionInnerProduct(Vec4 q_a, Vec4 q_b)
+{
+    return (q_a.x * q_b.x) + (q_a.y * q_b.y) + (q_a.z * q_b.z) + (q_a.w * q_b.w);
 }
 
 Vec4 quaternionNormalize(Vec4 q)
@@ -3079,7 +3089,6 @@ bool wouldOvershoot(float speculative_velocity_along_direction, float position_a
 {
     float offset_from_current_position_if_accelerate = oneDimensionalDecelerationSimulation(sign * speculative_velocity_along_direction, PLAYER_MAX_DECELERATION);
     float position_after_accelerate_then_immediately_decelerate = sign * offset_from_current_position_if_accelerate + position_along_direction;
-
     bool would_overshoot = false;
     if (sign == -1.0f)
     {
@@ -4269,13 +4278,13 @@ void gameFrame(double delta_time, TickInput* tick_input)
             // player handling: rotations
             {
                 // TODO: make const
-                float MAX_ANGULAR_VELOCITY = 0.05f * TAU;
+                float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f;
 
                 // TEMP ONLY DOING THIS FOR NO PACK RIGHT NOW
-                Vec4 current_rotation = player->rotation;
                 Vec4 target_rotation = directionToQuaternion(player->direction); 
-                Vec4 from_current_to_target = quaternionMultiply(target_rotation, quaternionConjugate(current_rotation)); // transform * current = target, so transform = target * current^-1
-                float total_angle = 2.0f * atan2f(from_current_to_target.y, from_current_to_target.w);
+                if (quaternionInnerProduct( player->rotation, target_rotation) < 0 ) target_rotation = quaternionNegate(target_rotation); // make sure quaternions on same hemisphere
+                Vec4 from_current_to_target = quaternionMultiply(target_rotation, quaternionConjugate(player->rotation)); // transform * current = target, so transform = target * current^-1
+                float total_angle = 2.0f * atan2f(from_current_to_target.y, from_current_to_target.w); // can do this because rotation is fully around the y axis
                 float frame_count = ceilf(fabs(total_angle) / MAX_ANGULAR_VELOCITY);
                 if (frame_count <= 1)
                 {
@@ -4308,11 +4317,11 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 Entity* e = getEntityFromId(id);
                 Direction push_direction = entities_tied_to_player_movement[to_push_index].direction;
                 float difference_in_player_position = getComponentAlongDirection(push_direction, player->position) - getComponentAlongDirection(push_direction, intCoordsToNorm(player->coords));
-                if (difference_in_player_position != 0) 
+                if (difference_in_player_position != 0)
                 {
                     Vec3 entity_target = intCoordsToNorm(e->coords);
                     Vec3 test_position = vec3AddFloatToVec3AlongDirection(push_direction, difference_in_player_position, entity_target);
-                    if (getComponentAlongDirection(push_direction, vec3Subtract(test_position, e->position)) > 0) e->position = test_position; // make sure entitiy doesn't snap backwards
+                    if (getSignedComponentAlongDirection(push_direction, vec3Subtract(test_position, e->position)) > 0) e->position = test_position;
                 }
                 else e->position = intCoordsToNorm(e->coords);
             }
