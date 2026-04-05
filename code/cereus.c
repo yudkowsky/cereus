@@ -346,6 +346,7 @@ const int32 TIME_AFTER_UNDO_UNTIL_PHYSICS_START = 4;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 64;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
+const int32 MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT = 32;
 const int32 MAX_SOURCE_COUNT = 32;
 const int32 MAX_LASER_TRAVEL_DISTANCE = 256;
 const int32 MAX_LASER_TURNS_ALLOWED = 16;
@@ -459,7 +460,7 @@ bool bypass_player_fall = false;
 
 // handle pushed entities
 bool player_pushing = false;
-int32 entites_tied_to_player_movement[32] = {0};
+int32 entities_tied_to_player_movement[32] = {0};
 
 ShaderMode game_shader_mode = OLD;
 bool draw_trailing_hitboxes = false;
@@ -900,13 +901,13 @@ Vec3 directionToVector(Direction direction)
         case EAST:  return (Vec3){  1,  0,  0 };
         case UP:    return (Vec3){  0,  1,  0 };
         case DOWN:  return (Vec3){  0, -1,  0 };
-
         default: return VEC3_0;
     }
 }
 
 // TODO: do actually need to change axis of rotation for U/D cases with mirror vs. sources. could think about alternative solutions, but there's no real good reason they should match - the rotations
 // 		 encode different things. also think about this just not being relevant, if have one 'standing' mirror and one 'up/down' mirror (would also mean 1-sided mirrors are automatic, if want them)
+// 		 also, these rotations could be hardcoded
 Vec4 directionToQuaternion(Direction direction) 
 {
     switch (direction)
@@ -1249,7 +1250,6 @@ bool saveLevelRewrite(char* path)
             writeLockedInfoToFile(file, e);
         }
     }
-
     fclose(file);
     return true;
 }
@@ -1751,14 +1751,33 @@ void pushAll(Int3 coords, Direction direction)
             Int3 next_coords = getNextCoords(e->coords, direction);
             moveEntityInBufferAndState(e, next_coords, e->direction);
 
+            // add object to 'pushed by player' id array. also, check if it's already being tracked - if so don't add it.
+            int32 next_free = 0;
+            bool already_tracked = false;
+            FOR(next_free_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
+            {
+                if (entities_tied_to_player_movement[next_free_index] == e->id) 
+                {
+                    already_tracked = true;
+                    break; // doesn't guarantee not already having written something to next_free. so need the already_tracked guard 
+                }
+                if (entities_tied_to_player_movement[next_free_index] > 0) continue;
+                next_free = next_free_index;
+                break;
+            }
+            if (!already_tracked) entities_tied_to_player_movement[next_free] = e->id;
+
             // TODO: create trailing hitbox
+
             current_stack_coords = getNextCoords(current_stack_coords, UP);
         }
         current_coords = getNextCoords(current_coords, oppositeDirection(direction));
     }
+    player_pushing = true;
 }
 
-void pushUp(Int3 coords, int32 animation_time)
+// TODO: why not call this with pushAll(coords, UP)?
+void pushUp(Int3 coords)
 {
     int32 stack_size = getPushableStackSize(coords);
     Int3 current_coords = coords;
@@ -1771,7 +1790,7 @@ void pushUp(Int3 coords, int32 animation_time)
         Int3 coords_above = getNextCoords(current_coords, UP);
         moveEntityInBufferAndState(e, coords_above, dir);
         // TODO(anims): create interpolation animation from current coords to coords above, with animation_time
-    	createTrailingHitbox(e->id, current_coords, (animation_time / 2) + 1, tile);
+    	createTrailingHitbox(e->id, current_coords, TRAILING_HITBOX_TIME, tile);
         current_coords = getNextCoords(current_coords, DOWN);
     }
 }
@@ -1894,7 +1913,7 @@ float getSignedComponentAlongDirection(Direction direction, Vec3 vector)
 
 Vec3 vec3ZeroComponentAlongDirection(Direction direction, Vec3 vector)
 {
-    switch(direction)
+    switch (direction)
     {
         case NORTH:
         case SOUTH:
@@ -1908,6 +1927,26 @@ Vec3 vec3ZeroComponentAlongDirection(Direction direction, Vec3 vector)
         default:
             return VEC3_0;
     }
+}
+
+Vec3 vec3AddFloatToVec3AlongDirection(Direction direction, float f, Vec3 v)
+{
+    switch (direction)
+    {
+        case NORTH:
+        case SOUTH:
+            return (Vec3){ v.x, v.y, v.z + f };
+        case WEST:
+        case EAST:
+            return (Vec3){ v.x + f, v.y, v.z };
+        case UP:
+        case DOWN:
+            return (Vec3){ v.x, v.y + f, v.z };
+        default:
+            return VEC3_0;
+
+    }
+	
 }
 
 float getDistanceFromLaserAlongAxis(Direction laser_direction, Vec3 laser_position, Vec3 entity_position)
@@ -3669,7 +3708,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
             {
 				// MOVEMENT 
                 Direction input_direction = 0;
-                Int3 next_player_coords = {0};
                 if 		(tick_input->w_press) input_direction = NORTH; 
                 else if (tick_input->a_press) input_direction = WEST; 
                 else if (tick_input->s_press) input_direction = SOUTH; 
@@ -3677,7 +3715,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                 if (input_direction == player->direction)
                 {
-                    next_player_coords = getNextCoords(player->coords, input_direction);
+                    // FORWARD MOVEMENT
+                    Int3 next_player_coords = getNextCoords(player->coords, input_direction);
 
                     bool allow_input = false;
 
@@ -3686,14 +3725,12 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(input_direction, sign);
                     float position_along_direction = getComponentAlongDirection(input_direction, player->position);
                     float coords_along_direction = getComponentAlongDirection(input_direction, intCoordsToNorm(player->coords));
-
-                    bool would_overshoot = wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign);
-                    if (would_overshoot) allow_input = true;
+                    if (wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign)) allow_input = true;
 
                     // don't allow movement if have any angular velocity TODO: gate this less aggressively - would probably want to allow if rotation is within some range of targeted velocity
                     if (!vec3IsZero(player->angular_velocity)) allow_input = false;
 
-                    // disallow movement if also moving in some other direction currently (not likely to happen; would need to turn first)
+                    // disallow movement if also moving in some other direction currently - probably just guards against moving while falling
                     if (!vec3IsZero(vec3ZeroComponentAlongDirection(input_direction, player->velocity))) allow_input = false;
 
                     if (allow_input)
@@ -3708,6 +3745,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             case NONE:
                             {
                                 // only don't allow movement if there's a trailing hitbox there. TODO: this is probably too aggressive of a check. see how it feels (maybe gate by frames left?)
+                                // will also need to add a gate for "is this trailing hitbox even within these coords?"
                                 TrailingHitbox th = {0};
                                 if (trailingHitboxAtCoords(next_player_coords, &th)) try_walk = false;
                                 else try_walk = true;
@@ -3722,7 +3760,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             case SOURCE_MAGENTA:
                             {
                                 // figure out if push, pause, or fail here.
-                                // implicit: if PAUSE_PUSH, just don't do any particular animations differently. TODO: this might feel unresponsive, maybe buffer the input or something?
+                                // implicit: if PAUSE_PUSH, just don't do anything in particular. TODO: this might feel unresponsive, maybe buffer the input or something?
                             	PushResult push_check = canPushStack(next_player_coords, input_direction);
                                 if (push_check == CAN_PUSH) 
                                 {
@@ -3736,7 +3774,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             {
                                 // if ladder is facing towards the player, do the climb
                                 if (getTileDirection(next_player_coords) == oppositeDirection(player->direction)) climb = true;
-                                else // TODO(anims): failed animations case
+                                else { /* TODO(anims): failed animations case */ }
                                 break;
                             }
                             default:
@@ -3844,6 +3882,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         }
 						else if (climb)
                         {
+                            /*
                             bool can_climb = false;
                             Int3 coords_above = getNextCoords(player->coords, UP);
 
@@ -3855,7 +3894,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             {
                                 if (canPushUp(coords_above) == CAN_PUSH) 
                                 {
-                                    pushUp(coords_above, CLIMB_ANIMATION_TIME);
+                                    pushUp(coords_above);
                                     can_climb = true;
                                 }
                             }
@@ -3875,13 +3914,13 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                                 recordActionForUndo(&world_state, false, true);
                             }
+                            */
                         }
                     }
                 }
-
                 else if (input_direction != oppositeDirection(player->direction)) // check if turning (as opposed to trying to reverse)
                 {
-                    // player is turning
+                    // TURN MOVEMENT
 
                     bool allow_turn = true;
                     if (getTileType(getNextCoords(player->coords, DOWN)) == NONE && !player->hit_by_red) allow_turn = false;
@@ -4261,82 +4300,87 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
         // do animations and handle state regarding movement
         {
-            // player handling
+            // PLAYER ANIMATIONS
+
+            // store before-move player coords for entity movement later
+            Vec3 player_position_before_move = player->position;
+
+            // player handling: directional movement
+            FOR(direction_index, 4)
             {
-                // need to loop over 4 directions and handle directional velocity. right now, only one at a time here will ever be actuated, but should maybe be able to keep the same system later
-                for (Direction direction_index = 0; direction_index < 4; direction_index++)
+                // only handle velocity / position if offset from the coords
+                Vec3 difference_in_player_position = vec3Subtract(intCoordsToNorm(player->coords), player->position);
+                float difference_in_position_along_direction = getComponentAlongDirection(direction_index, difference_in_player_position);
+                float sign = direction_index == NORTH || direction_index == WEST ? -1.0f : 1.0f;
+                if (difference_in_position_along_direction * sign <= 0) continue; // will continue if west picks up a difference in the east direction (and north in south direction)
+
+                float position_along_direction = getComponentAlongDirection(direction_index, player->position);
+                float coords_along_direction = getComponentAlongDirection(direction_index, intCoordsToNorm(player->coords));
+                float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(direction_index, sign);
+                if (!wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign))
                 {
-                    // only handle velocity / position if offset from the coords
-                    float position_along_direction = getComponentAlongDirection(direction_index, player->position);
-                    float coords_along_direction = getComponentAlongDirection(direction_index, intCoordsToNorm(player->coords));
-                    float difference_in_position = coords_along_direction - position_along_direction;
+                    // no overshooting: accelerate fully
+                    if (direction_index == NORTH || direction_index == SOUTH) player->velocity.z = speculative_velocity_along_direction;
+                    else player->velocity.x = speculative_velocity_along_direction;
+                    player->position = vec3Add(player->position, player->velocity);
+                }
+                else
+                {
+                    float current_speed = sign * getComponentAlongDirection(direction_index, player->velocity);
+                    float remaining_distance = sign * difference_in_position_along_direction;
+                    float stopping_distance = oneDimensionalDecelerationSimulation(current_speed, PLAYER_MAX_DECELERATION);
+                    float distance_error = remaining_distance - stopping_distance;
+                    int32 frames_to_stop = (int32)ceilf(current_speed / PLAYER_MAX_DECELERATION);
+                    if (frames_to_stop < 1) frames_to_stop = 1;
+                    float movement_adjustment = distance_error / (float)frames_to_stop;
 
-                    float sign = direction_index == NORTH || direction_index == WEST ? -1.0f : 1.0f;
+                    // decelerate velocity along the clean ramp
+                    float decelerated_speed = current_speed - PLAYER_MAX_DECELERATION;
+                    if (decelerated_speed < 0) decelerated_speed = 0;
 
-                    if (difference_in_position * sign <= 0) continue; // will continue if west starts picking up a difference in the east direction (and north of south direction)
+                    // move position by velocity + adjustment, then set velocity to decelerated value
+                    float actual_movement = current_speed + movement_adjustment;
 
-                    float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(direction_index, sign);
-					bool would_overshoot = wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign);
-                    
-                    if (!would_overshoot)
-                    {
-                        // no overshooting: accelerate fully
-                        if (direction_index == NORTH || direction_index == SOUTH) player->velocity.z = speculative_velocity_along_direction;
-                        else player->velocity.x = speculative_velocity_along_direction;
-                        player->position = vec3Add(player->position, player->velocity);
-                    }
-                    else
-                    {
-                        float current_speed = sign * getComponentAlongDirection(direction_index, player->velocity);
-                        float remaining_distance = sign * difference_in_position;
-                        float stopping_distance = oneDimensionalDecelerationSimulation(current_speed, PLAYER_MAX_DECELERATION);
-                        float distance_error = remaining_distance - stopping_distance;
-                        int32 frames_to_stop = (int32)ceilf(current_speed / PLAYER_MAX_DECELERATION);
-                        if (frames_to_stop < 1) frames_to_stop = 1;
-                        float movement_adjustment = distance_error / (float)frames_to_stop;
-
-                        // decelerate velocity along the clean ramp
-                        float decelerated_speed = current_speed - PLAYER_MAX_DECELERATION;
-                        if (decelerated_speed < 0) decelerated_speed = 0;
-
-                        // move position by velocity + adjustment, then set velocity to decelerated value
-                        float actual_movement = current_speed + movement_adjustment;
-
-                        if (direction_index == NORTH || direction_index == SOUTH)
-                        {
-                            player->position.z += sign * actual_movement;
-                            player->velocity.z = sign * decelerated_speed;
-                        }
-                        else
-                        {
-                            player->position.x += sign * actual_movement;
-                            player->velocity.x = sign * decelerated_speed;
-                        }
-                    }
+                    player->position = vec3AddFloatToVec3AlongDirection(direction_index, sign * actual_movement, player->position);
+                    if (direction_index == NORTH || direction_index == SOUTH) player->velocity.z = sign * decelerated_speed;
+                    else player->velocity.x = sign * decelerated_speed;
                 }
             }
 
-            // pack handling
+            // player handling: rotations
             {
-                if (pack_attached)
-                {
-                    Vec3 pack_coords = vec3Subtract(player->position, directionToVector(player->direction));
-                    pack->position = pack_coords;
-                    pack->rotation = directionToQuaternion(pack->direction);
-                }
+
             }
 
-            // all standard entities
-            Entity* all_entity_groups[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.sources, next_world_state.win_blocks };
-            FOR(falling_object_index, 4)
+            // PACK ANIMATIONS, IF ATTACHED
+
+            if (pack_attached)
             {
-                Entity* entity_group = all_entity_groups[falling_object_index];
-                FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) 
-                {
-                    Entity* e = &entity_group[entity_index];
-                    e->position = intCoordsToNorm(e->coords);
-                    e->rotation = directionToQuaternion(e->direction);
-                }
+                Vec3 pack_coords = vec3Subtract(player->position, directionToVector(player->direction));
+                pack->position = pack_coords;
+                pack->rotation = directionToQuaternion(pack->direction);
+            }
+
+            // PUSHED ENTITY ANIMATIONS
+
+            FOR(to_push_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
+            {
+                int32 id = entities_tied_to_player_movement[to_push_index];
+                if (id <= 0) continue;
+                Entity* e = getEntityFromId(id);
+                Vec3 difference_in_entity_position = vec3Subtract(intCoordsToNorm(e->coords), e->position);
+                Vec3 player_travel_this_frame = vec3Subtract(player->position, player_position_before_move);
+                Direction entity_movement_direction = NO_DIRECTION;
+                FOR(direction_index, 6) if (getComponentAlongDirection(direction_index, difference_in_entity_position) > 0) entity_movement_direction = direction_index; // assumes one axis of movement
+                float player_movement_along_direction = getComponentAlongDirection(entity_movement_direction, player_travel_this_frame);
+                e->position = vec3AddFloatToVec3AlongDirection(entity_movement_direction, player_movement_along_direction, e->position);
+            }
+
+            // check if player has stopped moving, and if so clear the push state
+            if (vec3IsZero(vec3Subtract(player->position, intCoordsToNorm(player->coords))))
+            {
+                player_pushing = false;
+                memset(&entities_tied_to_player_movement, 0, sizeof(int32) * MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT);
             }
     	}
 
@@ -4498,13 +4542,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
             createDebugText(mirror_info);
             */
 
-            /*
             char box_info[256] = {0};
 			Entity box1 = next_world_state.boxes[0];
-			Entity box2 = next_world_state.boxes[1];
-            snprintf(box_info, sizeof(box_info), "box 1 in motion: %i, box 1 moving direction: %i, box 2 in motion: %i, box 2 moving direction: %i", box1.in_motion, box1.moving_direction, box2.in_motion, box2.moving_direction);
+            snprintf(box_info, sizeof(box_info), "box 1 coords: %i, %i, %i, box 1 pos: %f, %f, %f", box1.coords.x, box1.coords.y, box1.coords.z, box1.position.x, box1.position.y, box1.position.z);
             createDebugText(box_info);
-            */
 
             char timer_info[256] = {0};
             snprintf(timer_info, sizeof(timer_info), "meta: %i, undo/restart: %i", time_until_allow_meta_input, time_until_allow_undo_or_restart_input);
