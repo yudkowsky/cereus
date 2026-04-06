@@ -319,10 +319,11 @@ const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
 
 const float PLAYER_MAX_SPEED = 0.12f;
 const int32 TURN_TIME = 10;
+const float MIN_DOWN_VELOCITY = -0.2f;
 const float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f; // last number is no. frames for a full turn
 const float PLAYER_ACCELERATION = 0.04f;
 const float PLAYER_MAX_DECELERATION = 0.04f;
-const float GRAVITY = -0.05f;
+const float GRAVITY = -0.03f;
 
 const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
 const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
@@ -331,7 +332,7 @@ const int32 TIME_AFTER_UNDO_UNTIL_PHYSICS_START = 4;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 64;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
-const int32 MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT = 32;
+const int32 MAX_ENTITIES_TIED_TO_MOVEMENT = 32;
 const int32 MAX_SOURCE_COUNT = 32;
 const int32 MAX_LASER_TRAVEL_DISTANCE = 256;
 const int32 MAX_LASER_TURNS_ALLOWED = 16;
@@ -1740,7 +1741,7 @@ void pushAll(Int3 coords, Direction direction, bool on_head, Entity* tied_to_ent
             // add object to 'pushed by player' id array, unelss it's already being tracked
             int32 write_index = -1;
             bool already_tracked = false;
-            FOR(next_free_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
+            FOR(next_free_index, MAX_ENTITIES_TIED_TO_MOVEMENT)
             {
                 if (entities_tied_to_movement[next_free_index].id == e->id) 
                 {
@@ -1852,19 +1853,19 @@ float getSignedComponentAlongDirection(Direction direction, Vec3 vector)
     }
 }
 
-Vec3 vec3ZeroComponentAlongDirection(Direction direction, Vec3 vector)
+Vec3 vec3SetComponentAlongDirection(Direction direction, Vec3 vector, float f)
 {
     switch (direction)
     {
         case NORTH:
         case SOUTH:
-            return (Vec3){ vector.x, vector.y, 0.0f };
+            return (Vec3){ vector.x, vector.y, f };
         case WEST:
         case EAST:
-            return (Vec3){ 0.0f, vector.y, vector.z };
+            return (Vec3){ f, vector.y, vector.z };
         case UP:
         case DOWN:
-            return (Vec3){ vector.x, 0.0f, vector.z };
+            return (Vec3){ vector.x, f, vector.z };
         default:
             return VEC3_0;
     }
@@ -1885,9 +1886,7 @@ Vec3 vec3AddFloatToVec3AlongDirection(Direction direction, float f, Vec3 v)
             return (Vec3){ v.x, v.y + f, v.z };
         default:
             return VEC3_0;
-
     }
-	
 }
 
 float getDistanceFromLaserAlongAxis(Direction laser_direction, Vec3 laser_position, Vec3 entity_position)
@@ -1916,7 +1915,7 @@ float getDistanceFromLaserAlongAxis(Direction laser_direction, Vec3 laser_positi
 
 Vec3 getNormCoordsWithEntityCoordAlongAxis(Direction direction, Vec3 current_norm_coords, Vec3 mirror_position)
 {
-    Vec3 norm_coords_not_along_axis = vec3ZeroComponentAlongDirection(direction, current_norm_coords);
+    Vec3 norm_coords_not_along_axis = vec3SetComponentAlongDirection(direction, current_norm_coords, 0);
     Vec3 mirror_coords_along_axis = vec3ScalarMultiply(directionToVector(direction), getSignedComponentAlongDirection(direction, mirror_position));
     return vec3Add(norm_coords_not_along_axis, mirror_coords_along_axis);
 }
@@ -2122,7 +2121,7 @@ void updateLaserBuffer()
                         Vec3 norm_coord_difference = vec3Subtract(current_norm_coords, mirror->position);
                         float difference_along_next_laser_direction_axis = getSignedComponentAlongDirection(next_laser_direction, norm_coord_difference);
                         Vec3 corresponding_difference_along_current_direction_axis = vec3ScalarMultiply(directionToVector(current_direction), difference_along_next_laser_direction_axis);
-                        Vec3 norm_coord_difference_not_along_current_direction_axis = vec3ZeroComponentAlongDirection(current_direction, norm_coord_difference);
+                        Vec3 norm_coord_difference_not_along_current_direction_axis = vec3SetComponentAlongDirection(current_direction, norm_coord_difference, 0);
                         current_norm_coords = vec3Add(mirror->position, vec3Add(norm_coord_difference_not_along_current_direction_axis, corresponding_difference_along_current_direction_axis));
 
                         // compute for clip plane before overwriting current_direction
@@ -3574,7 +3573,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) allow_input = false;
 
                     // disallow movement if also moving in some other direction currently - probably just guards against moving while falling
-                    if (!vec3IsZero(vec3ZeroComponentAlongDirection(input_direction, player->velocity))) allow_input = false;
+                    if (!vec3IsZero(vec3SetComponentAlongDirection(input_direction, player->velocity, 0))) allow_input = false;
 
                     if (allow_input)
                     {
@@ -3909,7 +3908,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
         if (pack_turn_state.pack_intermediate_states_timer > 0) pack_turn_state.pack_intermediate_states_timer--;
 
         // falling logic for entities
-        /*
         bool halt_falling = false;
         if (undo_press_timer > 0) halt_falling = true; // only do falling if there's not been an undo recently
         if (cheating) halt_falling = true;
@@ -3924,31 +3922,41 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 bool update_falling = false;
                 if (!e->falling) update_falling = true;
                 if (halt_falling) update_falling = false;
+                FOR(tied_check, MAX_ENTITIES_TIED_TO_MOVEMENT) if (entities_tied_to_movement[tied_check].id == e->id) { update_falling = false; break; }
                 if (update_falling && canFall(e)) setFalling(e);
 
                 if (e->falling)
                 {
-                    e->velocity.y += GRAVITY;
-                	float test_y = e->position.y + e->velocity.y;
-                    if (test_y > getComponentAlongDirection(DOWN, intCoordsToNorm(e->coords)))
+                    float test_y_velocity = e->velocity.y + GRAVITY;
+                    test_y_velocity = floatMax(test_y_velocity, MIN_DOWN_VELOCITY);
+                	float test_y_position = e->position.y + test_y_velocity;
+                    if (test_y_position > getComponentAlongDirection(DOWN, intCoordsToNorm(e->coords)))
                     {
-                        e->position.y = test_y;
+                        e->velocity.y = test_y_velocity;
+                        e->position.y = test_y_position;
                     }
                     else
                     {
                         bool continue_falling = false;
-                        if (canFall(e)) continue_falling = true;
-                        if (halt_falling) continue_falling = false;
+                        if (!halt_falling && canFall(e)) continue_falling = true;
+                        
                         if (continue_falling)
                         {
-                            setFalling(e);
-                            e->coords = getNextCoords(e->coords, DOWN);
+                            e->position.y = test_y_position;
+                            e->velocity.y = test_y_velocity;
+                            Int3 next_coords = getNextCoords(e->coords, DOWN);
+                            moveEntityInBufferAndState(e, next_coords, e->direction);
+                        }
+                        else
+                        {
+                            e->position.y = (float)e->coords.y;
+                            e->falling = false;
+                            e->velocity.y = 0;
                         }
                     }
                 }
             }
         }
-        */
 
         /*
         if (do_falling_logic)
@@ -4149,7 +4157,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             }
 
             // handle entities tied to movement
-            FOR(tied_entity_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
+            FOR(tied_entity_index, MAX_ENTITIES_TIED_TO_MOVEMENT)
             {
             	TiedEntity* tied_entity_info = &entities_tied_to_movement[tied_entity_index];
                 if (tied_entity_info->id <= 0) continue;
@@ -4180,18 +4188,26 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         Vec3 test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, difference_in_root_position_along_direction, entity_target);
                         bool do_entity_move = false;
                         if (getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, e->position)) > 0) do_entity_move = true;
-                        if (do_entity_move) e->position = test_position;
+                        if (do_entity_move) 
+                        {
+                            e->position = test_position;
+                            e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
+                        }
                         else if (tied_entity_info->on_head)
                         {
                             e->position = intCoordsToNorm(e->coords);
-                            tied_entity_info->id = 0; // here if something on head will overshoot
+                            e->velocity = VEC3_0;
+                            tied_entity_info->id = 0; // here if something on head overshoots when it's not supposed to be moving anymore
                         }
                     }
-                    else e->position = intCoordsToNorm(e->coords);
+                    else 
+                    {
+                        e->position = intCoordsToNorm(e->coords);
+                        e->velocity = VEC3_0;
+                    }
 
                     bool clear_entity_from_tied_to_movement = false;
-                    bool root_still_moving = !vec3IsZero(root_e->velocity);
-                    if (vec3IsEqual(e->position, intCoordsToNorm(e->coords)) && !root_still_moving) clear_entity_from_tied_to_movement = true;
+                    if (vec3IsEqual(e->position, intCoordsToNorm(e->coords))) clear_entity_from_tied_to_movement = true;
                     if (tied_entity_info->on_head) clear_entity_from_tied_to_movement = false;
                     if (clear_entity_from_tied_to_movement) tied_entity_info->id = 0;
                 }
