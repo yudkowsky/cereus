@@ -624,12 +624,12 @@ Vec4 quaternionNormalize(Vec4 q)
     return (Vec4){ q.x * inverse_length, q.y * inverse_length, q.z * inverse_length, q.w * inverse_length };
 }
 
-float getAngleOfYAxisRotation(Vec4 current, Vec4 target)
+float getAngleOfYAxisRotation(Vec4 a, Vec4 b)
 {
-    Vec4 unwound_target = target;
-    if (quaternionInnerProduct(current, target) < 0) unwound_target = quaternionNegate(target); // make sure quaternions on same hemisphere
-    Vec4 from_current_to_target = quaternionMultiply(unwound_target, quaternionConjugate(current)); // transform * current = target, so transform = target * current^-1
-    return 2.0f * atan2f(from_current_to_target.y, from_current_to_target.w); // can do this because rotation is fully around the y axis
+    Vec4 unwound_b = b;
+    if (quaternionInnerProduct(a, b) < 0) unwound_b = quaternionNegate(b); // make sure quaternions on same hemisphere
+    Vec4 from_a_to_b = quaternionMultiply(unwound_b, quaternionConjugate(a)); // transform * a = b, so transform = b * a^-1
+    return 2.0f * atan2f(from_a_to_b.y, from_a_to_b.w); // can do this because rotation is fully around the y axis
 }
 
 // TODO: could use the optimised version when i understand quaternions better. for now, this is more transparent
@@ -1729,29 +1729,29 @@ void pushAll(Int3 coords, Direction direction, bool on_head)
             moveEntityInBufferAndState(e, next_coords, e->direction);
 
             // add object to 'pushed by player' id array, unelss it's already being tracked
-            int32 next_free = 0;
+            int32 write_index = -1;
             bool already_tracked = false;
             FOR(next_free_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
             {
                 if (entities_tied_to_player_movement[next_free_index].id == e->id) 
                 {
                     already_tracked = true;
+                    write_index = next_free_index;
                     break; // doesn't guarantee not already having written something to next_free. so need the already_tracked guard 
                 }
                 if (entities_tied_to_player_movement[next_free_index].id > 0) continue;
-                next_free = next_free_index;
-                break;
+                if (write_index == -1) write_index = next_free_index;
             }
             if (!already_tracked) 
             {
-                entities_tied_to_player_movement[next_free].id = e->id;
-                entities_tied_to_player_movement[next_free].direction = direction;
-                entities_tied_to_player_movement[next_free].on_head = on_head;
+                entities_tied_to_player_movement[write_index].id = e->id;
+                entities_tied_to_player_movement[write_index].direction = direction;
+                entities_tied_to_player_movement[write_index].on_head = on_head;
             }
             else
             {
                 // if already tracked, maybe update direction
-                entities_tied_to_player_movement[next_free].direction = direction;
+                entities_tied_to_player_movement[write_index].direction = direction;
             }
 
             // TODO: create trailing hitbox
@@ -4051,9 +4051,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
         }
 		*/
 
-        // do animations and handle state regarding movement
+        // do animations and handle some state, in particular entities tied to player movement
         {
-            // player handling: directional movement
+            // handle directional movement
             FOR(direction_index, 4)
             {
                 // only handle velocity / position if offset from the coords
@@ -4101,14 +4101,14 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 pack->rotation = directionToQuaternion(player->direction);
             }
 
-            // rotation handling
+            // handle turn
             {
-                Vec4 target_rotation = directionToQuaternion(player->direction); 
-                float total_angle = getAngleOfYAxisRotation(player->rotation, target_rotation);
+                // player rotation
+                float total_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
                 float frame_count = ceilf(fabs(total_angle) / MAX_ANGULAR_VELOCITY);
                 if (frame_count <= 1)
                 {
-                    player->rotation = target_rotation;
+                    player->rotation = directionToQuaternion(player->direction); // wounding is dealt with in getAngleOfYAxisRotation - but this might be wrong, then?
                 }
                 else
                 {
@@ -4117,60 +4117,52 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     player->rotation = quaternionMultiply(rotation_this_frame, player->rotation);
                 }
 
+                // pack rotation
                 if (pack_attached)
                 {
                     // TODO: pack logic here
                 }
-
-                // rotate entities on head
-                FOR(to_rotate_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
-                {
-                    TiedEntity* rotate_entity = &entities_tied_to_player_movement[to_rotate_index];
-                    if (rotate_entity->id <= 0) continue;
-                    if (!rotate_entity->on_head) continue;
-
-                    Entity* e = getEntityFromId(rotate_entity->id);
-                    // find rotation from target to current of player, and apply the same rotation to target direction of the entity.
-                }
             }
 
-            /* TODO: compact above and below loops into one
-			// tied entity handling
-            FOR(tied_entity, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
+            // handle entities tied to player movement
+            FOR(tied_entity_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
             {
+            	TiedEntity* tied_entity = &entities_tied_to_player_movement[tied_entity_index];
+                if (tied_entity->id <= 0) continue;
 
-            }
-            */
-
-            // temp pack snap to coords
-            pack->position = intCoordsToNorm(pack->coords);
-            pack->rotation = directionToQuaternion(pack->direction);
-
-            // push entities in front and on head 
-            FOR(to_push_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
-            {
-                TiedEntity* push_entity = &entities_tied_to_player_movement[to_push_index];
-                if (push_entity->id <= 0) continue;
-
-                Entity* e = getEntityFromId(push_entity->id);
-                Vec3 difference_in_player_position = vec3Subtract(player->position, intCoordsToNorm(player->coords));
-                float difference_in_player_position_along_direction = getComponentAlongDirection(push_entity->direction, difference_in_player_position);
-                if (difference_in_player_position_along_direction != 0)
+                Entity* e = getEntityFromId(tied_entity->id);
+                if (tied_entity->direction == NO_DIRECTION)
                 {
-                    Vec3 entity_target = intCoordsToNorm(e->coords);
-                    Vec3 test_position = vec3AddFloatToVec3AlongDirection(push_entity->direction, difference_in_player_position_along_direction, entity_target);
-                    
-                    bool do_entity_move = false;
-                    if (push_entity->on_head) do_entity_move = true;
-                    if (getSignedComponentAlongDirection(push_entity->direction, vec3Subtract(test_position, e->position)) > 0) do_entity_move = true;
-                    if (do_entity_move) e->position = test_position;
+                    // rotation: find rotation from target to current of player, and apply the same rotation to target direction of the entity.
+                    float player_target_to_current_angle = getAngleOfYAxisRotation(directionToQuaternion(player->direction), player->rotation);
+                    Vec4 transform = quaternionFromAxis(intCoordsToNorm(AXIS_Y), player_target_to_current_angle);
+                	e->rotation = quaternionMultiply(directionToQuaternion(e->direction), transform);
                 }
-                else e->position = intCoordsToNorm(e->coords);
+                else
+                {
+                	// push
+                    Vec3 difference_in_player_position = vec3Subtract(player->position, intCoordsToNorm(player->coords));
+                    float difference_in_player_position_along_direction = getComponentAlongDirection(tied_entity->direction, difference_in_player_position);
+                    if (difference_in_player_position_along_direction != 0)
+                    {
+                        Vec3 entity_target = intCoordsToNorm(e->coords);
+                        Vec3 test_position = vec3AddFloatToVec3AlongDirection(tied_entity->direction, difference_in_player_position_along_direction, entity_target);
+                        bool do_entity_move = false;
+                        if (getSignedComponentAlongDirection(tied_entity->direction, vec3Subtract(test_position, e->position)) > 0) do_entity_move = true;
+                        if (do_entity_move) e->position = test_position;
+                        else 
+                        {
+                            e->position = intCoordsToNorm(e->coords);
+                            if (tied_entity->on_head) tied_entity->id = 0;
+                        }
+                    }
+                    else e->position = intCoordsToNorm(e->coords);
 
-                bool clear_entity_from_tied_to_movement = false;
-                if (vec3IsZero(difference_in_player_position)) clear_entity_from_tied_to_movement = true;
-                if (push_entity->on_head) clear_entity_from_tied_to_movement = false;
-                if (clear_entity_from_tied_to_movement) push_entity->id = 0;
+                    bool clear_entity_from_tied_to_movement = false;
+                    if (vec3IsZero(difference_in_player_position)) clear_entity_from_tied_to_movement = true;
+                    if (tied_entity->on_head) clear_entity_from_tied_to_movement = false;
+                    if (clear_entity_from_tied_to_movement) tied_entity->id = 0;
+                }
             }
     	}
 
@@ -4317,6 +4309,13 @@ void gameFrame(double delta_time, TickInput* tick_input)
             char player_text[256] = {0};
             snprintf(player_text, sizeof(player_text), "player info: pos norm: %f, %f, %f, velocity: %f, %f, %f", player->position.x, player->position.y, player->position.z, player->velocity.x, player->velocity.y, player->velocity.z);
             createDebugText(player_text);
+
+            // entities tied to player movement
+            char tied_info[256] = {0};
+            TiedEntity te_1 = entities_tied_to_player_movement[0];
+            TiedEntity te_2 = entities_tied_to_player_movement[1];
+            snprintf(tied_info, sizeof(tied_info), "tied entity 1: id: %i, dir: %i, on_head: %i, tied entity 2: id: %i, dir: %i, on_head: %i", te_1.id, te_1.direction, te_1.on_head, te_2.id, te_2.direction, te_2.on_head);
+            createDebugText(tied_info);
 
             /*
             char pack_text[256] = {0};
