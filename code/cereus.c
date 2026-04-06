@@ -3854,15 +3854,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
         }
 
         // pack turn sequence
-        // TODO: is most of this magic still needed after the new trailing hitbox setups / after new animation system?
-        // the pack_intermediate_states_timer numbers control when during a turn does the backpack push things, and what tile(s) does the backpack occupy for the purposes of laser passthrough
-
-        // numbers are magic and based on how long it takes for the pack to turn. this is because it's kind of hard to make a good looking generalization, e.g. just using 
-        // fractions of TURN_ANIMATION_TIME because it looks awkward for small values of the animation (anything less than 20) so i just hard code these numbers.
-
         if (pack_turn_state.pack_intermediate_states_timer > 0)
         {
-            if (pack_turn_state.pack_intermediate_states_timer == 8) // TODO: after verify that works, compress these two blocks
+            if (pack_turn_state.pack_intermediate_states_timer == 8) // TODO: after verify that works, combine these two blocks
             {
                 Int3 diagonal_coords = pack_turn_state.pack_intermediate_coords;
                 Direction diagonal_push_direction = oppositeDirection(player->direction);
@@ -3877,7 +3871,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
                 if (allow_diagonal)
                 {
-                    if (do_push) pushAll(diagonal_coords, diagonal_push_direction, false);
+                    //if (do_push) pushAll(diagonal_coords, diagonal_push_direction, false);
                     moveEntityInBufferAndState(pack, diagonal_coords, player->direction);
                 }
                 else
@@ -3888,14 +3882,20 @@ void gameFrame(double delta_time, TickInput* tick_input)
             }
             else if (pack_turn_state.pack_intermediate_states_timer == 4)
             {
-                Int3 orthogonal_coords = getNextCoords(pack->coords, oppositeDirection(player->direction));
                 Direction orthogonal_push_direction = pack_turn_state.initial_player_direction;
+                Int3 orthogonal_coords = getNextCoords(pack->coords, orthogonal_push_direction);
                 TileType type_at_orthogonal = getTileType(orthogonal_coords);
                 bool allow_orthogonal = false;
                 bool do_push = false;
+                if (type_at_orthogonal == NONE) allow_orthogonal = true;
+                if (isPushable(type_at_orthogonal) && canPush(orthogonal_coords, orthogonal_push_direction) == CAN_PUSH)
+                {
+                    allow_orthogonal = true;
+                    do_push = true;
+                }
                 if (allow_orthogonal)
                 {
-                    if (do_push) pushAll(orthogonal_coords, orthogonal_push_direction, false);
+                    //if (do_push) pushAll(orthogonal_coords, orthogonal_push_direction, false);
                     moveEntityInBufferAndState(pack, orthogonal_coords, player->direction);
                 }
                 else
@@ -4134,6 +4134,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
             }
             */
+
+            // temp pack snap to coords
+            pack->position = intCoordsToNorm(pack->coords);
+            pack->rotation = directionToQuaternion(pack->direction);
 
             // push entities in front and on head 
             FOR(to_push_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
