@@ -132,6 +132,7 @@ typedef struct
     int32 id;
     Direction direction;
     bool on_head;
+    Entity* tied_to_entity;
 }
 TiedEntity;
 
@@ -320,8 +321,9 @@ const float PLAYER_MAX_SPEED = 0.12f;
 const int32 TURN_TIME = 10;
 const float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f; // last number is no. frames for a full turn
 const float PLAYER_ACCELERATION = 0.04f;
-const float PLAYER_MAX_DECELERATION = 0.04f; // should be approx the same; offset comes from always clamping before max deceleration rather than it being an average.
-    	                                     // if this is the same number, deceleration will be slower than acceleration
+const float PLAYER_MAX_DECELERATION = 0.04f;
+const float GRAVITY = -0.05f;
+
 const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
 const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
 const int32 TRAILING_HITBOX_TIME = 5;
@@ -445,7 +447,7 @@ bool bypass_player_fall = false;
 
 // handle pushed entities
 bool player_pushing = false;
-TiedEntity entities_tied_to_player_movement[32] = {0};
+TiedEntity entities_tied_to_movement[32] = {0};
 
 ShaderMode game_shader_mode = OLD;
 bool draw_trailing_hitboxes = false;
@@ -476,6 +478,13 @@ float floatAbs(float f)
 {
     return f > 0 ? f : -f;
 }
+
+/*
+float floatFractionalPart(float f)
+{
+    return f - (int32)f;
+}
+*/
 
 Vec3 intCoordsToNorm(Int3 int_coords) 
 {
@@ -1707,7 +1716,7 @@ PushResult canPushUp(Int3 coords)
 }
 
 // assumes able to be pushed 
-void pushAll(Int3 coords, Direction direction, bool on_head)
+void pushAll(Int3 coords, Direction direction, bool on_head, Entity* tied_to_entity)
 {
     Int3 current_coords = coords;
     int32 push_count = 0;
@@ -1733,25 +1742,27 @@ void pushAll(Int3 coords, Direction direction, bool on_head)
             bool already_tracked = false;
             FOR(next_free_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
             {
-                if (entities_tied_to_player_movement[next_free_index].id == e->id) 
+                if (entities_tied_to_movement[next_free_index].id == e->id) 
                 {
                     already_tracked = true;
                     write_index = next_free_index;
                     break; // doesn't guarantee not already having written something to next_free. so need the already_tracked guard 
                 }
-                if (entities_tied_to_player_movement[next_free_index].id > 0) continue;
+                if (entities_tied_to_movement[next_free_index].id > 0) continue;
                 if (write_index == -1) write_index = next_free_index;
             }
+            if (write_index == -1) continue;
             if (!already_tracked) 
             {
-                entities_tied_to_player_movement[write_index].id = e->id;
-                entities_tied_to_player_movement[write_index].direction = direction;
-                entities_tied_to_player_movement[write_index].on_head = on_head;
+                entities_tied_to_movement[write_index].id = e->id;
+                entities_tied_to_movement[write_index].direction = direction;
+                entities_tied_to_movement[write_index].on_head = on_head;
+                entities_tied_to_movement[write_index].tied_to_entity = tied_to_entity;
             }
             else
             {
                 // if already tracked, maybe update direction
-                entities_tied_to_player_movement[write_index].direction = direction;
+                entities_tied_to_movement[write_index].direction = direction;
             }
 
             // TODO: create trailing hitbox
@@ -2199,7 +2210,7 @@ bool canFall(Entity* e)
 
     // only allow fall if below is nothing, or void
     if (!intCoordsWithinLevelBounds(next_coords)) return false;
-    if (getTileType(next_coords) != NONE && getTileType(next_coords) != VOID /*&& !removed_entity*/) return false;
+    if (getTileType(next_coords) != NONE && getTileType(next_coords) != VOID) return false;
 
     // don't do fall if trailing hitbox below
     TrailingHitbox _;
@@ -2213,7 +2224,7 @@ void setFalling(Entity* entity)
     // canFall will only return true for the bottom entity in a stack. so whenever this check is passed, the first entity is always the one in the bottom of the stack.
     if (!canFall(entity)) return;
 
-    // remove if above void; early return for this entity, but call doFallingEntity for the entity above, if there is one, so that it doesn't get its fall interrupted
+    // remove if above void: early return for this entity, but call doFallingEntity for the entity above, if there is one, so that it doesn't get its fall interrupted
     Int3 below = getNextCoords(entity->coords, DOWN);
     if (getTileType(below) == VOID)
     {
@@ -2230,54 +2241,24 @@ void setFalling(Entity* entity)
         return;
     }
 
-    Entity* player = &next_world_state.player;
-
     Int3 next_coords = getNextCoords(entity->coords, DOWN);
-
     int32 stack_size = getPushableStackSize(entity->coords);
     Int3 current_start_coords = entity->coords;
     Int3 current_end_coords = next_coords; 
 
-    //int32 fall_time = 8; // TODO(anims): decide time for th based on velocity (this is just some random number for now)
-
     FOR(stack_fall_index, stack_size)
     {
         Entity* e_in_stack = getEntityAtCoords(current_start_coords);
-
-        // if any entities in the stack are removed, or moving, don't do the fall
-        if (e_in_stack->removed) return; // should never happen; shouldn't have removed entity in the middle of a stack somewhere
-
-        // if the enitity is pack, and pack in attached (and this isn't the entity on which the function was called), cut the stack size short here, so the pack doesn't get dragged down
-        // similarly, if player is red, above a stack which is falling, break to allow the stack below to fall, but keep the player floating.
-        if (e_in_stack->id == PACK_ID && pack_attached && stack_fall_index != 0) break;
-        if (e_in_stack->id == PLAYER_ID && player->hit_by_red) break;
+        if (e_in_stack->removed) return; // if any entities in the stack are removed, or moving, don't do the fall
+        if (e_in_stack->id == PACK_ID && pack_attached && stack_fall_index != 0) break; // if e is pack, and pack_attached, and this isn't the entity on which the function was called, break fall here
+        if (e_in_stack->id == PLAYER_ID && next_world_state.player.hit_by_red) break; // similarly, if player is red above a falling stack, then break to allow stack to fall, but keep player floating
 
         e_in_stack->falling = true;
 
         current_end_coords = current_start_coords;
         current_start_coords = getNextCoords(current_start_coords, UP);
-        
-        // TODO(anims): what need to be done when object moves that was previously handled here
-        // 				animations
-        // 				trailing hitbox based on velocity
-        // 				disable inputs if player is falling (probably don't want to fully disable inputs, but for now do, with same time as for the th)
-        // 				actually move the object
     }
     return;
-}
-
-void setFallingForAllPushables()
-{
-    Entity* entity_group_to_fall[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.sources, next_world_state.win_blocks };
-    FOR(to_fall_index, 4)
-    {
-        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
-        {
-            Entity* e = &entity_group_to_fall[to_fall_index][entity_index];
-            if (e->locked || e->removed) continue;
-            setFalling(e);
-        }
-    }
 }
 
 // TEXT HELPERS FOR EDIT_BUFFER
@@ -2948,7 +2929,7 @@ void doStandardMovement(Direction direction, Int3 next_player_coords, bool recor
     bool do_on_head_movement = false;
     if (isPushable(getTileType(coords_above_player)) && canPush(coords_above_player, direction) == CAN_PUSH) do_on_head_movement = true;
     if (player->hit_by_blue) do_on_head_movement = false;
-    if (do_on_head_movement) pushAll(coords_above_player, direction, true);
+    if (do_on_head_movement) pushAll(coords_above_player, direction, true, player);
 
     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
     moveEntityInBufferAndState(player, next_player_coords, player->direction);
@@ -3656,7 +3637,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                             if (allow_walk || cheating)
                             {
-                                if (do_push) pushAll(next_player_coords, input_direction, false);
+                                if (do_push) pushAll(next_player_coords, input_direction, false, player);
                                 doStandardMovement(input_direction, next_player_coords, true);
                             }
                             // TODO: temporarily disabled leap of faith
@@ -3792,6 +3773,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                         if (pack_attached)
                         {
+                            // TODO: probably don't want to be able to force the one-box-only push action using timings. so should probably check if this is going to push something orthogonally,
+                            // and if so keep a flag in pack_turn_state that doesn't allow this turn to be interrupted partway through.
                             pack_turn_state.pack_intermediate_states_timer = TURN_TIME;
                             // TODO: do i need to store these? maybe could be derived later, and just have timer as an int32 timer
                             pack_turn_state.pack_intermediate_coords = getNextCoords(pack->coords, oppositeDirection(input_direction));
@@ -3865,7 +3848,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         // pack turn sequence
         if (pack_turn_state.pack_intermediate_states_timer > 0)
         {
-            if (pack_turn_state.pack_intermediate_states_timer == 8) // TODO: after verify that works, combine these two blocks
+            if (pack_turn_state.pack_intermediate_states_timer == TURN_TIME) // TODO: after verify that works, combine these two blocks
             {
                 Int3 diagonal_coords = pack_turn_state.pack_intermediate_coords;
                 Direction diagonal_push_direction = oppositeDirection(player->direction);
@@ -3880,7 +3863,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
                 if (allow_diagonal)
                 {
-                    //if (do_push) pushAll(diagonal_coords, diagonal_push_direction, false);
+                    if (do_push) pushAll(diagonal_coords, diagonal_push_direction, false, pack);
                     moveEntityInBufferAndState(pack, diagonal_coords, player->direction);
                 }
                 else
@@ -3889,7 +3872,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     pack_turn_state.pack_intermediate_states_timer = 0;
                 }
             }
-            else if (pack_turn_state.pack_intermediate_states_timer == 4)
+            else if (pack_turn_state.pack_intermediate_states_timer == TURN_TIME / 2)
             {
                 Direction orthogonal_push_direction = pack_turn_state.initial_player_direction;
                 Int3 orthogonal_coords = getNextCoords(pack->coords, orthogonal_push_direction);
@@ -3904,7 +3887,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
                 if (allow_orthogonal)
                 {
-                    //if (do_push) pushAll(orthogonal_coords, orthogonal_push_direction, false);
+                    if (do_push) pushAll(orthogonal_coords, orthogonal_push_direction, false, pack);
                     moveEntityInBufferAndState(pack, orthogonal_coords, player->direction);
                 }
                 else
@@ -3916,12 +3899,49 @@ void gameFrame(double delta_time, TickInput* tick_input)
         }
         if (pack_turn_state.pack_intermediate_states_timer > 0) pack_turn_state.pack_intermediate_states_timer--;
 
-        // falling logic
+        // falling logic for entities
         /*
-        bool do_falling_logic = true;
-        if (undo_press_timer > 0) do_falling_logic = false; // only do gravity if there's not been an undo recently
-        if (cheating) do_falling_logic = false;
+        bool halt_falling = false;
+        if (undo_press_timer > 0) halt_falling = true; // only do falling if there's not been an undo recently
+        if (cheating) halt_falling = true;
+        if (player->hit_by_blue) halt_falling = true;
 
+        Entity* falling_entity_group[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.sources };
+        FOR(group_index, 3)
+        {
+            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+            {
+                Entity* e = &falling_entity_group[group_index][entity_index];
+                bool update_falling = false;
+                if (!e->falling) update_falling = true;
+                if (halt_falling) update_falling = false;
+                if (update_falling && canFall(e)) setFalling(e);
+
+                if (e->falling)
+                {
+                    e->velocity.y += GRAVITY;
+                	float test_y = e->position.y + e->velocity.y;
+                    if (test_y > getComponentAlongDirection(DOWN, intCoordsToNorm(e->coords)))
+                    {
+                        e->position.y = test_y;
+                    }
+                    else
+                    {
+                        bool continue_falling = false;
+                        if (canFall(e)) continue_falling = true;
+                        if (halt_falling) continue_falling = false;
+                        if (continue_falling)
+                        {
+                            setFalling(e);
+                            e->coords = getNextCoords(e->coords, DOWN);
+                        }
+                    }
+                }
+            }
+        }
+        */
+
+        /*
         if (do_falling_logic)
         {
             if (!player->hit_by_blue) setFallingForAllPushables();
@@ -4081,7 +4101,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     int32 frames_to_stop = (int32)ceilf(current_speed / PLAYER_MAX_DECELERATION);
                     float movement_adjustment = distance_error / (float)frames_to_stop;
 
-                    // decelerate velocity along the clean ramp
                     float decelerated_speed = current_speed - PLAYER_MAX_DECELERATION;
                     if (decelerated_speed < 0) decelerated_speed = 0;
 
@@ -4124,14 +4143,20 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
             }
 
-            // handle entities tied to player movement
+            // handle entities tied to movement
             FOR(tied_entity_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
             {
-            	TiedEntity* tied_entity = &entities_tied_to_player_movement[tied_entity_index];
-                if (tied_entity->id <= 0) continue;
+            	TiedEntity* tied_entity_info = &entities_tied_to_movement[tied_entity_index];
+                if (tied_entity_info->id <= 0) continue;
 
-                Entity* e = getEntityFromId(tied_entity->id);
-                if (tied_entity->direction == NO_DIRECTION)
+                Entity* e = getEntityFromId(tied_entity_info->id);
+                if (e->falling) 
+                {
+                    tied_entity_info->id = 0;
+                    continue;
+                }
+
+                if (tied_entity_info->direction == NO_DIRECTION)
                 {
                     // rotation: find rotation from target to current of player, and apply the same rotation to target direction of the entity.
                     float player_target_to_current_angle = getAngleOfYAxisRotation(directionToQuaternion(player->direction), player->rotation);
@@ -4141,27 +4166,29 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 else
                 {
                 	// push
-                    Vec3 difference_in_player_position = vec3Subtract(player->position, intCoordsToNorm(player->coords));
-                    float difference_in_player_position_along_direction = getComponentAlongDirection(tied_entity->direction, difference_in_player_position);
-                    if (difference_in_player_position_along_direction != 0)
+                    Entity* root_e = tied_entity_info->tied_to_entity;
+
+                    Vec3 difference_in_root_position = vec3Subtract(root_e->position, intCoordsToNorm(root_e->coords));
+                    float difference_in_root_position_along_direction = getComponentAlongDirection(tied_entity_info->direction, difference_in_root_position);
+                    if (difference_in_root_position_along_direction != 0)
                     {
                         Vec3 entity_target = intCoordsToNorm(e->coords);
-                        Vec3 test_position = vec3AddFloatToVec3AlongDirection(tied_entity->direction, difference_in_player_position_along_direction, entity_target);
+                        Vec3 test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, difference_in_root_position_along_direction, entity_target);
                         bool do_entity_move = false;
-                        if (getSignedComponentAlongDirection(tied_entity->direction, vec3Subtract(test_position, e->position)) > 0) do_entity_move = true;
+                        if (getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, e->position)) > 0) do_entity_move = true;
                         if (do_entity_move) e->position = test_position;
                         else 
                         {
                             e->position = intCoordsToNorm(e->coords);
-                            if (tied_entity->on_head) tied_entity->id = 0;
+                            if (tied_entity_info->on_head) tied_entity_info->id = 0;
                         }
                     }
                     else e->position = intCoordsToNorm(e->coords);
 
                     bool clear_entity_from_tied_to_movement = false;
-                    if (vec3IsZero(difference_in_player_position)) clear_entity_from_tied_to_movement = true;
-                    if (tied_entity->on_head) clear_entity_from_tied_to_movement = false;
-                    if (clear_entity_from_tied_to_movement) tied_entity->id = 0;
+                    if (vec3IsZero(difference_in_root_position)) clear_entity_from_tied_to_movement = true;
+                    if (tied_entity_info->on_head) clear_entity_from_tied_to_movement = false;
+                    if (clear_entity_from_tied_to_movement) tied_entity_info->id = 0;
                 }
             }
     	}
@@ -4312,8 +4339,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
             // entities tied to player movement
             char tied_info[256] = {0};
-            TiedEntity te_1 = entities_tied_to_player_movement[0];
-            TiedEntity te_2 = entities_tied_to_player_movement[1];
+            TiedEntity te_1 = entities_tied_to_movement[0];
+            TiedEntity te_2 = entities_tied_to_movement[1];
             snprintf(tied_info, sizeof(tied_info), "tied entity 1: id: %i, dir: %i, on_head: %i, tied entity 2: id: %i, dir: %i, on_head: %i", te_1.id, te_1.direction, te_1.on_head, te_2.id, te_2.direction, te_2.on_head);
             createDebugText(tied_info);
 
