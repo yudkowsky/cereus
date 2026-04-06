@@ -1743,6 +1743,11 @@ void pushAll(Int3 coords, Direction direction, bool on_head)
                 entities_tied_to_player_movement[next_free].direction = direction;
                 entities_tied_to_player_movement[next_free].on_head = on_head;
             }
+            else
+            {
+                // if already tracked, maybe update direction
+                entities_tied_to_player_movement[next_free].direction = direction;
+            }
 
             // TODO: create trailing hitbox
 
@@ -2935,14 +2940,10 @@ void doStandardMovement(Direction direction, Int3 next_player_coords, bool recor
 
     // maybe move stack above the player's head
     Int3 coords_above_player = getNextCoords(player->coords, UP);
-
     bool do_on_head_movement = false;
-    if (isPushable(getTileType(coords_above_player))) do_on_head_movement = true;
+    if (isPushable(getTileType(coords_above_player)) && canPush(coords_above_player, direction) == CAN_PUSH) do_on_head_movement = true;
     if (player->hit_by_blue) do_on_head_movement = false;
-    if (do_on_head_movement) if (canPush(coords_above_player, direction) == CAN_PUSH) 
-    {
-        pushAll(coords_above_player, direction, true);
-    }
+    if (do_on_head_movement) pushAll(coords_above_player, direction, true);
 
     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
     moveEntityInBufferAndState(player, next_player_coords, player->direction);
@@ -2950,8 +2951,8 @@ void doStandardMovement(Direction direction, Int3 next_player_coords, bool recor
     // move pack also if pack is attached
     if (pack_attached)
     {
-        Int3 next_pack_coords = getNextCoords(pack->coords, direction);
         createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
+        Int3 next_pack_coords = getNextCoords(pack->coords, direction);
         moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
     }
 
@@ -3916,9 +3917,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         }
                     }
         		}
-
-                // TODO(anims): temporarily disabled all other movement
-
                 else if (input_direction == oppositeDirection(player->direction))
                 {
                     /*
@@ -4189,10 +4187,16 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     else player->velocity.x = sign * decelerated_speed;
                 }
             }
-
-            // player handling: rotations
+            if (pack_attached)
             {
-                // TEMP ONLY DOING THIS FOR NO PACK RIGHT NOW
+                // pack follows player movement if attached
+                Vec3 pack_coords = vec3Subtract(player->position, directionToVector(player->direction));
+                pack->position = pack_coords;
+                pack->rotation = directionToQuaternion(player->direction);
+            }
+
+            // rotation handling
+            {
                 Vec4 target_rotation = directionToQuaternion(player->direction); 
                 if (quaternionInnerProduct( player->rotation, target_rotation) < 0 ) target_rotation = quaternionNegate(target_rotation); // make sure quaternions on same hemisphere
                 Vec4 from_current_to_target = quaternionMultiply(target_rotation, quaternionConjugate(player->rotation)); // transform * current = target, so transform = target * current^-1
@@ -4208,17 +4212,15 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     Vec4 rotation_this_frame = quaternionFromAxis(intCoordsToNorm(AXIS_Y), step_angle);
                     player->rotation = quaternionMultiply(rotation_this_frame, player->rotation);
                 }
+
+                if (pack_attached)
+                {
+                    // TODO: pack logic here
+                }
             }
 
             // PACK ANIMATIONS, IF ATTACHED
             // TODO: this below and above should probably just be one 'rotation handling' case
-
-            if (pack_attached)
-            {
-                Vec3 pack_coords = vec3Subtract(player->position, directionToVector(player->direction));
-                pack->position = pack_coords;
-                pack->rotation = directionToQuaternion(pack->direction);
-            }
 
             // PUSHED ENTITY ANIMATIONS
             FOR(to_push_index, MAX_ENTITIES_TIED_TO_PLAYER_MOVEMENT)
@@ -4233,11 +4235,15 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 {
                     Vec3 entity_target = intCoordsToNorm(e->coords);
                     Vec3 test_position = vec3AddFloatToVec3AlongDirection(push_direction, difference_in_player_position, entity_target);
-                    if (getSignedComponentAlongDirection(push_direction, vec3Subtract(test_position, e->position)) > 0) e->position = test_position;
+                    
+                    bool do_entity_move = false;
+                    if (entities_tied_to_player_movement[to_push_index].on_head) do_entity_move = true;
+                    if (getSignedComponentAlongDirection(push_direction, vec3Subtract(test_position, e->position)) > 0) do_entity_move = true;
+                    if (do_entity_move) e->position = test_position;
                 }
                 else e->position = intCoordsToNorm(e->coords);
             }
-            // check if player has stopped moving, and if so clear the push state
+            // check if player has stopped moving, and if so clear the pushed entities from state
             if (vec3IsZero(vec3Subtract(player->position, intCoordsToNorm(player->coords))))
             {
                 player_pushing = false;
