@@ -2949,8 +2949,9 @@ void updatePackDetached()
 {
     Entity* player = &next_world_state.player;
     Entity* pack = &next_world_state.pack;
+
     TileType tile_behind_player = getTileType(getNextCoords(next_world_state.player.coords, oppositeDirection(next_world_state.player.direction)));
-    if (tile_behind_player == PACK) 
+    if (tile_behind_player == PACK || pack_turn_state.pack_intermediate_states_timer > 0) 
     {
         pack_attached = true;
         setTileDirection(player->direction, pack->coords);
@@ -3568,7 +3569,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     float coords_along_direction = getComponentAlongDirection(input_direction, intCoordsToNorm(player->coords));
                     if (wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign)) allow_input = true;
 
-                    // get abs(angle) of player current quat -> target quat, and gate on some angle threshohd here.
+                    // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
                     float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
                     if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) allow_input = false;
 
@@ -3765,6 +3766,11 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     // TURN MOVEMENT
                     bool allow_turn = true;
                     if (player->falling) allow_turn = false;
+
+                    // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
+                    float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
+                    if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) allow_turn = false;
+
                     if (allow_turn)
                     {
                         Direction initial_player_direction = player->direction;
@@ -3869,10 +3875,11 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 else
                 {
                     player->direction = pack_turn_state.initial_player_direction;
+                    pack->direction = pack_turn_state.initial_player_direction;
                     pack_turn_state.pack_intermediate_states_timer = 0;
                 }
             }
-            else if (pack_turn_state.pack_intermediate_states_timer == TURN_TIME / 2)
+            else if (pack_turn_state.pack_intermediate_states_timer == 7)
             {
                 Direction orthogonal_push_direction = pack_turn_state.initial_player_direction;
                 Int3 orthogonal_coords = getNextCoords(pack->coords, orthogonal_push_direction);
@@ -3892,6 +3899,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
                 else
                 {
+                    Int3 start_pack_coords = getNextCoords(player->coords, oppositeDirection(pack_turn_state.initial_player_direction));
+                    moveEntityInBufferAndState(pack, start_pack_coords, player->direction);
                     player->direction = pack_turn_state.initial_player_direction;
                     pack_turn_state.pack_intermediate_states_timer = 0;
                 }
@@ -4112,13 +4121,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     else player->velocity.x = sign * decelerated_speed;
                 }
             }
-            if (pack_attached)
-            {
-                // pack follows player movement if attached
-                Vec3 pack_coords = vec3Subtract(player->position, directionToVector(player->direction));
-                pack->position = pack_coords;
-                pack->rotation = directionToQuaternion(player->direction);
-            }
 
             // handle turn
             {
@@ -4139,7 +4141,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 // pack rotation
                 if (pack_attached)
                 {
-                    // TODO: pack logic here
+                    // pack follows player movement if attached
+                    Vec3 rotated_offset = vec3RotateByQuaternion(intCoordsToNorm(AXIS_Z), player->rotation); // AXIS_Z because pack is 0, 0, 1 relative to player 0, 0, 0, when player has no rotation.
+                    pack->position = vec3Add(player->position, rotated_offset);
+                    pack->rotation = player->rotation;
                 }
             }
 
@@ -4167,7 +4172,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 {
                 	// push
                     Entity* root_e = tied_entity_info->tied_to_entity;
-
                     Vec3 difference_in_root_position = vec3Subtract(root_e->position, intCoordsToNorm(root_e->coords));
                     float difference_in_root_position_along_direction = getComponentAlongDirection(tied_entity_info->direction, difference_in_root_position);
                     if (difference_in_root_position_along_direction != 0)
@@ -4177,16 +4181,17 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         bool do_entity_move = false;
                         if (getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, e->position)) > 0) do_entity_move = true;
                         if (do_entity_move) e->position = test_position;
-                        else 
+                        else if (tied_entity_info->on_head)
                         {
                             e->position = intCoordsToNorm(e->coords);
-                            if (tied_entity_info->on_head) tied_entity_info->id = 0;
+                            tied_entity_info->id = 0; // here if something on head will overshoot
                         }
                     }
                     else e->position = intCoordsToNorm(e->coords);
 
                     bool clear_entity_from_tied_to_movement = false;
-                    if (vec3IsZero(difference_in_root_position)) clear_entity_from_tied_to_movement = true;
+                    bool root_still_moving = !vec3IsZero(root_e->velocity);
+                    if (vec3IsEqual(e->position, intCoordsToNorm(e->coords)) && !root_still_moving) clear_entity_from_tied_to_movement = true;
                     if (tied_entity_info->on_head) clear_entity_from_tied_to_movement = false;
                     if (clear_entity_from_tied_to_movement) tied_entity_info->id = 0;
                 }
