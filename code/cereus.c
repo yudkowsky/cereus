@@ -624,6 +624,14 @@ Vec4 quaternionNormalize(Vec4 q)
     return (Vec4){ q.x * inverse_length, q.y * inverse_length, q.z * inverse_length, q.w * inverse_length };
 }
 
+float getAngleOfYAxisRotation(Vec4 current, Vec4 target)
+{
+    Vec4 unwound_target = target;
+    if (quaternionInnerProduct(current, target) < 0) unwound_target = quaternionNegate(target); // make sure quaternions on same hemisphere
+    Vec4 from_current_to_target = quaternionMultiply(unwound_target, quaternionConjugate(current)); // transform * current = target, so transform = target * current^-1
+    return 2.0f * atan2f(from_current_to_target.y, from_current_to_target.w); // can do this because rotation is fully around the y axis
+}
+
 // TODO: could use the optimised version when i understand quaternions better. for now, this is more transparent
 Vec3 vec3RotateByQuaternion(Vec3 v, Vec4 q)
 {
@@ -3579,8 +3587,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     float coords_along_direction = getComponentAlongDirection(input_direction, intCoordsToNorm(player->coords));
                     if (wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign)) allow_input = true;
 
-                    // don't allow movement if have any angular velocity TODO: gate this less aggressively - would probably want to allow if rotation is within some range of targeted velocity
-                    //if (!vec3IsZero(player->angular_velocity)) allow_input = false;
+                    // get abs(angle) of player current quat -> target quat, and gate on some angle threshohd here.
+                    float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
+                    if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) allow_input = false;
 
                     // disallow movement if also moving in some other direction currently - probably just guards against moving while falling
                     if (!vec3IsZero(vec3ZeroComponentAlongDirection(input_direction, player->velocity))) allow_input = false;
@@ -4095,9 +4104,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             // rotation handling
             {
                 Vec4 target_rotation = directionToQuaternion(player->direction); 
-                if (quaternionInnerProduct( player->rotation, target_rotation) < 0 ) target_rotation = quaternionNegate(target_rotation); // make sure quaternions on same hemisphere
-                Vec4 from_current_to_target = quaternionMultiply(target_rotation, quaternionConjugate(player->rotation)); // transform * current = target, so transform = target * current^-1
-                float total_angle = 2.0f * atan2f(from_current_to_target.y, from_current_to_target.w); // can do this because rotation is fully around the y axis
+                float total_angle = getAngleOfYAxisRotation(player->rotation, target_rotation);
                 float frame_count = ceilf(fabs(total_angle) / MAX_ANGULAR_VELOCITY);
                 if (frame_count <= 1)
                 {
