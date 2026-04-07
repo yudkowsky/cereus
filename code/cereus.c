@@ -319,7 +319,7 @@ const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
 
 const float PLAYER_MAX_SPEED = 0.12f;
 const int32 TURN_TIME = 10;
-const float MIN_DOWN_VELOCITY = -0.2f;
+const float MIN_DOWN_VELOCITY = -0.12f;
 const float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f; // last number is no. frames for a full turn
 const float PLAYER_ACCELERATION = 0.04f;
 const float PLAYER_MAX_DECELERATION = 0.04f;
@@ -1736,6 +1736,8 @@ void pushAll(Int3 coords, Direction direction, bool on_head, Entity* tied_to_ent
         {
             Entity* e = getEntityAtCoords(current_stack_coords);
             Int3 next_coords = getNextCoords(e->coords, direction);
+            TileType next_type = getTileType(next_coords);
+            if (next_type != NONE) break; // this is possible because of the inverse push index seeking. if not none, won't be pushable either, so break.
             moveEntityInBufferAndState(e, next_coords, e->direction);
 
             // add object to 'pushed by player' id array, unelss it's already being tracked
