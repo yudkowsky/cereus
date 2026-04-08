@@ -2257,8 +2257,10 @@ void setFalling(Entity* entity)
     {
         Entity* e_in_stack = getEntityAtCoords(current_start_coords);
         if (e_in_stack->removed) return; // if any entities in the stack are removed, or moving, don't do the fall
+
+        // two checks which have to do with breaking a stack so that everything below a point falls, but not above a certain point
         if (e_in_stack->id == PACK_ID && pack_attached && stack_fall_index != 0) break; // if e is pack, and pack_attached, and this isn't the entity on which the function was called, break fall here
-        if (e_in_stack->id == PLAYER_ID && next_world_state.player.hit_by_red) break; // similarly, if player is red above a falling stack, then break to allow stack to fall, but keep player floating
+        if (e_in_stack->id == PLAYER_ID && next_world_state.player.hit_by_red && stack_fall_index != 0) break; // similarly, if player is red above a falling stack, then break to allow stack to fall, but keep player floating
 
         e_in_stack->falling = true;
 
@@ -3912,10 +3914,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
         if (pack_turn_state.pack_intermediate_states_timer > 0) pack_turn_state.pack_intermediate_states_timer--;
 
         // falling logic for entities
-        bool halt_falling_objects = false;
-        if (undo_press_timer > 0) halt_falling_objects = true; // only do falling if there's not been an undo recently
-        if (player->hit_by_blue) halt_falling_objects = true;
-
         Entity* falling_entity_group[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.sources };
         FOR(group_index, 4)
         {
@@ -3933,14 +3931,15 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
                 else e = &falling_entity_group[group_index][entity_index];
 
-                bool update_falling = false;
-                if (!e->falling) update_falling = true;
-                if (canFall(e)) update_falling = true;
-                if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(e->position, intCoordsToNorm(e->coords)), 0))) update_falling = false; // not using e->velocity because it gets set after, so wouldn't work when pushing stationary object
-                if (halt_falling_objects) update_falling = false;
-                if (cheating) update_falling = false;
+                bool want_to_fall = false;
+                if (!e->falling) want_to_fall = true;
+                if (canFall(e)) want_to_fall = true;
+                if (undo_press_timer > 0) want_to_fall = false;
+                if (cheating) want_to_fall = false;
+                if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(e->position, intCoordsToNorm(e->coords)), 0))) want_to_fall = false; // not stationary. not using e->velocity because it gets set after, so wouldn't work when pushing stationary object
+                if (player->hit_by_blue) want_to_fall = false;
 
-                if (update_falling) setFalling(e); // only updates false -> true
+                if (want_to_fall) setFalling(e); // only updates false -> true
 
                 if (e->falling)
                 {
@@ -3955,10 +3954,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     }
                     else
                     {
-                        bool continue_falling = false;
-                        if (!halt_falling_objects && canFall(e)) continue_falling = true;
-                        
-                        if (continue_falling)
+                        if (want_to_fall)
                         {
                             TileType type = getTileType(e->coords);
                             createTrailingHitbox(e->id, e->coords, 10, type); // TODO: this number is magic. later, maybe just calculate this based on displacement and velocity
@@ -3981,11 +3977,76 @@ void gameFrame(double delta_time, TickInput* tick_input)
         }
 
         // player falling logic
-        if (!player->hit_by_red)
+        bool want_to_fall = false;
+        if (canFall(player)) want_to_fall = true;
+        if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(player->position, intCoordsToNorm(player->coords)), 0))) want_to_fall = false; // not stationary
+        if (undo_press_timer > 0) want_to_fall = false;
+        if (cheating) want_to_fall = false;
+        if (player->hit_by_red) want_to_fall = false;
+
+        if (want_to_fall) setFalling(player);
+
+        if (player->falling)
         {
+            float test_y_velocity = player->velocity.y + GRAVITY;
+            test_y_velocity = floatMax(test_y_velocity, MIN_DOWN_VELOCITY);
+            float test_y_position = player->position.y + test_y_velocity;
+            if (test_y_position > getComponentAlongDirection(DOWN, intCoordsToNorm(player->coords)))
+            {
+                // within a block: update player coords, and pack coords too, if pack attached
+                player->velocity.y = test_y_velocity;
+                player->position.y = test_y_position;
+                if (pack_attached)
+                {
+                    pack->velocity.y = test_y_velocity;
+                    pack->position.y = test_y_position;
+                }
+            }
+            else
+            {
+                if (want_to_fall)
+                {
+                    createTrailingHitbox(PLAYER_ID, player->coords, 10, PLAYER); // TODO: magic
 
+                    player->position.y = test_y_position;
+                    player->velocity.y = test_y_velocity;
+                	Int3 player_next_coords = getNextCoords(player->coords, DOWN);
+                    moveEntityInBufferAndState(player, player_next_coords, player->direction);
+
+                    if (pack_attached)
+                    {
+                        if (canFall(pack))
+                        {
+                            createTrailingHitbox(PACK_ID, pack->coords, 10, PACK); // TODO: magic
+
+                            pack->position.y = test_y_position;
+                            pack->velocity.y = test_y_velocity;
+                            Int3 pack_next_coords = getNextCoords(pack->coords, DOWN);
+                            moveEntityInBufferAndState(pack, pack_next_coords, pack->direction);
+                        }
+                        else
+                        {
+                            // pack will detach
+                            pack->position.y = (float)pack->coords.y;
+                            pack->falling = false;
+                            pack->velocity.y = 0;
+                        }
+                    }
+                }
+                else
+                {
+                    player->position.y = (float)player->coords.y;
+                    player->falling = false;
+                    player->velocity.y = 0;
+                    if (pack_attached)
+                    {
+                        pack->position.y = (float)pack->coords.y;
+                        pack->falling = false;
+                        pack->velocity.y = 0;
+                    }
+                }
+            }
         }
-
 
         /*
         if (do_falling_logic)
@@ -4740,7 +4801,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             if (player->position.y < 2.0f) do_player_aabb = true;
 
             // TODO: this is terrible (fix with shaders)
-            else if (player->hit_by_red && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
+            if (player->hit_by_red && player->hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
             else if (player->hit_by_red)  						drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
             else if (player->hit_by_blue) 						drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
             else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
