@@ -3921,11 +3921,14 @@ void gameFrame(double delta_time, TickInput* tick_input)
             FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
             {
                 Entity* e = &falling_entity_group[group_index][entity_index];
+
                 bool update_falling = false;
                 if (!e->falling) update_falling = true;
+                if (canFall(e)) update_falling = true;
+                if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(e->position, intCoordsToNorm(e->coords)), 0))) update_falling = false;
                 if (halt_falling) update_falling = false;
-                FOR(tied_check, MAX_ENTITIES_TIED_TO_MOVEMENT) if (entities_tied_to_movement[tied_check].id == e->id) { update_falling = false; break; }
-                if (update_falling && canFall(e)) setFalling(e);
+
+                if (update_falling) setFalling(e); // only updates false -> true
 
                 if (e->falling)
                 {
