@@ -119,20 +119,12 @@ typedef struct
 }
 TrailingHitbox;
 
-typedef enum
-{
-    CAN_PUSH = 0,
-	PAUSE_PUSH = 1,
-    FAILED_PUSH = 2
-}
-PushResult;
-
 typedef struct
 {	
     int32 id;
     Direction direction;
     bool on_head;
-    Entity* tied_to_entity;
+    Entity* root_entity;
 }
 TiedEntity;
 
@@ -240,7 +232,7 @@ typedef struct
 }
 DebugPopup;
 
-// LASER STRUCTS
+// LASER STRUCT
 
 // assumes 0 width
 typedef struct
@@ -444,7 +436,6 @@ bool pack_attached = true;
 bool allow_movement = true;
 PackTurnState pack_turn_state = {0};
 bool player_will_fall_next_turn = false;
-bool bypass_player_fall = false;
 
 // handle pushed entities
 bool player_pushing = false;
@@ -1681,153 +1672,7 @@ bool trailingHitboxAtCoords(Int3 coords, TrailingHitbox* trailing_hitbox)
     return false;
 }
 
-// ANIMATIONS
-
-
-
-// PUSH ENTITES
-
-PushResult canPush(Int3 coords, Direction direction)
-{
-    Int3 current_coords = coords;
-    TileType current_tile = getTileType(current_coords);
-    FOR(push_index, MAX_ENTITY_PUSH_COUNT)
-    {
-        Entity* e = getEntityAtCoords(current_coords);
-        if (isEntity(current_tile) && e->locked) return FAILED_PUSH;
-
-        current_coords = getNextCoords(current_coords, direction);
-        if (!intCoordsWithinLevelBounds(current_coords)) return FAILED_PUSH;
-
-        current_tile = getTileType(current_coords);
-        if (current_tile == NONE) return CAN_PUSH;
-        if (current_tile == GRID || current_tile == WALL || current_tile == LADDER ) return FAILED_PUSH;
-    }
-    return FAILED_PUSH; // only here if hit the max entity push count
-}
-
-// TODO: should be in canPush with UP as direction
-PushResult canPushUp(Int3 coords)
-{
-	int32 stack_size = getPushableStackSize(coords);
-    Int3 check_coords = coords;
-    FOR(_, stack_size) check_coords = getNextCoords(check_coords, UP);
-    if (getTileType(check_coords) == NONE) return CAN_PUSH;
-    else return FAILED_PUSH;
-}
-
-// assumes able to be pushed 
-void pushAll(Int3 coords, Direction direction, bool on_head, Entity* tied_to_entity)
-{
-    Int3 current_coords = coords;
-    int32 push_count = 0;
-    FOR(push_index, MAX_ENTITY_PUSH_COUNT)
-    {
-        if (getTileType(current_coords) == NONE) break;
-        current_coords = getNextCoords(current_coords, direction);
-        push_count++;
-    }
-    current_coords = getNextCoords(current_coords, oppositeDirection(direction));
-    for (int32 inverse_push_index = push_count; inverse_push_index != 0; inverse_push_index--)
-    {
-        int32 stack_size = getPushableStackSize(current_coords);
-        Int3 current_stack_coords = current_coords;
-        FOR(stack_index, stack_size)
-        {
-            Entity* e = getEntityAtCoords(current_stack_coords);
-            Int3 next_coords = getNextCoords(e->coords, direction);
-            TileType next_type = getTileType(next_coords);
-            if (next_type != NONE) break; // this is possible because of the inverse push index seeking. if not none, won't be pushable either, so break.
-            moveEntityInBufferAndState(e, next_coords, e->direction);
-
-            // add object to 'pushed by player' id array, unelss it's already being tracked
-            int32 write_index = -1;
-            bool already_tracked = false;
-            FOR(next_free_index, MAX_ENTITIES_TIED_TO_MOVEMENT)
-            {
-                if (entities_tied_to_movement[next_free_index].id == e->id) 
-                {
-                    already_tracked = true;
-                    write_index = next_free_index;
-                    break; // doesn't guarantee not already having written something to next_free. so need the already_tracked guard 
-                }
-                if (entities_tied_to_movement[next_free_index].id > 0) continue;
-                if (write_index == -1) write_index = next_free_index;
-            }
-            if (write_index == -1) continue;
-            if (!already_tracked) 
-            {
-                entities_tied_to_movement[write_index].id = e->id;
-                entities_tied_to_movement[write_index].direction = direction;
-                entities_tied_to_movement[write_index].on_head = on_head;
-                entities_tied_to_movement[write_index].tied_to_entity = tied_to_entity;
-            }
-            else
-            {
-                // if already tracked, maybe update direction
-                entities_tied_to_movement[write_index].direction = direction;
-            }
-
-            // TODO: create trailing hitbox
-
-            current_stack_coords = getNextCoords(current_stack_coords, UP);
-        }
-        current_coords = getNextCoords(current_coords, oppositeDirection(direction));
-    }
-    player_pushing = true;
-}
-
-// TODO: why not call this with pushAll(coords, UP)?
-void pushUp(Int3 coords)
-{
-    int32 stack_size = getPushableStackSize(coords);
-    Int3 current_coords = coords;
-    FOR(_, stack_size - 1) current_coords = getNextCoords(current_coords, UP);
-    for (int32 inverse_stack_index = stack_size; inverse_stack_index != 0; inverse_stack_index--)
-    {
-        TileType tile = getTileType(current_coords);
-        Direction dir = getTileDirection(current_coords);
-        Entity* e = getEntityAtCoords(current_coords);
-        Int3 coords_above = getNextCoords(current_coords, UP);
-        moveEntityInBufferAndState(e, coords_above, dir);
-        // TODO(anims): create interpolation animation from current coords to coords above, with animation_time
-    	createTrailingHitbox(e->id, current_coords, TRAILING_HITBOX_TIME, tile);
-        current_coords = getNextCoords(current_coords, DOWN);
-    }
-}
-
-// LASERS
-
-Direction getNextLaserDirectionMirror(Direction laser_direction, Direction mirror_direction)
-{
-    if (mirror_direction <= 4 && laser_direction <= 6) 
-    {
-        if (laser_direction == mirror_direction) 					return DOWN;
-        if (laser_direction == oppositeDirection(mirror_direction)) return UP;
-        if (laser_direction == UP) 									return oppositeDirection(mirror_direction);
-        if (laser_direction == DOWN) 								return mirror_direction;
-    }
-    switch (mirror_direction)
-    {
-        case UP: switch (laser_direction)
-     	{
-         	case NORTH: return EAST;
-         	case SOUTH: return WEST;
-         	case WEST:  return SOUTH;
-         	case EAST:  return NORTH;
-            default: 	return NO_DIRECTION;
-     	}
-		case DOWN: switch (laser_direction)
-       	{
-            case NORTH: return WEST;
-            case SOUTH: return EAST;
-            case WEST:  return NORTH;
-            case EAST:  return SOUTH;
-            default: 	return NO_DIRECTION;
-        }
-		default: return NO_DIRECTION;
-    }
-}
+// VECTOR POSITION HELPERS
 
 float getComponentAlongDirection(Direction direction, Vec3 vector)
 {
@@ -1891,6 +1736,165 @@ Vec3 vec3AddFloatToVec3AlongDirection(Direction direction, float f, Vec3 v)
     }
 }
 
+// PUSH ENTITES
+
+bool canPush(Int3 coords, Direction direction)
+{
+    Int3 current_coords = coords;
+    TileType current_tile = getTileType(current_coords);
+    FOR(push_index, MAX_ENTITY_PUSH_COUNT)
+    {
+        Entity* e = getEntityAtCoords(current_coords);
+        if (isEntity(current_tile) && e->locked) return false;
+        //if (!vec3IsZero(vec3SetComponentAlongDirection(direction, e->velocity, 0))) return false; // e moving in some direction not in the push direction
+        if (e->falling) return false;
+
+        // if will fall, don't allow push.
+        Int3 coords_below = getNextCoords(current_coords, DOWN);
+        TileType type_below = getTileType(coords_below);
+        if (type_below == NONE && !next_world_state.player.hit_by_blue) return false;
+
+        // check within bounds
+        current_coords = getNextCoords(current_coords, direction);
+        if (!intCoordsWithinLevelBounds(current_coords)) return false;
+
+        TrailingHitbox th;
+        if (trailingHitboxAtCoords(current_coords, &th)) return false;
+
+        current_tile = getTileType(current_coords);
+        if (current_tile == NONE) return true;
+        if (current_tile == GRID || current_tile == WALL || current_tile == LADDER ) return false;
+    }
+    return false; // only here if hit the max entity push count
+}
+
+// TODO: should be in canPush with UP as direction
+/*
+PushResult canPushUp(Int3 coords)
+{
+	int32 stack_size = getPushableStackSize(coords);
+    Int3 check_coords = coords;
+    FOR(_, stack_size) check_coords = getNextCoords(check_coords, UP);
+    if (getTileType(check_coords) == NONE) return CAN_PUSH;
+    else return FAILED_PUSH;
+}
+*/
+
+// assumes able to be pushed 
+void pushAll(Int3 coords, Direction direction, bool on_head, Entity* root_entity)
+{
+    Int3 current_coords = coords;
+    int32 push_count = 0;
+    FOR(push_index, MAX_ENTITY_PUSH_COUNT)
+    {
+        if (getTileType(current_coords) == NONE) break;
+        current_coords = getNextCoords(current_coords, direction);
+        push_count++;
+    }
+    current_coords = getNextCoords(current_coords, oppositeDirection(direction));
+
+    for (int32 inverse_push_index = push_count; inverse_push_index != 0; inverse_push_index--)
+    {
+        int32 stack_size = getPushableStackSize(current_coords);
+        Int3 current_stack_coords = current_coords;
+        FOR(stack_index, stack_size)
+        {
+            Entity* e = getEntityAtCoords(current_stack_coords);
+            Int3 next_coords = getNextCoords(e->coords, direction);
+            TileType next_type = getTileType(next_coords);
+            if (next_type != NONE) break; // this is possible because of the inverse push index seeking. if not none, won't be pushable either, so break.
+            moveEntityInBufferAndState(e, next_coords, e->direction);
+
+            // add object to 'pushed by player' id array, unelss it's already being tracked
+            int32 write_index = -1;
+            bool already_tracked = false;
+            FOR(next_free_index, MAX_ENTITIES_TIED_TO_MOVEMENT)
+            {
+                if (entities_tied_to_movement[next_free_index].id == e->id) 
+                {
+                    already_tracked = true;
+                    write_index = next_free_index;
+                    break; // doesn't guarantee not already having written something to next_free. so need the already_tracked guard 
+                }
+                if (entities_tied_to_movement[next_free_index].id > 0) continue;
+                if (write_index == -1) write_index = next_free_index;
+            }
+            if (write_index == -1) continue;
+            if (!already_tracked) 
+            {
+                entities_tied_to_movement[write_index].id = e->id;
+                entities_tied_to_movement[write_index].direction = direction;
+                entities_tied_to_movement[write_index].on_head = on_head;
+                entities_tied_to_movement[write_index].root_entity = root_entity;
+            }
+            else
+            {
+                // if already tracked, maybe update direction
+                entities_tied_to_movement[write_index].direction = direction;
+            }
+
+            current_stack_coords = getNextCoords(current_stack_coords, UP);
+        }
+        current_coords = getNextCoords(current_coords, oppositeDirection(direction));
+    }
+    player_pushing = true;
+}
+
+// TODO: why not call this with pushAll(coords, UP)?
+/*
+void pushUp(Int3 coords)
+{
+    int32 stack_size = getPushableStackSize(coords);
+    Int3 current_coords = coords;
+    FOR(_, stack_size - 1) current_coords = getNextCoords(current_coords, UP);
+    for (int32 inverse_stack_index = stack_size; inverse_stack_index != 0; inverse_stack_index--)
+    {
+        TileType tile = getTileType(current_coords);
+        Direction dir = getTileDirection(current_coords);
+        Entity* e = getEntityAtCoords(current_coords);
+        Int3 coords_above = getNextCoords(current_coords, UP);
+        moveEntityInBufferAndState(e, coords_above, dir);
+        // TODO(anims): create interpolation animation from current coords to coords above, with animation_time
+    	createTrailingHitbox(e->id, current_coords, TRAILING_HITBOX_TIME, tile);
+        current_coords = getNextCoords(current_coords, DOWN);
+    }
+}
+*/
+
+// LASERS
+
+Direction getNextLaserDirectionMirror(Direction laser_direction, Direction mirror_direction)
+{
+    if (mirror_direction <= 4 && laser_direction <= 6) 
+    {
+        if (laser_direction == mirror_direction) 					return DOWN;
+        if (laser_direction == oppositeDirection(mirror_direction)) return UP;
+        if (laser_direction == UP) 									return oppositeDirection(mirror_direction);
+        if (laser_direction == DOWN) 								return mirror_direction;
+    }
+    switch (mirror_direction)
+    {
+        case UP: switch (laser_direction)
+     	{
+         	case NORTH: return EAST;
+         	case SOUTH: return WEST;
+         	case WEST:  return SOUTH;
+         	case EAST:  return NORTH;
+            default: 	return NO_DIRECTION;
+     	}
+		case DOWN: switch (laser_direction)
+       	{
+            case NORTH: return WEST;
+            case SOUTH: return EAST;
+            case WEST:  return NORTH;
+            case EAST:  return SOUTH;
+            default: 	return NO_DIRECTION;
+        }
+		default: return NO_DIRECTION;
+    }
+}
+
+// TODO: rename and generalize, move to other general vec3 handling
 float getDistanceFromLaserAlongAxis(Direction laser_direction, Vec3 laser_position, Vec3 entity_position)
 {
 	switch (laser_direction)
@@ -2214,8 +2218,10 @@ bool canFall(Entity* e)
     if (getTileType(next_coords) != NONE && getTileType(next_coords) != VOID) return false;
 
     // don't do fall if trailing hitbox below
+    /*
     TrailingHitbox _;
     if (trailingHitboxAtCoords(next_coords, &_)) return false;
+    */
 
     return true;
 }
@@ -2928,7 +2934,7 @@ void doStandardMovement(Direction direction, Int3 next_player_coords, bool recor
     // maybe move stack above the player's head
     Int3 coords_above_player = getNextCoords(player->coords, UP);
     bool do_on_head_movement = false;
-    if (isPushable(getTileType(coords_above_player)) && canPush(coords_above_player, direction) == CAN_PUSH) do_on_head_movement = true;
+    if (isPushable(getTileType(coords_above_player)) && canPush(coords_above_player, direction)) do_on_head_movement = true;
     if (player->hit_by_blue) do_on_head_movement = false;
     if (do_on_head_movement) pushAll(coords_above_player, direction, true, player);
 
@@ -3604,14 +3610,11 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             case SOURCE_MAGENTA:
                             {
                                 // figure out if push, pause, or fail here.
-                                // implicit: if PAUSE_PUSH, just don't do anything in particular. TODO: this might feel unresponsive, maybe buffer the input or something?
-                            	PushResult push_check = canPush(next_player_coords, input_direction);
-                                if (push_check == CAN_PUSH) 
+                            	if (canPush(next_player_coords, input_direction))
                                 {
                                     do_push = true;
                                     try_walk = true;
                                 }
-                                else if (push_check == FAILED_PUSH) { /* TODO(anims): failed animations case */ }
                                 break;
                             }
                             case LADDER:
@@ -3715,7 +3718,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                     int32 animation_time = 8; // TODO(anims): these functions shouldn't use animations
                                     if (do_push) pushAll(next_player_coords, input_direction);
                                     doStandardMovement(input_direction, next_player_coords, animation_time, true);
-                                    bypass_player_fall = true; 
                                 }
                                 else 
                                 {
@@ -3863,7 +3865,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 bool allow_diagonal = false;
                 bool do_push = false;
                 if (type_at_diagonal == NONE) allow_diagonal = true;
-                if (isPushable(type_at_diagonal) && canPush(diagonal_coords, diagonal_push_direction) == CAN_PUSH)
+                if (isPushable(type_at_diagonal) && canPush(diagonal_coords, diagonal_push_direction))
                 {
                     allow_diagonal = true;
                     do_push = true;
@@ -3888,7 +3890,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 bool allow_orthogonal = false;
                 bool do_push = false;
                 if (type_at_orthogonal == NONE) allow_orthogonal = true;
-                if (isPushable(type_at_orthogonal) && canPush(orthogonal_coords, orthogonal_push_direction) == CAN_PUSH)
+                if (isPushable(type_at_orthogonal) && canPush(orthogonal_coords, orthogonal_push_direction))
                 {
                     allow_orthogonal = true;
                     do_push = true;
@@ -3910,23 +3912,33 @@ void gameFrame(double delta_time, TickInput* tick_input)
         if (pack_turn_state.pack_intermediate_states_timer > 0) pack_turn_state.pack_intermediate_states_timer--;
 
         // falling logic for entities
-        bool halt_falling = false;
-        if (undo_press_timer > 0) halt_falling = true; // only do falling if there's not been an undo recently
-        if (cheating) halt_falling = true;
-        if (player->hit_by_blue) halt_falling = true;
+        bool halt_falling_objects = false;
+        if (undo_press_timer > 0) halt_falling_objects = true; // only do falling if there's not been an undo recently
+        if (player->hit_by_blue) halt_falling_objects = true;
 
         Entity* falling_entity_group[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.sources };
-        FOR(group_index, 3)
+        FOR(group_index, 4)
         {
+            // handle pack as the 4th group here (if not attached). then immediately break
+            bool is_pack = false;
+            if (group_index == 3) is_pack = true;
+
             FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
             {
-                Entity* e = &falling_entity_group[group_index][entity_index];
+                Entity* e;
+                if (is_pack)
+                {
+                    if (pack_attached) break;
+                    e = pack;
+                }
+                else e = &falling_entity_group[group_index][entity_index];
 
                 bool update_falling = false;
                 if (!e->falling) update_falling = true;
                 if (canFall(e)) update_falling = true;
-                if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(e->position, intCoordsToNorm(e->coords)), 0))) update_falling = false;
-                if (halt_falling) update_falling = false;
+                if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(e->position, intCoordsToNorm(e->coords)), 0))) update_falling = false; // not using e->velocity because it gets set after, so wouldn't work when pushing stationary object
+                if (halt_falling_objects) update_falling = false;
+                if (cheating) update_falling = false;
 
                 if (update_falling) setFalling(e); // only updates false -> true
 
@@ -3934,19 +3946,23 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 {
                     float test_y_velocity = e->velocity.y + GRAVITY;
                     test_y_velocity = floatMax(test_y_velocity, MIN_DOWN_VELOCITY);
-                	float test_y_position = e->position.y + test_y_velocity;
+                    float test_y_position = e->position.y + test_y_velocity;
                     if (test_y_position > getComponentAlongDirection(DOWN, intCoordsToNorm(e->coords)))
                     {
+                        // within a block: update falling entity position and velocity, but not coords
                         e->velocity.y = test_y_velocity;
                         e->position.y = test_y_position;
                     }
                     else
                     {
                         bool continue_falling = false;
-                        if (!halt_falling && canFall(e)) continue_falling = true;
+                        if (!halt_falling_objects && canFall(e)) continue_falling = true;
                         
                         if (continue_falling)
                         {
+                            TileType type = getTileType(e->coords);
+                            createTrailingHitbox(e->id, e->coords, 10, type); // TODO: this number is magic. later, maybe just calculate this based on displacement and velocity
+
                             e->position.y = test_y_position;
                             e->velocity.y = test_y_velocity;
                             Int3 next_coords = getNextCoords(e->coords, DOWN);
@@ -3960,8 +3976,16 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         }
                     }
                 }
+                if (is_pack) break;
             }
         }
+
+        // player falling logic
+        if (!player->hit_by_red)
+        {
+
+        }
+
 
         /*
         if (do_falling_logic)
@@ -4184,7 +4208,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 else
                 {
                 	// push
-                    Entity* root_e = tied_entity_info->tied_to_entity;
+                    Entity* root_e = tied_entity_info->root_entity;
                     Vec3 difference_in_root_position = vec3Subtract(root_e->position, intCoordsToNorm(root_e->coords));
                     float difference_in_root_position_along_direction = getComponentAlongDirection(tied_entity_info->direction, difference_in_root_position);
                     if (difference_in_root_position_along_direction != 0)
@@ -4192,7 +4216,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         Vec3 entity_target = intCoordsToNorm(e->coords);
                         Vec3 test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, difference_in_root_position_along_direction, entity_target);
                         bool do_entity_move = false;
-                        if (getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, e->position)) > 0) do_entity_move = true;
+                        if (getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, e->position)) > 0) do_entity_move = true; // prevents negative snapping of a object-to-be-pushed towards player
+                        if (!vec3IsEqual(e->position, intCoordsToNorm(getNextCoords(e->coords, oppositeDirection(tied_entity_info->direction))))) do_entity_move = true; // but should still keep objects that aren't at their coords moving to get to their coords.
                         if (do_entity_move) 
                         {
                             e->position = test_position;
@@ -4213,7 +4238,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                     bool clear_entity_from_tied_to_movement = false;
                     if (vec3IsEqual(e->position, intCoordsToNorm(e->coords))) clear_entity_from_tied_to_movement = true;
-                    if (tied_entity_info->on_head) clear_entity_from_tied_to_movement = false;
+                    if (tied_entity_info->on_head) clear_entity_from_tied_to_movement = false; // case already handled above
                     if (clear_entity_from_tied_to_movement) tied_entity_info->id = 0;
                 }
             }
@@ -4322,11 +4347,11 @@ void gameFrame(double delta_time, TickInput* tick_input)
         // MISC STUFF
 
         // decrement trailing hitboxes 
-        FOR(i, MAX_TRAILING_HITBOX_COUNT) if (trailing_hitboxes[i].frames > 0) trailing_hitboxes[i].frames--;
-        if (bypass_player_fall) bypass_player_fall = false;
+        FOR(th_index, MAX_TRAILING_HITBOX_COUNT) if (trailing_hitboxes[th_index].frames > 0) trailing_hitboxes[th_index].frames--;
 
         // reset undos performed if no longer holding z undos
         if (undos_performed > 0 && !tick_input->z_press) undos_performed = 0;
+
         // decrement undo timer if > 0. the timer value means that even a few frames after releasing undo, gravity isn't applied.
         if (undo_press_timer > 0) undo_press_timer--;
 
