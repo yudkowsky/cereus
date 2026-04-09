@@ -3574,6 +3574,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
                     if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) allow_turn = false;
 
+                    // get difference in position along axis of travel, and gate on some threshold to target
+                    float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, intCoordsToNorm(player->coords)));
+                    if (fabs(difference_in_player_position_along_direction) > 0.2) allow_turn = false;
+
                     if (allow_turn)
                     {
                         Direction initial_player_direction = player->direction;
@@ -4020,6 +4024,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
                 else
                 {
+                    /*
                 	// push
                     Entity* root_e = tied_entity_info->root_entity;
                     Vec3 difference_in_root_position = vec3Subtract(root_e->position, intCoordsToNorm(root_e->coords));
@@ -4031,16 +4036,17 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         float test_movement_towards_direction = getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, e->position));
 
                         bool do_entity_move = false;
-                        if (test_movement_towards_direction > 0) do_entity_move = true; // prevents negative snapping of a object-to-be-pushed towards player
+                        if (test_movement_towards_direction > 0) do_entity_move = true; // prevents negative snapping of an object-to-be-pushed towards player
                         if (test_movement_towards_direction > 0.5) do_entity_move = false; // prevents too large a jump (happens if pack rotation not done before root_e moves by one tile)
-                        if (do_entity_move) 
+
+                        if (do_entity_move)
                         {
                             e->position = test_position;
                             e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
                         }
-                        else if (tied_entity_info->on_head)
+                        else if (test_movement_towards_direction < -0.5)
                         {
-                            // here if something on head overshoots when it's not supposed to be moving anymore
+                            // case where object should go to end, but is offset by one unit because root entity has changed coords. 
                             e->position = intCoordsToNorm(e->coords);
                             e->velocity = VEC3_0;
                             tied_entity_info->id = 0;
@@ -4068,6 +4074,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     if (vec3IsEqual(e->position, intCoordsToNorm(e->coords))) clear_entity_from_tied_to_movement = true;
                     if (tied_entity_info->on_head) clear_entity_from_tied_to_movement = false; // case already handled above
                     if (clear_entity_from_tied_to_movement) tied_entity_info->id = 0;
+                */
                 }
             }
     	}
