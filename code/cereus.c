@@ -4024,7 +4024,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
                 else
                 {
-                    /*
                 	// push
                     Entity* root_e = tied_entity_info->root_entity;
                     Vec3 difference_in_root_position = vec3Subtract(root_e->position, intCoordsToNorm(root_e->coords));
@@ -4046,10 +4045,19 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         }
                         else if (test_movement_towards_direction < -0.5)
                         {
-                            // case where object should go to end, but is offset by one unit because root entity has changed coords. 
-                            e->position = intCoordsToNorm(e->coords);
-                            e->velocity = VEC3_0;
-                            tied_entity_info->id = 0;
+                            // case where object should keep moving, but is offset by one unit because root entity has changed coords, but object on head / on stack will stop here, so isn't pushed by pushAll, but should still continue to end coords
+                            test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, 1, test_position);
+                            if (getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, intCoordsToNorm(e->coords))) < 0.0)
+                            {
+                                e->position = test_position;
+                                e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
+                            }
+                            else
+                            {
+                                e->position = intCoordsToNorm(e->coords);
+                                e->velocity = VEC3_0;
+                                tied_entity_info->id = 0;
+                            }
                         }
                         else if (root_e == pack)
                         {
@@ -4074,7 +4082,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     if (vec3IsEqual(e->position, intCoordsToNorm(e->coords))) clear_entity_from_tied_to_movement = true;
                     if (tied_entity_info->on_head) clear_entity_from_tied_to_movement = false; // case already handled above
                     if (clear_entity_from_tied_to_movement) tied_entity_info->id = 0;
-                */
                 }
             }
     	}
