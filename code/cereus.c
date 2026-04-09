@@ -1766,15 +1766,14 @@ bool canPush(Int3 coords, Direction direction)
     return false; // only here if hit the max entity push count
 }
 
-// TODO: should be in canPush with UP as direction
 /*
-PushResult canPushUp(Int3 coords)
+bool canPushUp(Int3 coords)
 {
 	int32 stack_size = getPushableStackSize(coords);
     Int3 check_coords = coords;
     FOR(_, stack_size) check_coords = getNextCoords(check_coords, UP);
-    if (getTileType(check_coords) == NONE) return CAN_PUSH;
-    else return FAILED_PUSH;
+    if (getTileType(check_coords) == NONE) return true;
+    else return false;
 }
 */
 
@@ -1818,18 +1817,13 @@ void pushAll(Int3 coords, Direction direction, bool on_head, Entity* root_entity
                 if (write_index == -1) write_index = next_free_index;
             }
             if (write_index == -1) continue;
-            if (!already_tracked) 
-            {
-                entities_tied_to_movement[write_index].id = e->id;
-                entities_tied_to_movement[write_index].direction = direction;
-                entities_tied_to_movement[write_index].on_head = on_head;
-                entities_tied_to_movement[write_index].root_entity = root_entity;
-            }
-            else
-            {
-                // if already tracked, maybe update direction
-                entities_tied_to_movement[write_index].direction = direction;
-            }
+
+            // update array even if already tracked, just with the old write_index
+            entities_tied_to_movement[write_index].id = e->id;
+            entities_tied_to_movement[write_index].direction = direction;
+            entities_tied_to_movement[write_index].on_head = on_head;
+            entities_tied_to_movement[write_index].root_entity = root_entity;
+
             current_stack_coords = getNextCoords(current_stack_coords, UP);
         }
         current_coords = getNextCoords(current_coords, oppositeDirection(direction));
@@ -4033,28 +4027,12 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                     if (difference_in_root_position_along_direction != 0)
                     {
-                        Vec3 entity_target = intCoordsToNorm(e->coords);
-                        Vec3 test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, difference_in_root_position_along_direction, entity_target);
-
+                        Vec3 test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, difference_in_root_position_along_direction, intCoordsToNorm(e->coords));
                         float test_movement_towards_direction = getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, e->position));
-
-                        /*
-                        if (root_e == pack)
-                        {
-                            if (test_movement_towards_direction < 0 || test_movement_towards_direction > 0.5)
-                            {
-                                e->position = intCoordsToNorm(e->coords);
-                                e->velocity = VEC3_0;
-                                tied_entity_info->id = 0;
-                                continue;
-                            }
-                        }
-                        */
 
                         bool do_entity_move = false;
                         if (test_movement_towards_direction > 0) do_entity_move = true; // prevents negative snapping of a object-to-be-pushed towards player
                         if (test_movement_towards_direction > 0.5) do_entity_move = false; // prevents too large a jump (happens if pack rotation not done before root_e moves by one tile)
-                        if (!vec3IsEqual(e->position, intCoordsToNorm(getNextCoords(e->coords, oppositeDirection(tied_entity_info->direction))))) do_entity_move = true; // but should still keep objects that aren't at their coords moving to get to their coords.
                         if (do_entity_move) 
                         {
                             e->position = test_position;
@@ -4069,10 +4047,15 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         }
                         else if (root_e == pack)
                         {
-                            // here if pack would overshoot 
-                            e->position = intCoordsToNorm(e->coords);
-                            e->velocity = VEC3_0;
-                            tied_entity_info->id = 0;
+                            // here if pack would overshoot, or otherwise misbehave
+                            bool close_to_target = fabs(getComponentAlongDirection(tied_entity_info->direction, vec3Subtract(e->position, intCoordsToNorm(e->coords)))) < 0.1;
+                            if (test_movement_towards_direction > 0.0 || close_to_target)
+                            {
+                                // TODO: try to interpolate in here instead?
+                                e->position = intCoordsToNorm(e->coords);
+                                e->velocity = VEC3_0;
+                                tied_entity_info->id = 0;
+                            }
                         }
                     }
                     else 
@@ -4088,10 +4071,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
             }
     	}
-
-        // disallow input if player above void / water
-        TileType tile_type_below_player = getTileType(getNextCoords(player->coords, DOWN));
-        if (tile_type_below_player == VOID || tile_type_below_player == WATER) allow_movement = false;
 
         // win block logic
         if (getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK)
@@ -4190,6 +4169,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
         }
 
         // MISC STUFF
+
+        // disallow input if player above void / water
+        TileType tile_type_below_player = getTileType(getNextCoords(player->coords, DOWN));
+        if (tile_type_below_player == VOID || tile_type_below_player == WATER) allow_movement = false;
 
         // decrement trailing hitboxes 
         FOR(th_index, MAX_TRAILING_HITBOX_COUNT) if (trailing_hitboxes[th_index].frames > 0) trailing_hitboxes[th_index].frames--;
