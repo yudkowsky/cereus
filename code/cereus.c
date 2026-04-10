@@ -60,6 +60,16 @@ typedef enum
 }
 Color;
 
+typedef enum
+{
+    WORLD_0,
+    WORLD_1,
+    GATE_1,
+    WORLD_2,
+    GATE_2
+}
+GameProgress;
+
 // coords are integer coordinates of the entity, position is the floating point coords in world space.
 // likewise direction is one of 6 orientations, rotation is the actual rotation passed to renderer.
 typedef struct
@@ -134,15 +144,33 @@ typedef struct
 }
 PackTurnState;
 
-typedef enum
+// assumes 0 width
+typedef struct
 {
-    WORLD_0,
-    WORLD_1,
-    GATE_1,
-    WORLD_2,
-    GATE_2
+    Vec3 start_coords;
+    Vec3 end_coords;
+    Direction direction;
+    Color color;
+    Vec4 start_clip_plane;
+    Vec4 end_clip_plane;
 }
-GameProgress;
+LaserBuffer;
+
+typedef struct TemporaryState
+{
+    TrailingHitbox trailing_hitboxes[32]; 
+
+    GameProgress game_progress;
+    bool in_overworld;
+    bool allow_movement;
+    bool pack_attached;
+
+    TiedEntity entities_tied_to_movement[32];
+    int32 player_hit_by_red;
+    int32 player_hit_by_blue;
+    PackTurnState pack_turn_state;
+}
+TemporaryState;
 
 // EDITOR STRUCTS
 
@@ -227,20 +255,6 @@ typedef struct
     PopupType type;
 }
 DebugPopup;
-
-// LASER STRUCT
-
-// assumes 0 width
-typedef struct
-{
-    Vec3 start_coords;
-    Vec3 end_coords;
-    Direction direction;
-    Color color;
-    Vec4 start_clip_plane;
-    Vec4 end_clip_plane;
-}
-LaserBuffer;
 
 // UNDO BUFFER STRUCTS
 
@@ -407,28 +421,17 @@ int32 camera_target_plane = 0; // y level of xz plane which calculates targeted 
 DrawCommand draw_commands[16768] = {0};
 int32 draw_command_count = 0;
 
-WorldState world_state = {0};
-WorldState next_world_state = {0};
-WorldState leap_of_faith_snapshot = {0}; // TODO: doesn't change the buffer, so could save 2MB memory by using some EntitySnapshot struct
-WorldState overworld_zero = {0}; // TODO: probably don't have to carry this around, just read from zeroed overworld file when i need this (on restart in overworld)
 Int3 level_dim = {0};
+WorldState world_state = {0};
+TemporaryState temp_state = {0};
+LaserBuffer laser_buffer[512] = {0}; // 512 = 64 max sources * 16 max laser turns
+
+WorldState leap_of_faith_world_state_snapshot = {0}; // TODO: doesn't change the buffer, so could save 2MB memory by using some EntitySnapshot struct
+TemporaryState leap_of_faith_temp_state_snapshot = {0};
+WorldState overworld_zero = {0}; // TODO: probably don't have to carry this around, just read from zeroed overworld file when i need this (on restart in overworld)
 
 int32 time_until_allow_meta_input = 0;
 int32 time_until_allow_undo_or_restart_input = 0;
-
-LaserBuffer laser_buffer[512] = {0}; // 512 = 64 max sources * 16 max laser turns
-TrailingHitbox trailing_hitboxes[32]; 
-
-GameProgress game_progress = WORLD_0;
-bool in_overworld = false;
-bool allow_movement = true;
-bool pack_attached = true;
-PackTurnState pack_turn_state = {0};
-bool player_hit_by_red;
-bool player_hit_by_blue;
-
-// handle pushed entities
-TiedEntity entities_tied_to_movement[32] = {0};
 
 // handle undos
 UndoBuffer undo_buffer = {0};
@@ -714,22 +717,22 @@ Int3 bufferIndexToCoords(int32 buffer_index)
 
 void setTileType(TileType type, Int3 coords) 
 {
-    next_world_state.buffer[coordsToBufferIndexType(coords)] = type; 
+    world_state.buffer[coordsToBufferIndexType(coords)] = type; 
 }
 
 void setTileDirection(Direction direction, Int3 coords)
 {
-    next_world_state.buffer[coordsToBufferIndexDirection(coords)] = direction;
+    world_state.buffer[coordsToBufferIndexDirection(coords)] = direction;
 }
 
 TileType getTileType(Int3 coords) 
 {
-    return next_world_state.buffer[coordsToBufferIndexType(coords)]; 
+    return world_state.buffer[coordsToBufferIndexType(coords)]; 
 }
 
 Direction getTileDirection(Int3 coords) 
 {
-    return next_world_state.buffer[coordsToBufferIndexDirection(coords)]; 
+    return world_state.buffer[coordsToBufferIndexDirection(coords)]; 
 }
 
 // sets coords and position of an entity to some values, and updates the buffer accordingly 
@@ -804,16 +807,16 @@ Entity* getEntityAtCoords(Int3 coords)
 {
     TileType tile = getTileType(coords);
     Entity *entity_group = 0;
-    if (isSource(tile)) entity_group = next_world_state.sources;
+    if (isSource(tile)) entity_group = world_state.sources;
     else switch(tile)
     {
-        case BOX:     	   entity_group = next_world_state.boxes;    	  break;
-        case MIRROR:  	   entity_group = next_world_state.mirrors;  	  break;
-        case GLASS: 	   entity_group = next_world_state.glass_blocks;  break;
-        case WIN_BLOCK:    entity_group = next_world_state.win_blocks;    break;
-        case LOCKED_BLOCK: entity_group = next_world_state.locked_blocks; break;
-        case PLAYER: return &next_world_state.player;
-        case PACK:	 return &next_world_state.pack;
+        case BOX:     	   entity_group = world_state.boxes;    	  break;
+        case MIRROR:  	   entity_group = world_state.mirrors;  	  break;
+        case GLASS: 	   entity_group = world_state.glass_blocks;  break;
+        case WIN_BLOCK:    entity_group = world_state.win_blocks;    break;
+        case LOCKED_BLOCK: entity_group = world_state.locked_blocks; break;
+        case PLAYER: return &world_state.player;
+        case PACK:	 return &world_state.pack;
         default: return 0;
     }
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
@@ -827,18 +830,18 @@ Entity* getEntityAtCoords(Int3 coords)
 Entity* getEntityFromId(int32 id)
 {
     if (id < 0) return 0;
-    if (id == PLAYER_ID) return &next_world_state.player;
-    else if (id == PACK_ID) return &next_world_state.pack;
+    if (id == PLAYER_ID) return &world_state.player;
+    else if (id == PACK_ID) return &world_state.pack;
     else 
     {
         Entity* entity_group = 0;
         int32 switch_value =  ((id / 100) * 100);
-        if 		(switch_value == ID_OFFSET_BOX)    		 entity_group = next_world_state.boxes; 
-        else if (switch_value == ID_OFFSET_MIRROR) 		 entity_group = next_world_state.mirrors;
-        else if (switch_value == ID_OFFSET_GLASS) 	 	 entity_group = next_world_state.glass_blocks;
-        else if (switch_value >= ID_OFFSET_SOURCE && switch_value < ID_OFFSET_WIN_BLOCK) entity_group = next_world_state.sources;
-        else if (switch_value == ID_OFFSET_WIN_BLOCK) 	 entity_group = next_world_state.win_blocks;
-        else if (switch_value == ID_OFFSET_LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
+        if 		(switch_value == ID_OFFSET_BOX)    		 entity_group = world_state.boxes; 
+        else if (switch_value == ID_OFFSET_MIRROR) 		 entity_group = world_state.mirrors;
+        else if (switch_value == ID_OFFSET_GLASS) 	 	 entity_group = world_state.glass_blocks;
+        else if (switch_value >= ID_OFFSET_SOURCE && switch_value < ID_OFFSET_WIN_BLOCK) entity_group = world_state.sources;
+        else if (switch_value == ID_OFFSET_WIN_BLOCK) 	 entity_group = world_state.win_blocks;
+        else if (switch_value == ID_OFFSET_LOCKED_BLOCK) entity_group = world_state.locked_blocks;
 
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) if (entity_group[entity_index].id == id) return &entity_group[entity_index];
         return 0;
@@ -884,12 +887,12 @@ int32 sourceColorIdOffset(Color color)
 
 int32 entityIdOffset(Entity *entity, Color color)
 {
-    if 		(entity == next_world_state.boxes)    	   return ID_OFFSET_BOX;
-    else if (entity == next_world_state.mirrors)  	   return ID_OFFSET_MIRROR;
-    else if (entity == next_world_state.glass_blocks)  return ID_OFFSET_GLASS;
-    else if (entity == next_world_state.win_blocks)    return ID_OFFSET_WIN_BLOCK;
-    else if (entity == next_world_state.locked_blocks) return ID_OFFSET_LOCKED_BLOCK;
-    else if (entity == next_world_state.sources)  	   return ID_OFFSET_SOURCE + sourceColorIdOffset(color);
+    if 		(entity == world_state.boxes)    	   return ID_OFFSET_BOX;
+    else if (entity == world_state.mirrors)  	   return ID_OFFSET_MIRROR;
+    else if (entity == world_state.glass_blocks)  return ID_OFFSET_GLASS;
+    else if (entity == world_state.win_blocks)    return ID_OFFSET_WIN_BLOCK;
+    else if (entity == world_state.locked_blocks) return ID_OFFSET_LOCKED_BLOCK;
+    else if (entity == world_state.sources)  	   return ID_OFFSET_SOURCE + sourceColorIdOffset(color);
     return 0;
 }
 
@@ -1038,7 +1041,7 @@ void loadBufferInfo(FILE* file)
 
     if (version == 0)
     {
-        fread(&next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
+        fread(&world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
     }
     else if (version == 1)
     {
@@ -1053,8 +1056,8 @@ void loadBufferInfo(FILE* file)
             fread(&type, 1, 1, file);
             fread(&direction, 1, 1, file);
 
-            next_world_state.buffer[buffer_index] = (uint8)type;
-            next_world_state.buffer[buffer_index + 1] = (uint8)direction;
+            world_state.buffer[buffer_index] = (uint8)type;
+            world_state.buffer[buffer_index + 1] = (uint8)direction;
         }
     }
 }
@@ -1101,7 +1104,7 @@ void loadWinBlockPaths(FILE* file)
 
         FOR(wb_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            Entity* wb = &next_world_state.win_blocks[wb_index];
+            Entity* wb = &world_state.win_blocks[wb_index];
             if (wb->coords.x == x && wb->coords.y == y && wb->coords.z == z)
             {
                 memcpy(wb->next_level, path, sizeof(wb->next_level));
@@ -1128,7 +1131,7 @@ void loadLockedInfoPaths(FILE* file)
         if (fread(&path, 1, 64, file) != 64) return;
         path[63] = '\0';
 
-        Entity* entity_group[6] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, next_world_state.glass_blocks, next_world_state.sources, next_world_state.win_blocks};
+        Entity* entity_group[6] = { world_state.boxes, world_state.mirrors, world_state.locked_blocks, world_state.glass_blocks, world_state.sources, world_state.win_blocks };
         FOR(group_index, 6)
         {
             FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -1149,7 +1152,7 @@ void writeBufferToFile(FILE* file, int32 version)
 {
     if (version == 0)
     {
-        fwrite(next_world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
+        fwrite(world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
     }
     else if (version == 1)
     {
@@ -1159,9 +1162,9 @@ void writeBufferToFile(FILE* file, int32 version)
 
         for (int32 buffer_index = 0; buffer_index < level_dim.x*level_dim.y*level_dim.z * 2; buffer_index += 2)
         {
-            if (next_world_state.buffer[buffer_index] == NONE) continue;
-            TileType type = (int8)next_world_state.buffer[buffer_index];
-            Direction direction = (int8)next_world_state.buffer[buffer_index + 1];
+            if (world_state.buffer[buffer_index] == NONE) continue;
+            TileType type = (int8)world_state.buffer[buffer_index];
+            Direction direction = (int8)world_state.buffer[buffer_index + 1];
             fwrite(&buffer_index, 4, 1, file); // write buffer_index, backsolve coords from level dims on decompression
             fwrite(&type, 1, 1, file);
             fwrite(&direction, 1, 1, file);
@@ -1235,13 +1238,13 @@ bool saveLevelRewrite(char* path)
 
     FOR(win_block_index, MAX_ENTITY_INSTANCE_COUNT)
     {
-        Entity* wb = &next_world_state.win_blocks[win_block_index];
+        Entity* wb = &world_state.win_blocks[win_block_index];
         if (wb->removed) continue;
         if (wb->next_level[0] == '\0') continue;
         writeWinBlockToFile(file, wb);
     }
 
-    Entity* entity_group[6] = {next_world_state.boxes, next_world_state.mirrors, next_world_state.locked_blocks, next_world_state.glass_blocks, next_world_state.sources, next_world_state.win_blocks};
+    Entity* entity_group[6] = { world_state.boxes, world_state.mirrors, world_state.locked_blocks, world_state.glass_blocks, world_state.sources, world_state.win_blocks };
     FOR(group_index, 6)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -1259,7 +1262,7 @@ bool saveLevelRewrite(char* path)
 int32 findInSolvedLevels(char level[64])
 {
     if (level[0] == '\0') return INT32_MAX; // if NULL string passed, return large number
-    FOR(level_index, MAX_LEVEL_COUNT) if (strcmp(next_world_state.solved_levels[level_index], level) == 0) return level_index;
+    FOR(level_index, MAX_LEVEL_COUNT) if (strcmp(world_state.solved_levels[level_index], level) == 0) return level_index;
     return -1;
 }
 
@@ -1271,26 +1274,26 @@ int32 nextFreeInSolvedLevels(char (*solved_levels)[64][64])
 
 void addToSolvedLevels(char level[64])
 {
-    int32 next_free = nextFreeInSolvedLevels(&next_world_state.solved_levels);
+    int32 next_free = nextFreeInSolvedLevels(&world_state.solved_levels);
     if (next_free == -1) return; // no free space (should not happen)
-    strcpy(next_world_state.solved_levels[next_free], level);
+    strcpy(world_state.solved_levels[next_free], level);
 }
 
 void removeFromSolvedLevels(char level[64])
 {
     int32 index = findInSolvedLevels(level);
     if (index == -1 || index > MAX_LEVEL_COUNT) return; // not in solved levels, or null string passed
-    memset(next_world_state.solved_levels[index], 0, sizeof(next_world_state.solved_levels[0]));
+    memset(world_state.solved_levels[index], 0, sizeof(world_state.solved_levels[0]));
 }
 
 void loadSolvedLevelsFromFile()
 {
-    memset(next_world_state.solved_levels, 0, sizeof(next_world_state.solved_levels));
+    memset(world_state.solved_levels, 0, sizeof(world_state.solved_levels));
 	FILE* file = fopen(solved_level_path, "rb+");
     FOR(level_index, MAX_LEVEL_COUNT)
     {
-        if (fread(next_world_state.solved_levels[level_index], 64, 1, file) != 1) break;
-        if (next_world_state.solved_levels[level_index][0] == 0) break;
+        if (fread(world_state.solved_levels[level_index], 64, 1, file) != 1) break;
+        if (world_state.solved_levels[level_index][0] == 0) break;
     }
     fclose(file);
 }
@@ -1301,8 +1304,8 @@ void writeSolvedLevelsToFile()
     if (!file) return;
     FOR(level_index, MAX_LEVEL_COUNT)
     {
-		if (next_world_state.solved_levels[level_index][0] == 0) break;
-        fwrite(&next_world_state.solved_levels[level_index], 64, 1, file);
+		if (world_state.solved_levels[level_index][0] == 0) break;
+        fwrite(&world_state.solved_levels[level_index], 64, 1, file);
     }
     fclose(file);
 }
@@ -1311,7 +1314,7 @@ void clearSolvedLevels()
 {
 	FILE* file = fopen(solved_level_path, "wb");
     fclose(file);
-    memset(next_world_state.solved_levels, 0, sizeof(next_world_state.solved_levels));
+    memset(world_state.solved_levels, 0, sizeof(world_state.solved_levels));
 }
 
 // DRAW ASSET
@@ -1583,9 +1586,9 @@ void editorPlaceOnlyInstanceOfTile(Entity* entity, Int3 coords, TileType tile, i
 {
     for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
     {
-        if (next_world_state.buffer[buffer_index] != tile) continue;
-        next_world_state.buffer[buffer_index] = NONE;
-        next_world_state.buffer[buffer_index + 1] = NORTH;
+        if (world_state.buffer[buffer_index] != tile) continue;
+        world_state.buffer[buffer_index] = NONE;
+        world_state.buffer[buffer_index + 1] = NORTH;
     }
     entity->coords = coords;
     entity->position = intCoordsToNorm(coords);
@@ -1646,21 +1649,21 @@ void createTrailingHitbox(int32 id, Int3 coords, int32 frames, TileType type)
     int32 hitbox_index = -1;
     FOR(find_hitbox_index, MAX_TRAILING_HITBOX_COUNT)
     {
-        if (trailing_hitboxes[find_hitbox_index].frames != 0) continue;
+        if (temp_state.trailing_hitboxes[find_hitbox_index].frames != 0) continue;
         hitbox_index = find_hitbox_index;
     }
     if (hitbox_index == -1) return;
-    trailing_hitboxes[hitbox_index].id = id;
-    trailing_hitboxes[hitbox_index].coords = coords;
-    trailing_hitboxes[hitbox_index].frames = frames;
-    trailing_hitboxes[hitbox_index].type = type;
+    temp_state.trailing_hitboxes[hitbox_index].id = id;
+    temp_state.trailing_hitboxes[hitbox_index].coords = coords;
+    temp_state.trailing_hitboxes[hitbox_index].frames = frames;
+    temp_state.trailing_hitboxes[hitbox_index].type = type;
 }
 
 bool trailingHitboxAtCoords(Int3 coords, TrailingHitbox* trailing_hitbox)
 {
     FOR(trailing_hitbox_index, MAX_TRAILING_HITBOX_COUNT) 
     {
-        TrailingHitbox th = trailing_hitboxes[trailing_hitbox_index];
+        TrailingHitbox th = temp_state.trailing_hitboxes[trailing_hitbox_index];
         if (int3IsEqual(coords, th.coords) && th.frames > 0) 
         {
             *trailing_hitbox = th;
@@ -1750,7 +1753,7 @@ bool canPush(Int3 coords, Direction direction)
         // if will fall, don't allow push.
         Int3 coords_below = getNextCoords(current_coords, DOWN);
         TileType type_below = getTileType(coords_below);
-        if (type_below == NONE && !player_hit_by_blue) return false;
+        if (type_below == NONE && !temp_state.player_hit_by_blue) return false;
 
         // check within bounds
         current_coords = getNextCoords(current_coords, direction);
@@ -1807,22 +1810,22 @@ void pushAll(Int3 coords, Direction direction, bool on_head, Entity* root_entity
             bool already_tracked = false;
             FOR(next_free_index, MAX_ENTITIES_TIED_TO_MOVEMENT)
             {
-                if (entities_tied_to_movement[next_free_index].id == e->id) 
+                if (temp_state.entities_tied_to_movement[next_free_index].id == e->id) 
                 {
                     already_tracked = true;
                     write_index = next_free_index;
                     break; // doesn't guarantee not already having written something to next_free. so need the already_tracked guard 
                 }
-                if (entities_tied_to_movement[next_free_index].id > 0) continue;
+                if (temp_state.entities_tied_to_movement[next_free_index].id > 0) continue;
                 if (write_index == -1) write_index = next_free_index;
             }
             if (write_index == -1) continue;
 
             // update array even if already tracked, just with the old write_index
-            entities_tied_to_movement[write_index].id = e->id;
-            entities_tied_to_movement[write_index].direction = direction;
-            entities_tied_to_movement[write_index].on_head = on_head;
-            entities_tied_to_movement[write_index].root_entity = root_entity;
+            temp_state.entities_tied_to_movement[write_index].id = e->id;
+            temp_state.entities_tied_to_movement[write_index].direction = direction;
+            temp_state.entities_tied_to_movement[write_index].on_head = on_head;
+            temp_state.entities_tied_to_movement[write_index].root_entity = root_entity;
 
             current_stack_coords = getNextCoords(current_stack_coords, UP);
         }
@@ -1914,13 +1917,13 @@ Vec3 getNormCoordsWithEntityCoordAlongAxis(Direction direction, Vec3 current_nor
 // TODO: insert small sphere at mirror reflection point
 void updateLaserBuffer()
 {
-    Entity* player = &next_world_state.player;
+    Entity* player = &world_state.player;
 
     // set all lasers to inactive. will make them active in the loop
     memset(laser_buffer, 0, sizeof(laser_buffer));
 
-    player_hit_by_red   = false;
-    player_hit_by_blue  = false;
+    temp_state.player_hit_by_red   = false;
+    temp_state.player_hit_by_blue  = false;
 
     // if a source is a non-primary color, create primary sources of the constituent colors 
     // TODO: probably shouldn't rebuild this buffer every time function is called, could just update when sources are moved / on level rebuild
@@ -1928,7 +1931,7 @@ void updateLaserBuffer()
     int32 primary_index = 0;
     FOR(source_index, MAX_ENTITY_INSTANCE_COUNT)
     {
-        Entity* s = &next_world_state.sources[source_index];
+        Entity* s = &world_state.sources[source_index];
         if (s->removed || s->locked) continue;
 		if (s->color < MAGENTA)
         {
@@ -2028,18 +2031,18 @@ void updateLaserBuffer()
                         {
                             case RED:     
                             {
-                                player_hit_by_red = true; 
+                                temp_state.player_hit_by_red = true; 
                                 break;
                             }
                             case BLUE:    
                             {
-                            	player_hit_by_blue = true; 
+                            	temp_state.player_hit_by_blue = true; 
                                 break;
                             }
                             case MAGENTA: 
                             {
-                                player_hit_by_red = true;
-                                player_hit_by_blue = true;
+                                temp_state.player_hit_by_red = true;
+                                temp_state.player_hit_by_blue = true;
                                 break;
                             }
                             default: break;
@@ -2243,8 +2246,8 @@ void setFalling(Entity* entity)
         if (e_in_stack->removed) return; // if any entities in the stack are removed, or moving, don't do the fall
 
         // two checks which have to do with breaking a stack so that everything below a point falls, but not above a certain point
-        if (e_in_stack->id == PACK_ID && pack_attached && stack_fall_index != 0) break; // if e is pack, and pack_attached, and this isn't the entity on which the function was called, break fall here
-        if (e_in_stack->id == PLAYER_ID && player_hit_by_red && stack_fall_index != 0) break; // similarly, if player is red above a falling stack, then break to allow stack to fall, but keep player floating
+        if (e_in_stack->id == PACK_ID && temp_state.pack_attached && stack_fall_index != 0) break; // if e is pack, and pack_attached, and this isn't the entity on which the function was called, break fall here
+        if (e_in_stack->id == PLAYER_ID && temp_state.player_hit_by_red && stack_fall_index != 0) break; // similarly, if player is red above a falling stack, then break to allow stack to fall, but keep player floating
 
         e_in_stack->falling = true;
 
@@ -2323,86 +2326,86 @@ void loadUndoBufferFromFile()
 
 void gameInitializeState(char* level_name)
 {
-    if (level_name == 0) strcpy(next_world_state.level_name, debug_level_name);
-    else strcpy(next_world_state.level_name, level_name);
+    if (level_name == 0) strcpy(world_state.level_name, debug_level_name);
+    else strcpy(world_state.level_name, level_name);
 
     memset(laser_buffer, 0, sizeof(laser_buffer));
 
-    Entity* player = &next_world_state.player;
-    Entity* pack = &next_world_state.pack;
+    Entity* player = &world_state.player;
+    Entity* pack = &world_state.pack;
 
     // memset worldstate to 0 (with persistant level_name, and solved levels)
     char persist_level_name[256] = {0};
     char persist_solved_levels[64][64] = {0};
-    strcpy(persist_level_name, next_world_state.level_name);
-    memcpy(persist_solved_levels, next_world_state.solved_levels, sizeof(persist_solved_levels));
+    strcpy(persist_level_name, world_state.level_name);
+    memcpy(persist_solved_levels, world_state.solved_levels, sizeof(persist_solved_levels));
 
-    memset(&next_world_state, 0, sizeof(WorldState));
+    memset(&world_state, 0, sizeof(WorldState));
 
-    strcpy(next_world_state.level_name, persist_level_name);
-    memcpy(next_world_state.solved_levels, persist_solved_levels, sizeof(persist_solved_levels));
+    strcpy(world_state.level_name, persist_level_name);
+    memcpy(world_state.solved_levels, persist_solved_levels, sizeof(persist_solved_levels));
 
-    if (strcmp(next_world_state.level_name, "overworld") == 0) in_overworld = true;
-    else in_overworld = false;
+    if (strcmp(world_state.level_name, "overworld") == 0) temp_state.in_overworld = true;
+    else temp_state.in_overworld = false;
 
     // build level_path from level_name
     char level_path[64] = {0};
-    buildLevelPathFromName(next_world_state.level_name, &level_path, false);
+    buildLevelPathFromName(world_state.level_name, &level_path, false);
     FILE* file = fopen(level_path, "rb+");
     loadBufferInfo(file);
     fclose(file);
 
-    memset(next_world_state.boxes,    	   0, sizeof(next_world_state.boxes)); 
-    memset(next_world_state.mirrors,  	   0, sizeof(next_world_state.mirrors));
-    memset(next_world_state.glass_blocks,  0, sizeof(next_world_state.glass_blocks));
-    memset(next_world_state.sources,  	   0, sizeof(next_world_state.sources));
-    memset(next_world_state.win_blocks,    0, sizeof(next_world_state.win_blocks));
-    memset(next_world_state.locked_blocks, 0, sizeof(next_world_state.locked_blocks));
+    memset(world_state.boxes,    	   0, sizeof(world_state.boxes)); 
+    memset(world_state.mirrors,  	   0, sizeof(world_state.mirrors));
+    memset(world_state.glass_blocks,  0, sizeof(world_state.glass_blocks));
+    memset(world_state.sources,  	   0, sizeof(world_state.sources));
+    memset(world_state.win_blocks,    0, sizeof(world_state.win_blocks));
+    memset(world_state.locked_blocks, 0, sizeof(world_state.locked_blocks));
     FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) // TODO: do i still need id -1 as a gate, now that i'm just using .removed everywhere?
     {
-        next_world_state.boxes[entity_index].id 		= -1;
-        next_world_state.mirrors[entity_index].id 		= -1;
-        next_world_state.glass_blocks[entity_index].id	= -1;
-        next_world_state.sources[entity_index].id		= -1;
-        next_world_state.win_blocks[entity_index].id	= -1;
-        next_world_state.locked_blocks[entity_index].id	= -1;
+        world_state.boxes[entity_index].id 		= -1;
+        world_state.mirrors[entity_index].id 		= -1;
+        world_state.glass_blocks[entity_index].id	= -1;
+        world_state.sources[entity_index].id		= -1;
+        world_state.win_blocks[entity_index].id	= -1;
+        world_state.locked_blocks[entity_index].id	= -1;
     }
 
     Entity *entity_group = 0;
     for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
     {
-        TileType buffer_contents = next_world_state.buffer[buffer_index];
-        if 	    (buffer_contents == BOX)     	  entity_group = next_world_state.boxes;
-        else if (buffer_contents == MIRROR)  	  entity_group = next_world_state.mirrors;
-        else if (buffer_contents == GLASS)	 	  entity_group = next_world_state.glass_blocks;
-        else if (buffer_contents == WIN_BLOCK)    entity_group = next_world_state.win_blocks;
-        else if (buffer_contents == LOCKED_BLOCK) entity_group = next_world_state.locked_blocks;
-        else if (isSource(buffer_contents))  	  entity_group = next_world_state.sources;
+        TileType buffer_contents = world_state.buffer[buffer_index];
+        if 	    (buffer_contents == BOX)     	  entity_group = world_state.boxes;
+        else if (buffer_contents == MIRROR)  	  entity_group = world_state.mirrors;
+        else if (buffer_contents == GLASS)	 	  entity_group = world_state.glass_blocks;
+        else if (buffer_contents == WIN_BLOCK)    entity_group = world_state.win_blocks;
+        else if (buffer_contents == LOCKED_BLOCK) entity_group = world_state.locked_blocks;
+        else if (isSource(buffer_contents))  	  entity_group = world_state.sources;
         if (entity_group != 0)
         {
             int32 count = getEntityCount(entity_group);
             entity_group[count].coords = bufferIndexToCoords(buffer_index);
             entity_group[count].position = intCoordsToNorm(entity_group[count].coords);
-            entity_group[count].direction = next_world_state.buffer[buffer_index + 1]; 
+            entity_group[count].direction = world_state.buffer[buffer_index + 1]; 
             entity_group[count].rotation = directionToQuaternion(entity_group[count].direction);
             entity_group[count].color = getEntityColor(entity_group[count].coords);
             entity_group[count].id = getEntityCount(entity_group) + entityIdOffset(entity_group, entity_group[count].color);
         	entity_group[count].removed = false;
             entity_group = 0;
         }
-        else if (next_world_state.buffer[buffer_index] == PLAYER)
+        else if (world_state.buffer[buffer_index] == PLAYER)
         {
             player->coords = bufferIndexToCoords(buffer_index);
             player->position = intCoordsToNorm(player->coords);
-            player->direction = next_world_state.buffer[buffer_index + 1];
+            player->direction = world_state.buffer[buffer_index + 1];
             player->rotation = directionToQuaternion(player->direction);
             player->id = PLAYER_ID;
         }
-        else if (next_world_state.buffer[buffer_index] == PACK)
+        else if (world_state.buffer[buffer_index] == PACK)
         {
             pack->coords = bufferIndexToCoords(buffer_index);
             pack->position = intCoordsToNorm(pack->coords);
-            pack->direction = next_world_state.buffer[buffer_index + 1];
+            pack->direction = world_state.buffer[buffer_index + 1];
             pack->rotation = directionToQuaternion(pack->direction);
             pack->id = PACK_ID;
         }
@@ -2411,7 +2414,11 @@ void gameInitializeState(char* level_name)
     file = fopen(level_path, "rb+");
     saved_main_camera = loadCameraInfo(file, false);
     saved_alt_camera = loadCameraInfo(file, true);
-    if (in_overworld)
+
+    temp_state.allow_movement = true;
+    temp_state.pack_attached = true;
+
+    if (temp_state.in_overworld)
     {
         if (saved_overworld_camera.fov > 0) camera = saved_overworld_camera; // on first startup, just use the camera that's saved as main camera in the overworld
         else camera = saved_main_camera;
@@ -2435,8 +2442,6 @@ void gameInitializeState(char* level_name)
     camera_screen_offset.z = (int32)(camera.coords.z / OVERWORLD_SCREEN_SIZE_Z);
     camera.rotation = buildCameraQuaternion(camera);
     camera_target_plane = player->coords.y;
-
-    world_state = next_world_state;
 }
 
 void recalculateDebugStartCoords()
@@ -2509,7 +2514,7 @@ void evictOldestUndoAction()
 }
 
 // called after a noraml (non-level-change) action
-// diffs world_state vs. next_world_state and stores deltas for every entity that changed
+// diffs world_state vs. world_state and stores deltas for every entity that changed
 void recordActionForUndo(WorldState* old_state, bool action_was_reset, bool action_was_climb)
 {
     if (undo_buffer.header_count >= MAX_UNDO_ACTIONS) evictOldestUndoAction();
@@ -2585,11 +2590,11 @@ void recordLevelChangeForUndo(char* current_level_name, bool level_was_just_solv
     uint32 entity_count = 0;
 
     // store all entities
-    recordEntityDelta(&next_world_state.player);
-    recordEntityDelta(&next_world_state.pack);
+    recordEntityDelta(&world_state.player);
+    recordEntityDelta(&world_state.pack);
     entity_count += 2;
 
-    Entity* groups[5] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.sources, next_world_state.win_blocks, next_world_state.locked_blocks };
+    Entity* groups[5] = { world_state.boxes, world_state.mirrors, world_state.sources, world_state.win_blocks, world_state.locked_blocks };
     FOR(group_index, 5)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -2624,8 +2629,8 @@ void recordLevelChangeForUndo(char* current_level_name, bool level_was_just_solv
 
 void zeroAnimations()
 {
-    memset(entities_tied_to_movement, 0, sizeof(entities_tied_to_movement));
-    pack_turn_state.pack_intermediate_states_timer = 0;
+    memset(temp_state.entities_tied_to_movement, 0, sizeof(temp_state.entities_tied_to_movement));
+    temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
 }
 
 bool performUndo()
@@ -2634,7 +2639,7 @@ bool performUndo()
 
     // clear animations + trailing hitboxes
     // TODO(anims): clear all animations
-    memset(trailing_hitboxes, 0, sizeof(trailing_hitboxes));
+    memset(temp_state.trailing_hitboxes, 0, sizeof(temp_state.trailing_hitboxes));
 
 	// get most recent action header
     uint32 header_index = (undo_buffer.header_write_pos + MAX_UNDO_ACTIONS - 1) % MAX_UNDO_ACTIONS;
@@ -2704,9 +2709,6 @@ bool performUndo()
 
     restart_last_turn = false;
 
-	// sync worldstate
-    world_state = next_world_state;
-
     //writeUndoBufferToFile();
 
     return true;
@@ -2715,62 +2717,60 @@ bool performUndo()
 void levelChangePrep(char next_level[64])
 {
     bool level_was_just_solved = false;
-    if (!in_overworld && findInSolvedLevels(next_world_state.level_name) == -1)
+    if (!temp_state.in_overworld && findInSolvedLevels(world_state.level_name) == -1)
     {
-        addToSolvedLevels(next_world_state.level_name);
+        addToSolvedLevels(world_state.level_name);
         writeSolvedLevelsToFile();
         level_was_just_solved = true;
     }
     
-    recordLevelChangeForUndo(next_world_state.level_name, level_was_just_solved);
+    recordLevelChangeForUndo(world_state.level_name, level_was_just_solved);
 
-    if (strcmp(next_level, "overworld") == 0) in_overworld = true;
-    else in_overworld = false;
+    if (strcmp(next_level, "overworld") == 0) temp_state.in_overworld = true;
+    else temp_state.in_overworld = false;
 
     // TODO(anims): cancel all animations
 }
 
 // MOVEMENT
 
-void doStandardMovement(Direction direction, Int3 next_player_coords, bool record_for_undo)
+void doStandardMovement(Direction direction, Int3 next_player_coords)
 {
-    Entity* player = &next_world_state.player;
-    Entity* pack = &next_world_state.pack;
+    Entity* player = &world_state.player;
+    Entity* pack = &world_state.pack;
 
     // maybe move stack above the player's head
     Int3 coords_above_player = getNextCoords(player->coords, UP);
     bool do_on_head_movement = false;
     if (isPushable(getTileType(coords_above_player)) && canPush(coords_above_player, direction)) do_on_head_movement = true;
-    if (player_hit_by_blue) do_on_head_movement = false;
+    if (temp_state.player_hit_by_blue) do_on_head_movement = false;
     if (do_on_head_movement) pushAll(coords_above_player, direction, true, player);
 
     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
     moveEntityInBufferAndState(player, next_player_coords, player->direction);
 
     // move pack also if pack is attached
-    if (pack_attached)
+    if (temp_state.pack_attached)
     {
         createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
         Int3 next_pack_coords = getNextCoords(pack->coords, direction);
         moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
     }
-
-    if (record_for_undo) recordActionForUndo(&world_state, false, false);
 }
 
 void updatePackDetached()
 {
-    Entity* player = &next_world_state.player;
-    Entity* pack = &next_world_state.pack;
+    Entity* player = &world_state.player;
+    Entity* pack = &world_state.pack;
 
-    TileType tile_behind_player = getTileType(getNextCoords(next_world_state.player.coords, oppositeDirection(next_world_state.player.direction)));
-    if (tile_behind_player == PACK || pack_turn_state.pack_intermediate_states_timer > 0) 
+    TileType tile_behind_player = getTileType(getNextCoords(world_state.player.coords, oppositeDirection(world_state.player.direction)));
+    if (tile_behind_player == PACK || temp_state.pack_turn_state.pack_intermediate_states_timer > 0) 
     {
-        pack_attached = true;
+        temp_state.pack_attached = true;
         setTileDirection(player->direction, pack->coords);
         pack->direction = player->direction;
     }
-    else pack_attached = false;
+    else temp_state.pack_attached = false;
 }
 
 // expects positive value for deceleration
@@ -2789,7 +2789,7 @@ float oneDimensionalDecelerationSimulation(float initial_velocity, float deceler
 
 float calculateSpeculativeVelocityAlongDirection(Direction direction, float sign)
 {
-    Entity* player = &next_world_state.player;
+    Entity* player = &world_state.player;
 
     // get velocity of case where we fully accelerate on this frame. clamp velocity to max speed
     Vec3 velocity_to_add = vec3ScalarMultiply(directionToVector(direction), PLAYER_ACCELERATION); // may be negative, if direction is N or W
@@ -2826,8 +2826,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
     draw_command_count = 0;
 
-    Entity* player = &next_world_state.player;
-    Entity* pack = &next_world_state.pack;
+    Entity* player = &world_state.player;
+    Entity* pack = &world_state.pack;
 
     //////////////////
     // CAMERA INPUT //
@@ -2934,8 +2934,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
             memset(*writing_to_field, 0, sizeof(*writing_to_field));
             memcpy(*writing_to_field, editor_state.edit_buffer.string, sizeof(*writing_to_field) - 1);
 
-            //world_state = next_world_state; don't think this is needed. but something might break sometime soon TODO: if it's been like a week, get rid of this
-
             editor_state.editor_mode = SELECT;
             editor_state.selected_id = 0;
             editor_state.writing_field = NO_WRITING_FIELD;
@@ -2987,7 +2985,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         {
                             setTileType(editor_state.picked_tile, raycast_output.place_coords); 
                             setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
-                            setEntityInstanceInGroup(next_world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
+                            setEntityInstanceInGroup(world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
                         }
                         else
                         {
@@ -2996,11 +2994,11 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             Entity* entity_group = 0;
                             switch (editor_state.picked_tile)
                             {
-                                case BOX:     	   entity_group = next_world_state.boxes;    	  break;
-                                case MIRROR:  	   entity_group = next_world_state.mirrors;  	  break;
-                                case GLASS: 	   entity_group = next_world_state.glass_blocks;  break;
-                                case WIN_BLOCK:    entity_group = next_world_state.win_blocks;    break;
-                                case LOCKED_BLOCK: entity_group = next_world_state.locked_blocks; break;
+                                case BOX:     	   entity_group = world_state.boxes;    	  break;
+                                case MIRROR:  	   entity_group = world_state.mirrors;  	  break;
+                                case GLASS: 	   entity_group = world_state.glass_blocks;  break;
+                                case WIN_BLOCK:    entity_group = world_state.win_blocks;    break;
+                                case LOCKED_BLOCK: entity_group = world_state.locked_blocks; break;
                                 default: entity_group = 0;
                             }
                             if (entity_group != 0) 
@@ -3266,17 +3264,12 @@ void gameFrame(double delta_time, TickInput* tick_input)
         }
     }
 
-    // catch up any edits done in editor mode to the world state
-    world_state = next_world_state;
-
     ///////////////////////
     // MAIN PHYSICS LOOP //
     ///////////////////////
 
     while (physics_accumulator >= (physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP))
    	{
-		next_world_state = world_state;
-
         debug_text_count = 0;
         bool silence_unlocks_due_to_restart_or_undo = false;
 
@@ -3294,7 +3287,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 silence_unlocks_due_to_restart_or_undo = true;
                 time_until_allow_undo_or_restart_input = 8; // TODO: reinstate gradual speed up here in a better way
             	undo_press_timer = TIME_AFTER_UNDO_UNTIL_PHYSICS_START;
-                allow_movement = true;
+                temp_state.allow_movement = true;
             }
             if (time_until_allow_undo_or_restart_input == 0 && tick_input->r_press)
             {
@@ -3307,21 +3300,21 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 // TODO(animations): clear all animations
                 Camera save_camera = camera;
 
-                gameInitializeState(next_world_state.level_name);
+                gameInitializeState(world_state.level_name);
 
-                if (in_overworld)
+                if (temp_state.in_overworld)
                 {
                     // copy world state from overworld_zero, but save the solved levels and overwrite the level name
 					char persist_solved_levels[64][64];
-                    memcpy(&persist_solved_levels, &next_world_state.solved_levels, sizeof(char) * 64 * 64);
-                    memcpy(&next_world_state, &overworld_zero, sizeof(WorldState));
-                    memcpy(&next_world_state.solved_levels, &persist_solved_levels, sizeof(char) * 64 * 64);
-                    memcpy(&next_world_state.level_name, "overworld", sizeof(char) * 64);
+                    memcpy(&persist_solved_levels, &world_state.solved_levels, sizeof(char) * 64 * 64);
+                    memcpy(&world_state, &overworld_zero, sizeof(WorldState));
+                    memcpy(&world_state.solved_levels, &persist_solved_levels, sizeof(char) * 64 * 64);
+                    memcpy(&world_state.level_name, "overworld", sizeof(char) * 64);
 
                     // set player and pack position based on game progress. assumes pack is always attached and player always faces north after a restart in overworld
 
                     Int3 player_restart_coords = {0};
-                    switch (game_progress)
+                    switch (temp_state.game_progress)
                 	{
                         case WORLD_0: player_restart_coords = (Int3){ 58, 2, 213 }; break;
                         case WORLD_1: player_restart_coords = (Int3){ 58, 2, 197 }; break;
@@ -3338,22 +3331,22 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 restart_last_turn = true;
                 silence_unlocks_due_to_restart_or_undo = true;
                 time_until_allow_undo_or_restart_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                allow_movement = true;
+                temp_state.allow_movement = true;
             }
-			if (time_until_allow_meta_input == 0 && tick_input->escape_press && !in_overworld)
+			if (time_until_allow_meta_input == 0 && tick_input->escape_press && !temp_state.in_overworld)
             {
                 // leave current level if not in overworld. TODO: why is saving solved levels required here?
                 char save_solved_levels[64][64] = {0};
-                memcpy(save_solved_levels, next_world_state.solved_levels, sizeof(save_solved_levels));
+                memcpy(save_solved_levels, world_state.solved_levels, sizeof(save_solved_levels));
                 levelChangePrep("overworld");
                 gameInitializeState("overworld");
-                memcpy(next_world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
+                memcpy(world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
                 writeSolvedLevelsToFile();
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                allow_movement = true;
+                temp_state.allow_movement = true;
             }
 
-            if (allow_movement && (tick_input->w_press || tick_input->a_press || tick_input->s_press || tick_input->d_press))
+            if (temp_state.allow_movement && (tick_input->w_press || tick_input->a_press || tick_input->s_press || tick_input->d_press))
             {
 				// MOVEMENT 
                 Direction input_direction = 0;
@@ -3436,95 +3429,54 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             Int3 coords_below_next_coords = getNextCoords(next_player_coords, DOWN);
                             TileType tile_below_next_coords = getTileType(coords_below_next_coords);
 
+                            // basic check for if walk will be allowed
                             bool allow_walk = true;
-                            if (tile_below_next_coords == NONE && !player_hit_by_red) allow_walk = false;
+                            if (tile_below_next_coords == NONE && !temp_state.player_hit_by_red) allow_walk = false;
                             if (isEntity(tile_below_next_coords) && !vec3IsZero(getEntityAtCoords(coords_below_next_coords)->velocity)) allow_walk = false;
 
                             if (allow_walk || cheating)
                             {
+                                recordActionForUndo(&world_state, false, false);
                                 if (do_push) pushAll(next_player_coords, input_direction, false, player);
-                                doStandardMovement(input_direction, next_player_coords, true);
+                                doStandardMovement(input_direction, next_player_coords);
                             }
-                            // TODO: temporarily disabled leap of faith
-                            /*
                             else
                             {
                                 // leap of faith logic
-                                memcpy(&leap_of_faith_snapshot, &world_state, sizeof(WorldState));
-                                // TODO(anims): clear all animations
+                                
+                                // create snapshot of current world state
+                                memcpy(&leap_of_faith_world_state_snapshot, &world_state, sizeof(WorldState));
+                                memcpy(&leap_of_faith_temp_state_snapshot,  &temp_state,  sizeof(TemporaryState));
 
-                                // ignoring trailing hitboxes in the setup because they are relatively short-lived to the 9 or so frames of fast forward. but if one is created on frams 7+ then
-                                // this could be a mistake, because the player won't actually be red when she walks off the edge (disparity between this simulation and the actual logic)
-                                TrailingHitbox trailing_hitboxes_snapshot[32] = {0};
-                                memcpy (&trailing_hitboxes_snapshot, &trailing_hitboxes, sizeof(TrailingHitbox) * MAX_TRAILING_HITBOX_COUNT);
+                                // commit tentative move
+                                if (do_push) pushAll(next_player_coords, input_direction, false, player);
+                                doStandardMovement(input_direction, next_player_coords);
 
-                                if (do_push) pushAll(next_player_coords, input_direction);
-
-                                if (!player->hit_by_blue)
+                                // simulate forward, and check if red
+                                bool would_be_red = false;
+                                FOR(_, 8)
                                 {
-                                    // still doing animations, because need the position norm to update - but will skip ahead in the animation. if doesn't work, clear back to animations savestate
-                                    setFallingForAllPushables();
-                                    if (!pack_attached) setFalling(pack);
-                                    bool animations_on = true;
-                                    // TODO: can't this be a doStandardMovement call? 
-                                    //doHeadMovement(input_direction, animations_on, 1);
-                                }
-
-                                moveEntityInBufferAndState(player, next_player_coords, player->direction);
-
-                                player->position = intCoordsToNorm(player->coords); // instead of creating animation for this, i'll just set position norm to where it will be after the animation
-
-                                if (pack_attached)
-                                {
-                                    Int3 next_pack_coords = getNextCoords(next_player_coords, oppositeDirection(input_direction));
-                                    moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
-                                    pack->position = intCoordsToNorm(pack->coords);
-                                }
-
-                                // TODO(anims): in new system, do something like this system is doing; need to fastforward position to where it would be by time taken to push
-                                // fastforward everything in animations by amount of time taken to push
-                                for (int32 animation_index = 0; animation_index < MAX_ANIMATION_COUNT; animation_index++)
-                                {
-                                    Animation* a = &animations[animation_index];
-                                    if (a->frames_left == 0) continue;
-                                    if (a->frames_left <= MOVE_OR_PUSH_ANIMATION_TIME)
+                                    //doPhysicsTick();
+                                    updateLaserBuffer();
+                                    if (temp_state.player_hit_by_red)
                                     {
-                                        if (a->position_to_change != 0) *a->position_to_change = a->position[0];
-                                        if (a->rotation_to_change != 0) *a->rotation_to_change = a->rotation[0];
-                                    }
-                                    else
-                                    {
-                                        if (a->position_to_change != 0) *a->position_to_change = a->position[a->frames_left - MOVE_OR_PUSH_ANIMATION_TIME];
-                                        if (a->rotation_to_change != 0) *a->rotation_to_change = a->rotation[a->frames_left - MOVE_OR_PUSH_ANIMATION_TIME];
+                                        would_be_red = true;
+                                        break;
                                     }
                                 }
 
-                                // ignore trailing hitboxes
-                                memset(&trailing_hitboxes, 0, sizeof(TrailingHitbox) * MAX_TRAILING_HITBOX_COUNT);
+                                // restore everything
+                                memcpy(&world_state, &leap_of_faith_world_state_snapshot, sizeof(WorldState));
+                                memcpy(&temp_state,       &leap_of_faith_temp_state_snapshot,  sizeof(TemporaryState));
 
-                                // actually check for a hit
-                                updateLaserBuffer();
-
-                                bool leap_of_faith_worked = false;
-                                if (player->hit_by_red) leap_of_faith_worked = true;
-
-                                // restore state no matter what, since even if worked i want to run the animations properly now anyway
-                                memcpy(&next_world_state, &leap_of_faith_snapshot, sizeof(WorldState));
-                                // TODO(anims): would want to restore animations here
-                                memcpy(&trailing_hitboxes, &trailing_hitboxes_snapshot, sizeof(TrailingHitbox) * MAX_TRAILING_HITBOX_COUNT);
-
-                                if (leap_of_faith_worked)
+                                // if became red, perform move
+                                if (would_be_red)
                                 {
-                                    int32 animation_time = 8; // TODO(anims): these functions shouldn't use animations
-                                    if (do_push) pushAll(next_player_coords, input_direction);
-                                    doStandardMovement(input_direction, next_player_coords, animation_time, true);
-                                }
-                                else 
-                                {
-                                    // TODO(anims): failed walk animation for player
+                                    recordActionForUndo(&world_state, false, false);
+                                    if (do_push) pushAll(next_player_coords, input_direction, false, player);
+                                    doStandardMovement(input_direction, next_player_coords);
                                 }
                             }
-                        	*/
                         }
 						else if (climb)
                         {
@@ -3584,83 +3536,31 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         player->direction = input_direction;
                         setTileDirection(player->direction, player->coords);
 
-                        if (pack_attached)
+                        if (temp_state.pack_attached)
                         {
-                            pack_turn_state.pack_intermediate_states_timer = TURN_TIME;
-                            pack_turn_state.pack_intermediate_coords = getNextCoords(pack->coords, oppositeDirection(input_direction));
-                            pack_turn_state.initial_player_direction = initial_player_direction;
+                            temp_state.pack_turn_state.pack_intermediate_states_timer = TURN_TIME;
+                            temp_state.pack_turn_state.pack_intermediate_coords = getNextCoords(pack->coords, oppositeDirection(input_direction));
+                            temp_state.pack_turn_state.initial_player_direction = initial_player_direction;
                         }
                     }
         		}
                 else if (input_direction == oppositeDirection(player->direction))
                 {
                     /*
-                    if (!player_will_fall_next_turn)
-                    {
-                        // backwards movement: allow only when climbing down a ladder. right now just move, and let player fall (functionally the same, but animation is goofy)
-                        Direction backwards_direction = oppositeDirection(player->direction);
-                        Int3 coords_below = getNextCoords(player->coords, DOWN);
-                        if (vec3IsZero(player->velocity) && getTileType(coords_below) == LADDER && getTileDirection(coords_below) == input_direction && (pack_detached || (!pack_detached && getTileType(getNextCoords(pack->coords, DOWN)) == NONE)))
-                        {
-                            bool can_move = false;
-                            bool do_push = false;
-                            Int3 coords_behind_pack = getNextCoords(pack->coords, backwards_direction);
-                            TileType tile_behind = getTileType(coords_behind_pack);
-                            if (tile_behind == NONE)
-                            {
-                                can_move = true;
-                            }
-                            else if (isPushable(tile_behind))
-                            {
-                                can_move = true;
-                                do_push = true;
-                            }
 
-                            if (can_move)
-                            {
-                                if (do_push)
-                                {
-                                    if (canPushStack(coords_behind_pack, backwards_direction) == CAN_PUSH) pushAll(coords_behind_pack, backwards_direction);
-                                }
-                                if (!player->hit_by_blue) doHeadMovement(backwards_direction, true, MOVE_OR_PUSH_ANIMATION_TIME);
-            
-                                // since moving backwards, move pack first so no accidental overlap during movement
-                                if (!pack_detached)
-                                {
-                                    Int3 next_pack_coords = getNextCoords(pack->coords, backwards_direction);
-                                    moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
+                    TODO: backwards movement off the edge of a ladder, or else a failed animation
 
-                                    // TODO(anims): interpolation anim (pack coords tw player -> pack coords)
-                                }
-
-                                next_player_coords = getNextCoords(player->coords, backwards_direction);
-                                moveEntityInBufferAndState(player, next_player_coords, player->direction);
-
-                                // TODO(anims): interpolation anim (player coords in player direction -> player coords) - again, order should be reversed
-
-                                recordActionForUndo(&world_state, false, false);
-                            }
-                            else
-                            {
-                                // TODO(anims): failed walk animation (in opposite direction to player)
-                            }
-                        }
-                        else
-                        {
-                            // TODO(anims): failed walk animation (in opposite direction to player)
-                        }
-                    }
                     */
                 }
             }
         }
 
         // pack turn sequence
-        if (pack_turn_state.pack_intermediate_states_timer > 0)
+        if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0)
         {
-            if (pack_turn_state.pack_intermediate_states_timer == TURN_TIME) // TODO: after verify that works, combine these two blocks
+            if (temp_state.pack_turn_state.pack_intermediate_states_timer == TURN_TIME) // TODO: after verify that works, combine these two blocks
             {
-                Int3 diagonal_coords = pack_turn_state.pack_intermediate_coords;
+                Int3 diagonal_coords = temp_state.pack_turn_state.pack_intermediate_coords;
                 Direction diagonal_push_direction = oppositeDirection(player->direction);
             	TileType type_at_diagonal = getTileType(diagonal_coords);
                 bool allow_diagonal = false;
@@ -3678,14 +3578,14 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
                 else
                 {
-                    player->direction = pack_turn_state.initial_player_direction;
-                    pack->direction = pack_turn_state.initial_player_direction;
-                    pack_turn_state.pack_intermediate_states_timer = 0;
+                    player->direction = temp_state.pack_turn_state.initial_player_direction;
+                    pack->direction = temp_state.pack_turn_state.initial_player_direction;
+                    temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
                 }
             }
-            else if (pack_turn_state.pack_intermediate_states_timer == 7)
+            else if (temp_state.pack_turn_state.pack_intermediate_states_timer == 7)
             {
-                Direction orthogonal_push_direction = pack_turn_state.initial_player_direction;
+                Direction orthogonal_push_direction = temp_state.pack_turn_state.initial_player_direction;
                 Int3 orthogonal_coords = getNextCoords(pack->coords, orthogonal_push_direction);
                 TileType type_at_orthogonal = getTileType(orthogonal_coords);
                 bool allow_orthogonal = false;
@@ -3703,17 +3603,17 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
                 else
                 {
-                    Int3 start_pack_coords = getNextCoords(player->coords, oppositeDirection(pack_turn_state.initial_player_direction));
+                    Int3 start_pack_coords = getNextCoords(player->coords, oppositeDirection(temp_state.pack_turn_state.initial_player_direction));
                     moveEntityInBufferAndState(pack, start_pack_coords, player->direction);
-                    player->direction = pack_turn_state.initial_player_direction;
-                    pack_turn_state.pack_intermediate_states_timer = 0;
+                    player->direction = temp_state.pack_turn_state.initial_player_direction;
+                    temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
                 }
             }
         }
-        if (pack_turn_state.pack_intermediate_states_timer > 0) pack_turn_state.pack_intermediate_states_timer--;
+        if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0) temp_state.pack_turn_state.pack_intermediate_states_timer--;
 
         // falling logic for entities
-        Entity* falling_entity_group[3] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.sources };
+        Entity* falling_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
         FOR(group_index, 4)
         {
             // handle pack as the 4th group here (if not attached). then immediately break
@@ -3725,7 +3625,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 Entity* e;
                 if (is_pack)
                 {
-                    if (pack_attached) break;
+                    if (temp_state.pack_attached) break;
                     e = pack;
                 }
                 else e = &falling_entity_group[group_index][entity_index];
@@ -3736,7 +3636,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 if (undo_press_timer > 0) want_to_fall = false;
                 if (cheating) want_to_fall = false;
                 if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(e->position, intCoordsToNorm(e->coords)), 0))) want_to_fall = false; // not stationary. not using e->velocity because it gets set after, so wouldn't work when pushing stationary object
-                if (player_hit_by_blue) want_to_fall = false;
+                if (temp_state.player_hit_by_blue) want_to_fall = false;
 
                 if (want_to_fall) setFalling(e); // only updates false -> true
 
@@ -3781,7 +3681,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(player->position, intCoordsToNorm(player->coords)), 0))) want_to_fall = false; // not stationary
         if (undo_press_timer > 0) want_to_fall = false;
         if (cheating) want_to_fall = false;
-        if (player_hit_by_red) want_to_fall = false;
+        if (temp_state.player_hit_by_red) want_to_fall = false;
 
         if (want_to_fall) setFalling(player);
 
@@ -3795,7 +3695,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 // within a block: update player coords, and pack coords too, if pack attached
                 player->velocity.y = test_y_velocity;
                 player->position.y = test_y_position;
-                if (pack_attached)
+                if (temp_state.pack_attached)
                 {
                     pack->velocity.y = test_y_velocity;
                     pack->position.y = test_y_position;
@@ -3812,7 +3712,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 	Int3 player_next_coords = getNextCoords(player->coords, DOWN);
                     moveEntityInBufferAndState(player, player_next_coords, player->direction);
 
-                    if (pack_attached)
+                    if (temp_state.pack_attached)
                     {
                         if (canFall(pack))
                         {
@@ -3837,7 +3737,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     player->position.y = (float)player->coords.y;
                     player->falling = false;
                     player->velocity.y = 0;
-                    if (pack_attached)
+                    if (temp_state.pack_attached)
                     {
                         pack->position.y = (float)pack->coords.y;
                         pack->falling = false;
@@ -3993,7 +3893,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
 
                 // pack rotation
-                if (pack_attached)
+                if (temp_state.pack_attached)
                 {
                     // pack follows player movement if attached
                     Vec3 rotated_offset = vec3RotateByQuaternion(intCoordsToNorm(AXIS_Z), player->rotation); // AXIS_Z because pack is 0, 0, 1 relative to player 0, 0, 0, when player has no rotation.
@@ -4005,7 +3905,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             // handle entities tied to movement
             FOR(tied_entity_index, MAX_ENTITIES_TIED_TO_MOVEMENT)
             {
-            	TiedEntity* tied_entity_info = &entities_tied_to_movement[tied_entity_index];
+            	TiedEntity* tied_entity_info = &temp_state.entities_tied_to_movement[tied_entity_index];
                 if (tied_entity_info->id <= 0) continue;
 
                 Entity* e = getEntityFromId(tied_entity_info->id);
@@ -4043,22 +3943,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             e->position = test_position;
                             e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
                         }
-                        else if (test_movement_towards_direction < -0.5)
-                        {
-                            // case where object should keep moving, but is offset by one unit because root entity has changed coords, but object on head / on stack will stop here, so isn't pushed by pushAll, but should still continue to end coords
-                            test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, 1, test_position);
-                            if (getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, intCoordsToNorm(e->coords))) < 0.0)
-                            {
-                                e->position = test_position;
-                                e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
-                            }
-                            else
-                            {
-                                e->position = intCoordsToNorm(e->coords);
-                                e->velocity = VEC3_0;
-                                tied_entity_info->id = 0;
-                            }
-                        }
                         else if (root_e == pack)
                         {
                             // here if pack would overshoot, or otherwise misbehave
@@ -4066,6 +3950,22 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             if (test_movement_towards_direction > 0.0 || close_to_target)
                             {
                                 // TODO: try to interpolate in here instead?
+                                e->position = intCoordsToNorm(e->coords);
+                                e->velocity = VEC3_0;
+                                tied_entity_info->id = 0;
+                            }
+                        }
+                        else if (test_movement_towards_direction < -0.5)
+                        {
+                            // case where object should keep moving, but is offset by one unit because root entity has changed coords, but object on head / on stack will stop here, so isn't pushed by pushAll, but should still continue to end coords
+                            test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, 1, test_position);
+                            if (getComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, intCoordsToNorm(e->coords))) < 0.0)
+                            {
+                                e->position = test_position;
+                                e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
+                            }
+                            else
+                            {
                                 e->position = intCoordsToNorm(e->coords);
                                 e->velocity = VEC3_0;
                                 tied_entity_info->id = 0;
@@ -4095,16 +3995,16 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 Entity* wb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
                 bool do_win_block_usage = true;
                 if (editor_state.editor_mode != NO_MODE) do_win_block_usage = false;
-                if (!pack_attached) do_win_block_usage = false;
+                if (!temp_state.pack_attached) do_win_block_usage = false;
                 if (wb->locked) do_win_block_usage = false;
                 if (wb->next_level[0] == 0) do_win_block_usage = false; // don't go through if there is no next level here yet
 
                 if (do_win_block_usage)
                 {
-                    if (in_overworld) 
+                    if (temp_state.in_overworld) 
                     {
                         char level_path[64] = {0};
-                        buildLevelPathFromName(next_world_state.level_name, &level_path, false);
+                        buildLevelPathFromName(world_state.level_name, &level_path, false);
                         saveLevelRewrite(level_path);
                         if (camera_mode == ALT_WAITING) 
                         {
@@ -4134,8 +4034,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     Entity* wb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
                     if (findInSolvedLevels(wb->next_level) == -1)
                     {
-                        int32 next_free = nextFreeInSolvedLevels(&next_world_state.solved_levels);
-                        strcpy(next_world_state.solved_levels[next_free], wb->next_level);
+                        int32 next_free = nextFreeInSolvedLevels(&world_state.solved_levels);
+                        strcpy(world_state.solved_levels[next_free], wb->next_level);
                     }
                     writeSolvedLevelsToFile();
                     createDebugPopup("level solved!", NO_TYPE);
@@ -4146,7 +4046,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         
 		// locked block logic
         // TODO: currently iterating this every frame on every entity, which is pretty wasteful. should instead just change this if some action that could impact locked-ness happened that frame.
-        Entity* entity_group[4] = { next_world_state.boxes, next_world_state.mirrors, next_world_state.win_blocks, next_world_state.sources };
+        Entity* entity_group[4] = { world_state.boxes, world_state.mirrors, world_state.win_blocks, world_state.sources };
         FOR(group_index, 4)
         {
             FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -4159,7 +4059,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         }
         FOR(locked_block_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            Entity* lb = &next_world_state.locked_blocks[locked_block_index];
+            Entity* lb = &world_state.locked_blocks[locked_block_index];
             if (lb->id == -1) continue;
             int32 find_result = findInSolvedLevels(lb->unlocked_by);
             if (find_result == INT32_MAX) continue;
@@ -4186,10 +4086,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
         // disallow input if player above void / water
         TileType tile_type_below_player = getTileType(getNextCoords(player->coords, DOWN));
-        if (tile_type_below_player == VOID || tile_type_below_player == WATER) allow_movement = false;
+        if (tile_type_below_player == VOID || tile_type_below_player == WATER) temp_state.allow_movement = false;
 
         // decrement trailing hitboxes 
-        FOR(th_index, MAX_TRAILING_HITBOX_COUNT) if (trailing_hitboxes[th_index].frames > 0) trailing_hitboxes[th_index].frames--;
+        FOR(th_index, MAX_TRAILING_HITBOX_COUNT) if (temp_state.trailing_hitboxes[th_index].frames > 0) temp_state.trailing_hitboxes[th_index].frames--;
 
         // reset undos performed if no longer holding z undos
         if (undos_performed > 0 && !tick_input->z_press) undos_performed = 0;
@@ -4198,7 +4098,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         if (undo_press_timer > 0) undo_press_timer--;
 
         // update overworld player coords for camera offset if player not removed. if player is removed, these coords persist, so that camera doesn't jump wildly when changing player pos in editor
-        if (in_overworld)
+        if (temp_state.in_overworld)
         {
             if (!player->removed) ow_player_coords_for_offset = player->coords;
         }
@@ -4208,21 +4108,21 @@ void gameFrame(double delta_time, TickInput* tick_input)
         }
 
         // update gameProgress based on which levels are solved, and current coords of the player
-        if (findInSolvedLevels("pack-intro-i") == -1) game_progress = WORLD_0;
-        else if (player->coords.z <= 159) game_progress = GATE_2;
-        else if (player->coords.z <= 174) game_progress = WORLD_2;
-        else if (player->coords.z <= 189) game_progress = GATE_1;
-        else game_progress = WORLD_1;
+        if (findInSolvedLevels("pack-intro-i") == -1) temp_state.game_progress = WORLD_0;
+        else if (player->coords.z <= 159) temp_state.game_progress = GATE_2;
+        else if (player->coords.z <= 174) temp_state.game_progress = WORLD_2;
+        else if (player->coords.z <= 189) temp_state.game_progress = GATE_1;
+        else temp_state.game_progress = WORLD_1;
 
         // create debug texts
         if (do_debug_text)
         {
             // display level name
-            createDebugText(next_world_state.level_name);
+            createDebugText(world_state.level_name);
 
             // game progress info
             char game_text[256] = {0};
-            snprintf(game_text, sizeof(game_text), "game progress: %d", game_progress);
+            snprintf(game_text, sizeof(game_text), "game progress: %d", temp_state.game_progress);
             createDebugText(game_text);
 
             // entity info
@@ -4232,8 +4132,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
             // entities tied to player movement
             char tied_info[256] = {0};
-            TiedEntity te_1 = entities_tied_to_movement[0];
-            TiedEntity te_2 = entities_tied_to_movement[1];
+            TiedEntity te_1 = temp_state.entities_tied_to_movement[0];
+            TiedEntity te_2 = temp_state.entities_tied_to_movement[1];
             snprintf(tied_info, sizeof(tied_info), "tied entity 1: id: %i, dir: %i, on_head: %i, tied entity 2: id: %i, dir: %i, on_head: %i", te_1.id, te_1.direction, te_1.on_head, te_2.id, te_2.direction, te_2.on_head);
             createDebugText(tied_info);
 
@@ -4245,14 +4145,14 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
             /*
             char mirror_info[256] = {0};
-            Entity m1 = next_world_state.mirrors[0];
-            Entity m2 = next_world_state.mirrors[1];
+            Entity m1 = world_state.mirrors[0];
+            Entity m2 = world_state.mirrors[1];
             snprintf(mirror_info, sizeof(mirror_info), "mirror 1 pos norm: %.2f, %.2f, %.2f, mirror 2 pos norm: %.2f, %.2f, %.2f", m1.position.x, m1.position.y, m1.position.z, m2.position.x, m2.position.y, m2.position.z);
             createDebugText(mirror_info);
             */
 
             char box_info[256] = {0};
-			Entity box1 = next_world_state.boxes[0];
+			Entity box1 = world_state.boxes[0];
             snprintf(box_info, sizeof(box_info), "box 1 coords: %i, %i, %i, box 1 pos: %f, %f, %f", box1.coords.x, box1.coords.y, box1.coords.z, box1.position.x, box1.position.y, box1.position.z);
             createDebugText(box_info);
 
@@ -4354,12 +4254,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
             }
         }
-
-        // finished updating state
-        world_state = next_world_state;
-
         physics_accumulator -= physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP;
-
         if (time_until_allow_undo_or_restart_input > 0) time_until_allow_undo_or_restart_input--;
 	}
 
@@ -4466,7 +4361,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         {
             saveLevelRewrite(level_path);
             saveLevelRewrite(relative_level_path);
-            if (in_overworld)
+            if (temp_state.in_overworld)
             {
                 saveLevelRewrite(overworld_zero_path);
                 saveLevelRewrite(overworld_zero_relative_path);
@@ -4481,7 +4376,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
     // update camera for drawing. after loop because depends on in_overworld
     camera_with_ow_offset = camera;
-    if (in_overworld)
+    if (temp_state.in_overworld)
     {
         Int3 player_delta = int3Subtract(ow_player_coords_for_offset, OVERWORLD_CAMERA_CENTER_START);
         int32 screen_offset_x = 0;
@@ -4552,8 +4447,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     if (e->locked) draw_tile = LOCKED_BLOCK;
                     if (draw_tile == WIN_BLOCK)
                     {
-                        if (in_overworld && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
-                        else if (!in_overworld && findInSolvedLevels(next_world_state.level_name) != -1) draw_tile = WON_BLOCK;
+                        if (temp_state.in_overworld && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
+                        else if (!temp_state.in_overworld && findInSolvedLevels(world_state.level_name) != -1) draw_tile = WON_BLOCK;
                     }
 
                     if (game_shader_mode == OLD)
@@ -4570,9 +4465,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
             {
                 if (game_shader_mode != OLD && getCube3DId(draw_tile) == CUBE_3D_WATER) 
                 {
-                    drawAsset(MODEL_3D_WATER, WATER_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1]), VEC4_0, false, VEC4_0, VEC4_0);
+                    drawAsset(MODEL_3D_WATER, WATER_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), VEC4_0, false, VEC4_0, VEC4_0);
                 }
-                drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(next_world_state.buffer[tile_index + 1]), VEC4_0, false, VEC4_0, VEC4_0);
+                drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), VEC4_0, false, VEC4_0, VEC4_0);
             }
         }
 
@@ -4582,9 +4477,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
             if (player->position.y < 2.0f) do_player_aabb = true;
 
             // TODO: this is terrible (fix with shaders)
-            if (player_hit_by_red && player_hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
-            else if (player_hit_by_red)  				 drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
-            else if (player_hit_by_blue) 				 drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
+            if (temp_state.player_hit_by_red && temp_state.player_hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
+            else if (temp_state.player_hit_by_red)  				 		   drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
+            else if (temp_state.player_hit_by_blue) 				 		   drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
             else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
         }
         if (!world_state.pack.removed) 
@@ -4604,7 +4499,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         }
         if (draw_level_boundary)
         {
-			if (in_overworld)
+			if (temp_state.in_overworld)
             {
             	// draw camera screen lines
                 int32 x_draw_offset = 0;
@@ -4661,7 +4556,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         {
             FOR(th_index, MAX_TRAILING_HITBOX_COUNT)
             {
-                TrailingHitbox th = trailing_hitboxes[th_index];
+                TrailingHitbox th = temp_state.trailing_hitboxes[th_index];
                 if (th.frames == 0) continue;
                 drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC4_0, false, VEC4_0, VEC4_0);
             }
@@ -4727,7 +4622,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
             drawText(editor_state.edit_buffer.string, center_screen, DEFAULT_TEXT_SCALE, 1.0f);
         }
 
-        // draw debug popups
+        // draw debug popup
         FOR(popup_index, MAX_DEBUG_POPUP_COUNT)
         {
             DebugPopup* popup = &debug_popups[popup_index];
