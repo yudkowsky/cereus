@@ -3467,7 +3467,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                                 // restore everything
                                 memcpy(&world_state, &leap_of_faith_world_state_snapshot, sizeof(WorldState));
-                                memcpy(&temp_state,       &leap_of_faith_temp_state_snapshot,  sizeof(TemporaryState));
+                                memcpy(&temp_state,  &leap_of_faith_temp_state_snapshot,  sizeof(TemporaryState));
 
                                 // if became red, perform move
                                 if (would_be_red)
