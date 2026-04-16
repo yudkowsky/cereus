@@ -386,7 +386,7 @@ double physics_accumulator = 0;
 double timer_accumulator = 0;
 double global_time = 0; // will not work as a 'time elapsed' counter in editor mode because it grows slower during time slowdown
 
-const char debug_level_name[64] = "testing";
+const char debug_level_name[64] = "overworld";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
@@ -413,6 +413,7 @@ Int3 camera_screen_offset = {0};
 const Int3 OVERWORLD_CAMERA_CENTER_START = { 58, 2, 197 };
 bool draw_level_boundary = false;
 Int3 ow_player_coords_for_offset = {0};
+bool silence_unlocks_due_to_restart_or_undo = false;
 
 float camera_lerp_t = 0.0f;
 const float CAMERA_T_TIMESTEP = 0.05f;
@@ -2149,6 +2150,9 @@ void updateLaserBuffer()
                             if (this_is_th) e = getEntityFromId(th.id);
                             else e = getEntityAtCoords(current_tile_coords);
 
+                            // TODO: temp so that i can get into the overworld after this shift
+                            if (!e) continue;
+
                             // check if should skip this id, if so passthrough
                             bool passthrough = false;
                             if (e->id == id_to_skip) passthrough = true;
@@ -2819,6 +2823,447 @@ bool wouldOvershoot(float speculative_velocity_along_direction, float position_a
 
 // GAME LOGIC
 
+void doPhysicsTick()
+{
+    Entity* player = &world_state.player;
+    Entity* pack = &world_state.pack;
+
+    // pack turn sequence
+    if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0)
+    {
+        if (temp_state.pack_turn_state.pack_intermediate_states_timer == TURN_TIME) // TODO: after verify that works, combine these two blocks
+        {
+            Int3 diagonal_coords = temp_state.pack_turn_state.pack_intermediate_coords;
+            Direction diagonal_push_direction = oppositeDirection(player->direction);
+            TileType type_at_diagonal = getTileType(diagonal_coords);
+            bool allow_diagonal = false;
+            bool do_push = false;
+            if (type_at_diagonal == NONE) allow_diagonal = true;
+            if (isPushable(type_at_diagonal) && canPush(diagonal_coords, diagonal_push_direction))
+            {
+                allow_diagonal = true;
+                do_push = true;
+            }
+            if (allow_diagonal)
+            {
+                if (do_push) pushAll(diagonal_coords, diagonal_push_direction, false, pack);
+                moveEntityInBufferAndState(pack, diagonal_coords, player->direction);
+            }
+            else
+            {
+                player->direction = temp_state.pack_turn_state.initial_player_direction;
+                pack->direction = temp_state.pack_turn_state.initial_player_direction;
+                temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
+            }
+        }
+        else if (temp_state.pack_turn_state.pack_intermediate_states_timer == 7)
+        {
+            Direction orthogonal_push_direction = temp_state.pack_turn_state.initial_player_direction;
+            Int3 orthogonal_coords = getNextCoords(pack->coords, orthogonal_push_direction);
+            TileType type_at_orthogonal = getTileType(orthogonal_coords);
+            bool allow_orthogonal = false;
+            bool do_push = false;
+            if (type_at_orthogonal == NONE) allow_orthogonal = true;
+            if (isPushable(type_at_orthogonal) && canPush(orthogonal_coords, orthogonal_push_direction))
+            {
+                allow_orthogonal = true;
+                do_push = true;
+            }
+            if (allow_orthogonal)
+            {
+                if (do_push) pushAll(orthogonal_coords, orthogonal_push_direction, false, pack);
+                moveEntityInBufferAndState(pack, orthogonal_coords, player->direction);
+            }
+            else
+            {
+                Int3 start_pack_coords = getNextCoords(player->coords, oppositeDirection(temp_state.pack_turn_state.initial_player_direction));
+                moveEntityInBufferAndState(pack, start_pack_coords, player->direction);
+                player->direction = temp_state.pack_turn_state.initial_player_direction;
+                temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
+            }
+        }
+    }
+    if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0) temp_state.pack_turn_state.pack_intermediate_states_timer--;
+
+    // update pack detached after falling TODO: it's not clear this is the best place for this - does any other action maybe detach pack? maybe climbing?
+    updatePackDetached();
+
+    // climb logic
+    // TODO(anims): need something like a player.climbing flag for this gate instead. for now: disabling climbing
+    /*
+    if (player->moving_direction == UP && player->in_motion == 1)
+    {
+        bool do_push = false;
+        bool can_move = false;
+        bool try_climb_more = false;
+        Int3 next_coords = getNextCoords(player->coords, player->direction);
+        TileType tile_ahead = getTileType(next_coords);
+        if (tile_ahead == NONE)
+        {
+            can_move = true;
+        }
+        else if (isPushable(tile_ahead)) 
+        {
+            if (canPushStack(next_coords, player->direction) == CAN_PUSH)
+            {
+                can_move = true;
+                do_push = true;
+            }
+        }
+        else if (tile_ahead == LADDER)
+        {
+            try_climb_more = true;
+        }
+
+        if (can_move)
+        {
+            int32 animation_time = MOVE_OR_PUSH_ANIMATION_TIME;
+            if (do_push) pushAll(next_coords, player->direction);
+            doStandardMovement(player->direction, next_coords, animation_time, false);
+        }
+        else if (try_climb_more)
+        {
+            // assume works for now (breaks if solid block above)
+            Int3 coords_above = getNextCoords(player->coords, UP);
+            if (getTileType(coords_above) == NONE)
+            {
+                can_move = true;
+                do_push = false; // not actually required
+            }
+            else if (isPushable(getTileType(coords_above)))
+            {
+                if (canPushUp(coords_above) == CAN_PUSH)
+                {
+                    can_move = true;
+                    do_push = true;
+                }
+            }
+            if (can_move)
+            {
+                if (do_push)
+                {
+                    pushUp(coords_above, CLIMB_ANIMATION_TIME);
+                }
+                moveEntityInBufferAndState(player, coords_above, player->direction);
+
+                // TODO(anims): interpolate animation upwards - this should happen before moveEntity...
+
+                player->in_motion = CLIMB_ANIMATION_TIME;
+                player->moving_direction = UP;
+
+                if (!pack_detached)
+                {
+                    Int3 coords_above_pack = getNextCoords(pack->coords, UP);
+                    moveEntityInBufferAndState(pack, coords_above_pack, pack->direction);
+
+                    // TODO(anims): interpolation anim upwards
+
+                    pack->in_motion = CLIMB_ANIMATION_TIME;
+                    pack->moving_direction = UP;
+                }
+            }
+        }
+        else
+        {
+            // can't move or climb more
+            resetPlayerAndPackMotion();
+            // TODO(anims): failed walk animation in direction of player
+        }
+    }
+    */
+
+    // falling logic for entities
+    Entity* falling_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
+    FOR(group_index, 4)
+    {
+        // handle pack as the 4th group here (if not attached). then immediately break
+        bool is_pack = false;
+        if (group_index == 3) is_pack = true;
+
+        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+        {
+            Entity* e;
+            if (is_pack)
+            {
+                if (temp_state.pack_attached) break;
+                e = pack;
+            }
+            else e = &falling_entity_group[group_index][entity_index];
+
+            bool want_to_fall = false;
+            if (!e->falling) want_to_fall = true;
+            if (canFall(e)) want_to_fall = true;
+            if (undo_press_timer > 0) want_to_fall = false;
+            if (cheating) want_to_fall = false;
+            if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(e->position, intCoordsToNorm(e->coords)), 0))) want_to_fall = false; // not stationary. not using e->velocity because it gets set after, so wouldn't work when pushing stationary object
+            if (temp_state.player_hit_by_blue) want_to_fall = false;
+
+            if (want_to_fall) setFalling(e); // only updates false -> true
+
+            if (e->falling)
+            {
+                float test_y_velocity = e->velocity.y + GRAVITY;
+                test_y_velocity = floatMax(test_y_velocity, MIN_DOWN_VELOCITY);
+                float test_y_position = e->position.y + test_y_velocity;
+                if (test_y_position > getComponentAlongDirection(DOWN, intCoordsToNorm(e->coords)))
+                {
+                    // within a block: update falling entity position and velocity, but not coords
+                    e->velocity.y = test_y_velocity;
+                    e->position.y = test_y_position;
+                }
+                else
+                {
+                    if (want_to_fall)
+                    {
+                        TileType type = getTileType(e->coords);
+                        createTrailingHitbox(e->id, e->coords, 10, type); // TODO: this number is magic. later, maybe just calculate this based on displacement and velocity
+
+                        e->position.y = test_y_position;
+                        e->velocity.y = test_y_velocity;
+                        Int3 next_coords = getNextCoords(e->coords, DOWN);
+                        moveEntityInBufferAndState(e, next_coords, e->direction);
+                    }
+                    else
+                    {
+                        e->position.y = (float)e->coords.y;
+                        e->falling = false;
+                        e->velocity.y = 0;
+                    }
+                }
+            }
+            if (is_pack) break;
+        }
+    }
+
+    // player falling logic
+    bool want_to_fall = false;
+    if (canFall(player)) want_to_fall = true;
+    if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(player->position, intCoordsToNorm(player->coords)), 0))) want_to_fall = false; // not stationary
+    if (undo_press_timer > 0) want_to_fall = false;
+    if (cheating) want_to_fall = false;
+    if (temp_state.player_hit_by_red) want_to_fall = false;
+
+    if (want_to_fall) setFalling(player);
+
+    if (player->falling)
+    {
+        float test_y_velocity = player->velocity.y + GRAVITY;
+        test_y_velocity = floatMax(test_y_velocity, MIN_DOWN_VELOCITY);
+        float test_y_position = player->position.y + test_y_velocity;
+        if (test_y_position > getComponentAlongDirection(DOWN, intCoordsToNorm(player->coords)))
+        {
+            // within a block: update player coords, and pack coords too, if pack attached
+            player->velocity.y = test_y_velocity;
+            player->position.y = test_y_position;
+            if (temp_state.pack_attached)
+            {
+                pack->velocity.y = test_y_velocity;
+                pack->position.y = test_y_position;
+            }
+        }
+        else
+        {
+            if (want_to_fall)
+            {
+                createTrailingHitbox(PLAYER_ID, player->coords, 10, PLAYER); // TODO: magic
+
+                player->position.y = test_y_position;
+                player->velocity.y = test_y_velocity;
+                Int3 player_next_coords = getNextCoords(player->coords, DOWN);
+                moveEntityInBufferAndState(player, player_next_coords, player->direction);
+
+                if (temp_state.pack_attached)
+                {
+                    if (canFall(pack))
+                    {
+                        createTrailingHitbox(PACK_ID, pack->coords, 10, PACK); // TODO: magic
+
+                        pack->position.y = test_y_position;
+                        pack->velocity.y = test_y_velocity;
+                        Int3 pack_next_coords = getNextCoords(pack->coords, DOWN);
+                        moveEntityInBufferAndState(pack, pack_next_coords, pack->direction);
+                    }
+                    else
+                    {
+                        // pack will detach
+                        pack->position.y = (float)pack->coords.y;
+                        pack->falling = false;
+                        pack->velocity.y = 0;
+                    }
+                }
+            }
+            else
+            {
+                player->position.y = (float)player->coords.y;
+                player->falling = false;
+                player->velocity.y = 0;
+                if (temp_state.pack_attached)
+                {
+                    pack->position.y = (float)pack->coords.y;
+                    pack->falling = false;
+                    pack->velocity.y = 0;
+                }
+            }
+        }
+    }
+
+    // do animations and handle some state, in particular entities tied to player movement
+    // this is in this function because of the state handling
+    {
+        // handle directional movement
+        FOR(direction_index, 4)
+        {
+            // only handle velocity / position if offset from the coords
+            Vec3 difference_in_player_position = vec3Subtract(intCoordsToNorm(player->coords), player->position);
+            float difference_in_position_along_direction = getComponentAlongDirection(direction_index, difference_in_player_position);
+            float sign = direction_index == NORTH || direction_index == WEST ? -1.0f : 1.0f;
+            if (difference_in_position_along_direction * sign <= 0) continue; // will continue if west picks up a difference in the east direction (and north in south direction)
+
+            float position_along_direction = getComponentAlongDirection(direction_index, player->position);
+            float coords_along_direction = getComponentAlongDirection(direction_index, intCoordsToNorm(player->coords));
+            float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(direction_index, sign);
+            if (!wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign))
+            {
+                // no overshooting: accelerate fully
+                if (direction_index == NORTH || direction_index == SOUTH) player->velocity.z = speculative_velocity_along_direction;
+                else player->velocity.x = speculative_velocity_along_direction;
+                player->position = vec3Add(player->position, player->velocity);
+            }
+            else
+            {
+                float current_speed = sign * getComponentAlongDirection(direction_index, player->velocity);
+                float remaining_distance = sign * difference_in_position_along_direction;
+                float stopping_distance = oneDimensionalDecelerationSimulation(current_speed, PLAYER_MAX_DECELERATION);
+                float distance_error = remaining_distance - stopping_distance;
+                int32 frames_to_stop = (int32)ceilf(current_speed / PLAYER_MAX_DECELERATION);
+                float movement_adjustment = distance_error / (float)frames_to_stop;
+
+                float decelerated_speed = current_speed - PLAYER_MAX_DECELERATION;
+                if (decelerated_speed < 0) decelerated_speed = 0;
+
+                // move position by velocity + adjustment, then set velocity to decelerated value
+                float actual_movement = current_speed + movement_adjustment;
+
+                player->position = vec3AddFloatToVec3AlongDirection(direction_index, sign * actual_movement, player->position);
+                if (direction_index == NORTH || direction_index == SOUTH) player->velocity.z = sign * decelerated_speed;
+                else player->velocity.x = sign * decelerated_speed;
+            }
+        }
+
+        // handle turn
+        {
+            // player rotation
+            float total_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
+            float frame_count = ceilf((float)fabs(total_angle) / MAX_ANGULAR_VELOCITY);
+            if (frame_count <= 1)
+            {
+                player->rotation = directionToQuaternion(player->direction); // wounding is dealt with in getAngleOfYAxisRotation - but this might be wrong, then?
+            }
+            else
+            {
+                float step_angle = total_angle / frame_count;
+                Vec4 rotation_this_frame = quaternionFromAxis(intCoordsToNorm(AXIS_Y), step_angle);
+                player->rotation = quaternionMultiply(rotation_this_frame, player->rotation);
+            }
+
+            // pack rotation
+            if (temp_state.pack_attached)
+            {
+                // pack follows player movement if attached
+                Vec3 rotated_offset = vec3RotateByQuaternion(intCoordsToNorm(AXIS_Z), player->rotation); // AXIS_Z because pack is 0, 0, 1 relative to player 0, 0, 0, when player has no rotation.
+                pack->position = vec3Add(player->position, rotated_offset);
+                pack->rotation = player->rotation;
+            }
+        }
+
+        // handle entities tied to movement
+        FOR(tied_entity_index, MAX_ENTITIES_TIED_TO_MOVEMENT)
+        {
+            TiedEntity* tied_entity_info = &temp_state.entities_tied_to_movement[tied_entity_index];
+            if (tied_entity_info->id <= 0) continue;
+
+            Entity* e = getEntityFromId(tied_entity_info->id);
+            if (e->falling) 
+            {
+                tied_entity_info->id = 0;
+                continue;
+            }
+
+            if (tied_entity_info->direction == NO_DIRECTION)
+            {
+                // rotation: find rotation from target to current of player, and apply the same rotation to target direction of the entity.
+                float player_target_to_current_angle = getAngleOfYAxisRotation(directionToQuaternion(player->direction), player->rotation);
+                Vec4 transform = quaternionFromAxis(intCoordsToNorm(AXIS_Y), player_target_to_current_angle);
+                e->rotation = quaternionMultiply(directionToQuaternion(e->direction), transform);
+            }
+            else
+            {
+                // push
+                Entity* root_e = tied_entity_info->root_entity;
+                Vec3 difference_in_root_position = vec3Subtract(root_e->position, intCoordsToNorm(root_e->coords));
+                float difference_in_root_position_along_direction = getComponentAlongDirection(tied_entity_info->direction, difference_in_root_position);
+
+                if (difference_in_root_position_along_direction != 0)
+                {
+                    Vec3 test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, difference_in_root_position_along_direction, intCoordsToNorm(e->coords));
+                    float test_movement_towards_direction = getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, e->position));
+
+                    bool do_entity_move = false;
+                    if (test_movement_towards_direction > 0) do_entity_move = true; // prevents negative snapping of an object-to-be-pushed towards player
+                    if (test_movement_towards_direction > 0.5) do_entity_move = false; // prevents too large a jump (happens if pack rotation not done before root_e moves by one tile)
+
+                    if (do_entity_move)
+                    {
+                        e->position = test_position;
+                        e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
+                    }
+                    else if (root_e == pack)
+                    {
+                        // here if pack would overshoot, or otherwise misbehave
+                        bool close_to_target = fabs(getComponentAlongDirection(tied_entity_info->direction, vec3Subtract(e->position, intCoordsToNorm(e->coords)))) < 0.1;
+                        if (test_movement_towards_direction > 0.0 || close_to_target)
+                        {
+                            // TODO: try to interpolate in here instead?
+                            e->position = intCoordsToNorm(e->coords);
+                            e->velocity = VEC3_0;
+                            tied_entity_info->id = 0;
+                        }
+                    }
+                    else if (test_movement_towards_direction < -0.5)
+                    {
+                        // case where object should keep moving, but is offset by one unit because root entity has changed coords, but object on head / on stack will stop here, so isn't pushed by pushAll, but should still continue to end coords
+                        test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, 1, test_position);
+                        if (getComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, intCoordsToNorm(e->coords))) < 0.0)
+                        {
+                            e->position = test_position;
+                            e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
+                        }
+                        else
+                        {
+                            e->position = intCoordsToNorm(e->coords);
+                            e->velocity = VEC3_0;
+                            tied_entity_info->id = 0;
+                        }
+                    }
+                }
+                else 
+                {
+                    e->position = intCoordsToNorm(e->coords);
+                    e->velocity = VEC3_0;
+                }
+
+                bool clear_entity_from_tied_to_movement = false;
+                if (vec3IsEqual(e->position, intCoordsToNorm(e->coords))) clear_entity_from_tied_to_movement = true;
+                if (tied_entity_info->on_head) clear_entity_from_tied_to_movement = false; // case already handled above
+                if (clear_entity_from_tied_to_movement) tied_entity_info->id = 0;
+            }
+        }
+    }
+
+    // decrement trailing hitboxes 
+    FOR(th_index, MAX_TRAILING_HITBOX_COUNT) if (temp_state.trailing_hitboxes[th_index].frames > 0) temp_state.trailing_hitboxes[th_index].frames--;
+}
+
 void gameFrame(double delta_time, TickInput* tick_input)
 {	
     if (delta_time > 0.1) delta_time = 0.1;
@@ -3271,7 +3716,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
     while (physics_accumulator >= (physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP))
    	{
         debug_text_count = 0;
-        bool silence_unlocks_due_to_restart_or_undo = false;
 
         if (editor_state.editor_mode == NO_MODE)
         {
@@ -3456,7 +3900,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 bool would_be_red = false;
                                 FOR(_, 8)
                                 {
-                                    //doPhysicsTick();
+                                    doPhysicsTick();
                                     updateLaserBuffer();
                                     if (temp_state.player_hit_by_red)
                                     {
@@ -3546,445 +3990,13 @@ void gameFrame(double delta_time, TickInput* tick_input)
         		}
                 else if (input_direction == oppositeDirection(player->direction))
                 {
-                    /*
-
-                    TODO: backwards movement off the edge of a ladder, or else a failed animation
-
-                    */
+                    // TODO: backwards movement off the edge of a ladder, or else a failed animation
                 }
             }
         }
-
-        // pack turn sequence
-        if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0)
-        {
-            if (temp_state.pack_turn_state.pack_intermediate_states_timer == TURN_TIME) // TODO: after verify that works, combine these two blocks
-            {
-                Int3 diagonal_coords = temp_state.pack_turn_state.pack_intermediate_coords;
-                Direction diagonal_push_direction = oppositeDirection(player->direction);
-            	TileType type_at_diagonal = getTileType(diagonal_coords);
-                bool allow_diagonal = false;
-                bool do_push = false;
-                if (type_at_diagonal == NONE) allow_diagonal = true;
-                if (isPushable(type_at_diagonal) && canPush(diagonal_coords, diagonal_push_direction))
-                {
-                    allow_diagonal = true;
-                    do_push = true;
-                }
-                if (allow_diagonal)
-                {
-                    if (do_push) pushAll(diagonal_coords, diagonal_push_direction, false, pack);
-                    moveEntityInBufferAndState(pack, diagonal_coords, player->direction);
-                }
-                else
-                {
-                    player->direction = temp_state.pack_turn_state.initial_player_direction;
-                    pack->direction = temp_state.pack_turn_state.initial_player_direction;
-                    temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
-                }
-            }
-            else if (temp_state.pack_turn_state.pack_intermediate_states_timer == 7)
-            {
-                Direction orthogonal_push_direction = temp_state.pack_turn_state.initial_player_direction;
-                Int3 orthogonal_coords = getNextCoords(pack->coords, orthogonal_push_direction);
-                TileType type_at_orthogonal = getTileType(orthogonal_coords);
-                bool allow_orthogonal = false;
-                bool do_push = false;
-                if (type_at_orthogonal == NONE) allow_orthogonal = true;
-                if (isPushable(type_at_orthogonal) && canPush(orthogonal_coords, orthogonal_push_direction))
-                {
-                    allow_orthogonal = true;
-                    do_push = true;
-                }
-                if (allow_orthogonal)
-                {
-                    if (do_push) pushAll(orthogonal_coords, orthogonal_push_direction, false, pack);
-                    moveEntityInBufferAndState(pack, orthogonal_coords, player->direction);
-                }
-                else
-                {
-                    Int3 start_pack_coords = getNextCoords(player->coords, oppositeDirection(temp_state.pack_turn_state.initial_player_direction));
-                    moveEntityInBufferAndState(pack, start_pack_coords, player->direction);
-                    player->direction = temp_state.pack_turn_state.initial_player_direction;
-                    temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
-                }
-            }
-        }
-        if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0) temp_state.pack_turn_state.pack_intermediate_states_timer--;
-
-        // falling logic for entities
-        Entity* falling_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
-        FOR(group_index, 4)
-        {
-            // handle pack as the 4th group here (if not attached). then immediately break
-            bool is_pack = false;
-            if (group_index == 3) is_pack = true;
-
-            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
-            {
-                Entity* e;
-                if (is_pack)
-                {
-                    if (temp_state.pack_attached) break;
-                    e = pack;
-                }
-                else e = &falling_entity_group[group_index][entity_index];
-
-                bool want_to_fall = false;
-                if (!e->falling) want_to_fall = true;
-                if (canFall(e)) want_to_fall = true;
-                if (undo_press_timer > 0) want_to_fall = false;
-                if (cheating) want_to_fall = false;
-                if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(e->position, intCoordsToNorm(e->coords)), 0))) want_to_fall = false; // not stationary. not using e->velocity because it gets set after, so wouldn't work when pushing stationary object
-                if (temp_state.player_hit_by_blue) want_to_fall = false;
-
-                if (want_to_fall) setFalling(e); // only updates false -> true
-
-                if (e->falling)
-                {
-                    float test_y_velocity = e->velocity.y + GRAVITY;
-                    test_y_velocity = floatMax(test_y_velocity, MIN_DOWN_VELOCITY);
-                    float test_y_position = e->position.y + test_y_velocity;
-                    if (test_y_position > getComponentAlongDirection(DOWN, intCoordsToNorm(e->coords)))
-                    {
-                        // within a block: update falling entity position and velocity, but not coords
-                        e->velocity.y = test_y_velocity;
-                        e->position.y = test_y_position;
-                    }
-                    else
-                    {
-                        if (want_to_fall)
-                        {
-                            TileType type = getTileType(e->coords);
-                            createTrailingHitbox(e->id, e->coords, 10, type); // TODO: this number is magic. later, maybe just calculate this based on displacement and velocity
-
-                            e->position.y = test_y_position;
-                            e->velocity.y = test_y_velocity;
-                            Int3 next_coords = getNextCoords(e->coords, DOWN);
-                            moveEntityInBufferAndState(e, next_coords, e->direction);
-                        }
-                        else
-                        {
-                            e->position.y = (float)e->coords.y;
-                            e->falling = false;
-                            e->velocity.y = 0;
-                        }
-                    }
-                }
-                if (is_pack) break;
-            }
-        }
-
-        // player falling logic
-        bool want_to_fall = false;
-        if (canFall(player)) want_to_fall = true;
-        if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(player->position, intCoordsToNorm(player->coords)), 0))) want_to_fall = false; // not stationary
-        if (undo_press_timer > 0) want_to_fall = false;
-        if (cheating) want_to_fall = false;
-        if (temp_state.player_hit_by_red) want_to_fall = false;
-
-        if (want_to_fall) setFalling(player);
-
-        if (player->falling)
-        {
-            float test_y_velocity = player->velocity.y + GRAVITY;
-            test_y_velocity = floatMax(test_y_velocity, MIN_DOWN_VELOCITY);
-            float test_y_position = player->position.y + test_y_velocity;
-            if (test_y_position > getComponentAlongDirection(DOWN, intCoordsToNorm(player->coords)))
-            {
-                // within a block: update player coords, and pack coords too, if pack attached
-                player->velocity.y = test_y_velocity;
-                player->position.y = test_y_position;
-                if (temp_state.pack_attached)
-                {
-                    pack->velocity.y = test_y_velocity;
-                    pack->position.y = test_y_position;
-                }
-            }
-            else
-            {
-                if (want_to_fall)
-                {
-                    createTrailingHitbox(PLAYER_ID, player->coords, 10, PLAYER); // TODO: magic
-
-                    player->position.y = test_y_position;
-                    player->velocity.y = test_y_velocity;
-                	Int3 player_next_coords = getNextCoords(player->coords, DOWN);
-                    moveEntityInBufferAndState(player, player_next_coords, player->direction);
-
-                    if (temp_state.pack_attached)
-                    {
-                        if (canFall(pack))
-                        {
-                            createTrailingHitbox(PACK_ID, pack->coords, 10, PACK); // TODO: magic
-
-                            pack->position.y = test_y_position;
-                            pack->velocity.y = test_y_velocity;
-                            Int3 pack_next_coords = getNextCoords(pack->coords, DOWN);
-                            moveEntityInBufferAndState(pack, pack_next_coords, pack->direction);
-                        }
-                        else
-                        {
-                            // pack will detach
-                            pack->position.y = (float)pack->coords.y;
-                            pack->falling = false;
-                            pack->velocity.y = 0;
-                        }
-                    }
-                }
-                else
-                {
-                    player->position.y = (float)player->coords.y;
-                    player->falling = false;
-                    player->velocity.y = 0;
-                    if (temp_state.pack_attached)
-                    {
-                        pack->position.y = (float)pack->coords.y;
-                        pack->falling = false;
-                        pack->velocity.y = 0;
-                    }
-                }
-            }
-        }
-
-        // update pack detached after falling TODO: it's not clear this is the best place for this - does any other action maybe detach pack? maybe climbing?
-        updatePackDetached();
-
-        // climb logic
-        // TODO(anims): need something like a player.climbing flag for this gate instead. for now: disabling climbing
-        /*
-        if (player->moving_direction == UP && player->in_motion == 1)
-        {
-            bool do_push = false;
-            bool can_move = false;
-            bool try_climb_more = false;
-            Int3 next_coords = getNextCoords(player->coords, player->direction);
-            TileType tile_ahead = getTileType(next_coords);
-            if (tile_ahead == NONE)
-            {
-				can_move = true;
-            }
-            else if (isPushable(tile_ahead)) 
-            {
-                if (canPushStack(next_coords, player->direction) == CAN_PUSH)
-                {
-                    can_move = true;
-                    do_push = true;
-                }
-            }
-            else if (tile_ahead == LADDER)
-            {
-                try_climb_more = true;
-            }
-
-            if (can_move)
-            {
-                int32 animation_time = MOVE_OR_PUSH_ANIMATION_TIME;
-                if (do_push) pushAll(next_coords, player->direction);
-                doStandardMovement(player->direction, next_coords, animation_time, false);
-            }
-            else if (try_climb_more)
-            {
-				// assume works for now (breaks if solid block above)
-                Int3 coords_above = getNextCoords(player->coords, UP);
-                if (getTileType(coords_above) == NONE)
-                {
-                    can_move = true;
-                    do_push = false; // not actually required
-                }
-                else if (isPushable(getTileType(coords_above)))
-                {
-                    if (canPushUp(coords_above) == CAN_PUSH)
-                    {
-                        can_move = true;
-                        do_push = true;
-                    }
-                }
-                if (can_move)
-                {
-                    if (do_push)
-                    {
-						pushUp(coords_above, CLIMB_ANIMATION_TIME);
-                    }
-                    moveEntityInBufferAndState(player, coords_above, player->direction);
-
-                    // TODO(anims): interpolate animation upwards - this should happen before moveEntity...
-
-                    player->in_motion = CLIMB_ANIMATION_TIME;
-                    player->moving_direction = UP;
-
-                    if (!pack_detached)
-                    {
-                        Int3 coords_above_pack = getNextCoords(pack->coords, UP);
-                        moveEntityInBufferAndState(pack, coords_above_pack, pack->direction);
-
-                        // TODO(anims): interpolation anim upwards
-
-                        pack->in_motion = CLIMB_ANIMATION_TIME;
-                        pack->moving_direction = UP;
-                    }
-                }
-            }
-            else
-            {
-                // can't move or climb more
-                resetPlayerAndPackMotion();
-                // TODO(anims): failed walk animation in direction of player
-            }
-        }
-		*/
-
-        // do animations and handle some state, in particular entities tied to player movement
-        {
-            // handle directional movement
-            FOR(direction_index, 4)
-            {
-                // only handle velocity / position if offset from the coords
-                Vec3 difference_in_player_position = vec3Subtract(intCoordsToNorm(player->coords), player->position);
-                float difference_in_position_along_direction = getComponentAlongDirection(direction_index, difference_in_player_position);
-                float sign = direction_index == NORTH || direction_index == WEST ? -1.0f : 1.0f;
-                if (difference_in_position_along_direction * sign <= 0) continue; // will continue if west picks up a difference in the east direction (and north in south direction)
-
-                float position_along_direction = getComponentAlongDirection(direction_index, player->position);
-                float coords_along_direction = getComponentAlongDirection(direction_index, intCoordsToNorm(player->coords));
-                float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(direction_index, sign);
-                if (!wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign))
-                {
-                    // no overshooting: accelerate fully
-                    if (direction_index == NORTH || direction_index == SOUTH) player->velocity.z = speculative_velocity_along_direction;
-                    else player->velocity.x = speculative_velocity_along_direction;
-                    player->position = vec3Add(player->position, player->velocity);
-                }
-                else
-                {
-                    float current_speed = sign * getComponentAlongDirection(direction_index, player->velocity);
-                    float remaining_distance = sign * difference_in_position_along_direction;
-                    float stopping_distance = oneDimensionalDecelerationSimulation(current_speed, PLAYER_MAX_DECELERATION);
-                    float distance_error = remaining_distance - stopping_distance;
-                    int32 frames_to_stop = (int32)ceilf(current_speed / PLAYER_MAX_DECELERATION);
-                    float movement_adjustment = distance_error / (float)frames_to_stop;
-
-                    float decelerated_speed = current_speed - PLAYER_MAX_DECELERATION;
-                    if (decelerated_speed < 0) decelerated_speed = 0;
-
-                    // move position by velocity + adjustment, then set velocity to decelerated value
-                    float actual_movement = current_speed + movement_adjustment;
-
-                    player->position = vec3AddFloatToVec3AlongDirection(direction_index, sign * actual_movement, player->position);
-                    if (direction_index == NORTH || direction_index == SOUTH) player->velocity.z = sign * decelerated_speed;
-                    else player->velocity.x = sign * decelerated_speed;
-                }
-            }
-
-            // handle turn
-            {
-                // player rotation
-                float total_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
-                float frame_count = ceilf((float)fabs(total_angle) / MAX_ANGULAR_VELOCITY);
-                if (frame_count <= 1)
-                {
-                    player->rotation = directionToQuaternion(player->direction); // wounding is dealt with in getAngleOfYAxisRotation - but this might be wrong, then?
-                }
-                else
-                {
-                    float step_angle = total_angle / frame_count;
-                    Vec4 rotation_this_frame = quaternionFromAxis(intCoordsToNorm(AXIS_Y), step_angle);
-                    player->rotation = quaternionMultiply(rotation_this_frame, player->rotation);
-                }
-
-                // pack rotation
-                if (temp_state.pack_attached)
-                {
-                    // pack follows player movement if attached
-                    Vec3 rotated_offset = vec3RotateByQuaternion(intCoordsToNorm(AXIS_Z), player->rotation); // AXIS_Z because pack is 0, 0, 1 relative to player 0, 0, 0, when player has no rotation.
-                    pack->position = vec3Add(player->position, rotated_offset);
-                    pack->rotation = player->rotation;
-                }
-            }
-
-            // handle entities tied to movement
-            FOR(tied_entity_index, MAX_ENTITIES_TIED_TO_MOVEMENT)
-            {
-            	TiedEntity* tied_entity_info = &temp_state.entities_tied_to_movement[tied_entity_index];
-                if (tied_entity_info->id <= 0) continue;
-
-                Entity* e = getEntityFromId(tied_entity_info->id);
-                if (e->falling) 
-                {
-                    tied_entity_info->id = 0;
-                    continue;
-                }
-
-                if (tied_entity_info->direction == NO_DIRECTION)
-                {
-                    // rotation: find rotation from target to current of player, and apply the same rotation to target direction of the entity.
-                    float player_target_to_current_angle = getAngleOfYAxisRotation(directionToQuaternion(player->direction), player->rotation);
-                    Vec4 transform = quaternionFromAxis(intCoordsToNorm(AXIS_Y), player_target_to_current_angle);
-                	e->rotation = quaternionMultiply(directionToQuaternion(e->direction), transform);
-                }
-                else
-                {
-                	// push
-                    Entity* root_e = tied_entity_info->root_entity;
-                    Vec3 difference_in_root_position = vec3Subtract(root_e->position, intCoordsToNorm(root_e->coords));
-                    float difference_in_root_position_along_direction = getComponentAlongDirection(tied_entity_info->direction, difference_in_root_position);
-
-                    if (difference_in_root_position_along_direction != 0)
-                    {
-                        Vec3 test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, difference_in_root_position_along_direction, intCoordsToNorm(e->coords));
-                        float test_movement_towards_direction = getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, e->position));
-
-                        bool do_entity_move = false;
-                        if (test_movement_towards_direction > 0) do_entity_move = true; // prevents negative snapping of an object-to-be-pushed towards player
-                        if (test_movement_towards_direction > 0.5) do_entity_move = false; // prevents too large a jump (happens if pack rotation not done before root_e moves by one tile)
-
-                        if (do_entity_move)
-                        {
-                            e->position = test_position;
-                            e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
-                        }
-                        else if (root_e == pack)
-                        {
-                            // here if pack would overshoot, or otherwise misbehave
-                            bool close_to_target = fabs(getComponentAlongDirection(tied_entity_info->direction, vec3Subtract(e->position, intCoordsToNorm(e->coords)))) < 0.1;
-                            if (test_movement_towards_direction > 0.0 || close_to_target)
-                            {
-                                // TODO: try to interpolate in here instead?
-                                e->position = intCoordsToNorm(e->coords);
-                                e->velocity = VEC3_0;
-                                tied_entity_info->id = 0;
-                            }
-                        }
-                        else if (test_movement_towards_direction < -0.5)
-                        {
-                            // case where object should keep moving, but is offset by one unit because root entity has changed coords, but object on head / on stack will stop here, so isn't pushed by pushAll, but should still continue to end coords
-                            test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, 1, test_position);
-                            if (getComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, intCoordsToNorm(e->coords))) < 0.0)
-                            {
-                                e->position = test_position;
-                                e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
-                            }
-                            else
-                            {
-                                e->position = intCoordsToNorm(e->coords);
-                                e->velocity = VEC3_0;
-                                tied_entity_info->id = 0;
-                            }
-                        }
-                    }
-                    else 
-                    {
-                        e->position = intCoordsToNorm(e->coords);
-                        e->velocity = VEC3_0;
-                    }
-
-                    bool clear_entity_from_tied_to_movement = false;
-                    if (vec3IsEqual(e->position, intCoordsToNorm(e->coords))) clear_entity_from_tied_to_movement = true;
-                    if (tied_entity_info->on_head) clear_entity_from_tied_to_movement = false; // case already handled above
-                    if (clear_entity_from_tied_to_movement) tied_entity_info->id = 0;
-                }
-            }
-    	}
+        
+        // handle all physics that doesn't have to do with player input on this frame
+        doPhysicsTick();
 
         // win block logic
         if (getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK)
@@ -4043,8 +4055,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 }
             }
         }
-        
-		// locked block logic
+
+        // locked block logic
         // TODO: currently iterating this every frame on every entity, which is pretty wasteful. should instead just change this if some action that could impact locked-ness happened that frame.
         Entity* entity_group[4] = { world_state.boxes, world_state.mirrors, world_state.win_blocks, world_state.sources };
         FOR(group_index, 4)
@@ -4087,9 +4099,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
         // disallow input if player above void / water
         TileType tile_type_below_player = getTileType(getNextCoords(player->coords, DOWN));
         if (tile_type_below_player == VOID || tile_type_below_player == WATER) temp_state.allow_movement = false;
-
-        // decrement trailing hitboxes 
-        FOR(th_index, MAX_TRAILING_HITBOX_COUNT) if (temp_state.trailing_hitboxes[th_index].frames > 0) temp_state.trailing_hitboxes[th_index].frames--;
 
         // reset undos performed if no longer holding z undos
         if (undos_performed > 0 && !tick_input->z_press) undos_performed = 0;
