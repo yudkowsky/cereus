@@ -3707,6 +3707,23 @@ void gameFrame(double delta_time, TickInput* tick_input)
             else			   createDebugPopup("debug state visibility off", DEBUG_STATE_VISIBILITY_CHANGE);
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
+
+        // TODO: temp for level setup change
+        if (tick_input->five_press)
+        {
+            for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
+			{
+                if (world_state.buffer[buffer_index] == WIN_BLOCK)
+                {
+                    world_state.buffer[buffer_index] = WATER;
+                    world_state.buffer[buffer_index + 1] = NORTH;
+                }
+            }
+
+            memset(&world_state.win_blocks, 0, sizeof(world_state.win_blocks));
+
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
     }
 
     ///////////////////////
