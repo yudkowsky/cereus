@@ -3719,9 +3719,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     world_state.buffer[buffer_index + 1] = NORTH;
                 }
             }
-
             memset(&world_state.win_blocks, 0, sizeof(world_state.win_blocks));
-
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
     }
