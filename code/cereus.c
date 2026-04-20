@@ -2840,6 +2840,7 @@ void doPhysicsTick()
             if (allow_diagonal)
             {
                 if (do_push) pushAll(diagonal_coords, diagonal_push_direction, false, pack);
+                createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
                 moveEntityInBufferAndState(pack, diagonal_coords, player->direction);
             }
             else
@@ -2865,6 +2866,7 @@ void doPhysicsTick()
             if (allow_orthogonal)
             {
                 if (do_push) pushAll(orthogonal_coords, orthogonal_push_direction, false, pack);
+                createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
                 moveEntityInBufferAndState(pack, orthogonal_coords, player->direction);
             }
             else
@@ -3890,7 +3892,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                             if (allow_walk || cheating)
                             {
-                                recordActionForUndo(&world_state, false, false);
                                 createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER); // TODO: figure out timings for trailing hitboxes
                                 if (do_push) pushAll(next_player_coords, input_direction, false, player);
                                 doStandardMovement(input_direction, next_player_coords);
@@ -3931,7 +3932,6 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 // if became red, perform move
                                 if (would_be_red)
                                 {
-                                    recordActionForUndo(&world_state, false, false);
                                     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER); // TODO: figure out timings for trailing hitboxes
                                     if (do_push) pushAll(next_player_coords, input_direction, false, player);
                                     doStandardMovement(input_direction, next_player_coords);
@@ -3992,6 +3992,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                     if (allow_turn)
                     {
+                        // TODO: guard on if this turn will succeed, i guess? actually, maybe just remove the action if turn fails in turn sequence
+                        recordActionForUndo(&world_state, false, false);
+
                         Direction initial_player_direction = player->direction;
                         player->direction = input_direction;
                         setTileDirection(player->direction, player->coords);
