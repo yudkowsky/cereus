@@ -329,7 +329,7 @@ const float GRAVITY = -0.03f;
 
 const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
 const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
-const int32 TRAILING_HITBOX_TIME = 5;
+const int32 TRAILING_HITBOX_TIME = 6;
 const int32 TIME_AFTER_UNDO_UNTIL_PHYSICS_START = 4;
 
 const int32 MAX_ENTITY_INSTANCE_COUNT = 64;
@@ -966,7 +966,6 @@ void setEntityVecsFromInts(Entity* e)
 // camera: 	 		tag: CMRA, 	size: 24 (6 * 4b), 			data: x, y, z, fov, yaw, pitch (as floats)
 // win block: 		tag: WINB, 	size: 76 (3 * 4b + 64b), 	data: x, y, z (as int32), char[64] path
 // locked block: 	tag: LOKB, 	size: 76 (3 * 4b + 64b),	data: x, y, z (as int32), char[64] path
-// reset block: 	tag: RESB, 	size: 3b + n*(3+1+3)b,		data: x, y, z + n * entity_to_reset(x, y, z, direction) (as int32)
 
 void buildLevelPathFromName(char level_name[64], char (*level_path)[64], bool overwrite_source)
 {
@@ -2207,12 +2206,6 @@ bool canFall(Entity* e)
     // only allow fall if below is nothing, or void
     if (!intCoordsWithinLevelBounds(next_coords)) return false;
     if (getTileType(next_coords) != NONE && getTileType(next_coords) != VOID) return false;
-
-    // don't do fall if trailing hitbox below
-    /*
-    TrailingHitbox _;
-    if (trailingHitboxAtCoords(next_coords, &_)) return false;
-    */
 
     return true;
 }
@@ -3832,7 +3825,9 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
                     if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) allow_input = false;
 
-                    // disallow movement if also moving in some other direction currently - probably just guards against moving while falling
+                    // disallow movement if able to fall
+                    if (!temp_state.player_hit_by_red && canFall(player)) allow_input = false;
+                    // also disallow movement if also moving in some other direction currently - probably just guards against moving while falling
                     if (!vec3IsZero(vec3SetComponentAlongDirection(input_direction, player->velocity, 0))) allow_input = false;
 
                     if (allow_input)
@@ -3896,6 +3891,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                             if (allow_walk || cheating)
                             {
                                 recordActionForUndo(&world_state, false, false);
+                                createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER); // TODO: figure out timings for trailing hitboxes
                                 if (do_push) pushAll(next_player_coords, input_direction, false, player);
                                 doStandardMovement(input_direction, next_player_coords);
                             }
@@ -3906,10 +3902,13 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 // create snapshot of current world state
                                 memcpy(&leap_of_faith_world_state_snapshot, &world_state, sizeof(WorldState));
                                 memcpy(&leap_of_faith_temp_state_snapshot,  &temp_state,  sizeof(TemporaryState));
+                                TickInput tick_input_snapshot = *tick_input;
 
                                 // commit tentative move
                                 if (do_push) pushAll(next_player_coords, input_direction, false, player);
                                 doStandardMovement(input_direction, next_player_coords);
+
+                                memset(tick_input, 0, sizeof(TickInput));
 
                                 // simulate forward, and check if red
                                 bool would_be_red = false;
@@ -3927,11 +3926,13 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 // restore everything
                                 memcpy(&world_state, &leap_of_faith_world_state_snapshot, sizeof(WorldState));
                                 memcpy(&temp_state,  &leap_of_faith_temp_state_snapshot,  sizeof(TemporaryState));
+                                *tick_input = tick_input_snapshot;
 
                                 // if became red, perform move
                                 if (would_be_red)
                                 {
                                     recordActionForUndo(&world_state, false, false);
+                                    createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER); // TODO: figure out timings for trailing hitboxes
                                     if (do_push) pushAll(next_player_coords, input_direction, false, player);
                                     doStandardMovement(input_direction, next_player_coords);
                                 }
