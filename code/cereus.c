@@ -3579,7 +3579,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
         if (tick_input->o_press)
         {
             draw_trailing_hitboxes = !draw_trailing_hitboxes;
-            if (cheating) createDebugPopup("showing trailing hitboxes", DRAW_TRAILING_HITBOX_TOGGLE);
+            if (draw_trailing_hitboxes) createDebugPopup("showing trailing hitboxes", DRAW_TRAILING_HITBOX_TOGGLE);
             else createDebugPopup("not showing trailing hitboxes", DRAW_TRAILING_HITBOX_TOGGLE);
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
@@ -3892,7 +3892,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
                             if (allow_walk || cheating)
                             {
-                                createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER); // TODO: figure out timings for trailing hitboxes
+                                recordActionForUndo(&world_state, false, false);
                                 if (do_push) pushAll(next_player_coords, input_direction, false, player);
                                 doStandardMovement(input_direction, next_player_coords);
                             }
@@ -3932,7 +3932,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                                 // if became red, perform move
                                 if (would_be_red)
                                 {
-                                    createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER); // TODO: figure out timings for trailing hitboxes
+                                    recordActionForUndo(&world_state, false, false);
                                     if (do_push) pushAll(next_player_coords, input_direction, false, player);
                                     doStandardMovement(input_direction, next_player_coords);
                                 }
