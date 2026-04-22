@@ -3601,6 +3601,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
         {
             game_shader_mode = OLD; 
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+
+
             createDebugPopup("shader mode: old", SHADER_MODE_CHANGE);
         }
 
