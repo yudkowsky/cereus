@@ -922,8 +922,8 @@ Vec4 directionToQuaternion(Direction direction)
         case WEST:  return quaternionFromAxis(intCoordsToNorm(AXIS_Y),  0.25f * TAU);
         case SOUTH: return quaternionFromAxis(intCoordsToNorm(AXIS_Y),  0.50f * TAU);
         case EAST:  return quaternionFromAxis(intCoordsToNorm(AXIS_Y), -0.25f * TAU);
-        case UP:	return quaternionFromAxis(intCoordsToNorm(AXIS_Z),  0.25f * TAU);
-        case DOWN:	return quaternionFromAxis(intCoordsToNorm(AXIS_Z), -0.25f * TAU);
+        case UP:	return quaternionFromAxis(intCoordsToNorm(AXIS_X),  0.25f * TAU);
+        case DOWN:	return quaternionFromAxis(intCoordsToNorm(AXIS_X), -0.25f * TAU);
         default: return (Vec4){ 0, 0, 0, 1 };
     }
 }
@@ -1858,22 +1858,23 @@ void pushUp(Int3 coords)
 
 Direction getNextLaserDirectionMirror(Direction laser_direction, Direction mirror_direction)
 {
-    if (mirror_direction <= 4 && laser_direction <= 6) 
+    if (mirror_direction < 4)
     {
-        if (laser_direction == mirror_direction) 					return DOWN;
-        if (laser_direction == oppositeDirection(mirror_direction)) return UP;
-        if (laser_direction == UP) 									return oppositeDirection(mirror_direction);
-        if (laser_direction == DOWN) 								return mirror_direction;
+        Direction mirror_dir_used = (mirror_direction + 1) % 4;
+        if (mirror_dir_used == laser_direction) return UP;
+        if (mirror_dir_used == oppositeDirection(laser_direction)) return DOWN;
+        if (laser_direction == UP) return mirror_dir_used;
+        if (laser_direction == DOWN) return oppositeDirection(mirror_dir_used);
     }
     switch (mirror_direction)
     {
         case UP: switch (laser_direction)
      	{
-         	case NORTH: return EAST;
-         	case SOUTH: return WEST;
-         	case WEST:  return SOUTH;
-         	case EAST:  return NORTH;
-            default: 	return NO_DIRECTION;
+            case NORTH: return EAST;
+            case SOUTH: return WEST;
+            case WEST:  return SOUTH;
+            case EAST:  return NORTH;
+            default: return NO_DIRECTION;
      	}
 		case DOWN: switch (laser_direction)
        	{
@@ -2439,6 +2440,8 @@ void gameInitializeState(char* level_name)
     camera_screen_offset.z = (int32)(camera.coords.z / OVERWORLD_SCREEN_SIZE_Z);
     camera.rotation = buildCameraQuaternion(camera);
     camera_target_plane = player->coords.y;
+
+    updateLaserBuffer();
 }
 
 void recalculateDebugStartCoords()
@@ -3803,6 +3806,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 silence_unlocks_due_to_restart_or_undo = true;
                 time_until_allow_undo_or_restart_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 temp_state.allow_movement = true;
+
+                updateLaserBuffer();
             }
 			if (time_until_allow_meta_input == 0 && tick_input->escape_press && !temp_state.in_overworld)
             {
@@ -4182,61 +4187,13 @@ void gameFrame(double delta_time, TickInput* tick_input)
             snprintf(tied_info, sizeof(tied_info), "tied entity 1: id: %i, dir: %i, on_head: %i, tied entity 2: id: %i, dir: %i, on_head: %i", te_1.id, te_1.direction, te_1.on_head, te_2.id, te_2.direction, te_2.on_head);
             createDebugText(tied_info);
 
-            /*
-            char pack_text[256] = {0};
-            snprintf(pack_text, sizeof(pack_text), "pack info: coords: %d, %d, %d, moving_time: %d, moving_direction: %d", pack->coords.x, pack->coords.y, pack->coords.z, pack->in_motion, pack->moving_direction);
-            createDebugText(pack_text);
-            */
-
-            /*
-            char mirror_info[256] = {0};
-            Entity m1 = world_state.mirrors[0];
-            Entity m2 = world_state.mirrors[1];
-            snprintf(mirror_info, sizeof(mirror_info), "mirror 1 pos norm: %.2f, %.2f, %.2f, mirror 2 pos norm: %.2f, %.2f, %.2f", m1.position.x, m1.position.y, m1.position.z, m2.position.x, m2.position.y, m2.position.z);
-            createDebugText(mirror_info);
-            */
-
-            char box_info[256] = {0};
-			Entity box1 = world_state.boxes[0];
-            snprintf(box_info, sizeof(box_info), "box 1 coords: %i, %i, %i, box 1 pos: %f, %f, %f", box1.coords.x, box1.coords.y, box1.coords.z, box1.position.x, box1.position.y, box1.position.z);
-            createDebugText(box_info);
-
             char timer_info[256] = {0};
             snprintf(timer_info, sizeof(timer_info), "meta: %i, undo/restart: %i", time_until_allow_meta_input, time_until_allow_undo_or_restart_input);
             createDebugText(timer_info);
 
-            /*
-            // camera pos info
-            char camera_text[256] = {0};
-            snprintf(camera_text, sizeof(camera_text), "current camera info:    %.1f, %.1f, %.1f, fov: %.1f", camera.coords.x, camera.coords.y, camera.coords.z, camera.fov);
-            createDebugText(camera_text);
-
-            // saved camera info
-            char saved_camera_text[256] = {0};
-            snprintf(saved_camera_text, sizeof(saved_camera_text), "main saved camera info: %.1f, %.1f, %.1f, fov: %.1f", saved_main_camera.coords.x, saved_main_camera.coords.y, saved_main_camera.coords.z, saved_main_camera.fov);
-            createDebugText(saved_camera_text);
-
-            // saved alt camera info
-            char alt_camera_text[256] = {0};
-            snprintf(alt_camera_text, sizeof(alt_camera_text), "alt saved camera info:  %.1f, %.1f, %.1f, fov: %.1f", saved_alt_camera.coords.x, saved_alt_camera.coords.y, saved_alt_camera.coords.z, saved_alt_camera.fov);
-            createDebugText(alt_camera_text);
-
-            // camera_t info
-            char t_text[256] = {0};
-            snprintf(t_text, sizeof(t_text), "t value: %.2f", camera_lerp_t);
-            createDebugText(t_text);
-            */
-
-            /*
-            // show undos performed
-            char undo_text[256] = {0};
-            snprintf(undo_text, sizeof(undo_text), "undos performed: %d", undos_performed);
-            createDebugText(undo_text);
-            */
-
             // show current selected id + coords
             char edit_text[256] = {0};
-            snprintf(edit_text, sizeof(edit_text), "selected id: %d; coords: %d, %d, %d", editor_state.selected_id, editor_state.selected_coords.x, editor_state.selected_coords.y, editor_state.selected_coords.z);
+            snprintf(edit_text, sizeof(edit_text), "selected id: %d", editor_state.selected_id);
             createDebugText(edit_text);
 
             /*
@@ -4251,12 +4208,10 @@ void gameFrame(double delta_time, TickInput* tick_input)
             }
             */
 
-			/*
             // show undo deltas in buffer
             char undo_buffer_text[256] = {0};
             snprintf(undo_buffer_text, sizeof(undo_buffer_text), "undo deltas in buffer: %d", undo_buffer.delta_count);
             createDebugText(undo_buffer_text);
-            */
 
             // draw selected id info
             if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
@@ -4267,7 +4222,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     if (e) // TODO: this guard is somewhat bad solution; i still persist selected_id even if that id doesn't exist anymore. this prevents crash, but later: on entity delete check if matches against id, and if so remove from editor_state.
                     {
                         char selected_id_text[256] = {0};
-                        snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d", editor_state.selected_id);
+                        snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d, coords: %d, %d, %d, direction: %i", editor_state.selected_id, e->coords.x, e->coords.y, e->coords.z, e->direction);
+                        createDebugText(selected_id_text);
 
                         char writing_field_text[256] = {0};
                         char writing_field_state[256] = {0};
@@ -4455,9 +4411,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
             float length = vec3Length(diff);
             Vec3 scale = { LASER_WIDTH, LASER_WIDTH, length };
-            Vec4 rotation = {0};
-			if (lb.direction == UP || lb.direction == DOWN) rotation = directionToQuaternion(lb.direction);
-			else rotation = directionToQuaternion(lb.direction);
+			Vec4 rotation = directionToQuaternion(lb.direction);
 
             Vec3 color_without_alpha = {0};
             switch (lb.color)
