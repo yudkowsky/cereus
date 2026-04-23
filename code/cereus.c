@@ -64,9 +64,7 @@ typedef enum
 {
     WORLD_0,
     WORLD_1,
-    GATE_1,
     WORLD_2,
-    GATE_2
 }
 GameProgress;
 
@@ -161,6 +159,7 @@ typedef struct TemporaryState
     TrailingHitbox trailing_hitboxes[32]; 
 
     GameProgress game_progress;
+    Int3 restart_position;
     bool in_overworld;
     bool allow_movement;
     bool pack_attached;
@@ -429,7 +428,7 @@ LaserBuffer laser_buffer[512] = {0}; // 512 = 64 max sources * 16 max laser turn
 
 WorldState leap_of_faith_world_state_snapshot = {0}; // TODO: doesn't change the buffer, so could save 2MB memory by using some EntitySnapshot struct
 TemporaryState leap_of_faith_temp_state_snapshot = {0};
-WorldState overworld_zero = {0}; // TODO: probably don't have to carry this around, just read from zeroed overworld file when i need this (on restart in overworld)
+WorldState overworld_zero_state = {0}; // TODO: probably don't have to carry this around, just read from zeroed overworld file when i need this (on restart in overworld)
 
 int32 time_until_allow_meta_input = 0;
 int32 time_until_allow_undo_or_restart_input = 0;
@@ -2459,7 +2458,7 @@ void gameInitialize(char* level_name, DisplayInfo display_from_platform)
 
     // read overworld-zero's world state from file on startup, so it's kept in memory. this is used on restart in the overworld.
     gameInitializeState("overworld-zero");
-    memcpy(&overworld_zero, &world_state, sizeof(WorldState));
+    memcpy(&overworld_zero_state, &world_state, sizeof(WorldState));
 
     gameInitializeState(level_name);
 }
@@ -3781,22 +3780,11 @@ void gameFrame(double delta_time, TickInput* tick_input)
                     // copy world state from overworld_zero, but save the solved levels and overwrite the level name
 					char persist_solved_levels[64][64];
                     memcpy(&persist_solved_levels, &world_state.solved_levels, sizeof(char) * 64 * 64);
-                    memcpy(&world_state, &overworld_zero, sizeof(WorldState));
+                    memcpy(&world_state, &overworld_zero_state, sizeof(WorldState));
                     memcpy(&world_state.solved_levels, &persist_solved_levels, sizeof(char) * 64 * 64);
                     memcpy(&world_state.level_name, "overworld", sizeof(char) * 64);
 
-                    // set player and pack position based on game progress. assumes pack is always attached and player always faces north after a restart in overworld
-
-                    Int3 player_restart_coords = {0};
-                    switch (temp_state.game_progress)
-                	{
-                        case WORLD_0: player_restart_coords = (Int3){ 58, 2, 213 }; break;
-                        case WORLD_1: player_restart_coords = (Int3){ 58, 2, 197 }; break;
-                        case GATE_1:  player_restart_coords = (Int3){ 58, 2, 189 }; break;
-                        case WORLD_2: player_restart_coords = (Int3){ 58, 2, 167 }; break;
-                        case GATE_2:  player_restart_coords = (Int3){ 58, 2, 159 }; break;
-                    }
-                    moveEntityInBufferAndState(player, player_restart_coords, NORTH);
+                    moveEntityInBufferAndState(player, temp_state.restart_position, NORTH);
                     setEntityVecsFromInts(player);
                     moveEntityInBufferAndState(pack, getNextCoords(player->coords, SOUTH), NORTH);
                     setEntityVecsFromInts(pack);
@@ -4157,12 +4145,19 @@ void gameFrame(double delta_time, TickInput* tick_input)
             ow_player_coords_for_offset = INT3_0;
         }
 
-        // update gameProgress based on which levels are solved, and current coords of the player
-        if (findInSolvedLevels("pack-intro-i") == -1) temp_state.game_progress = WORLD_0;
-        else if (player->coords.z <= 159) temp_state.game_progress = GATE_2;
-        else if (player->coords.z <= 174) temp_state.game_progress = WORLD_2;
-        else if (player->coords.z <= 189) temp_state.game_progress = GATE_1;
-        else temp_state.game_progress = WORLD_1;
+        // update restart coords based on current coords of the player, and also update game progress if this is relevant
+        if (player->coords.z > 204) temp_state.restart_position = (Int3){ 58, 2, 225 };
+        else if (player->coords.z > 189)
+    	{
+            temp_state.restart_position = (Int3){ 58, 2, 200 };
+            if (temp_state.game_progress < WORLD_1) temp_state.game_progress = WORLD_1;
+        }
+        else if (player->coords.z > 174) temp_state.restart_position = (Int3){ 58, 2, 188 };
+        else
+        {
+            temp_state.restart_position = (Int3){ 58, 2, 170 };
+            if (temp_state.game_progress < WORLD_2) temp_state.game_progress = WORLD_2;
+        }
 
         // create debug texts
         if (do_debug_text)
@@ -4368,7 +4363,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                 saveLevelRewrite(overworld_zero_relative_path);
 
                 // overwrite overworld_zero's world state with the new saved one
-                memcpy(&overworld_zero, &world_state, sizeof(WorldState));
+                memcpy(&overworld_zero_state, &world_state, sizeof(WorldState));
             }
             createDebugPopup("level saved", LEVEL_SAVE);
             writeSolvedLevelsToFile();
