@@ -2510,6 +2510,19 @@ void evictOldestUndoAction()
     undo_buffer.header_count--;
 }
 
+// don't call if there was level change
+void popLastUndoAction()
+{
+    if (undo_buffer.header_count == 0) return;
+
+    uint32 header_index = (undo_buffer.header_write_pos + MAX_UNDO_ACTIONS - 1) % MAX_UNDO_ACTIONS;
+    UndoActionHeader* header = &undo_buffer.headers[header_index];
+    undo_buffer.delta_write_pos = header->delta_start_pos;
+    undo_buffer.delta_count -= header->entity_count;
+    undo_buffer.header_write_pos = header_index;
+    undo_buffer.header_count--;
+}
+
 // called after a noraml (non-level-change) action
 // diffs world_state vs. world_state and stores deltas for every entity that changed
 void recordActionForUndo(WorldState* old_state, bool action_was_reset, bool action_was_climb)
@@ -2848,6 +2861,7 @@ void doPhysicsTick()
                 player->direction = temp_state.pack_turn_state.initial_player_direction;
                 pack->direction = temp_state.pack_turn_state.initial_player_direction;
                 temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
+                popLastUndoAction();
             }
         }
         else if (temp_state.pack_turn_state.pack_intermediate_states_timer == 7)
@@ -2875,6 +2889,7 @@ void doPhysicsTick()
                 moveEntityInBufferAndState(pack, start_pack_coords, player->direction);
                 player->direction = temp_state.pack_turn_state.initial_player_direction;
                 temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
+                popLastUndoAction();
             }
         }
     }
