@@ -1874,7 +1874,7 @@ Direction getNextLaserDirectionMirror(Direction laser_direction, Direction mirro
             case SOUTH: return WEST;
             case WEST:  return SOUTH;
             case EAST:  return NORTH;
-            default: return NO_DIRECTION;
+            default: 	return NO_DIRECTION;
      	}
 		case DOWN: switch (laser_direction)
        	{
