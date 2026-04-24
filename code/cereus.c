@@ -385,7 +385,7 @@ double physics_accumulator = 0;
 double timer_accumulator = 0;
 double global_time = 0; // will not work as a 'time elapsed' counter in editor mode because it grows slower during time slowdown
 
-const char debug_level_name[64] = "overworld";
+const char debug_level_name[64] = "testing";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
@@ -1650,6 +1650,7 @@ void createTrailingHitbox(int32 id, Int3 coords, int32 frames, TileType type)
     {
         if (temp_state.trailing_hitboxes[find_hitbox_index].frames != 0) continue;
         hitbox_index = find_hitbox_index;
+    	break;
     }
     if (hitbox_index == -1) return;
     temp_state.trailing_hitboxes[hitbox_index].id = id;
@@ -1801,7 +1802,10 @@ void pushAll(Int3 coords, Direction direction, bool on_head, Entity* root_entity
             Entity* e = getEntityAtCoords(current_stack_coords);
             Int3 next_coords = getNextCoords(e->coords, direction);
             TileType next_type = getTileType(next_coords);
+
             if (next_type != NONE) break; // this is possible because of the inverse push index seeking. if not none, won't be pushable either, so break.
+
+            createTrailingHitbox(e->id, e->coords, TRAILING_HITBOX_TIME, next_type);
             moveEntityInBufferAndState(e, next_coords, e->direction);
 
             // add object to 'pushed by player' id array, unelss it's already being tracked
@@ -3272,8 +3276,13 @@ void doPhysicsTick()
         }
     }
 
-    // decrement trailing hitboxes 
-    FOR(th_index, MAX_TRAILING_HITBOX_COUNT) if (temp_state.trailing_hitboxes[th_index].frames > 0) temp_state.trailing_hitboxes[th_index].frames--;
+    // decrement and clear trailing hitboxes 
+    FOR(th_index, MAX_TRAILING_HITBOX_COUNT) 
+    {
+        TrailingHitbox* th = &temp_state.trailing_hitboxes[th_index];
+        if (th->frames > 0) th->frames--;
+        if (th->frames == 0) memset(&temp_state.trailing_hitboxes[th_index], 0, sizeof(TrailingHitbox));
+    }
 }
 
 void gameFrame(double delta_time, TickInput* tick_input)
@@ -4190,6 +4199,15 @@ void gameFrame(double delta_time, TickInput* tick_input)
             char edit_text[256] = {0};
             snprintf(edit_text, sizeof(edit_text), "selected id: %d", editor_state.selected_id);
             createDebugText(edit_text);
+
+            char th_text[256] = {0};
+            int32 th_count = 0;
+            FOR(th_index, MAX_TRAILING_HITBOX_COUNT) if (temp_state.trailing_hitboxes[th_index].id != 0) th_count++;
+            TrailingHitbox th1 = temp_state.trailing_hitboxes[0];
+            TrailingHitbox th2 = temp_state.trailing_hitboxes[0];
+            TrailingHitbox th3 = temp_state.trailing_hitboxes[0];
+            snprintf(th_text, sizeof(th_text), "1: %d %d %d; 2: %d %d %d; 3: %d %d %d; count: %i", th1.type, th1.id, th1.frames, th2.type, th2.id, th2.frames, th3.type, th3.id, th3.frames, th_count);
+            createDebugText(th_text);
 
             /*
             // debug lasers
