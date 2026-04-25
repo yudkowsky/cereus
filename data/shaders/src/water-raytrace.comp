@@ -174,9 +174,11 @@ void main()
             float determinant = dot(edge_1, cross_ray_direction_edge_2);
 
             // near-parallel to triangle: skip this triangle
-            if (determinant < 0.0001) continue; // assuming front-facing triangles only, i.e. positive determinants, so if negative determinant, ignore this intersection.
+            if (determinant < 0.0001) continue; // assuming front-facing triangles only, i.e. positive determinant
+                								// so if negative determinant, ignore this intersection.
 
-			// optimisation due to only front-facing triangles: save dividing by determinant until after know triangle has been hit, by comparing to determinant
+			// optimisation due to only front-facing triangles: save dividing by determinant 
+            // until after know triangle has been hit, by comparing to determinant
 
 			// calculate first barycentric coordinate, u (scaled by determinant for now)
 			vec3 origin_minus_vertex_0 = ray_point - vertex_0; // this is used later, so keep to save compute
@@ -192,10 +194,12 @@ void main()
         	float t_hit = dot(edge_2, cross_origin_minus_vertex_0_edge_1);
             if (t_hit < 0) continue; // if triangle is behind ray. this probably will not happen, because of level geometry
 
-			// now know triangle has been hit. so just store t value by scaling by inverse determinant. if need u and v coords, scale them here too
+			// now know triangle has been hit. so just store t value by scaling by inverse determinant. 
+            // if need u and v coords, scale them here too
             float inverse_determinant = 1.0 / determinant;
 			t_hit *= inverse_determinant;
 
+            // overwrite color and normal values if this is the closest found triangle at this point
             if (t_hit < t_closest)
             {
 				t_closest = t_hit;

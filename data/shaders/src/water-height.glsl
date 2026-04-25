@@ -1,22 +1,10 @@
-/*
-float waterHeight(vec3 world_pos, float time)
-{
-    float x_frequency = 3.0;
-    float y_frequency = 2.0;
-    float x_speed = 1.5;
-    float y_speed = 1.0;
-    float x_amplitude = 0.04;
-    float y_amplitude = 0.03;
-
-    return (sin(world_pos.x * x_frequency + time * x_speed) * x_amplitude) + (sin(world_pos.z * y_frequency + time * y_speed) * y_amplitude);
-}
-*/
-
+// this function is currently very simple, but could theoretically be more 
+// involved while still letting the rest of the setup work without changes
 float waterHeight(vec3 world_pos, float time)
 {
     float height = 0.0;
     
-    // random stuff
+    // poor man's ocean
     height += 0.040 * sin(dot(vec2(1.0, 0.0),  world_pos.xz) * 3.0 + time * 1.5);
     height += 0.030 * sin(dot(vec2(0.0, 1.0),  world_pos.xz) * 2.0 + time * 1.0);
     height += 0.015 * sin(dot(vec2(0.7, 0.7),  world_pos.xz) * 5.0 + time * 2.0);
