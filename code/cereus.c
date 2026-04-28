@@ -2349,8 +2349,8 @@ void gameInitializeState(char* level_name)
     memset(world_state.sources,       0, sizeof(world_state.sources));
     memset(world_state.win_blocks,    0, sizeof(world_state.win_blocks));
     memset(world_state.locked_blocks, 0, sizeof(world_state.locked_blocks));
-    FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) // TODO: do i still need id -1 as a gate, now that i'm just using .removed everywhere?
-    {
+    FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) // NOTE: id -1 distinguishes between 'slot was never used' and removed which means was once used, 
+    {                                            // now free. this is important for locked_blocks, so if want to change this, need slot_ever_used bool or something
         world_state.boxes[entity_index].id          = -1;
         world_state.mirrors[entity_index].id        = -1;
         world_state.glass_blocks[entity_index].id   = -1;
@@ -2636,12 +2636,12 @@ void zeroAnimations()
     temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
 }
 
+// returns false only if already at oldest action
 bool performUndo()
 {
     if (undo_buffer.header_count == 0) return false;
 
     // clear animations + trailing hitboxes
-    // TODO(anims): clear all animations
     memset(temp_state.trailing_hitboxes, 0, sizeof(temp_state.trailing_hitboxes));
 
     // get most recent action header
@@ -2731,8 +2731,6 @@ void levelChangePrep(char next_level[64])
 
     if (strcmp(next_level, "overworld") == 0) temp_state.in_overworld = true;
     else temp_state.in_overworld = false;
-
-    // TODO(anims): cancel all animations
 }
 
 // MOVEMENT
@@ -2948,8 +2946,6 @@ void doPhysicsTick()
                 }
                 moveEntityInBufferAndState(player, coords_above, player->direction);
 
-                // TODO(anims): interpolate animation upwards - this should happen before moveEntity...
-
                 player->in_motion = CLIMB_ANIMATION_TIME;
                 player->moving_direction = UP;
 
@@ -2957,8 +2953,6 @@ void doPhysicsTick()
                 {
                     Int3 coords_above_pack = getNextCoords(pack->coords, UP);
                     moveEntityInBufferAndState(pack, coords_above_pack, pack->direction);
-
-                    // TODO(anims): interpolation anim upwards
 
                     pack->in_motion = CLIMB_ANIMATION_TIME;
                     pack->moving_direction = UP;
@@ -2969,7 +2963,6 @@ void doPhysicsTick()
         {
             // can't move or climb more
             resetPlayerAndPackMotion();
-            // TODO(anims): failed walk animation in direction of player
         }
     }
 
@@ -3745,19 +3738,33 @@ void gameFrame(double delta_time, TickInput* tick_input)
 
         if (editor_state.editor_mode == NO_MODE)
         {
-            // assuming game undo and restart (still no undo in editor)
-            if (time_until_allow_undo_or_restart_input == 0 && tick_input->z_press)
+            // assuming gameplay undo and restart (still no undo in editor)
+            bool do_undo = false;
+            if (tick_input->z_press) do_undo = true;
+            if (time_until_allow_undo_or_restart_input != 0) do_undo = false;
+
+            if (do_undo)
             {
                 // UNDO
                 if (performUndo())
                 {
                     updatePackDetached();
+
+                    if (undos_performed == 0) time_until_allow_undo_or_restart_input = 9;
+                    else if (undos_performed < 2) time_until_allow_undo_or_restart_input = 6;
+                    else time_until_allow_undo_or_restart_input = 5;
+
                     undos_performed++;
+                    silence_unlocks_due_to_restart_or_undo = true;
+                    undo_press_timer = TIME_AFTER_UNDO_UNTIL_PHYSICS_START;
+                    temp_state.allow_movement = true;
                 }
-                silence_unlocks_due_to_restart_or_undo = true;
-                time_until_allow_undo_or_restart_input = 8; // TODO: reinstate gradual speed up here in a better way
-                undo_press_timer = TIME_AFTER_UNDO_UNTIL_PHYSICS_START;
-                temp_state.allow_movement = true;
+                else
+                {
+                    time_until_allow_undo_or_restart_input = 8;
+                }
+
+                // TODO: maybe stop gameplay input for a few frames after undo?
             }
             if (time_until_allow_undo_or_restart_input == 0 && tick_input->r_press)
             {
