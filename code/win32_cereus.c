@@ -9,11 +9,12 @@ typedef MMRESULT (WINAPI *timeBeginPeriod_t)(UINT);
 typedef MMRESULT (WINAPI *timeEndPeriod_t)(UINT);
 
 HWND global_window_handle = 0;
-TickInput tick_input = {0};
-bool cursor_locked = false;
+Input input = {0};
+bool cursor_locked = false; // TODO: let the player have a cursor until game input, but give it back as soon as mouse is attempted to be moved (in game mode)
+bool window_focused = false;
 DisplayInfo display_info = {0};
 
-void centerCursorInWindow(void)
+void centerCursorInWindow()
 {
     if (!global_window_handle || !cursor_locked) return;
     RECT client_rect;
@@ -26,11 +27,11 @@ void centerCursorInWindow(void)
     SetCursorPos(center.x, center.y);
 }
 
-void pushTextChar(TickInput *input, uint32 codepoint)
+void pushTextChar(Input *in, uint32 codepoint)
 {
-    if (input->text.count < (int32)(sizeof(input->text.codepoints) / sizeof(input->text.codepoints[0])))
+    if (in->text.count < (int32)(sizeof(in->text.codepoints) / sizeof(in->text.codepoints[0])))
     {
-		input->text.codepoints[input->text.count++] = codepoint;
+		in->text.codepoints[in->text.count++] = codepoint;
     }
 }
 
@@ -45,15 +46,14 @@ LRESULT CALLBACK windowMessageProcessor(
         case WM_CHAR:
         {
             uint32 character = (uint32)wParam;
-            if 		(character == '\b') tick_input.backspace_pressed_this_frame = true;
-            else if (character == '\r') tick_input.enter_pressed_this_frame = true;
-            else if (character >= 32 && character < 128) pushTextChar(&tick_input, character);
+            if (character == '\b' || character == '\r' || (character >= 32 && character < 128)) pushTextChar(&input, character);
             return 0;
         }
         case WM_ACTIVATE:
         {
             if (LOWORD(wParam) == WA_INACTIVE)
             {
+                window_focused = false;
                 cursor_locked = false;
                 while (ShowCursor(TRUE) < 0) { }
             }
@@ -69,6 +69,7 @@ LRESULT CALLBACK windowMessageProcessor(
                 // re-lock if alt-tab (WA_ACTIVE) or clicked inside client area
                 if (LOWORD(wParam) == WA_ACTIVE || click_in_client)
                 {
+                    window_focused = true;
                     cursor_locked = true;
                     while (ShowCursor(FALSE) >= 0) { }
                     centerCursorInWindow();
@@ -113,138 +114,80 @@ LRESULT CALLBACK windowMessageProcessor(
                 RAWINPUT* raw_input = (RAWINPUT*)buffer;
                 if (raw_input->header.dwType == RIM_TYPEMOUSE)
                 {
-                    tick_input.mouse_dx -= raw_input->data.mouse.lLastX;
-                    tick_input.mouse_dy -= raw_input->data.mouse.lLastY;
-
-                    USHORT buttons = raw_input->data.mouse.usButtonFlags;
-                    if (buttons & RI_MOUSE_LEFT_BUTTON_DOWN)   tick_input.left_mouse_press   = true;
-                    if (buttons & RI_MOUSE_LEFT_BUTTON_UP)     tick_input.left_mouse_press   = false;
-                    if (buttons & RI_MOUSE_RIGHT_BUTTON_DOWN)  tick_input.right_mouse_press  = true;
-                    if (buttons & RI_MOUSE_RIGHT_BUTTON_UP)    tick_input.right_mouse_press  = false;
-                    if (buttons & RI_MOUSE_MIDDLE_BUTTON_DOWN) tick_input.middle_mouse_press = true;
-                    if (buttons & RI_MOUSE_MIDDLE_BUTTON_UP)   tick_input.middle_mouse_press = false;
+                    input.mouse_dx -= raw_input->data.mouse.lLastX;
+                    input.mouse_dy -= raw_input->data.mouse.lLastY;
                 }
             }
             return 0;
         }
-        case WM_KEYDOWN:
-        {
-            switch (wParam)
-            {
-                case 'A': tick_input.a_press = true; break;
-                case 'B': tick_input.b_press = true; break;
-                case 'C': tick_input.c_press = true; break;
-                case 'D': tick_input.d_press = true; break;
-                case 'E': tick_input.e_press = true; break;
-                case 'F': tick_input.f_press = true; break;
-                case 'G': tick_input.g_press = true; break;
-                case 'H': tick_input.h_press = true; break;
-                case 'I': tick_input.i_press = true; break;
-                case 'J': tick_input.j_press = true; break;
-                case 'K': tick_input.k_press = true; break;
-                case 'L': tick_input.l_press = true; break;
-                case 'M': tick_input.m_press = true; break;
-                case 'N': tick_input.n_press = true; break;
-                case 'O': tick_input.o_press = true; break;
-                case 'P': tick_input.p_press = true; break;
-                case 'Q': tick_input.q_press = true; break;
-                case 'R': tick_input.r_press = true; break;
-                case 'S': tick_input.s_press = true; break;
-                case 'T': tick_input.t_press = true; break;
-                case 'U': tick_input.u_press = true; break;
-                case 'V': tick_input.v_press = true; break;
-                case 'W': tick_input.w_press = true; break;
-                case 'X': tick_input.x_press = true; break;
-                case 'Y': tick_input.y_press = true; break;
-                case 'Z': tick_input.z_press = true; break;
-
-                case '0': tick_input.zero_press  = true; break;
-                case '1': tick_input.one_press   = true; break;
-                case '2': tick_input.two_press   = true; break;
-                case '3': tick_input.three_press = true; break;
-                case '4': tick_input.four_press  = true; break;
-                case '5': tick_input.five_press  = true; break;
-                case '6': tick_input.six_press   = true; break;
-                case '7': tick_input.seven_press = true; break;
-                case '8': tick_input.eight_press = true; break;
-                case '9': tick_input.nine_press  = true; break;
-
-                case VK_UP:    tick_input.w_press = true; break;
-                case VK_DOWN:  tick_input.s_press = true; break;
-                case VK_LEFT:  tick_input.a_press = true; break;
-                case VK_RIGHT: tick_input.d_press = true; break;
-
-                case VK_OEM_PERIOD: tick_input.dot_press 	   = true; break;
-                case VK_OEM_COMMA:  tick_input.comma_press 	   = true; break;
-                case VK_BACK:       tick_input.backspace_press = true; break;
-
-                case VK_SPACE: 	tick_input.space_press = true;  break;
-                case VK_SHIFT: 	tick_input.shift_press = true;  break;
-                case VK_ESCAPE: tick_input.escape_press = true; break;
-            	case VK_TAB:	tick_input.tab_press = true;	break;
-            }
-            break;
-        }
-        case WM_KEYUP:
-        {
-            switch (wParam)
-            {
-                case 'A': tick_input.a_press = false; break;
-                case 'B': tick_input.b_press = false; break;
-                case 'C': tick_input.c_press = false; break;
-                case 'D': tick_input.d_press = false; break;
-                case 'E': tick_input.e_press = false; break;
-                case 'F': tick_input.f_press = false; break;
-                case 'G': tick_input.g_press = false; break;
-                case 'H': tick_input.h_press = false; break;
-                case 'I': tick_input.i_press = false; break;
-                case 'J': tick_input.j_press = false; break;
-                case 'K': tick_input.k_press = false; break;
-                case 'L': tick_input.l_press = false; break;
-                case 'M': tick_input.m_press = false; break;
-                case 'N': tick_input.n_press = false; break;
-                case 'O': tick_input.o_press = false; break;
-                case 'P': tick_input.p_press = false; break;
-                case 'Q': tick_input.q_press = false; break;
-                case 'R': tick_input.r_press = false; break;
-                case 'S': tick_input.s_press = false; break;
-                case 'T': tick_input.t_press = false; break;
-                case 'U': tick_input.u_press = false; break;
-                case 'V': tick_input.v_press = false; break;
-                case 'W': tick_input.w_press = false; break;
-                case 'X': tick_input.x_press = false; break;
-                case 'Y': tick_input.y_press = false; break;
-                case 'Z': tick_input.z_press = false; break;
-
-                case '0': tick_input.zero_press  = false; break;
-                case '1': tick_input.one_press   = false; break;
-                case '2': tick_input.two_press   = false; break;
-                case '3': tick_input.three_press = false; break;
-                case '4': tick_input.four_press  = false; break;
-                case '5': tick_input.five_press  = false; break;
-                case '6': tick_input.six_press   = false; break;
-                case '7': tick_input.seven_press = false; break;
-                case '8': tick_input.eight_press = false; break;
-                case '9': tick_input.nine_press  = false; break;
-
-                case VK_UP:    tick_input.w_press = false; break;
-                case VK_DOWN:  tick_input.s_press = false; break;
-                case VK_LEFT:  tick_input.a_press = false; break;
-                case VK_RIGHT: tick_input.d_press = false; break;
-
-                case VK_OEM_PERIOD: tick_input.dot_press       = false; break;
-                case VK_OEM_COMMA:  tick_input.comma_press     = false; break;
-                case VK_BACK:       tick_input.backspace_press = false; break;
-
-                case VK_SPACE: 	tick_input.space_press  = false; break;
-                case VK_SHIFT: 	tick_input.shift_press  = false; break;
-                case VK_ESCAPE: tick_input.escape_press = false; break;
-            	case VK_TAB:	tick_input.tab_press    = false; break;
-            }
-            break;
-        }
     }
     return DefWindowProcW(window_handle, message_id, wParam, lParam);
+}
+
+uint64 pollKeys()
+{
+    if (!window_focused) return 0;
+
+    uint64 held = 0;
+
+    if (GetAsyncKeyState('0') & 0x8000) held |= KEY_0;
+    if (GetAsyncKeyState('1') & 0x8000) held |= KEY_1;
+    if (GetAsyncKeyState('2') & 0x8000) held |= KEY_2;
+    if (GetAsyncKeyState('3') & 0x8000) held |= KEY_3;
+    if (GetAsyncKeyState('4') & 0x8000) held |= KEY_4;
+    if (GetAsyncKeyState('5') & 0x8000) held |= KEY_5;
+    if (GetAsyncKeyState('6') & 0x8000) held |= KEY_6;
+    if (GetAsyncKeyState('7') & 0x8000) held |= KEY_7;
+    if (GetAsyncKeyState('8') & 0x8000) held |= KEY_8;
+    if (GetAsyncKeyState('9') & 0x8000) held |= KEY_9;
+
+    if (GetAsyncKeyState('A') & 0x8000) held |= KEY_A;
+    if (GetAsyncKeyState('B') & 0x8000) held |= KEY_B;
+    if (GetAsyncKeyState('C') & 0x8000) held |= KEY_C;
+    if (GetAsyncKeyState('D') & 0x8000) held |= KEY_D;
+    if (GetAsyncKeyState('E') & 0x8000) held |= KEY_E;
+    if (GetAsyncKeyState('F') & 0x8000) held |= KEY_F;
+    if (GetAsyncKeyState('G') & 0x8000) held |= KEY_G;
+    if (GetAsyncKeyState('H') & 0x8000) held |= KEY_H;
+    if (GetAsyncKeyState('I') & 0x8000) held |= KEY_I;
+    if (GetAsyncKeyState('J') & 0x8000) held |= KEY_J;
+    if (GetAsyncKeyState('K') & 0x8000) held |= KEY_K;
+    if (GetAsyncKeyState('L') & 0x8000) held |= KEY_L;
+    if (GetAsyncKeyState('M') & 0x8000) held |= KEY_M;
+    if (GetAsyncKeyState('N') & 0x8000) held |= KEY_N;
+    if (GetAsyncKeyState('O') & 0x8000) held |= KEY_O;
+    if (GetAsyncKeyState('P') & 0x8000) held |= KEY_P;
+    if (GetAsyncKeyState('Q') & 0x8000) held |= KEY_Q;
+    if (GetAsyncKeyState('R') & 0x8000) held |= KEY_R;
+    if (GetAsyncKeyState('S') & 0x8000) held |= KEY_S;
+    if (GetAsyncKeyState('T') & 0x8000) held |= KEY_T;
+    if (GetAsyncKeyState('U') & 0x8000) held |= KEY_U;
+    if (GetAsyncKeyState('V') & 0x8000) held |= KEY_V;
+    if (GetAsyncKeyState('W') & 0x8000) held |= KEY_W;
+    if (GetAsyncKeyState('X') & 0x8000) held |= KEY_X;
+    if (GetAsyncKeyState('Y') & 0x8000) held |= KEY_Y;
+    if (GetAsyncKeyState('Z') & 0x8000) held |= KEY_Z;
+
+    // arrow keys aliased to wasd
+    if (GetAsyncKeyState(VK_UP)    & 0x8000) held |= KEY_W;
+    if (GetAsyncKeyState(VK_DOWN)  & 0x8000) held |= KEY_S;
+    if (GetAsyncKeyState(VK_LEFT)  & 0x8000) held |= KEY_A;
+    if (GetAsyncKeyState(VK_RIGHT) & 0x8000) held |= KEY_D;
+
+    if (GetAsyncKeyState(VK_OEM_PERIOD) & 0x8000) held |= KEY_DOT;
+    if (GetAsyncKeyState(VK_OEM_COMMA)  & 0x8000) held |= KEY_COMMA;
+    if (GetAsyncKeyState(VK_SPACE)      & 0x8000) held |= KEY_SPACE;
+    if (GetAsyncKeyState(VK_SHIFT)      & 0x8000) held |= KEY_SHIFT;
+    if (GetAsyncKeyState(VK_TAB)        & 0x8000) held |= KEY_TAB;
+    if (GetAsyncKeyState(VK_ESCAPE)     & 0x8000) held |= KEY_ESCAPE;
+    if (GetAsyncKeyState(VK_BACK)       & 0x8000) held |= KEY_BACKSPACE;
+    if (GetAsyncKeyState(VK_RETURN)     & 0x8000) held |= KEY_ENTER;
+
+    if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) held |= KEY_LEFT_MOUSE;
+    if (GetAsyncKeyState(VK_RBUTTON) & 0x8000) held |= KEY_RIGHT_MOUSE;
+    if (GetAsyncKeyState(VK_MBUTTON) & 0x8000) held |= KEY_MIDDLE_MOUSE;
+
+    return held;
 }
 
 int CALLBACK WinMain(
@@ -254,14 +197,6 @@ int CALLBACK WinMain(
 	int       initial_show_state)
 {
 	(void)_;
-
-    /*
-    char exe_path[MAX_PATH];
-    GetModuleFileNameA(NULL, exe_path, MAX_PATH);
-    char* last_slash = strrchr(exe_path, '\\');
-    if (last_slash) *last_slash = '\0';
-    SetCurrentDirectoryA(exe_path);
-    */
 
 	WNDCLASSEXW window_class = {0};
 
@@ -301,6 +236,7 @@ int CALLBACK WinMain(
     global_window_handle = window_handle;
 
     ShowWindow(window_handle, initial_show_state);
+    //window_focused = true; // uncomment if required, probably isn't
 
     // lock cursor on startup
     cursor_locked = true;
@@ -372,13 +308,13 @@ int CALLBACK WinMain(
         double delta_time = (current_tick.QuadPart - last_tick.QuadPart) * seconds_per_tick;
         last_tick = current_tick;
 
-        gameFrame(delta_time, &tick_input); 
+        input.keys_held = pollKeys();
 
-        tick_input.mouse_dx = 0;
-        tick_input.mouse_dy = 0;
-        tick_input.text.count = 0;
-        tick_input.backspace_pressed_this_frame = false;
-        tick_input.enter_pressed_this_frame = false;
+        gameFrame(delta_time, &input); 
+
+        input.mouse_dx = 0;
+        input.mouse_dy = 0;
+        input.text.count = 0;
 
         centerCursorInWindow();
 
