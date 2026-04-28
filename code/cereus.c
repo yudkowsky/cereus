@@ -129,6 +129,7 @@ typedef struct
     Direction direction;
     bool on_head;
     Entity* root_entity;
+    bool tied_to_pack_and_decoupled; // should interpolate towards end point, but still handle with rest of enities
 }
 TiedEntity;
 
@@ -1836,6 +1837,7 @@ void pushAll(Int3 coords, Direction direction, bool on_head, Entity* root_entity
             temp_state.entities_tied_to_movement[write_index].direction = direction;
             temp_state.entities_tied_to_movement[write_index].on_head = on_head;
             temp_state.entities_tied_to_movement[write_index].root_entity = root_entity;
+            temp_state.entities_tied_to_movement[write_index].tied_to_pack_and_decoupled = false;
 
             current_stack_coords = getNextCoords(current_stack_coords, UP);
         }
@@ -3205,11 +3207,12 @@ void doPhysicsTick()
                     Vec3 test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, difference_in_root_position_along_direction, intCoordsToNorm(e->coords));
                     float test_movement_towards_direction = getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, e->position));
 
-                    bool do_entity_move = false;
-                    if (test_movement_towards_direction > 0) do_entity_move = true; // prevents negative snapping of an object-to-be-pushed towards player
-                    if (test_movement_towards_direction > 0.5) do_entity_move = false; // prevents too large a jump (happens if pack rotation not done before root_e moves by one tile)
+                    bool do_standard_entity_move = false;
+                    if (test_movement_towards_direction > 0) do_standard_entity_move = true; // prevents negative snapping of an object-to-be-pushed towards player
+                    if (test_movement_towards_direction > 0.5) do_standard_entity_move = false; // prevents too large a jump (happens if pack rotation not done before root_e moves by one tile)
+                    if (tied_entity_info->tied_to_pack_and_decoupled) do_standard_entity_move = false;
 
-                    if (do_entity_move)
+                    if (do_standard_entity_move)
                     {
                         e->position = test_position;
                         e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
@@ -3220,10 +3223,21 @@ void doPhysicsTick()
                         bool close_to_target = fabs(getComponentAlongDirection(tied_entity_info->direction, vec3Subtract(e->position, intCoordsToNorm(e->coords)))) < 0.1;
                         if (test_movement_towards_direction > 0.0 || close_to_target)
                         {
-                            // TODO: try to interpolate in here instead?
-                            e->position = intCoordsToNorm(e->coords);
-                            e->velocity = VEC3_0;
-                            tied_entity_info->id = 0;
+                            tied_entity_info->tied_to_pack_and_decoupled = true;
+                            float interpolation_distance_per_frame = 0.1f;
+                            float difference = getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(intCoordsToNorm(e->coords), e->position));
+                            if (difference < interpolation_distance_per_frame)
+                            {
+                                e->position = intCoordsToNorm(e->coords);
+                                e->velocity = VEC3_0;
+                                tied_entity_info->id = 0;
+                            }
+                            else
+                            {
+                                float sign = (tied_entity_info->direction == NORTH || tied_entity_info->direction == WEST) ? -1.0f : 1.0f;
+                                e->position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, sign * interpolation_distance_per_frame, e->position);
+                                e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, sign * interpolation_distance_per_frame, VEC3_0);
+                            }
                         }
                     }
                     else if (test_movement_towards_direction < -0.5)
