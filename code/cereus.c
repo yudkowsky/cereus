@@ -329,7 +329,7 @@ const float GRAVITY = -0.03f;
 
 const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
 const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
-const int32 TRAILING_HITBOX_TIME = 6;
+const int32 TRAILING_HITBOX_TIME = 7;
 const int32 FALL_TRAILING_HITBOX_TIME = 10; // TODO: this number should maybe be derived based on individual circumstance. but maybe just using a max is fine too, since collisions check if a trailing hitbox is relevant before using
 const int32 TIME_AFTER_UNDO_UNTIL_PHYSICS_START = 4;
 
@@ -1813,7 +1813,7 @@ void pushAll(Int3 coords, Direction direction, bool on_head, Entity* root_entity
 
             if (next_type != NONE) break; // this is possible because of the inverse push index seeking. if not none, won't be pushable either, so break.
 
-            createTrailingHitbox(e->id, e->coords, TRAILING_HITBOX_TIME, next_type);
+            createTrailingHitbox(e->id, e->coords, TRAILING_HITBOX_TIME, getTileType(e->coords));
             moveEntityInBufferAndState(e, next_coords, e->direction);
 
             // add object to 'pushed by player' id array, unelss it's already being tracked
@@ -1907,8 +1907,6 @@ Vec3 getNormCoordsWithEntityCoordAlongAxis(Direction direction, Vec3 current_nor
     return vec3Add(norm_coords_not_along_axis, mirror_coords_along_axis);
 }
 
-// handles where lasers go. the complicated part of this function handles when mirrors are moving around, and offsets the lasers visually by a bit.
-// TODO: insert small sphere at mirror reflection point
 void updateLaserBuffer()
 {
     Entity* player = &world_state.player;
@@ -1919,7 +1917,7 @@ void updateLaserBuffer()
     temp_state.player_hit_by_red   = false;
     temp_state.player_hit_by_blue  = false;
 
-    // if a source is a non-primary color, create primary sources of the constituent colors 
+    // if a source is magenta, create entry in sources_as_primary of it as both red and blue
     // TODO: probably shouldn't rebuild this buffer every time function is called, could just update when sources are moved / on level rebuild
     Entity sources_as_primary[256] = {0};
     int32 primary_index = 0;
@@ -2020,27 +2018,10 @@ void updateLaserBuffer()
                         lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), -0.375f));
                         current_norm_coords = player->position;
 
-                        // set player color based on laser
-                        switch (lb->color)
-                        {
-                            case RED:     
-                            {
-                                temp_state.player_hit_by_red = true; 
-                                break;
-                            }
-                            case BLUE:    
-                            {
-                                temp_state.player_hit_by_blue = true; 
-                                break;
-                            }
-                            case MAGENTA: 
-                            {
-                                temp_state.player_hit_by_red = true;
-                                temp_state.player_hit_by_blue = true;
-                                break;
-                            }
-                            default: break;
-                        }
+                        // set player color
+                        if (source->color == RED)  temp_state.player_hit_by_red = true;
+                        if (source->color == BLUE) temp_state.player_hit_by_blue = true;
+
                         advance_tile = false;
                         break;
                     }
@@ -2077,12 +2058,17 @@ void updateLaserBuffer()
                             break;
                         }
 
+                        /* 
+                        TODO: think about this more; i do want this functionality, but this will mean that when pushing as in blue-business-i, the laser will 
+                              hit neither mirror nor player for approx. 2 frames, which means that the object will fall. could encode a special case, or just
+                              have a fall timer, so that objects take a few frames to start falling
                         if (distance_from_mirror_along_axes > 0.35)
                         {
                             // between 0.5 and 0.3, so this hits the 'edge' of the mirror: break the laser
                             // still want to do later calculations to calculate exact coords to end
                             end_here = true;
                         }
+                        */
                         else if (distance_from_mirror_along_axes == 0)
                         {
                             lb->end_coords = mirror->position;
@@ -3871,8 +3857,7 @@ void gameFrame(double delta_time, TickInput* tick_input)
                         {
                             case NONE:
                             {
-                                // only don't allow movement if there's a trailing hitbox there. TODO: this is probably too aggressive of a check. see how it feels (maybe gate by frames left?)
-                                // will also need to add a gate for "is this trailing hitbox even within these coords?"
+                                // currently not allowing input if trailing hitbox occupies next tile. this check might be too strict sometimes
                                 TrailingHitbox th = {0};
                                 if (trailingHitboxAtCoords(next_player_coords, &th)) try_walk = false;
                                 else try_walk = true;
@@ -4213,8 +4198,8 @@ void gameFrame(double delta_time, TickInput* tick_input)
             int32 th_count = 0;
             FOR(th_index, MAX_TRAILING_HITBOX_COUNT) if (temp_state.trailing_hitboxes[th_index].id != 0) th_count++;
             TrailingHitbox th1 = temp_state.trailing_hitboxes[0];
-            TrailingHitbox th2 = temp_state.trailing_hitboxes[0];
-            TrailingHitbox th3 = temp_state.trailing_hitboxes[0];
+            TrailingHitbox th2 = temp_state.trailing_hitboxes[1];
+            TrailingHitbox th3 = temp_state.trailing_hitboxes[2];
             snprintf(th_text, sizeof(th_text), "1: %d %d %d; 2: %d %d %d; 3: %d %d %d; count: %i", th1.type, th1.id, th1.frames, th2.type, th2.id, th2.frames, th3.type, th3.id, th3.frames, th_count);
             createDebugText(th_text);
 
