@@ -400,6 +400,7 @@ const float CAMERA_MOVE_STEP = 0.2f;
 const float CAMERA_FOV = 15.0f;
 
 DisplayInfo game_display = {0};
+Input prev_input = {0}; // copied from previous frame input to generate keys_pressed
 
 Camera camera = {0};
 Camera camera_with_ow_offset = {0};
@@ -2250,21 +2251,16 @@ void editBackspace()
     buffer->string[buffer->length] = 0;
 }
 
-/*
 void updateTextInput(Input *input)
 {
     for (int32 chars_typed_index = 0; chars_typed_index < input->text.count; chars_typed_index++)
     {
         uint32 codepoint = input->text.codepoints[chars_typed_index];
         char character = (char)codepoint;
-        editAppendChar(character);
-    }
-    if (input->backspace_pressed_this_frame)
-    {
-        editBackspace();
+        if (character == '\b') editBackspace();
+        else editAppendChar(character);
     }
 }
-*/
 
 void initUndoBuffer()
 {
@@ -3275,6 +3271,10 @@ void gameFrame(double delta_time, Input* input)
 
     draw_command_count = 0;
 
+    // generate keys_pressed from prev_input and input
+    input->keys_pressed = input->keys_held & ~prev_input.keys_held;
+    prev_input = *input; // note that prev_input is almost always the same as input, it just persists over the frame
+
     Entity* player = &world_state.player;
     Entity* pack = &world_state.pack;
 
@@ -3371,7 +3371,6 @@ void gameFrame(double delta_time, Input* input)
     ////////////
 
     // handle text input first
-    /*
     if (editor_state.editor_mode == SELECT_WRITE)
     {
         char (*writing_to_field)[64] = 0;
@@ -3379,7 +3378,7 @@ void gameFrame(double delta_time, Input* input)
         if      (editor_state.writing_field == WRITING_FIELD_NEXT_LEVEL)  writing_to_field = &e->next_level;
         else if (editor_state.writing_field == WRITING_FIELD_UNLOCKED_BY) writing_to_field = &e->unlocked_by;
 
-        if (tick_input->enter_pressed_this_frame)
+        if (input->keys_pressed & KEY_ENTER)
         {
             memset(*writing_to_field, 0, sizeof(*writing_to_field));
             memcpy(*writing_to_field, editor_state.edit_buffer.string, sizeof(*writing_to_field) - 1);
@@ -3388,20 +3387,19 @@ void gameFrame(double delta_time, Input* input)
             editor_state.selected_id = 0;
             editor_state.writing_field = NO_WRITING_FIELD;
         }
-        else if (tick_input->escape_press)
+        else if (input->keys_held & KEY_ESCAPE)
         {
             editor_state.editor_mode = SELECT;
             editor_state.selected_id = 0;
             editor_state.writing_field = NO_WRITING_FIELD;
         }
 
-        updateTextInput(tick_input);
+        updateTextInput(input);
     }
     else
     {
         memset(&editor_state.edit_buffer, 0, sizeof(editor_state.edit_buffer));
     }
-    */
 
     // MAIN EDITOR MODE FUNCTIONALITY (mostly anything to do with the raycasts)
 

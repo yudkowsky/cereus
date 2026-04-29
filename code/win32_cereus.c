@@ -203,7 +203,7 @@ int CALLBACK WinMain(
 	window_class.cbSize = sizeof(window_class);
 	window_class.lpfnWndProc = windowMessageProcessor;
 	window_class.hInstance = module_handle;
-	window_class.hCursor = LoadCursor(0, IDC_ARROW); // NOTE(spike): remove when want custom cursor
+	window_class.hCursor = LoadCursor(0, IDC_ARROW);
 	window_class.lpszClassName = L"standard_window_class";
 
     RegisterClassExW(&window_class);
@@ -236,7 +236,6 @@ int CALLBACK WinMain(
     global_window_handle = window_handle;
 
     ShowWindow(window_handle, initial_show_state);
-    //window_focused = true; // uncomment if required, probably isn't
 
     // lock cursor on startup
     cursor_locked = true;
