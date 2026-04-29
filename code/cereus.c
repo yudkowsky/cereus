@@ -82,6 +82,7 @@ typedef struct
     // movement state
     Vec3 velocity;
     bool falling;
+    Direction climbing_direction; // TODO: put in temp state, only applies to player
 
     // for sources/lasers
     Color color;
@@ -162,7 +163,7 @@ typedef struct TemporaryState
     GameProgress game_progress;
     Int3 restart_position;
     bool in_overworld;
-    bool allow_movement;
+    int32 allow_movement_timer; // if > 0, decrements every frame towards 0, and then able to move. if -1, movement is permanently stopped until some other action resets it.
     bool pack_attached;
 
     TiedEntity entities_tied_to_movement[32];
@@ -1646,7 +1647,7 @@ int32 getPushableStackSize(Int3 first_entity_coords)
 
 // TRAILING HITBOXES
 
-void createTrailingHitbox(int32 id, Int3 coords, int32 frames, TileType type)
+void createTrailingHitbox(int32 id, Int3 coords, int32 frames, TileType type) // TODO: derive type from id in here instead of passing
 {
     int32 hitbox_index = -1;
     FOR(find_hitbox_index, MAX_TRAILING_HITBOX_COUNT)
@@ -1778,7 +1779,6 @@ bool canPush(Int3 coords, Direction direction)
     return false; // only here if hit the max entity push count
 }
 
-/*
 bool canPushUp(Int3 coords)
 {
     int32 stack_size = getPushableStackSize(coords);
@@ -1787,7 +1787,6 @@ bool canPushUp(Int3 coords)
     if (getTileType(check_coords) == NONE) return true;
     else return false;
 }
-*/
 
 // assumes able to be pushed 
 void pushAll(Int3 coords, Direction direction, bool on_head, Entity* root_entity)
@@ -2389,8 +2388,9 @@ void gameInitializeState(char* level_name)
     saved_main_camera = loadCameraInfo(file, false);
     saved_alt_camera = loadCameraInfo(file, true);
 
-    temp_state.allow_movement = true;
+    temp_state.allow_movement_timer = 0;
     temp_state.pack_attached = true;
+    player->climbing_direction = NO_DIRECTION;
 
     if (temp_state.in_overworld)
     {
@@ -2618,6 +2618,27 @@ void recordLevelChangeForUndo(char* current_level_name, bool level_was_just_solv
 
 void zeroAnimations()
 {
+    // set all entities velocity to zero, and rotation to equal their direction
+    Entity* moving_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
+    FOR(group_index, 3)
+    {
+        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+        {
+            Entity* e = &moving_entity_group[group_index][entity_index];
+            e->velocity = VEC3_0;
+            e->rotation = directionToQuaternion(e->direction);
+        }
+    }
+
+    Entity* player = &world_state.player;
+    Entity* pack = &world_state.pack;
+    player->rotation = directionToQuaternion(player->direction);
+    player->velocity = VEC3_0;
+    pack->rotation = directionToQuaternion(pack->direction);
+    pack->velocity = VEC3_0;
+
+    player->climbing_direction = NO_DIRECTION;
+
     memset(temp_state.entities_tied_to_movement, 0, sizeof(temp_state.entities_tied_to_movement));
     temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
 }
@@ -2629,6 +2650,7 @@ bool performUndo()
 
     // clear animations + trailing hitboxes
     memset(temp_state.trailing_hitboxes, 0, sizeof(temp_state.trailing_hitboxes));
+    zeroAnimations();
 
     // get most recent action header
     uint32 header_index = (undo_buffer.header_write_pos + MAX_UNDO_ACTIONS - 1) % MAX_UNDO_ACTIONS;
@@ -2814,7 +2836,7 @@ void doPhysicsTick()
     // pack turn sequence
     if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0)
     {
-        if (temp_state.pack_turn_state.pack_intermediate_states_timer == TURN_TIME) // TODO: after verify that works, combine these two blocks
+        if (temp_state.pack_turn_state.pack_intermediate_states_timer == TURN_TIME)
         {
             Int3 diagonal_coords = temp_state.pack_turn_state.pack_intermediate_coords;
             Direction diagonal_push_direction = oppositeDirection(player->direction);
@@ -2867,6 +2889,8 @@ void doPhysicsTick()
                 player->direction = temp_state.pack_turn_state.initial_player_direction;
                 temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
                 popLastUndoAction();
+
+                temp_state.allow_movement_timer = 6; // TODO: i probably want to allow all movement except this same turn again, not just disable all movement for a few frames
             }
         }
     }
@@ -2875,85 +2899,144 @@ void doPhysicsTick()
     updatePackDetached();
 
     // climb logic
-    // TODO(anims): need something like a player.climbing flag for this gate instead. for now: disabling climbing
-    /*
-    if (player->moving_direction == UP && player->in_motion == 1)
+    if (player->climbing_direction == UP)
     {
-        bool do_push = false;
-        bool can_move = false;
-        bool try_climb_more = false;
-        Int3 next_coords = getNextCoords(player->coords, player->direction);
-        TileType tile_ahead = getTileType(next_coords);
-        if (tile_ahead == NONE)
-        {
-            can_move = true;
-        }
-        else if (isPushable(tile_ahead)) 
-        {
-            if (canPushStack(next_coords, player->direction) == CAN_PUSH)
-            {
-                can_move = true;
-                do_push = true;
-            }
-        }
-        else if (tile_ahead == LADDER)
-        {
-            try_climb_more = true;
-        }
+        float CLIMBING_SPEED = 0.1f; // TODO: global. also check with something that doesn't divide into 1.0 later
 
-        if (can_move)
+        float y_coord_difference = getComponentAlongDirection(UP, vec3Subtract(intCoordsToNorm(player->coords), player->position));
+
+        if (y_coord_difference > CLIMBING_SPEED)
         {
-            int32 animation_time = MOVE_OR_PUSH_ANIMATION_TIME;
-            if (do_push) pushAll(next_coords, player->direction);
-            doStandardMovement(player->direction, next_coords, animation_time, false);
-        }
-        else if (try_climb_more)
-        {
-            // assume works for now (breaks if solid block above)
-            Int3 coords_above = getNextCoords(player->coords, UP);
-            if (getTileType(coords_above) == NONE)
-            {
-                can_move = true;
-                do_push = false; // not actually required
-            }
-            else if (isPushable(getTileType(coords_above)))
-            {
-                if (canPushUp(coords_above) == CAN_PUSH)
-                {
-                    can_move = true;
-                    do_push = true;
-                }
-            }
-            if (can_move)
-            {
-                if (do_push)
-                {
-                    pushUp(coords_above, CLIMB_ANIMATION_TIME);
-                }
-                moveEntityInBufferAndState(player, coords_above, player->direction);
-
-                player->in_motion = CLIMB_ANIMATION_TIME;
-                player->moving_direction = UP;
-
-                if (!pack_detached)
-                {
-                    Int3 coords_above_pack = getNextCoords(pack->coords, UP);
-                    moveEntityInBufferAndState(pack, coords_above_pack, pack->direction);
-
-                    pack->in_motion = CLIMB_ANIMATION_TIME;
-                    pack->moving_direction = UP;
-                }
-            }
+            // just keep climbing, already commited to this movement.
+            player->position.y += CLIMBING_SPEED;
+            player->velocity.y = CLIMBING_SPEED;
+            pack->position.y += CLIMBING_SPEED;
+            pack->velocity.y = CLIMBING_SPEED;
         }
         else
         {
-            // can't move or climb more
-            resetPlayerAndPackMotion();
+            // movement crosses tile boundary so will require a check against what's above and infront:
+            // maybe continue climbing
+            // maybe pack should detach but otherwise keep climbing
+            // maybe end climb and start moving forwards
+            // maybe reverse direction if path is occupied either above or infront
+
+            bool try_climb_more = false;
+            bool move_forwards = false;
+            bool do_push_forwards = false;
+            bool reverse_direction = false;
+
+            Int3 coords_ahead = getNextCoords(player->coords, player->direction);
+            TileType type_ahead = getTileType(coords_ahead);
+
+            if (type_ahead == LADDER)
+            {
+                try_climb_more = true;
+            }
+            else if (type_ahead == NONE)
+            {
+                move_forwards = true;
+            }
+            else if (isPushable(type_ahead) && canPush(coords_ahead, player->direction))
+            {
+                move_forwards = true;
+                do_push_forwards = true;
+            }
+            else
+            {
+                reverse_direction = true;
+            }
+
+            if (try_climb_more)
+            {
+                // check above for block
+                // handle maybe pack detach
+
+                bool climb_more = false;
+                bool push_up = false;
+
+                Int3 coords_above_player = getNextCoords(player->coords, UP);
+                TileType type_above_player = getTileType(coords_above_player);
+
+                if (type_above_player == NONE)
+                {
+                    climb_more = true;
+                }
+                else if (isPushable(type_above_player) && canPushUp(coords_above_player))
+                {
+                    climb_more = true;
+                    push_up = true;
+                }
+
+                if (climb_more)
+                {
+                    createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
+                    if (push_up) {} // TODO: implement pushUp
+                    moveEntityInBufferAndState(player, coords_above_player, player->direction);
+
+                    player->position.y += CLIMBING_SPEED;
+                    player->velocity.y = CLIMBING_SPEED;
+
+                    if (temp_state.pack_attached)
+                    {
+                        bool pack_stays_with_player = false;
+                        bool pack_pushes = false;
+
+                        Int3 coords_above_pack = getNextCoords(pack->coords, UP);
+                        TileType type_above_pack = getTileType(coords_above_pack);
+
+                        if (type_above_pack == NONE)
+                        {
+                            pack_stays_with_player = true;
+                        }
+                        else if (isPushable(type_above_pack) && canPushUp(coords_above_pack))
+                        {
+                            pack_stays_with_player = true;
+                            pack_pushes = true;
+                        }
+
+                        if (pack_stays_with_player)
+                        {
+                            createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
+                            if (pack_pushes) {} // TODO: implement pushUp
+                            moveEntityInBufferAndState(pack, coords_above_pack, player->direction);
+
+                            pack->position.y += CLIMBING_SPEED;
+                            pack->velocity.y = CLIMBING_SPEED;
+                        }
+                        else
+                        {
+                            temp_state.pack_attached = false;
+                        }
+                    }
+                }
+                else
+                {
+                    reverse_direction = true;
+                }
+            }
+
+            if (move_forwards)
+            {
+                player->position = intCoordsToNorm(player->coords); // normalise y coord
+                player->climbing_direction = NO_DIRECTION;
+                player->velocity = VEC3_0;
+                if (do_push_forwards) pushAll(coords_ahead, player->direction, false, player);
+                doStandardMovement(player->direction, coords_ahead);
+            }
+
+            if (reverse_direction)
+            {
+                player->climbing_direction = DOWN;
+            }
         }
     }
 
-    updatePackDetached();
-    */
+    if (player->climbing_direction == DOWN)
+    {
+        // just let player fall for now
+        player->climbing_direction = NO_DIRECTION;
+    }
 
     // falling logic for entities
     Entity* falling_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
@@ -3025,6 +3108,7 @@ void doPhysicsTick()
     if (undo_press_timer > 0) want_to_fall = false;
     if (cheating) want_to_fall = false;
     if (temp_state.player_hit_by_red) want_to_fall = false;
+    if (player->climbing_direction != NO_DIRECTION) want_to_fall = false;
 
     if (want_to_fall) setFalling(player);
 
@@ -3092,6 +3176,9 @@ void doPhysicsTick()
 
     // do animations and handle some state, in particular entities tied to player movement
     // this is in this function because of the state handling
+
+    // player movement
+    if (player->climbing_direction == NO_DIRECTION)
     {
         // handle directional movement
         FOR(direction_index, 4)
@@ -3158,100 +3245,100 @@ void doPhysicsTick()
                 pack->rotation = player->rotation;
             }
         }
+    }
 
-        // handle entities tied to movement
-        FOR(tied_entity_index, MAX_ENTITIES_TIED_TO_MOVEMENT)
+    // handle entities tied to movement
+    FOR(tied_entity_index, MAX_ENTITIES_TIED_TO_MOVEMENT)
+    {
+        TiedEntity* tied_entity_info = &temp_state.entities_tied_to_movement[tied_entity_index];
+        if (tied_entity_info->id <= 0) continue;
+
+        Entity* e = getEntityFromId(tied_entity_info->id);
+        if (e->falling) 
         {
-            TiedEntity* tied_entity_info = &temp_state.entities_tied_to_movement[tied_entity_index];
-            if (tied_entity_info->id <= 0) continue;
+            tied_entity_info->id = 0;
+            continue;
+        }
 
-            Entity* e = getEntityFromId(tied_entity_info->id);
-            if (e->falling) 
-            {
-                tied_entity_info->id = 0;
-                continue;
-            }
+        if (tied_entity_info->direction == NO_DIRECTION)
+        {
+            // rotation: find rotation from target to current of player, and apply the same rotation to target direction of the entity.
+            float player_target_to_current_angle = getAngleOfYAxisRotation(directionToQuaternion(player->direction), player->rotation);
+            Vec4 transform = quaternionFromAxis(intCoordsToNorm(AXIS_Y), player_target_to_current_angle);
+            e->rotation = quaternionMultiply(directionToQuaternion(e->direction), transform);
+        }
+        else
+        {
+            // push
+            Entity* root_e = tied_entity_info->root_entity;
+            Vec3 difference_in_root_position = vec3Subtract(root_e->position, intCoordsToNorm(root_e->coords));
+            float difference_in_root_position_along_direction = getComponentAlongDirection(tied_entity_info->direction, difference_in_root_position);
 
-            if (tied_entity_info->direction == NO_DIRECTION)
+            if (difference_in_root_position_along_direction != 0)
             {
-                // rotation: find rotation from target to current of player, and apply the same rotation to target direction of the entity.
-                float player_target_to_current_angle = getAngleOfYAxisRotation(directionToQuaternion(player->direction), player->rotation);
-                Vec4 transform = quaternionFromAxis(intCoordsToNorm(AXIS_Y), player_target_to_current_angle);
-                e->rotation = quaternionMultiply(directionToQuaternion(e->direction), transform);
-            }
-            else
-            {
-                // push
-                Entity* root_e = tied_entity_info->root_entity;
-                Vec3 difference_in_root_position = vec3Subtract(root_e->position, intCoordsToNorm(root_e->coords));
-                float difference_in_root_position_along_direction = getComponentAlongDirection(tied_entity_info->direction, difference_in_root_position);
+                Vec3 test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, difference_in_root_position_along_direction, intCoordsToNorm(e->coords));
+                float test_movement_towards_direction = getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, e->position));
 
-                if (difference_in_root_position_along_direction != 0)
+                bool do_standard_entity_move = false;
+                if (test_movement_towards_direction > 0) do_standard_entity_move = true; // prevents negative snapping of an object-to-be-pushed towards player
+                if (test_movement_towards_direction > 0.5) do_standard_entity_move = false; // prevents too large a jump (happens if pack rotation not done before root_e moves by one tile)
+                if (tied_entity_info->tied_to_pack_and_decoupled) do_standard_entity_move = false;
+
+                if (do_standard_entity_move)
                 {
-                    Vec3 test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, difference_in_root_position_along_direction, intCoordsToNorm(e->coords));
-                    float test_movement_towards_direction = getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, e->position));
-
-                    bool do_standard_entity_move = false;
-                    if (test_movement_towards_direction > 0) do_standard_entity_move = true; // prevents negative snapping of an object-to-be-pushed towards player
-                    if (test_movement_towards_direction > 0.5) do_standard_entity_move = false; // prevents too large a jump (happens if pack rotation not done before root_e moves by one tile)
-                    if (tied_entity_info->tied_to_pack_and_decoupled) do_standard_entity_move = false;
-
-                    if (do_standard_entity_move)
+                    e->position = test_position;
+                    e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
+                }
+                else if (root_e == pack)
+                {
+                    // here if pack would overshoot, or otherwise misbehave
+                    bool close_to_target = fabs(getComponentAlongDirection(tied_entity_info->direction, vec3Subtract(e->position, intCoordsToNorm(e->coords)))) < 0.1;
+                    if (test_movement_towards_direction > 0.0 || close_to_target)
                     {
-                        e->position = test_position;
-                        e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
-                    }
-                    else if (root_e == pack)
-                    {
-                        // here if pack would overshoot, or otherwise misbehave
-                        bool close_to_target = fabs(getComponentAlongDirection(tied_entity_info->direction, vec3Subtract(e->position, intCoordsToNorm(e->coords)))) < 0.1;
-                        if (test_movement_towards_direction > 0.0 || close_to_target)
-                        {
-                            tied_entity_info->tied_to_pack_and_decoupled = true;
-                            float interpolation_distance_per_frame = 0.1f;
-                            float difference = getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(intCoordsToNorm(e->coords), e->position));
-                            if (difference < interpolation_distance_per_frame)
-                            {
-                                e->position = intCoordsToNorm(e->coords);
-                                e->velocity = VEC3_0;
-                                tied_entity_info->id = 0;
-                            }
-                            else
-                            {
-                                float sign = (tied_entity_info->direction == NORTH || tied_entity_info->direction == WEST) ? -1.0f : 1.0f;
-                                e->position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, sign * interpolation_distance_per_frame, e->position);
-                                e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, sign * interpolation_distance_per_frame, VEC3_0);
-                            }
-                        }
-                    }
-                    else if (test_movement_towards_direction < -0.5)
-                    {
-                        // case where object should keep moving, but is offset by one unit because root entity has changed coords, but object on head / on stack will stop here, so isn't pushed by pushAll, but should still continue to end coords
-                        test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, 1, test_position);
-                        if (getComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, intCoordsToNorm(e->coords))) < 0.0)
-                        {
-                            e->position = test_position;
-                            e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
-                        }
-                        else
+                        tied_entity_info->tied_to_pack_and_decoupled = true;
+                        float interpolation_distance_per_frame = 0.1f;
+                        float difference = getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(intCoordsToNorm(e->coords), e->position));
+                        if (difference < interpolation_distance_per_frame)
                         {
                             e->position = intCoordsToNorm(e->coords);
                             e->velocity = VEC3_0;
                             tied_entity_info->id = 0;
                         }
+                        else
+                        {
+                            float sign = (tied_entity_info->direction == NORTH || tied_entity_info->direction == WEST) ? -1.0f : 1.0f;
+                            e->position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, sign * interpolation_distance_per_frame, e->position);
+                            e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, sign * interpolation_distance_per_frame, VEC3_0);
+                        }
                     }
                 }
-                else 
+                else if (test_movement_towards_direction < -0.5)
                 {
-                    e->position = intCoordsToNorm(e->coords);
-                    e->velocity = VEC3_0;
+                    // case where object should keep moving, but is offset by one unit because root entity has changed coords, but object on head / on stack will stop here, so isn't pushed by pushAll, but should still continue to end coords
+                    test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, 1, test_position);
+                    if (getComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, intCoordsToNorm(e->coords))) < 0.0)
+                    {
+                        e->position = test_position;
+                        e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
+                    }
+                    else
+                    {
+                        e->position = intCoordsToNorm(e->coords);
+                        e->velocity = VEC3_0;
+                        tied_entity_info->id = 0;
+                    }
                 }
-
-                bool clear_entity_from_tied_to_movement = false;
-                if (vec3IsEqual(e->position, intCoordsToNorm(e->coords))) clear_entity_from_tied_to_movement = true;
-                if (tied_entity_info->on_head) clear_entity_from_tied_to_movement = false; // case already handled above
-                if (clear_entity_from_tied_to_movement) tied_entity_info->id = 0;
             }
+            else 
+            {
+                e->position = intCoordsToNorm(e->coords);
+                e->velocity = VEC3_0;
+            }
+
+            bool clear_entity_from_tied_to_movement = false;
+            if (vec3IsEqual(e->position, intCoordsToNorm(e->coords))) clear_entity_from_tied_to_movement = true;
+            if (tied_entity_info->on_head) clear_entity_from_tied_to_movement = false; // case already handled above
+            if (clear_entity_from_tied_to_movement) tied_entity_info->id = 0;
         }
     }
 
@@ -3742,8 +3829,8 @@ void gameFrame(double delta_time, Input* input)
         {
             // assuming gameplay undo and restart (still no undo in editor)
             bool do_undo = false;
-            if (input->keys_held & KEY_Z) do_undo = true;
-            if (time_until_allow_undo_or_restart_input != 0) do_undo = false;
+            if (input->keys_held & KEY_Z && time_until_allow_undo_or_restart_input == 0) do_undo = true; // allow if held, and time allows
+            if (input->keys_pressed & KEY_Z) do_undo = true; // allow if pressed this frame, regardless of time
 
             if (do_undo)
             {
@@ -3753,13 +3840,14 @@ void gameFrame(double delta_time, Input* input)
                     updatePackDetached();
 
                     if (undos_performed == 0) time_until_allow_undo_or_restart_input = 9;
-                    else if (undos_performed < 2) time_until_allow_undo_or_restart_input = 6;
-                    else time_until_allow_undo_or_restart_input = 5;
+                    else if (undos_performed < 2) time_until_allow_undo_or_restart_input = 8;
+                    else if (undos_performed < 6) time_until_allow_undo_or_restart_input = 7;
+                    else time_until_allow_undo_or_restart_input = 6;
 
                     undos_performed++;
                     silence_unlocks_due_to_restart_or_undo = true;
                     undo_press_timer = TIME_AFTER_UNDO_UNTIL_PHYSICS_START;
-                    temp_state.allow_movement = true;
+                    temp_state.allow_movement_timer = TIME_AFTER_UNDO_UNTIL_PHYSICS_START;
                 }
                 else
                 {
@@ -3799,7 +3887,7 @@ void gameFrame(double delta_time, Input* input)
                 restart_last_turn = true;
                 silence_unlocks_due_to_restart_or_undo = true;
                 time_until_allow_undo_or_restart_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                temp_state.allow_movement = true;
+                temp_state.allow_movement_timer = 0;
 
                 updateLaserBuffer();
             }
@@ -3813,10 +3901,10 @@ void gameFrame(double delta_time, Input* input)
                 memcpy(world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
                 writeSolvedLevelsToFile();
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                temp_state.allow_movement = true;
+                temp_state.allow_movement_timer = 0;
             }
 
-            if (temp_state.allow_movement && (input->keys_held & KEY_W || input->keys_held & KEY_A || input->keys_held & KEY_S || input->keys_held & KEY_D))
+            if (temp_state.allow_movement_timer == 0 && (input->keys_held & KEY_W || input->keys_held & KEY_A || input->keys_held & KEY_S || input->keys_held & KEY_D))
             {
                 // MOVEMENT 
                 Direction input_direction = 0;
@@ -3852,7 +3940,7 @@ void gameFrame(double delta_time, Input* input)
                     {
                         bool try_walk = false;
                         bool do_push = false;
-                        bool climb = false;
+                        bool try_climb = false;
 
                         TileType next_tile = getTileType(next_player_coords);
                         switch (next_tile)
@@ -3884,7 +3972,7 @@ void gameFrame(double delta_time, Input* input)
                             case LADDER:
                             {
                                 // if ladder is facing towards the player, do the climb
-                                if (getTileDirection(next_player_coords) == oppositeDirection(player->direction)) climb = true;
+                                if (getTileDirection(next_player_coords) == oppositeDirection(player->direction)) try_climb = true;
                                 else { /* TODO(anims): failed animations case */ }
                                 break;
                             }
@@ -3953,39 +4041,61 @@ void gameFrame(double delta_time, Input* input)
                                 }
                             }
                         }
-                        else if (climb)
+                        else if (try_climb)
                         {
+                            // only handles setting climbing direction to UP if player wants to climb up. everything else is handled later, because we want to keep climbing sometimes, even if there's been no input for it.
+                            bool do_climb = false; 
+                            Int3 coords_above_player = getNextCoords(player->coords, UP);
+                            TileType type_above_player = getTileType(coords_above_player);
+                            if (type_above_player == NONE) do_climb = true;
+                            //else if (isPushable(type_above_player) && canPushUp(coords_above_player) do_climb = true; // TODO: handle push up case (need to reimplement these functions)
+
+                            if (do_climb)
+                            {
+                                player->climbing_direction = UP;
+                            }
+
                             /*
-                            bool can_climb = false;
-                            Int3 coords_above = getNextCoords(player->coords, UP);
-
-                            if (getTileType(coords_above) == NONE)
+                            // only handles the first climb, i.e. the one that happens when a button is pressed
+                            bool do_climb = false; 
+                            Int3 coords_above_player = getNextCoords(player->coords, UP);
+                            TileType type_above_player = getTileType(coords_above_player);
+                            if (type_above_player == NONE) do_climb = true;
+                            else if (isPushable(type_above_player) && canPushUp(coords_above_player)
                             {
-                                can_climb = true;
-                            }
-                            else if (isPushable(getTileType(coords_above)))
-                            {
-                                if (canPushUp(coords_above) == CAN_PUSH) 
-                                {
-                                    pushUp(coords_above);
-                                    can_climb = true;
-                                }
+                                pushUp(coords_above_player);
+                                do_climb = true;
                             }
 
-                            if (can_climb)
+                            if (do_climb)
                             {
                                 createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
-                                moveEntityInBufferAndState(player, coords_above, player->direction);
-                                // TODO(anims): figure out flags for climbing, maybe, similar to e.falling?
+                                moveEntityInBufferAndState(player, coords_above_player, player->direction);
+                                player->climbing_direction = UP;
 
-                                if (pack_attached)
+                                if (temp_state.pack_attached)
                                 {
-                                    createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
-                                    moveEntityInBufferAndState(pack, getNextCoords(pack->coords, UP), pack->direction);
-                                    // TODO(anims): same as above? probably don't need anything special, just use the player flag and grab the pack, too, if attached
-                                }
+                                    move_pack_up = false;
+                                    Int3 coords_above_pack = getNextCoords(player->coords, UP);
+                                    TileType type_above_pack = getTileType(coords_above_pack, UP);
+                                    if (type_above_pack == NONE) move_pack_up = true;
+                                    else if (isPushable(type_above_pack) && canPushUp(coords_above_pack))
+                                    {
+                                        pushUp(coords_above_pack);
+                                        move_pack_up = true;
+                                    }
 
-                                recordActionForUndo(&world_state, false, true);
+                                    if (move_pack_up)
+                                    {
+                                        createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
+                                        moveEntityInBufferAndState(pack, coords_above_pack, pack->direction);
+                                    }
+                                    else
+                                    {
+                                        // player can move up, but pack cannot (would hit something), so must detach
+                                        temp_state.pack_attached = false;
+                                    }
+                                }
                             }
                             */
                         }
@@ -4132,13 +4242,19 @@ void gameFrame(double delta_time, Input* input)
 
         // disallow input if player above void / water
         TileType tile_type_below_player = getTileType(getNextCoords(player->coords, DOWN));
-        if (tile_type_below_player == VOID || tile_type_below_player == WATER) temp_state.allow_movement = false;
+        if (tile_type_below_player == VOID || tile_type_below_player == WATER) temp_state.allow_movement_timer = -1;
 
         // reset undos performed if no longer holding z undos
         if (undos_performed > 0 && !input->keys_held & KEY_Z) undos_performed = 0;
 
         // decrement undo timer if > 0. the timer value means that even a few frames after releasing undo, gravity isn't applied.
         if (undo_press_timer > 0) undo_press_timer--;
+
+        // decrement allow movement timer, if movement should be disabled for a few frames
+        if (temp_state.allow_movement_timer > 0) temp_state.allow_movement_timer--;
+
+        // TODO: TEMP: disallow any input when climbing direction isn't no dir. probably want to do something like this that's a bit more intelligent. also probably want to be able to change climbing direction sometimes
+        if (player->climbing_direction != NO_DIRECTION) temp_state.allow_movement_timer = 1;
 
         // update overworld player coords for camera offset if player not removed. if player is removed, these coords persist, so that camera doesn't jump wildly when changing player pos in editor
         if (temp_state.in_overworld)
@@ -4151,13 +4267,19 @@ void gameFrame(double delta_time, Input* input)
         }
 
         // update restart coords based on current coords of the player, and also update game progress if this is relevant
-        if (player->coords.z > 204) temp_state.restart_position = (Int3){ 58, 2, 225 };
+        if (player->coords.z > 204) 
+        {
+            temp_state.restart_position = (Int3){ 58, 2, 225 };
+        }
         else if (player->coords.z > 189)
         {
             temp_state.restart_position = (Int3){ 58, 2, 200 };
             if (temp_state.game_progress < WORLD_1) temp_state.game_progress = WORLD_1;
         }
-        else if (player->coords.z > 174) temp_state.restart_position = (Int3){ 58, 2, 188 };
+        else if (player->coords.z > 174) 
+        {
+            temp_state.restart_position = (Int3){ 58, 2, 188 };
+        }
         else
         {
             temp_state.restart_position = (Int3){ 58, 2, 170 };
@@ -4177,7 +4299,7 @@ void gameFrame(double delta_time, Input* input)
 
             // entity info
             char player_text[256] = {0};
-            snprintf(player_text, sizeof(player_text), "player info: pos norm: %f, %f, %f, velocity: %f, %f, %f", player->position.x, player->position.y, player->position.z, player->velocity.x, player->velocity.y, player->velocity.z);
+            snprintf(player_text, sizeof(player_text), "player info: coords: %i, %i, %i, pos norm: %f, %f, %f, velocity: %f, %f, %f", player->coords.x, player->coords.y, player->coords.z, player->position.x, player->position.y, player->position.z, player->velocity.x, player->velocity.y, player->velocity.z);
             createDebugText(player_text);
 
             // entities tied to player movement
@@ -4205,6 +4327,10 @@ void gameFrame(double delta_time, Input* input)
             snprintf(th_text, sizeof(th_text), "1: %d %d %d; 2: %d %d %d; 3: %d %d %d; count: %i", th1.type, th1.id, th1.frames, th2.type, th2.id, th2.frames, th3.type, th3.id, th3.frames, th_count);
             createDebugText(th_text);
 
+            char climb_text[256] = {0};
+            snprintf(climb_text, sizeof(climb_text), "climbing direction: %i", player->climbing_direction);
+            createDebugText(climb_text);
+
             /*
             // debug lasers
             FOR(lb_index, 64)
@@ -4228,7 +4354,7 @@ void gameFrame(double delta_time, Input* input)
                 if (editor_state.selected_id > 0)
                 {
                     Entity* e = getEntityFromId(editor_state.selected_id);
-                    if (e) // TODO: this guard is somewhat bad solution; i still persist selected_id even if that id doesn't exist anymore. this prevents crash, but later: on entity delete check if matches against id, and if so remove from editor_state.
+                    if (e)
                     {
                         char selected_id_text[256] = {0};
                         snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d, coords: %d, %d, %d, direction: %i", editor_state.selected_id, e->coords.x, e->coords.y, e->coords.z, e->direction);
