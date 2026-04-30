@@ -62,11 +62,11 @@ Color;
 
 typedef enum
 {
-    WORLD_0,
-    WORLD_1,
-    WORLD_2,
+    MIRROR_SIDE,
+    MIRROR_UP,
+    MIRROR_DOWN,
 }
-GameProgress;
+MirrorOrientation;
 
 // coords are integer coordinates of the entity, position is the floating point coords in world space.
 // likewise direction is one of 6 orientations, rotation is the actual rotation passed to renderer.
@@ -78,6 +78,9 @@ typedef struct
     Direction direction;
     Vec4 rotation;
     bool removed;
+
+    // for mirrors
+    MirrorOrientation mirror_orientation;
 
     // movement state
     Vec3 velocity;
@@ -155,6 +158,14 @@ typedef struct
     Vec4 end_clip_plane;
 }
 LaserBuffer;
+
+typedef enum
+{
+    WORLD_0,
+    WORLD_1,
+    WORLD_2,
+}
+GameProgress;
 
 typedef struct TemporaryState
 {
@@ -264,6 +275,7 @@ typedef struct
     int32 id;
     Int3 old_coords;
     Direction old_direction;
+    MirrorOrientation old_mirror_orientation;
     bool was_removed;
 }
 UndoEntityDelta;
@@ -724,9 +736,9 @@ void setTileType(TileType type, Int3 coords)
     world_state.buffer[coordsToBufferIndexType(coords)] = type; 
 }
 
-void setTileDirection(Direction direction, Int3 coords)
+void setTileDirection(Direction direction, Int3 coords, MirrorOrientation mirror_orientation)
 {
-    world_state.buffer[coordsToBufferIndexDirection(coords)] = direction;
+    world_state.buffer[coordsToBufferIndexDirection(coords)] = (uint8)(direction + 4*mirror_orientation);
 }
 
 TileType getTileType(Int3 coords) 
@@ -744,11 +756,11 @@ void moveEntityInBufferAndState(Entity* e, Int3 end_coords, Direction end_direct
 {
     TileType type = getTileType(e->coords); // could also get from id
     setTileType(NONE, e->coords);
-    setTileDirection(NO_DIRECTION, e->coords);
+    setTileDirection(NO_DIRECTION, e->coords, e->mirror_orientation);
     e->coords = end_coords;
     e->direction = end_direction;
     setTileType(type, end_coords);
-    setTileDirection(end_direction, end_coords);
+    setTileDirection(end_direction, end_coords, e->mirror_orientation);
 }
 
 bool isSource(TileType type) 
@@ -914,9 +926,7 @@ Vec3 directionToVector(Direction direction)
     }
 }
 
-// TODO: do actually need to change axis of rotation for U/D cases with mirror vs. sources. could think about alternative solutions, but there's no real good reason they should match - the rotations
-//       encode different things. also think about this just not being relevant, if have one 'standing' mirror and one 'up/down' mirror (would also mean 1-sided mirrors are automatic, if want them)
-//       also, these rotations could be hardcoded
+// these rotations could be hardcoded
 Vec4 directionToQuaternion(Direction direction) 
 {
     switch (direction)
@@ -928,6 +938,18 @@ Vec4 directionToQuaternion(Direction direction)
         case UP:    return quaternionFromAxis(intCoordsToNorm(AXIS_X),  0.25f * TAU);
         case DOWN:  return quaternionFromAxis(intCoordsToNorm(AXIS_X), -0.25f * TAU);
         default: return (Vec4){ 0, 0, 0, 1 };
+    }
+}
+
+Vec4 mirrorRotation(Direction direction, MirrorOrientation orientation)
+{
+    Vec4 direction_as_quaternion = directionToQuaternion(direction);
+    switch (orientation)
+    {
+        case MIRROR_SIDE: return direction_as_quaternion; 
+        case MIRROR_UP:   return quaternionMultiply(direction_as_quaternion, quaternionFromAxis(intCoordsToNorm(AXIS_X), -0.25f * TAU));
+        case MIRROR_DOWN: return quaternionMultiply(direction_as_quaternion, quaternionFromAxis(intCoordsToNorm(AXIS_X),  0.25f * TAU));
+        default: return IDENTITY_QUATERNION;
     }
 }
 
@@ -1598,7 +1620,7 @@ void editorPlaceOnlyInstanceOfTile(Entity* entity, Int3 coords, TileType tile, i
     entity->id = id;
     entity->removed = false;
     setTileType(editor_state.picked_tile, coords);
-    setTileDirection(NORTH, coords);
+    setTileDirection(NORTH, coords, 0);
 }
 
 // ANIMATION HELPER 
@@ -1788,7 +1810,19 @@ bool canPushUp(Int3 coords)
     else return false;
 }
 
-// assumes able to be pushed 
+// pass in entity id, finds next free in entites_tied_to_movement if not already tracked; returns write id for that entity if already tracked
+int32 getWriteIndexInTiedEntities(int32 entity_id)
+{
+    FOR(tied_entity_index, MAX_ENTITIES_TIED_TO_MOVEMENT)
+    {
+        if (temp_state.entities_tied_to_movement[tied_entity_index].id == entity_id) return tied_entity_index;
+        if (temp_state.entities_tied_to_movement[tied_entity_index].id > 0) continue;
+        return tied_entity_index;
+    }
+    return -1;
+}
+
+// assumes at least the bottom of the stack is able to be pushed 
 void pushAll(Int3 coords, Direction direction, bool on_head, Entity* root_entity)
 {
     Int3 current_coords = coords;
@@ -1816,23 +1850,9 @@ void pushAll(Int3 coords, Direction direction, bool on_head, Entity* root_entity
             createTrailingHitbox(e->id, e->coords, TRAILING_HITBOX_TIME, getTileType(e->coords));
             moveEntityInBufferAndState(e, next_coords, e->direction);
 
-            // add object to 'pushed by player' id array, unelss it's already being tracked
-            int32 write_index = -1;
-            bool already_tracked = false;
-            FOR(next_free_index, MAX_ENTITIES_TIED_TO_MOVEMENT)
-            {
-                if (temp_state.entities_tied_to_movement[next_free_index].id == e->id) 
-                {
-                    already_tracked = true;
-                    write_index = next_free_index;
-                    break; // doesn't guarantee not already having written something to next_free. so need the already_tracked guard 
-                }
-                if (temp_state.entities_tied_to_movement[next_free_index].id > 0) continue;
-                if (write_index == -1) write_index = next_free_index;
-            }
+            int32 write_index = getWriteIndexInTiedEntities(e->id);
             if (write_index == -1) continue;
 
-            // update array even if already tracked, just with the old write_index
             temp_state.entities_tied_to_movement[write_index].id = e->id;
             temp_state.entities_tied_to_movement[write_index].direction = direction;
             temp_state.entities_tied_to_movement[write_index].on_head = on_head;
@@ -1846,55 +1866,59 @@ void pushAll(Int3 coords, Direction direction, bool on_head, Entity* root_entity
 }
 
 // assumes able to be pushed
-/*
-void pushUp(Int3 coords)
+void pushUp(Int3 coords, Entity* root_entity)
 {
     int32 stack_size = getPushableStackSize(coords);
     Int3 current_coords = coords;
-    FOR(_, stack_size - 1) current_coords = getNextCoords(current_coords, UP);
+    FOR(_, stack_size - 1) current_coords = getNextCoords(current_coords, UP); // put current coords at top of stack
+
     for (int32 inverse_stack_index = stack_size; inverse_stack_index != 0; inverse_stack_index--)
     {
-        TileType tile = getTileType(current_coords);
-        Direction dir = getTileDirection(current_coords);
+        // iterate down the stack
         Entity* e = getEntityAtCoords(current_coords);
-        Int3 coords_above = getNextCoords(current_coords, UP);
-        moveEntityInBufferAndState(e, coords_above, dir);
-        // TODO(anims): tie to player movement
-        createTrailingHitbox(e->id, current_coords, TRAILING_HITBOX_TIME, tile);
+        Int3 next_coords = getNextCoords(current_coords, UP);
+
+        createTrailingHitbox(e->id, e->coords, TRAILING_HITBOX_TIME, getTileType(e->coords));
+        moveEntityInBufferAndState(e, next_coords, e->direction);
+
+        int32 write_index = getWriteIndexInTiedEntities(e->id);
+        if (write_index == -1) continue;
+
+        temp_state.entities_tied_to_movement[write_index].id = e->id;
+        temp_state.entities_tied_to_movement[write_index].direction = UP;
+        temp_state.entities_tied_to_movement[write_index].on_head = false; // is this important for anything in this context?
+        temp_state.entities_tied_to_movement[write_index].root_entity = root_entity;
+        temp_state.entities_tied_to_movement[write_index].tied_to_pack_and_decoupled = false;
+
         current_coords = getNextCoords(current_coords, DOWN);
     }
 }
-*/
 
 // LASERS
 
-Direction getNextLaserDirectionMirror(Direction laser_direction, Direction mirror_direction)
+// UP and DOWN cases aren't as intuitive because i want SIDE to be intuitive and also i only want to only apply one transformation in mirrorRotation on U/D cases. 
+// if this becomes a problem, think about redoing model / mirrorRotation and this function to make everything fit more neatly together.
+Direction getNextLaserDirectionMirror(Direction laser_direction, Direction mirror_direction, MirrorOrientation mirror_orientation)
 {
-    if (mirror_direction < 4)
+    switch (mirror_orientation)
     {
-        Direction mirror_dir_used = (mirror_direction + 1) % 4;
-        if (mirror_dir_used == laser_direction) return UP;
-        if (mirror_dir_used == oppositeDirection(laser_direction)) return DOWN;
-        if (laser_direction == UP) return mirror_dir_used;
-        if (laser_direction == DOWN) return oppositeDirection(mirror_dir_used);
-    }
-    switch (mirror_direction)
-    {
-        case UP: switch (laser_direction)
+        case MIRROR_SIDE:
         {
-            case NORTH: return EAST;
-            case SOUTH: return WEST;
-            case WEST:  return SOUTH;
-            case EAST:  return NORTH;
-            default:    return NO_DIRECTION;
+            if (mirror_direction == laser_direction) return (laser_direction + 1) % 4;
+            if (laser_direction == (mirror_direction + 3) % 4) return (mirror_direction + 2) % 4;
+            return NO_DIRECTION;
         }
-        case DOWN: switch (laser_direction)
+        case MIRROR_UP:
         {
-            case NORTH: return WEST;
-            case SOUTH: return EAST;
-            case WEST:  return NORTH;
-            case EAST:  return SOUTH;
-            default:    return NO_DIRECTION;
+            if (mirror_direction == (laser_direction + 1) % 4) return UP;
+            if (laser_direction == UP) return mirror_direction;
+            return NO_DIRECTION;
+        }
+        case MIRROR_DOWN:
+        {
+            if (mirror_direction == (laser_direction + 1) % 4) return DOWN;
+            if (laser_direction == DOWN) return mirror_direction;
+            return NO_DIRECTION;
         }
         default: return NO_DIRECTION;
     }
@@ -2047,7 +2071,7 @@ void updateLaserBuffer()
                             continue;
                         }
 
-                        Direction next_laser_direction = getNextLaserDirectionMirror(current_direction, mirror->direction);
+                        Direction next_laser_direction = getNextLaserDirectionMirror(current_direction, mirror->direction, mirror->mirror_orientation);
 
                         if (next_laser_direction == NO_DIRECTION) 
                         {
@@ -2189,31 +2213,31 @@ bool canFall(Entity* e)
     return true;
 }
 
-void setFalling(Entity* entity)
+void setFalling(Entity* e)
 {
     // canFall will only return true for the bottom entity in a stack. so whenever this check is passed, the first entity is always the one in the bottom of the stack.
-    if (!canFall(entity)) return;
+    if (!canFall(e)) return;
 
     // remove if above void: early return for this entity, but call doFallingEntity for the entity above, if there is one, so that it doesn't get its fall interrupted
-    Int3 below = getNextCoords(entity->coords, DOWN);
+    Int3 below = getNextCoords(e->coords, DOWN);
     if (getTileType(below) == VOID)
     {
-        setTileType(NONE, entity->coords);
-        setTileDirection(NO_DIRECTION, entity->coords);
-        entity->removed = true;
-        Int3 above = getNextCoords(entity->coords, UP);
+        setTileType(NONE, e->coords);
+        setTileDirection(NO_DIRECTION, e->coords, e->mirror_orientation);
+        e->removed = true;
+        Int3 coords_above = getNextCoords(e->coords, UP);
 
-        if (isPushable(getTileType(above)))
+        if (isPushable(getTileType(coords_above)))
         {
-            Entity* above_entity = getEntityAtCoords(above);
-            if (above_entity) setFalling(above_entity);
+            Entity* e_above = getEntityAtCoords(coords_above);
+            if (e_above) setFalling(e_above);
         }
         return;
     }
 
-    Int3 next_coords = getNextCoords(entity->coords, DOWN);
-    int32 stack_size = getPushableStackSize(entity->coords);
-    Int3 current_start_coords = entity->coords;
+    Int3 next_coords = getNextCoords(e->coords, DOWN);
+    int32 stack_size = getPushableStackSize(e->coords);
+    Int3 current_start_coords = e->coords;
     Int3 current_end_coords = next_coords; 
 
     FOR(stack_fall_index, stack_size)
@@ -2357,13 +2381,24 @@ void gameInitializeState(char* level_name)
         if (entity_group != 0)
         {
             int32 count = getEntityCount(entity_group);
-            entity_group[count].coords = bufferIndexToCoords(buffer_index);
-            entity_group[count].position = intCoordsToNorm(entity_group[count].coords);
-            entity_group[count].direction = world_state.buffer[buffer_index + 1]; 
-            entity_group[count].rotation = directionToQuaternion(entity_group[count].direction);
-            entity_group[count].color = getEntityColor(entity_group[count].coords);
-            entity_group[count].id = getEntityCount(entity_group) + entityIdOffset(entity_group, entity_group[count].color);
-            entity_group[count].removed = false;
+            Entity* e = &entity_group[count];
+            e->coords = bufferIndexToCoords(buffer_index);
+            e->position = intCoordsToNorm(e->coords);
+            if (entity_group == world_state.mirrors)
+            {
+                e->direction = world_state.buffer[buffer_index + 1] % 4;
+                e->mirror_orientation = world_state.buffer[buffer_index + 1] / 4;
+                e->rotation = mirrorRotation(e->direction, e->mirror_orientation);
+            }
+            else
+            {
+                e->direction = world_state.buffer[buffer_index + 1];
+                e->mirror_orientation = 0;
+                e->rotation = directionToQuaternion(e->direction);
+            }
+            e->color = getEntityColor(e->coords);
+            e->id = getEntityCount(entity_group) + entityIdOffset(entity_group, e->color);
+            e->removed = false;
             entity_group = 0;
         }
         else if (world_state.buffer[buffer_index] == PLAYER)
@@ -2681,7 +2716,7 @@ bool performUndo()
         if (e && !e->removed)
         {
             setTileType(NONE, e->coords);
-            setTileDirection(NORTH, e->coords);
+            setTileDirection(NORTH, e->coords, e->mirror_orientation);
         }
         delta_pos = (delta_pos + 1) % MAX_UNDO_DELTAS;
     }
@@ -2695,17 +2730,19 @@ bool performUndo()
         Entity* e = getEntityFromId(delta->id);
         if (e)
         {
+            TileType type = getTileTypeFromId(delta->id);
             e->coords = delta->old_coords;
             e->position = intCoordsToNorm(e->coords);
             e->direction = delta->old_direction;
-            e->rotation = directionToQuaternion(e->direction);
+            e->mirror_orientation = delta->old_mirror_orientation;
+            if (type == MIRROR) e->rotation = mirrorRotation(e->direction, e->mirror_orientation);
+            else e->rotation = directionToQuaternion(e->direction);
             e->removed = delta->was_removed;
 
             if (!delta->was_removed)
             {
-                TileType type = getTileTypeFromId(delta->id);
                 setTileType(type, delta->old_coords);
-                setTileDirection(delta->old_direction, delta->old_coords);
+                setTileDirection(delta->old_direction, delta->old_coords, delta->old_mirror_orientation);
             }
         }
         delta_pos = (delta_pos + 1) % MAX_UNDO_DELTAS;
@@ -2776,7 +2813,7 @@ void updatePackDetached()
     if (tile_behind_player == PACK || temp_state.pack_turn_state.pack_intermediate_states_timer > 0) 
     {
         temp_state.pack_attached = true;
-        setTileDirection(player->direction, pack->coords);
+        setTileDirection(player->direction, pack->coords, 0);
         pack->direction = player->direction;
     }
     else temp_state.pack_attached = false;
@@ -2971,7 +3008,7 @@ void doPhysicsTick()
                 if (climb_more)
                 {
                     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
-                    if (push_up) {} // TODO: implement pushUp
+                    if (push_up) pushUp(coords_above_player, player);
                     moveEntityInBufferAndState(player, coords_above_player, player->direction);
 
                     player->position.y += CLIMBING_SPEED;
@@ -2998,7 +3035,7 @@ void doPhysicsTick()
                         if (pack_stays_with_player)
                         {
                             createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
-                            if (pack_pushes) {} // TODO: implement pushUp
+                            if (pack_pushes) pushUp(coords_above_pack, pack);
                             moveEntityInBufferAndState(pack, coords_above_pack, player->direction);
 
                             pack->position.y += CLIMBING_SPEED;
@@ -3227,7 +3264,7 @@ void doPhysicsTick()
             float frame_count = ceilf((float)fabs(total_angle) / MAX_ANGULAR_VELOCITY);
             if (frame_count <= 1)
             {
-                player->rotation = directionToQuaternion(player->direction); // wounding is dealt with in getAngleOfYAxisRotation - but this might be wrong, then?
+                player->rotation = directionToQuaternion(player->direction);
             }
             else
             {
@@ -3509,7 +3546,7 @@ void gameFrame(double delta_time, Input* input)
                         entity->removed = true;
                     }
                     setTileType(NONE, raycast_output.hit_coords);
-                    setTileDirection(NORTH, raycast_output.hit_coords);
+                    setTileDirection(NORTH, raycast_output.hit_coords, 0);
                 }
                 else if ((input->keys_held & KEY_RIGHT_MOUSE || input->keys_held & KEY_H) && raycast_output.hit) 
                 {
@@ -3520,7 +3557,7 @@ void gameFrame(double delta_time, Input* input)
                         if (isSource(editor_state.picked_tile)) 
                         {
                             setTileType(editor_state.picked_tile, raycast_output.place_coords); 
-                            setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
+                            setTileDirection(editor_state.picked_direction, raycast_output.place_coords, 0); // TODO: is picked_direction even ever used?
                             setEntityInstanceInGroup(world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
                         }
                         else
@@ -3540,37 +3577,53 @@ void gameFrame(double delta_time, Input* input)
                             if (entity_group != 0) 
                             {
                                 setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
-                                setTileDirection(editor_state.picked_direction, raycast_output.place_coords);
+                                setTileDirection(editor_state.picked_direction, raycast_output.place_coords, 0);
                             }
                             else 
                             {
-                                setTileDirection(NORTH, raycast_output.place_coords);
+                                setTileDirection(NORTH, raycast_output.place_coords, 0);
                             }
                         }
                     }
                 }
                 else if (input->keys_held & KEY_R && raycast_output.hit)
                 {   
-                    TileType tile = getTileType(raycast_output.hit_coords);
-                    if (isEntity(tile) && tile != VOID && tile != WATER)
+                    TileType type = getTileType(raycast_output.hit_coords);
+                    if (type == MIRROR)
+                    {
+                        Entity* mirror = getEntityAtCoords(raycast_output.hit_coords);
+                        if (mirror)
+                        {
+                            mirror->direction++;
+                            if (mirror->direction >= UP)
+                            {
+                                mirror->direction = NORTH;
+                                mirror->mirror_orientation++;
+                                if (mirror->mirror_orientation > MIRROR_DOWN) mirror->mirror_orientation = MIRROR_SIDE;
+                            }
+                            setTileDirection(mirror->direction, raycast_output.hit_coords, mirror->mirror_orientation);
+                            mirror->rotation = mirrorRotation(mirror->direction, mirror->mirror_orientation);
+                        }
+                    }
+                    else if (isEntity(type))
                     {
                         Direction direction = getTileDirection(raycast_output.hit_coords);
                         if (direction == DOWN) direction = NORTH;
                         else direction++;
-                        setTileDirection(direction, raycast_output.hit_coords);
-                        Entity *entity = getEntityAtCoords(raycast_output.hit_coords);
-                        if (entity != 0)
+                        setTileDirection(direction, raycast_output.hit_coords, 0); // mirror rotation case is handled later
+                        Entity* e = getEntityAtCoords(raycast_output.hit_coords);
+                        if (e != 0)
                         {
-                            entity->direction = direction;
-                            entity->rotation = directionToQuaternion(direction);
+                            e->direction = direction;
+                            e->rotation = directionToQuaternion(direction);
                         }
                     }
-                    else if (tile == LADDER)
+                    else if (type == LADDER)
                     {
                         Direction direction = getTileDirection(raycast_output.hit_coords);
                         if (direction == EAST) direction = NORTH;
                         else direction++;
-                        setTileDirection(direction, raycast_output.hit_coords);
+                        setTileDirection(direction, raycast_output.hit_coords, 0);
                     }
                 }
                 else if ((input->keys_held & KEY_MIDDLE_MOUSE || input->keys_held & KEY_G) && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
@@ -4054,50 +4107,6 @@ void gameFrame(double delta_time, Input* input)
                             {
                                 player->climbing_direction = UP;
                             }
-
-                            /*
-                            // only handles the first climb, i.e. the one that happens when a button is pressed
-                            bool do_climb = false; 
-                            Int3 coords_above_player = getNextCoords(player->coords, UP);
-                            TileType type_above_player = getTileType(coords_above_player);
-                            if (type_above_player == NONE) do_climb = true;
-                            else if (isPushable(type_above_player) && canPushUp(coords_above_player)
-                            {
-                                pushUp(coords_above_player);
-                                do_climb = true;
-                            }
-
-                            if (do_climb)
-                            {
-                                createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
-                                moveEntityInBufferAndState(player, coords_above_player, player->direction);
-                                player->climbing_direction = UP;
-
-                                if (temp_state.pack_attached)
-                                {
-                                    move_pack_up = false;
-                                    Int3 coords_above_pack = getNextCoords(player->coords, UP);
-                                    TileType type_above_pack = getTileType(coords_above_pack, UP);
-                                    if (type_above_pack == NONE) move_pack_up = true;
-                                    else if (isPushable(type_above_pack) && canPushUp(coords_above_pack))
-                                    {
-                                        pushUp(coords_above_pack);
-                                        move_pack_up = true;
-                                    }
-
-                                    if (move_pack_up)
-                                    {
-                                        createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
-                                        moveEntityInBufferAndState(pack, coords_above_pack, pack->direction);
-                                    }
-                                    else
-                                    {
-                                        // player can move up, but pack cannot (would hit something), so must detach
-                                        temp_state.pack_attached = false;
-                                    }
-                                }
-                            }
-                            */
                         }
                     }
                 }
@@ -4117,18 +4126,50 @@ void gameFrame(double delta_time, Input* input)
 
                     if (allow_turn)
                     {
-                        // TODO: guard on if this turn will succeed, i guess? actually, maybe just remove the action if turn fails in turn sequence
                         recordActionForUndo(&world_state, false, false);
 
                         Direction initial_player_direction = player->direction;
                         player->direction = input_direction;
-                        setTileDirection(player->direction, player->coords);
+                        setTileDirection(player->direction, player->coords, 0);
 
                         if (temp_state.pack_attached)
                         {
                             temp_state.pack_turn_state.pack_intermediate_states_timer = TURN_TIME;
                             temp_state.pack_turn_state.pack_intermediate_coords = getNextCoords(pack->coords, oppositeDirection(input_direction));
                             temp_state.pack_turn_state.initial_player_direction = initial_player_direction;
+                        }
+
+                        // if not blue, rotate objects stacked above the player
+                        if (!temp_state.player_hit_by_blue)
+                        {
+                            Int3 coords_above = getNextCoords(player->coords, UP);
+                            TileType type_above = getTileType(coords_above);
+
+                            int32 stack_size = 0;
+                            if (isPushable(type_above)) stack_size = getPushableStackSize(coords_above);
+
+                            // need to add either 1 or -1 to direction of entity being rotated
+                            if (stack_size > 0);
+                            {
+                                int32 direction_add = (4 + player->direction - initial_player_direction) % 4;
+
+                                Int3 current_coords = coords_above;
+                                FOR(stack_index, stack_size)
+                                {
+                                    Entity* e = getEntityAtCoords(current_coords);
+
+                                    e->direction = (e->direction + direction_add) % 4;
+
+                                    int32 write_index = getWriteIndexInTiedEntities(e->id);
+                                    temp_state.entities_tied_to_movement[write_index].id = e->id;
+                                    temp_state.entities_tied_to_movement[write_index].direction = e->direction;
+                                    temp_state.entities_tied_to_movement[write_index].on_head = true;
+                                    temp_state.entities_tied_to_movement[write_index].root_entity = player;
+                                    temp_state.entities_tied_to_movement[write_index].tied_to_pack_and_decoupled = false;
+
+                                    current_coords = getNextCoords(current_coords, UP);
+                                }
+                            }
                         }
                     }
                 }
@@ -4226,7 +4267,7 @@ void gameFrame(double delta_time, Input* input)
                 if (getTileType(lb->coords) == LOCKED_BLOCK)
                 {
                     setTileType(NONE, lb->coords);
-                    setTileDirection(NORTH, lb->coords);
+                    setTileDirection(NORTH, lb->coords, 0);
                 }
                 if (!silence_unlocks_due_to_restart_or_undo) createDebugPopup("something was unlocked!", NO_TYPE);
             }
@@ -4234,7 +4275,7 @@ void gameFrame(double delta_time, Input* input)
             {
                 lb->removed = false;
                 setTileType(LOCKED_BLOCK, lb->coords);
-                setTileDirection(NORTH, lb->coords);
+                setTileDirection(NORTH, lb->coords, 0);
             }
         }
 
@@ -4255,6 +4296,19 @@ void gameFrame(double delta_time, Input* input)
 
         // TODO: TEMP: disallow any input when climbing direction isn't no dir. probably want to do something like this that's a bit more intelligent. also probably want to be able to change climbing direction sometimes
         if (player->climbing_direction != NO_DIRECTION) temp_state.allow_movement_timer = 1;
+
+        // all mirrors with direction >=UP are moved to the next orientation with direction NORTH.
+        FOR(mirror_index, MAX_ENTITY_INSTANCE_COUNT)
+        {
+            Entity* mirror = &world_state.mirrors[mirror_index];
+            if (mirror->direction >= 4) 
+            {
+                mirror->direction -= 4;
+                mirror->mirror_orientation += 1;
+                if (mirror->mirror_orientation > MIRROR_DOWN) mirror->mirror_orientation = MIRROR_SIDE;
+                setTileDirection(mirror->direction, mirror->coords, mirror->mirror_orientation); // keep buffer in sync
+            }
+        }
 
         // update overworld player coords for camera offset if player not removed. if player is removed, these coords persist, so that camera doesn't jump wildly when changing player pos in editor
         if (temp_state.in_overworld)
@@ -4297,10 +4351,16 @@ void gameFrame(double delta_time, Input* input)
             snprintf(game_text, sizeof(game_text), "game progress: %d", temp_state.game_progress);
             createDebugText(game_text);
 
-            // entity info
+            // player info
             char player_text[256] = {0};
             snprintf(player_text, sizeof(player_text), "player info: coords: %i, %i, %i, pos norm: %f, %f, %f, velocity: %f, %f, %f", player->coords.x, player->coords.y, player->coords.z, player->position.x, player->position.y, player->position.z, player->velocity.x, player->velocity.y, player->velocity.z);
             createDebugText(player_text);
+
+            // mirror info
+            char mirror_text[256] = {0};
+            Entity m = world_state.mirrors[0];
+            snprintf(mirror_text, sizeof(mirror_text), "mirror: coords: %i, %i, %i; direction: %i; orientation: %i", m.coords.x, m.coords.y, m.coords.z, m.direction, m.mirror_orientation);
+            createDebugText(mirror_text);
 
             // entities tied to player movement
             char tied_info[256] = {0};
@@ -4357,7 +4417,7 @@ void gameFrame(double delta_time, Input* input)
                     if (e)
                     {
                         char selected_id_text[256] = {0};
-                        snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d, coords: %d, %d, %d, direction: %i", editor_state.selected_id, e->coords.x, e->coords.y, e->coords.z, e->direction);
+                        snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d, coords: %d, %d, %d, direction: %i, mirror_orientation: %i", editor_state.selected_id, e->coords.x, e->coords.y, e->coords.z, e->direction, e->mirror_orientation);
                         createDebugText(selected_id_text);
 
                         char writing_field_text[256] = {0};
