@@ -1896,34 +1896,6 @@ void pushUp(Int3 coords, Entity* root_entity)
 
 // LASERS
 
-// UP and DOWN cases aren't as intuitive because i want SIDE to be intuitive and also i only want to only apply one transformation in mirrorRotation on U/D cases. 
-// if this becomes a problem, think about redoing model / mirrorRotation and this function to make everything fit more neatly together.
-Direction getNextLaserDirectionMirror(Direction laser_direction, Direction mirror_direction, MirrorOrientation mirror_orientation)
-{
-    switch (mirror_orientation)
-    {
-        case MIRROR_SIDE:
-        {
-            if (mirror_direction == laser_direction) return (laser_direction + 1) % 4;
-            if (laser_direction == (mirror_direction + 3) % 4) return (mirror_direction + 2) % 4;
-            return NO_DIRECTION;
-        }
-        case MIRROR_UP:
-        {
-            if (mirror_direction == (laser_direction + 1) % 4) return UP;
-            if (laser_direction == UP) return mirror_direction;
-            return NO_DIRECTION;
-        }
-        case MIRROR_DOWN:
-        {
-            if (mirror_direction == (laser_direction + 1) % 4) return DOWN;
-            if (laser_direction == DOWN) return mirror_direction;
-            return NO_DIRECTION;
-        }
-        default: return NO_DIRECTION;
-    }
-}
-
 Vec3 getNormCoordsWithEntityCoordAlongAxis(Direction direction, Vec3 current_norm_coords, Vec3 mirror_position)
 {
     Vec3 norm_coords_not_along_axis = vec3SetComponentAlongDirection(direction, current_norm_coords, 0);
@@ -2071,21 +2043,75 @@ void updateLaserBuffer()
                             continue;
                         }
 
-                        Direction next_laser_direction = getNextLaserDirectionMirror(current_direction, mirror->direction, mirror->mirror_orientation);
+                        // find next laser direction, and mirror normal direction. also decide how to clip: different when hitting the mirror side-on compared to hitting back of mirror
+                        Direction next_laser_direction = NO_DIRECTION;
+                        Vec3 mirror_normal = VEC3_0;
+                        bool backside_clip_plane = false;
+                        switch (mirror->mirror_orientation)
+                        {
+                            case MIRROR_SIDE:
+                            {
+                                if (current_direction != UP && current_direction != DOWN) // check first because modulo arithmetic assumes 4-way dir
+                                {
+                                    if (mirror->direction == current_direction) next_laser_direction = (current_direction) + 1 % 4;
+                                    else if (current_direction == (mirror->direction + 3) % 4) next_laser_direction = (mirror->direction + 2) % 4;
+                                    else backside_clip_plane = true;
+                                }
+
+                                Direction front_axis = oppositeDirection(mirror->direction);
+                                Direction side_axis = (mirror->direction + 1) % 4;
+                                mirror_normal = vec3Normalize(vec3Add(directionToVector(front_axis), directionToVector(side_axis)));
+                                break;
+                            }
+                            case MIRROR_UP:
+                            {
+                                if (current_direction == DOWN) next_laser_direction = (mirror->direction + 1) % 4;
+                                else if (current_direction == UP) backside_clip_plane = true;
+                                else if (mirror->direction == (current_direction + 1) % 4) next_laser_direction = UP;
+                                else if (mirror->direction == (current_direction + 3) % 4) backside_clip_plane = true;
+
+                                Direction horizontal_axis = (mirror->direction + 1) % 4;
+                                mirror_normal = vec3Normalize(vec3Add(directionToVector(horizontal_axis), directionToVector(UP)));
+                                break;
+                            }
+                            case MIRROR_DOWN:
+                            {
+                                if (current_direction == UP) next_laser_direction = (mirror->direction + 1) % 4;
+                                else if (current_direction == DOWN) backside_clip_plane = true;
+                                else if (mirror->direction == (current_direction + 1) % 4) next_laser_direction = DOWN;
+                                else if (mirror->direction == (current_direction + 3) % 4) backside_clip_plane = true;
+
+                                Direction horizontal_axis = (mirror->direction + 1) % 4;
+                                mirror_normal = vec3Normalize(vec3Add(directionToVector(horizontal_axis), directionToVector(DOWN)));
+                                break;
+                            }
+                            default: break;
+                        }
 
                         if (next_laser_direction == NO_DIRECTION) 
                         {
-                            // hit side of mirror which doesnt reflect
                             Vec3 coords_without_offset = getNormCoordsWithEntityCoordAlongAxis(current_direction, current_norm_coords, mirror->position);
-                            lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), -0.38f));
-                            advance_tile = false;
+                            if (backside_clip_plane)
+                            {
+                                lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), 0.5f));
+
+                                float origin_offset = -vec3Inner(mirror_normal, coords_without_offset);
+                                lb->end_clip_plane = (Vec4){ -mirror_normal.x, -mirror_normal.y, -mirror_normal.z, -origin_offset };
+
+                                advance_tile = false;
+                            }
+                            else
+                            {
+                                lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), -0.38f));
+                                advance_tile = false;
+                            }
                             break;
                         }
 
                         /* 
                         TODO: think about this more; i do want this functionality, but this will mean that when pushing as in blue-business-i, the laser will 
                               hit neither mirror nor player for approx. 2 frames, which means that the object will fall. could encode a special case, or just
-                              have a fall timer, so that objects take a few frames to start falling
+                              have a fall timer, so that objects take a few frames to start falling after being blue, or ... something
                         if (distance_from_mirror_along_axes > 0.35)
                         {
                             // between 0.5 and 0.3, so this hits the 'edge' of the mirror: break the laser
@@ -2093,12 +2119,11 @@ void updateLaserBuffer()
                             end_here = true;
                         }
                         */
-                        else if (distance_from_mirror_along_axes == 0)
+
+                        if (distance_from_mirror_along_axes == 0)
                         {
                             lb->end_coords = mirror->position;
 
-                            // find end clip plane
-                            Vec3 mirror_normal = vec3Normalize(vec3Add(directionToVector(next_laser_direction), directionToVector(oppositeDirection(current_direction))));
                             float origin_offset = -vec3Inner(mirror_normal, lb->end_coords);
                             lb->end_clip_plane = (Vec4){ mirror_normal.x, mirror_normal.y, mirror_normal.z, origin_offset };
 
@@ -2120,9 +2145,6 @@ void updateLaserBuffer()
                         Vec3 norm_coord_difference_not_along_current_direction_axis = vec3SetComponentAlongDirection(current_direction, norm_coord_difference, 0);
                         current_norm_coords = vec3Add(mirror->position, vec3Add(norm_coord_difference_not_along_current_direction_axis, corresponding_difference_along_current_direction_axis));
 
-                        // compute for clip plane before overwriting current_direction
-                        Vec3 mirror_normal = vec3Normalize(vec3Add(directionToVector(next_laser_direction), directionToVector(oppositeDirection(current_direction))));
-
                         if (!end_here)
                         {
                             id_to_skip = mirror->id;
@@ -2132,9 +2154,9 @@ void updateLaserBuffer()
                         }
                         lb->end_coords = current_norm_coords;
 
-                        // continue clip plane calculation. needs to be after so we use end_coords
-                        float origin_offset = -vec3Inner(mirror_normal, lb->end_coords);
-                        lb->end_clip_plane = (Vec4){ mirror_normal.x, mirror_normal.y, mirror_normal.z, origin_offset };
+                        // overwrite old clip plane calculation with new end coords
+                        float new_origin_offset = -vec3Inner(mirror_normal, lb->end_coords);
+                        lb->end_clip_plane = (Vec4){ mirror_normal.x, mirror_normal.y, mirror_normal.z, new_origin_offset };
 
                         advance_tile = false;
                         break;
