@@ -2232,6 +2232,10 @@ bool canFall(Entity* e)
     if (!intCoordsWithinLevelBounds(next_coords)) return false;
     if (getTileType(next_coords) != NONE && getTileType(next_coords) != VOID) return false;
 
+    // don't allow fall if trailing hitbox occupies tile below. this might not be the final version of how this code should look
+    TrailingHitbox _;
+    if (trailingHitboxAtCoords(next_coords, &_)) return false;
+
     return true;
 }
 
@@ -2265,7 +2269,7 @@ void setFalling(Entity* e)
     FOR(stack_fall_index, stack_size)
     {
         Entity* e_in_stack = getEntityAtCoords(current_start_coords);
-        if (e_in_stack->removed) return; // if any entities in the stack are removed, or moving, don't do the fall
+        if (e_in_stack->removed) return; // if any entities in the stack are removed, don't do the fall
 
         // two checks which have to do with breaking a stack so that everything below a point falls, but not above a certain point
         if (e_in_stack->id == PACK_ID && temp_state.pack_attached && stack_fall_index != 0) break; // if e is pack, and pack_attached, and this isn't the entity on which the function was called, break fall here
@@ -3947,8 +3951,6 @@ void gameFrame(double delta_time, Input* input)
                 {
                     time_until_allow_undo_or_restart_input = 8;
                 }
-
-                // TODO: maybe stop gameplay input for a few frames after undo?
             }
             if (time_until_allow_undo_or_restart_input == 0 && input->keys_held & KEY_R)
             {
@@ -3958,7 +3960,7 @@ void gameFrame(double delta_time, Input* input)
                     recordActionForUndo(&world_state, true, false);
                 }
                 createDebugPopup("level restarted", NO_TYPE);
-                // TODO(animations): clear all animations
+                zeroAnimations();
                 Camera save_camera = camera;
 
                 gameInitializeState(world_state.level_name);
@@ -4067,12 +4069,10 @@ void gameFrame(double delta_time, Input* input)
                             {
                                 // if ladder is facing towards the player, do the climb
                                 if (getTileDirection(next_player_coords) == oppositeDirection(player->direction)) try_climb = true;
-                                else { /* TODO(anims): failed animations case */ }
                                 break;
                             }
                             default:
                             {
-                                // TODO(anims): failed animations case
                                 break;
                             }
                         }
@@ -4230,35 +4230,25 @@ void gameFrame(double delta_time, Input* input)
                         bool allow_down_climb = false;
 
                         // TODO: condense these branches using Int3 pushing_coords or something
-                        if (temp_state.pack_attached)
+                        Int3 pushing_coords = INT3_0;
+                        if (temp_state.pack_attached) pushing_coords = next_pack_coords;
+                        else pushing_coords = next_player_coords;
+
+                        TileType type_to_push = getTileType(pushing_coords);
+
+                        if (type_to_push == NONE)
                         {
-                            TileType type_behind_pack = getTileType(next_pack_coords);
-                            if (type_behind_pack == NONE) 
-                            {
-                                allow_down_climb = true;
-                            }
-                            else if (isPushable(type_behind_pack) && canPush(next_pack_coords, move_direction))
-                            {
-                                do_push = true;
-                                allow_down_climb = true;
-                            }
+                            allow_down_climb = true;
                         }
-                        else if (!temp_state.pack_attached)
+                        else if (isPushable(type_to_push) && canPush(pushing_coords, move_direction))
                         {
-                            TileType type_behind_player = getTileType(next_player_coords);
-                            if (type_behind_player == NONE)
-                            {
-                                allow_down_climb = true;
-                            }
-                            else if (isPushable(type_behind_player) && canPush(next_player_coords, move_direction))
-                            {
-                                do_push = true;
-                                allow_down_climb = true;
-                            }
+                            do_push = true;
+                            allow_down_climb = true;
                         }
 
                         if (allow_down_climb)
                         {
+                            recordActionForUndo(&world_state, false, false);
                             // just move back. when move is done, player will start to fall for 0 frames. she will be 
                             // caught by the ladder by a special case in the falling logic (set climbing_direction to DOWN, etc.)
 
