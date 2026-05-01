@@ -338,6 +338,7 @@ const float MIN_DOWN_VELOCITY = -0.12f;
 const float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f; // last number is number of frames for a full turn
 const float PLAYER_ACCELERATION = 0.04f;
 const float PLAYER_MAX_DECELERATION = 0.04f;
+const float CLIMBING_SPEED = 0.1f; // TODO: check with something that doesn't divide into 1.0 later
 const float GRAVITY = -0.03f;
 
 const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
@@ -2100,7 +2101,7 @@ void updateLaserBuffer()
                             Vec3 coords_without_offset = getNormCoordsWithEntityCoordAlongAxis(current_direction, current_norm_coords, mirror->position);
                             if (backside_clip_plane)
                             {
-                                lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), 0.5f));
+                                lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), 1.0f));
 
                                 float origin_offset = -vec3Inner(mirror_normal, mirror->position);
                                 lb->end_clip_plane = (Vec4){ -mirror_normal.x, -mirror_normal.y, -mirror_normal.z, -origin_offset };
@@ -2975,8 +2976,6 @@ void doPhysicsTick()
     // climb logic
     if (player->climbing_direction == UP)
     {
-        float CLIMBING_SPEED = 0.1f; // TODO: global. also check with something that doesn't divide into 1.0 later
-
         float y_coord_difference = getComponentAlongDirection(UP, vec3Subtract(intCoordsToNorm(player->coords), player->position));
 
         if (y_coord_difference > CLIMBING_SPEED)
@@ -3370,15 +3369,18 @@ void doPhysicsTick()
                     e->position = test_position;
                     e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
 
-                    // apply player rotation too, in case player isn't done rotating when this move happens.
-                    float player_target_to_current_angle = getAngleOfYAxisRotation(directionToQuaternion(player->direction), player->rotation);
-                    Vec4 transform = quaternionFromAxis(intCoordsToNorm(AXIS_Y), player_target_to_current_angle);
+                    if (tied_entity_info->on_head)
+                    {
+                        // apply player rotation too, in case player isn't done rotating when this move happens.
+                        float player_target_to_current_angle = getAngleOfYAxisRotation(directionToQuaternion(player->direction), player->rotation);
+                        Vec4 transform = quaternionFromAxis(intCoordsToNorm(AXIS_Y), player_target_to_current_angle);
 
-                    Vec4 base_rotation = IDENTITY_QUATERNION;
-                    if (getTileTypeFromId(e->id) == MIRROR) base_rotation = mirrorRotation(e->direction, e->mirror_orientation);
-                    else base_rotation = directionToQuaternion(e->direction);
+                        Vec4 base_rotation = IDENTITY_QUATERNION;
+                        if (getTileTypeFromId(e->id) == MIRROR) base_rotation = mirrorRotation(e->direction, e->mirror_orientation);
+                        else base_rotation = directionToQuaternion(e->direction);
 
-                    e->rotation = quaternionMultiply(transform, base_rotation);
+                        e->rotation = quaternionMultiply(transform, base_rotation);
+                    }
                 }
                 else if (root_e == pack)
                 {
@@ -4273,7 +4275,10 @@ void gameFrame(double delta_time, Input* input)
                                 if (do_push) pushAll(next_player_coords, move_direction, false, player);
                             }
 
-                            // TODO: move stuff on head
+                            // move stuff on head
+                            Int3 coords_on_head = getNextCoords(player->coords, UP);
+                            TileType type_on_head = getTileType(coords_on_head);
+                            if (isPushable(type_on_head) && canPush(coords_on_head, move_direction)) pushAll(coords_on_head, move_direction, true, player);
 
                             createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
                             moveEntityInBufferAndState(player, next_player_coords, player->direction);
