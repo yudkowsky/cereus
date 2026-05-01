@@ -3206,8 +3206,8 @@ void doPhysicsTick()
 
                 player->position.y = test_y_position;
                 player->velocity.y = test_y_velocity;
-                Int3 player_next_coords = getNextCoords(player->coords, DOWN);
-                moveEntityInBufferAndState(player, player_next_coords, player->direction);
+                Int3 coords_below = getNextCoords(player->coords, DOWN);
+                moveEntityInBufferAndState(player, coords_below, player->direction);
 
                 if (temp_state.pack_attached)
                 {
@@ -3226,6 +3226,7 @@ void doPhysicsTick()
                         pack->position.y = (float)pack->coords.y;
                         pack->falling = false;
                         pack->velocity.y = 0;
+                        temp_state.pack_attached = false;
                     }
                 }
             }
@@ -4038,10 +4039,13 @@ void gameFrame(double delta_time, Input* input)
                     float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
                     if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) allow_input = false;
 
-                    // disallow movement if able to fall
-                    if (!temp_state.player_hit_by_red && canFall(player)) allow_input = false;
-                    // also disallow movement if also moving in some other direction currently - probably just guards against moving while falling
-                    if (!vec3IsZero(vec3SetComponentAlongDirection(input_direction, player->velocity, 0))) allow_input = false;
+                    if (!cheating)
+                    {
+                        // disallow movement if able to fall
+                        if (!temp_state.player_hit_by_red && canFall(player)) allow_input = false;
+                        // also disallow movement if also moving in some other direction currently - probably just guards against moving while falling
+                        if (!vec3IsZero(vec3SetComponentAlongDirection(input_direction, player->velocity, 0))) allow_input = false;
+                    }
 
                     if (allow_input)
                     {
@@ -4228,6 +4232,7 @@ void gameFrame(double delta_time, Input* input)
                 }
                 else if (input_direction == oppositeDirection(player->direction))
                 {
+                    // maybe move backwards
                     Direction move_direction = oppositeDirection(player->direction);
 
                     Int3 coords_below = getNextCoords(player->coords, DOWN);
