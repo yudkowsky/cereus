@@ -530,6 +530,13 @@ Vec3 vec3Negate(Vec3 coords)
     return (Vec3){ -coords.x, -coords.y, -coords.z }; 
 }
 
+/*
+Vec4 vec4Negate(Vec4 coords)
+{
+    return (Vec4){ -coords.x, -coords.y, -coords.z, -coords.w };
+}
+*/
+
 bool int3IsZero(Int3 coords)
 {
     return (coords.x == 0 && coords.y == 0 && coords.z == 0);
@@ -2095,7 +2102,7 @@ void updateLaserBuffer()
                             {
                                 lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), 0.5f));
 
-                                float origin_offset = -vec3Inner(mirror_normal, coords_without_offset);
+                                float origin_offset = -vec3Inner(mirror_normal, mirror->position);
                                 lb->end_clip_plane = (Vec4){ -mirror_normal.x, -mirror_normal.y, -mirror_normal.z, -origin_offset };
 
                                 advance_tile = false;
@@ -2107,18 +2114,6 @@ void updateLaserBuffer()
                             }
                             break;
                         }
-
-                        /* 
-                        TODO: think about this more; i do want this functionality, but this will mean that when pushing as in blue-business-i, the laser will 
-                              hit neither mirror nor player for approx. 2 frames, which means that the object will fall. could encode a special case, or just
-                              have a fall timer, so that objects take a few frames to start falling after being blue, or ... something
-                        if (distance_from_mirror_along_axes > 0.35)
-                        {
-                            // between 0.5 and 0.3, so this hits the 'edge' of the mirror: break the laser
-                            // still want to do later calculations to calculate exact coords to end
-                            end_here = true;
-                        }
-                        */
 
                         if (distance_from_mirror_along_axes == 0)
                         {
@@ -2134,6 +2129,19 @@ void updateLaserBuffer()
                             break;
                         }
 
+                        /* 
+                        TODO: think about this more; i do want this functionality, but this will mean that when pushing as in blue-business-i, the laser will 
+                              hit neither mirror nor player for approx. 2 frames, which means that the object will fall. could encode a special case, or just
+                              have a fall timer, so that objects take a few frames to start falling after being blue, or ... something
+                        if (distance_from_mirror_along_axes > 0.35)
+                        {
+                            // between 0.5 and 0.35, so this hits the 'edge' of the mirror: break the laser
+                            // still want to do later calculations to calculate exact coords to end
+                            end_here = true;
+                        }
+                        */
+
+
                         // get difference along next_laser_direction of current_norm_coords vs mirror->position.
                         // this will be relevantly signed because getSignedComponentAlongDirection gives signed output.
                         // add that difference to norm_coords along current_direction. again signs are accounted for because directionToVector gives signed output.
@@ -2145,6 +2153,8 @@ void updateLaserBuffer()
                         Vec3 norm_coord_difference_not_along_current_direction_axis = vec3SetComponentAlongDirection(current_direction, norm_coord_difference, 0);
                         current_norm_coords = vec3Add(mirror->position, vec3Add(norm_coord_difference_not_along_current_direction_axis, corresponding_difference_along_current_direction_axis));
 
+                        lb->end_coords = current_norm_coords;
+
                         if (!end_here)
                         {
                             id_to_skip = mirror->id;
@@ -2152,7 +2162,6 @@ void updateLaserBuffer()
                             no_more_turns = false;
                             current_direction = next_laser_direction;
                         }
-                        lb->end_coords = current_norm_coords;
 
                         // overwrite old clip plane calculation with new end coords
                         float new_origin_offset = -vec3Inner(mirror_normal, lb->end_coords);
@@ -2170,7 +2179,7 @@ void updateLaserBuffer()
                         // if entity there could be a real hit with a passthrough. in any other case, just stop here.
                         if (isEntity(hit_type))
                         {
-                            Entity* e = {0};
+                            Entity* e = NULL;
                             if (this_is_th) e = getEntityFromId(th.id);
                             else e = getEntityAtCoords(current_tile_coords);
 
