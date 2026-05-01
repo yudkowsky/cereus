@@ -2561,6 +2561,8 @@ void popLastUndoAction()
 
 // called after a noraml (non-level-change) action
 // diffs world_state vs. world_state and stores deltas for every entity that changed
+// TODO: was_reset and was_climb aren't used here - i think i just zero the animations regardless. 
+//       justification for was_reset is clear, but why do i need was_climb? 
 void recordActionForUndo(WorldState* old_state, bool action_was_reset, bool action_was_climb)
 {
     if (undo_buffer.header_count >= MAX_UNDO_ACTIONS) evictOldestUndoAction();
@@ -4140,10 +4142,11 @@ void gameFrame(double delta_time, Input* input)
                             Int3 coords_above_player = getNextCoords(player->coords, UP);
                             TileType type_above_player = getTileType(coords_above_player);
                             if (type_above_player == NONE) do_climb = true;
-                            //else if (isPushable(type_above_player) && canPushUp(coords_above_player) do_climb = true; // TODO: handle push up case (need to reimplement these functions)
+                            else if (isPushable(type_above_player) && canPushUp(coords_above_player)) do_climb = true;
 
                             if (do_climb)
                             {
+                                recordActionForUndo(&world_state, false, true);
                                 player->climbing_direction = UP;
                             }
                         }
@@ -4214,7 +4217,69 @@ void gameFrame(double delta_time, Input* input)
                 }
                 else if (input_direction == oppositeDirection(player->direction))
                 {
-                    // TODO: backwards movement off the edge of a ladder, or else a failed animation
+                    Direction move_direction = oppositeDirection(player->direction);
+
+                    Int3 coords_below = getNextCoords(player->coords, DOWN);
+                    TileType type_below = getTileType(coords_below);
+                    if (type_below == LADDER && getTileDirection(coords_below) == move_direction)
+                    {
+                        Int3 next_player_coords = getNextCoords(player->coords, move_direction);
+                        Int3 next_pack_coords = getNextCoords(pack->coords, move_direction);
+
+                        bool do_push = false;
+                        bool allow_down_climb = false;
+
+                        // TODO: condense these branches using Int3 pushing_coords or something
+                        if (temp_state.pack_attached)
+                        {
+                            TileType type_behind_pack = getTileType(next_pack_coords);
+                            if (type_behind_pack == NONE) 
+                            {
+                                allow_down_climb = true;
+                            }
+                            else if (isPushable(type_behind_pack) && canPush(next_pack_coords, move_direction))
+                            {
+                                do_push = true;
+                                allow_down_climb = true;
+                            }
+                        }
+                        else if (!temp_state.pack_attached)
+                        {
+                            TileType type_behind_player = getTileType(next_player_coords);
+                            if (type_behind_player == NONE)
+                            {
+                                allow_down_climb = true;
+                            }
+                            else if (isPushable(type_behind_player) && canPush(next_player_coords, move_direction))
+                            {
+                                do_push = true;
+                                allow_down_climb = true;
+                            }
+                        }
+
+                        if (allow_down_climb)
+                        {
+                            // just move back. when move is done, player will start to fall for 0 frames. she will be 
+                            // caught by the ladder by a special case in the falling logic (set climbing_direction to DOWN, etc.)
+
+                            // move pack first, because moving backwards.
+                            if (temp_state.pack_attached)
+                            {
+                                createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
+                                if (do_push) pushAll(next_pack_coords, move_direction, false, pack);
+                                moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
+                            }
+                            else
+                            {
+                                if (do_push) pushAll(next_player_coords, move_direction, false, player);
+                            }
+
+                            // TODO: move stuff on head
+
+                            createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
+                            moveEntityInBufferAndState(player, next_player_coords, player->direction);
+                        }
+                    }
                 }
             }
         }
