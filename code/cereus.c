@@ -3008,9 +3008,6 @@ void doPhysicsTick()
 
             if (try_climb_more)
             {
-                // check above for block
-                // handle maybe pack detach
-
                 bool climb_more = false;
                 bool push_up = false;
 
@@ -3322,9 +3319,19 @@ void doPhysicsTick()
         if (tied_entity_info->direction == NO_DIRECTION)
         {
             // rotation: find rotation from target to current of player, and apply the same rotation to target direction of the entity.
+            // TODO: wrap as function?
             float player_target_to_current_angle = getAngleOfYAxisRotation(directionToQuaternion(player->direction), player->rotation);
             Vec4 transform = quaternionFromAxis(intCoordsToNorm(AXIS_Y), player_target_to_current_angle);
-            e->rotation = quaternionMultiply(directionToQuaternion(e->direction), transform);
+
+            Vec4 base_rotation = IDENTITY_QUATERNION;
+            if (getTileTypeFromId(e->id) == MIRROR) base_rotation = mirrorRotation(e->direction, e->mirror_orientation);
+            else base_rotation = directionToQuaternion(e->direction);
+
+            e->rotation = quaternionMultiply(transform, base_rotation);
+
+            // follow along with player coords still. this is for the case where player is still moving when this rotation happens.
+            e->position.x = player->position.x;
+            e->position.z = player->position.z;
         }
         else
         {
@@ -3347,6 +3354,16 @@ void doPhysicsTick()
                 {
                     e->position = test_position;
                     e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
+
+                    // apply player rotation too, in case player isn't done rotating when this move happens.
+                    float player_target_to_current_angle = getAngleOfYAxisRotation(directionToQuaternion(player->direction), player->rotation);
+                    Vec4 transform = quaternionFromAxis(intCoordsToNorm(AXIS_Y), player_target_to_current_angle);
+
+                    Vec4 base_rotation = IDENTITY_QUATERNION;
+                    if (getTileTypeFromId(e->id) == MIRROR) base_rotation = mirrorRotation(e->direction, e->mirror_orientation);
+                    else base_rotation = directionToQuaternion(e->direction);
+
+                    e->rotation = quaternionMultiply(transform, base_rotation);
                 }
                 else if (root_e == pack)
                 {
@@ -4184,7 +4201,7 @@ void gameFrame(double delta_time, Input* input)
 
                                     int32 write_index = getWriteIndexInTiedEntities(e->id);
                                     temp_state.entities_tied_to_movement[write_index].id = e->id;
-                                    temp_state.entities_tied_to_movement[write_index].direction = e->direction;
+                                    temp_state.entities_tied_to_movement[write_index].direction = NO_DIRECTION;
                                     temp_state.entities_tied_to_movement[write_index].on_head = true;
                                     temp_state.entities_tied_to_movement[write_index].root_entity = player;
                                     temp_state.entities_tied_to_movement[write_index].tied_to_pack_and_decoupled = false;
