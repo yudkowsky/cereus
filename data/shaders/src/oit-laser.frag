@@ -85,17 +85,11 @@ void main()
     vec4 laser_color;
     if (intensity > outline_intensity_boundary)
     {
-        laser_color = vec4(pc.color.rgb + 0.5, 1.0);
+        laser_color = vec4(pc.color.rgb + 0.6, 1.0);
         is_outline = false;
     }
-    else if (is_outline)
-    {
-        laser_color = vec4(pc.color.rgb, intensity / outline_intensity_boundary);
-    }
-    else
-    {
-        laser_color = vec4(pc.color.rgb, intensity / outline_intensity_boundary);
-    }
+    else if (is_outline) laser_color = vec4(pc.color.rgb, intensity / outline_intensity_boundary);
+    else laser_color = vec4(pc.color.rgb, intensity / outline_intensity_boundary);
 
     if (laser_color.a < 0.01) discard;
 
