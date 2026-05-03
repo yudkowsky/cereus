@@ -2216,7 +2216,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     api_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     api_info.apiVersion = VK_API_VERSION_1_3;
 
-    VkInstanceCreateInfo instance_creation_info = {0}; // struct that holds creation instructions
+    VkInstanceCreateInfo instance_creation_info = {0};
     instance_creation_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
     instance_creation_info.pApplicationInfo = &api_info;
     instance_creation_info.enabledExtensionCount = 2;
@@ -2224,7 +2224,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     vkCreateInstance(&instance_creation_info, 0, &vulkan_state.vulkan_instance_handle);
 
-    // struct that holds info that the surfaces uses to talk to platform layer
 	VkWin32SurfaceCreateInfoKHR surface_creation_info = {0};
     surface_creation_info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
     surface_creation_info.hinstance = vulkan_state.platform_handles.module_handle;
@@ -2370,12 +2369,17 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     // float per queue, in [0,1]. this is set at creation for the entire runtime.
 
     // these are relative hints used when various queues in the same family are trying to use the 
+    //
     // same engine. for now, i will only have one queue, so i'll put its priority at 1.0f
+    //
 	float queue_priorities[1] = { 1.0f };
 
     // struct to get x queues from family y, with these priorities.
+    //
     // this struct is one per family i want queues from, so i will have one or two of these
+    //
     VkDeviceQueueCreateInfo graphics_queue_info = {0};
+
     graphics_queue_info.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
     graphics_queue_info.queueFamilyIndex = vulkan_state.graphics_family_index;
     graphics_queue_info.queueCount = 1;

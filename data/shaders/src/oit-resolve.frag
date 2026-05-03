@@ -141,3 +141,5 @@ void main()
 
     out_color = vec4(result, alpha_accumulator);
 }
+
+
