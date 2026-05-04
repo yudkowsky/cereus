@@ -469,7 +469,7 @@ Camera vulkan_camera = {0};
 ShaderMode shader_mode = OLD;
 
 float water_time = 0.0f;
-const float depth_threshold = 1.0f;
+const float depth_threshold = 5.0f;
 const float normal_threshold = 0.2f;
 
 Cube cube_instances[8192];
@@ -519,7 +519,6 @@ void mat4Multiply(float output_matrix[16], float a[16], float b[16])
     memcpy(output_matrix, temporary_matrix, sizeof(temporary_matrix));
 }
 
-// pretty sure this is right. but should probably test it somehow
 void mat4Inverse(float out[16], float m[16])
 {
     float inv[16];

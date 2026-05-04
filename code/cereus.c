@@ -141,7 +141,6 @@ TiedEntity;
 typedef struct
 {
     int32 pack_intermediate_states_timer;
-
     Int3 pack_intermediate_coords;
     Direction initial_player_direction;
 }
@@ -216,7 +215,6 @@ typedef struct
     bool do_wide_camera;
     Int3 selected_coords;
     TileType picked_tile;
-    Direction picked_direction;
 
     int32 selected_id;
     WritingField writing_field;
@@ -285,8 +283,6 @@ typedef struct
     uint8 entity_count;
     uint32 delta_start_pos;
     bool level_changed;
-    bool was_reset;
-    bool was_climb;
 }
 UndoActionHeader;
 
@@ -2061,7 +2057,7 @@ void updateLaserBuffer()
                             {
                                 if (current_direction != UP && current_direction != DOWN) // check first because modulo arithmetic assumes 4-way dir
                                 {
-                                    if (mirror->direction == current_direction) next_laser_direction = (current_direction) + 1 % 4;
+                                    if (mirror->direction == current_direction) next_laser_direction = (current_direction + 1) % 4;
                                     else if (current_direction == (mirror->direction + 3) % 4) next_laser_direction = (mirror->direction + 2) % 4;
                                     else backside_clip_plane = true;
                                 }
@@ -2573,11 +2569,10 @@ void popLastUndoAction()
     undo_buffer.header_count--;
 }
 
-// called after a noraml (non-level-change) action
-// diffs world_state vs. world_state and stores deltas for every entity that changed
-// TODO: was_reset and was_climb aren't used here - i think i just zero the animations regardless. 
-//       justification for was_reset is clear, but why do i need was_climb? 
-void recordActionForUndo(WorldState* old_state, bool action_was_reset, bool action_was_climb)
+// NOTE: this function used to take in action_was_reset and action_was_climb as bools. add back reset if want
+//       to only interpolate sometimes. i don't remember why climb was a flag, maybe order of interpolations? 
+//       see if still need later, if i decide to add back interpolations on undo.
+void recordActionForUndo(WorldState* old_state)
 {
     if (undo_buffer.header_count >= MAX_UNDO_ACTIONS) evictOldestUndoAction();
 
@@ -2605,8 +2600,6 @@ void recordActionForUndo(WorldState* old_state, bool action_was_reset, bool acti
     undo_buffer.headers[header_index].entity_count = (uint8)entity_count;
     undo_buffer.headers[header_index].delta_start_pos = delta_start;
     undo_buffer.headers[header_index].level_changed = false;
-    undo_buffer.headers[header_index].was_reset = action_was_reset;
-    undo_buffer.headers[header_index].was_climb = action_was_climb;
     undo_buffer.level_change_indices[header_index] = 0xFF;
     undo_buffer.header_write_pos = (header_index + 1) % MAX_UNDO_ACTIONS;
     undo_buffer.header_count++;
@@ -3614,7 +3607,7 @@ void gameFrame(double delta_time, Input* input)
                         if (isSource(editor_state.picked_tile)) 
                         {
                             setTileType(editor_state.picked_tile, raycast_output.place_coords); 
-                            setTileDirection(editor_state.picked_direction, raycast_output.place_coords, 0); // TODO: is picked_direction even ever used?
+                            setTileDirection(NORTH, raycast_output.place_coords, 0);
                             setEntityInstanceInGroup(world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
                         }
                         else
@@ -3634,7 +3627,7 @@ void gameFrame(double delta_time, Input* input)
                             if (entity_group != 0) 
                             {
                                 setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
-                                setTileDirection(editor_state.picked_direction, raycast_output.place_coords, 0);
+                                setTileDirection(NORTH, raycast_output.place_coords, 0);
                             }
                             else 
                             {
@@ -3969,7 +3962,7 @@ void gameFrame(double delta_time, Input* input)
                 // RESTART 
                 if (!restart_last_turn) 
                 {
-                    recordActionForUndo(&world_state, true, false);
+                    recordActionForUndo(&world_state);
                 }
                 createDebugPopup("level restarted", NO_TYPE);
                 zeroAnimations();
@@ -4104,7 +4097,7 @@ void gameFrame(double delta_time, Input* input)
 
                             if (allow_walk || cheating)
                             {
-                                recordActionForUndo(&world_state, false, false);
+                                recordActionForUndo(&world_state);
                                 if (do_push) pushAll(next_player_coords, input_direction, false, player);
                                 doStandardMovement(input_direction, next_player_coords);
                             }
@@ -4144,7 +4137,7 @@ void gameFrame(double delta_time, Input* input)
                                 // if became red, perform move
                                 if (would_be_red)
                                 {
-                                    recordActionForUndo(&world_state, false, false);
+                                    recordActionForUndo(&world_state);
                                     if (do_push) pushAll(next_player_coords, input_direction, false, player);
                                     doStandardMovement(input_direction, next_player_coords);
                                 }
@@ -4161,7 +4154,7 @@ void gameFrame(double delta_time, Input* input)
 
                             if (do_climb)
                             {
-                                recordActionForUndo(&world_state, false, true);
+                                recordActionForUndo(&world_state);
                                 player->climbing_direction = UP;
                             }
                         }
@@ -4183,7 +4176,7 @@ void gameFrame(double delta_time, Input* input)
 
                     if (allow_turn)
                     {
-                        recordActionForUndo(&world_state, false, false);
+                        recordActionForUndo(&world_state);
 
                         Direction initial_player_direction = player->direction;
                         player->direction = input_direction;
@@ -4264,7 +4257,7 @@ void gameFrame(double delta_time, Input* input)
 
                         if (allow_down_climb)
                         {
-                            recordActionForUndo(&world_state, false, false);
+                            recordActionForUndo(&world_state);
                             // just move back. when move is done, player will start to fall for 0 frames. she will be 
                             // caught by the ladder by a special case in the falling logic (set climbing_direction to DOWN, etc.)
 

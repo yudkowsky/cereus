@@ -53,9 +53,10 @@ void main()
 
 	if (pc.debug_mode > 0.9)
     {
-		if (do_depth_edge == true) out_color = vec4(1.0, 0.0, 0.0, 1.0);
-        if (do_normal_edge == true) out_color = vec4(0.0, 0.0, 1.0, 1.0);
-        if (!do_depth_edge && !do_normal_edge) out_color = vec4(0.0, 0.0, 0.0, 1.0);
+        vec4 output_color = vec4(0.0);
+		if (do_depth_edge == true) output_color += vec4(1.0, 0.0, 0.0, 1.0);
+        if (do_normal_edge == true) output_color += vec4(0.0, 0.0, 1.0, 1.0);
+        out_color = output_color;
     }
     else
     {
@@ -63,3 +64,5 @@ void main()
         else discard;
     }
 }
+
+
