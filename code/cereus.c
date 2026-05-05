@@ -85,7 +85,6 @@ typedef struct
     // movement state
     Vec3 velocity;
     bool falling;
-    Direction climbing_direction; // TODO: put in temp state, only applies to player
 
     // for sources/lasers
     Color color;
@@ -170,11 +169,9 @@ typedef struct TemporaryState
 {
     TrailingHitbox trailing_hitboxes[32]; 
 
-    GameProgress game_progress;
-    Int3 restart_position;
-    bool in_overworld;
     int32 allow_movement_timer; // if > 0, decrements every frame towards 0, and then able to move. if -1, movement is permanently stopped until some other action resets it.
     bool pack_attached;
+    Direction climbing_direction;
 
     TiedEntity entities_tied_to_movement[32];
     int32 player_hit_by_red;
@@ -334,7 +331,7 @@ const float MIN_DOWN_VELOCITY = -0.12f;
 const float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f; // last number is number of frames for a full turn
 const float PLAYER_ACCELERATION = 0.04f;
 const float PLAYER_MAX_DECELERATION = 0.04f;
-const float CLIMBING_SPEED = 0.1f; // TODO: check with something that doesn't divide into 1.0 later
+const float CLIMBING_SPEED = 0.12f;
 const float GRAVITY = -0.03f;
 
 const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
@@ -429,17 +426,20 @@ bool silence_unlocks_due_to_restart_or_undo = false;
 
 float camera_lerp_t = 0.0f;
 const float CAMERA_T_TIMESTEP = 0.05f;
-int32 camera_target_plane = 0; // y level of xz plane which calculates targeted point during camera interpolation function TODO: should probably be something defined by level
+int32 camera_target_plane = 0; // y level of xz plane which calculates targeted point during camera interpolation function
 
 DrawCommand draw_commands[16768] = {0};
 int32 draw_command_count = 0;
 
 Int3 level_dim = {0};
 WorldState world_state = {0};
+GameProgress game_progress = WORLD_0;
+Int3 restart_position = {0};
+bool in_overworld = true;
 TemporaryState temp_state = {0};
 LaserBuffer laser_buffer[512] = {0}; // 512 = 64 max sources * 16 max laser turns
 
-WorldState leap_of_faith_world_state_snapshot = {0}; // TODO: doesn't change the buffer, so could save 2MB memory by using some EntitySnapshot struct
+WorldState leap_of_faith_world_state_snapshot = {0}; // TODO: only need to copy entities. figure out smart way to do this without adding Entities struct that has all the entities in it - maybe some union?
 TemporaryState leap_of_faith_temp_state_snapshot = {0};
 WorldState overworld_zero_state = {0}; // TODO: probably don't have to carry this around, just read from zeroed overworld file when i need this (on restart in overworld)
 
@@ -2374,8 +2374,8 @@ void gameInitializeState(char* level_name)
     strcpy(world_state.level_name, persist_level_name);
     memcpy(world_state.solved_levels, persist_solved_levels, sizeof(persist_solved_levels));
 
-    if (strcmp(world_state.level_name, "overworld") == 0) temp_state.in_overworld = true;
-    else temp_state.in_overworld = false;
+    if (strcmp(world_state.level_name, "overworld") == 0) in_overworld = true;
+    else in_overworld = false;
 
     // build level_path from level_name
     char level_path[64] = {0};
@@ -2457,9 +2457,9 @@ void gameInitializeState(char* level_name)
 
     temp_state.allow_movement_timer = 0;
     temp_state.pack_attached = true;
-    player->climbing_direction = NO_DIRECTION;
+    temp_state.climbing_direction = NO_DIRECTION;
 
-    if (temp_state.in_overworld)
+    if (in_overworld)
     {
         if (saved_overworld_camera.fov > 0) camera = saved_overworld_camera; // on first startup, just use the camera that's saved as main camera in the overworld
         else camera = saved_main_camera;
@@ -2703,10 +2703,8 @@ void zeroAnimations()
     pack->rotation = directionToQuaternion(pack->direction);
     pack->velocity = VEC3_0;
 
-    player->climbing_direction = NO_DIRECTION;
-
-    memset(temp_state.entities_tied_to_movement, 0, sizeof(temp_state.entities_tied_to_movement));
-    temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
+    memset(&temp_state, 0, sizeof(TemporaryState));
+    temp_state.climbing_direction = NO_DIRECTION; // okay, i see what Anton meant here. maybe consider having 0 as NO_DIRECTION if this becomes annoying elsewhere
 }
 
 // returns false only if already at oldest action
@@ -2796,7 +2794,7 @@ bool performUndo()
 void levelChangePrep(char next_level[64])
 {
     bool level_was_just_solved = false;
-    if (!temp_state.in_overworld && findInSolvedLevels(world_state.level_name) == -1)
+    if (!in_overworld && findInSolvedLevels(world_state.level_name) == -1)
     {
         addToSolvedLevels(world_state.level_name);
         writeSolvedLevelsToFile();
@@ -2805,8 +2803,8 @@ void levelChangePrep(char next_level[64])
     
     recordLevelChangeForUndo(world_state.level_name, level_was_just_solved);
 
-    if (strcmp(next_level, "overworld") == 0) temp_state.in_overworld = true;
-    else temp_state.in_overworld = false;
+    if (strcmp(next_level, "overworld") == 0) in_overworld = true;
+    else in_overworld = false;
 }
 
 // MOVEMENT
@@ -2967,7 +2965,7 @@ void doPhysicsTick()
     updatePackDetached();
 
     // climb logic
-    if (player->climbing_direction == UP)
+    if (temp_state.climbing_direction == UP)
     {
         float y_coord_difference = getComponentAlongDirection(UP, vec3Subtract(intCoordsToNorm(player->coords), player->position));
 
@@ -3082,23 +3080,23 @@ void doPhysicsTick()
             if (move_forwards)
             {
                 player->position = intCoordsToNorm(player->coords); // normalise y coord
-                player->climbing_direction = NO_DIRECTION;
                 player->velocity = VEC3_0;
+                temp_state.climbing_direction = NO_DIRECTION;
                 if (do_push_forwards) pushAll(coords_ahead, player->direction, false, player);
                 doStandardMovement(player->direction, coords_ahead);
             }
 
             if (reverse_direction)
             {
-                player->climbing_direction = DOWN;
+                temp_state.climbing_direction = DOWN;
             }
         }
     }
 
-    if (player->climbing_direction == DOWN)
+    if (temp_state.climbing_direction == DOWN)
     {
         // just let player fall for now
-        player->climbing_direction = NO_DIRECTION;
+        temp_state.climbing_direction = NO_DIRECTION;
     }
 
     // falling logic for entities
@@ -3171,7 +3169,7 @@ void doPhysicsTick()
     if (undo_press_timer > 0) want_to_fall = false;
     if (cheating) want_to_fall = false;
     if (temp_state.player_hit_by_red) want_to_fall = false;
-    if (player->climbing_direction != NO_DIRECTION) want_to_fall = false;
+    if (temp_state.climbing_direction != NO_DIRECTION) want_to_fall = false;
 
     if (want_to_fall) setFalling(player);
 
@@ -3242,7 +3240,7 @@ void doPhysicsTick()
     // this is in this function because of the state handling
 
     // player movement
-    if (player->climbing_direction == NO_DIRECTION)
+    if (temp_state.climbing_direction == NO_DIRECTION)
     {
         // handle directional movement
         FOR(direction_index, 4)
@@ -3970,7 +3968,7 @@ void gameFrame(double delta_time, Input* input)
 
                 gameInitializeState(world_state.level_name);
 
-                if (temp_state.in_overworld)
+                if (in_overworld)
                 {
                     // copy world state from overworld_zero, but save the solved levels and overwrite the level name
                     char persist_solved_levels[64][64];
@@ -3979,7 +3977,7 @@ void gameFrame(double delta_time, Input* input)
                     memcpy(&world_state.solved_levels, &persist_solved_levels, sizeof(char) * 64 * 64);
                     memcpy(&world_state.level_name, "overworld", sizeof(char) * 64);
 
-                    moveEntityInBufferAndState(player, temp_state.restart_position, NORTH);
+                    moveEntityInBufferAndState(player, restart_position, NORTH);
                     setEntityVecsFromInts(player);
                     moveEntityInBufferAndState(pack, getNextCoords(player->coords, SOUTH), NORTH);
                     setEntityVecsFromInts(pack);
@@ -3992,7 +3990,7 @@ void gameFrame(double delta_time, Input* input)
 
                 updateLaserBuffer();
             }
-            if (time_until_allow_meta_input == 0 && input->keys_held & KEY_ESCAPE && !temp_state.in_overworld)
+            if (time_until_allow_meta_input == 0 && input->keys_held & KEY_ESCAPE && !in_overworld)
             {
                 // leave current level if not in overworld. TODO: why is saving solved levels required here?
                 char save_solved_levels[64][64] = {0};
@@ -4155,7 +4153,7 @@ void gameFrame(double delta_time, Input* input)
                             if (do_climb)
                             {
                                 recordActionForUndo(&world_state);
-                                player->climbing_direction = UP;
+                                temp_state.climbing_direction = UP;
                             }
                         }
                     }
@@ -4259,7 +4257,7 @@ void gameFrame(double delta_time, Input* input)
                         {
                             recordActionForUndo(&world_state);
                             // just move back. when move is done, player will start to fall for 0 frames. she will be 
-                            // caught by the ladder by a special case in the falling logic (set climbing_direction to DOWN, etc.)
+                            // caught by the ladder by a special case in the falling logic (set climbing direction to DOWN, etc.)
 
                             // move pack first, because moving backwards.
                             if (temp_state.pack_attached)
@@ -4304,7 +4302,7 @@ void gameFrame(double delta_time, Input* input)
 
                 if (do_win_block_usage)
                 {
-                    if (temp_state.in_overworld) 
+                    if (in_overworld) 
                     {
                         char level_path[64] = {0};
                         buildLevelPathFromName(world_state.level_name, &level_path, false);
@@ -4401,7 +4399,7 @@ void gameFrame(double delta_time, Input* input)
         if (temp_state.allow_movement_timer > 0) temp_state.allow_movement_timer--;
 
         // TODO: TEMP: disallow any input when climbing direction isn't no dir. probably want to do something like this that's a bit more intelligent. also probably want to be able to change climbing direction sometimes
-        if (player->climbing_direction != NO_DIRECTION) temp_state.allow_movement_timer = 1;
+        if (temp_state.climbing_direction != NO_DIRECTION) temp_state.allow_movement_timer = 1;
 
         // all mirrors with direction >=UP are moved to the next orientation with direction NORTH.
         FOR(mirror_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -4417,7 +4415,7 @@ void gameFrame(double delta_time, Input* input)
         }
 
         // update overworld player coords for camera offset if player not removed. if player is removed, these coords persist, so that camera doesn't jump wildly when changing player pos in editor
-        if (temp_state.in_overworld)
+        if (in_overworld)
         {
             if (!player->removed) ow_player_coords_for_offset = player->coords;
         }
@@ -4429,21 +4427,21 @@ void gameFrame(double delta_time, Input* input)
         // update restart coords based on current coords of the player, and also update game progress if this is relevant
         if (player->coords.z > 204) 
         {
-            temp_state.restart_position = (Int3){ 58, 2, 225 };
+            restart_position = (Int3){ 58, 2, 225 };
         }
         else if (player->coords.z > 189)
         {
-            temp_state.restart_position = (Int3){ 58, 2, 200 };
-            if (temp_state.game_progress < WORLD_1) temp_state.game_progress = WORLD_1;
+            restart_position = (Int3){ 58, 2, 200 };
+            if (game_progress < WORLD_1) game_progress = WORLD_1;
         }
         else if (player->coords.z > 174) 
         {
-            temp_state.restart_position = (Int3){ 58, 2, 188 };
+            restart_position = (Int3){ 58, 2, 188 };
         }
         else
         {
-            temp_state.restart_position = (Int3){ 58, 2, 170 };
-            if (temp_state.game_progress < WORLD_2) temp_state.game_progress = WORLD_2;
+            restart_position = (Int3){ 58, 2, 170 };
+            if (game_progress < WORLD_2) game_progress = WORLD_2;
         }
 
         // create debug texts
@@ -4454,7 +4452,7 @@ void gameFrame(double delta_time, Input* input)
 
             // game progress info
             char game_text[256] = {0};
-            snprintf(game_text, sizeof(game_text), "game progress: %d", temp_state.game_progress);
+            snprintf(game_text, sizeof(game_text), "game progress: %d", game_progress);
             createDebugText(game_text);
 
             // player info
@@ -4494,7 +4492,7 @@ void gameFrame(double delta_time, Input* input)
             createDebugText(th_text);
 
             char climb_text[256] = {0};
-            snprintf(climb_text, sizeof(climb_text), "climbing direction: %i", player->climbing_direction);
+            snprintf(climb_text, sizeof(climb_text), "climbing direction: %i", temp_state.climbing_direction);
             createDebugText(climb_text);
 
             /*
@@ -4663,7 +4661,7 @@ void gameFrame(double delta_time, Input* input)
         {
             saveLevelRewrite(level_path);
             saveLevelRewrite(relative_level_path);
-            if (temp_state.in_overworld)
+            if (in_overworld)
             {
                 saveLevelRewrite(overworld_zero_path);
                 saveLevelRewrite(overworld_zero_relative_path);
@@ -4678,7 +4676,7 @@ void gameFrame(double delta_time, Input* input)
 
     // update camera for drawing. after loop because depends on in_overworld
     camera_with_ow_offset = camera;
-    if (temp_state.in_overworld)
+    if (in_overworld)
     {
         Int3 player_delta = int3Subtract(ow_player_coords_for_offset, OVERWORLD_CAMERA_CENTER_START);
         int32 screen_offset_x = 0;
@@ -4747,8 +4745,8 @@ void gameFrame(double delta_time, Input* input)
                     if (e->locked) draw_tile = LOCKED_BLOCK;
                     if (draw_tile == WIN_BLOCK)
                     {
-                        if (temp_state.in_overworld && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
-                        else if (!temp_state.in_overworld && findInSolvedLevels(world_state.level_name) != -1) draw_tile = WON_BLOCK;
+                        if (in_overworld && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
+                        else if (!in_overworld && findInSolvedLevels(world_state.level_name) != -1) draw_tile = WON_BLOCK;
                     }
 
                     if (game_shader_mode == OLD)
@@ -4799,7 +4797,7 @@ void gameFrame(double delta_time, Input* input)
         }
         if (draw_level_boundary)
         {
-            if (temp_state.in_overworld)
+            if (in_overworld)
             {
                 // draw camera screen lines
                 int32 x_draw_offset = 0;
