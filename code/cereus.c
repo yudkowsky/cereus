@@ -435,7 +435,7 @@ bool in_overworld = true;
 
 WorldState leap_of_faith_world_state_snapshot = {0}; // TODO: only need to copy entities. figure out smart way to do this without adding Entities struct that has all the entities in it - maybe some union?
 TemporaryState leap_of_faith_temp_state_snapshot = {0};
-WorldState overworld_zero_state = {0}; // TODO: probably don't have to carry this around, just read from zeroed overworld file when i need this (on restart in overworld)
+WorldState overworld_zero_state = {0};
 
 int32 time_until_allow_meta_input = 0;
 int32 time_until_allow_undo_or_restart_input = 0;
@@ -672,21 +672,19 @@ Vec3 cameraLookingAtPointOnPlane(Camera input_camera, float plane_y)
     };
 }
 
-Camera lerpCamera(Camera a, Camera b, float t, float target_plane_y)
+Camera lerpCamera(Camera start_cam, Camera end_cam, float t, float target_plane_y)
 {
     Camera result = {0};
-    result.coords.x = a.coords.x + (b.coords.x - a.coords.x) * t;
-    result.coords.y = a.coords.y + (b.coords.y - a.coords.y) * t;
-    result.coords.z = a.coords.z + (b.coords.z - a.coords.z) * t;
-    result.fov      = a.fov      + (b.fov      - a.fov)      * t;
+    result.coords = vec3Add(start_cam.coords, vec3ScalarMultiply(vec3Subtract(end_cam.coords, start_cam.coords), t));
+    result.fov = start_cam.fov + (end_cam.fov - start_cam.fov) * t;
 
-    Vec3 target_a = cameraLookingAtPointOnPlane(a, target_plane_y);
-    Vec3 target_b = cameraLookingAtPointOnPlane(b, target_plane_y);
+    Vec3 target_a = cameraLookingAtPointOnPlane(start_cam, target_plane_y);
+    Vec3 target_b = cameraLookingAtPointOnPlane(end_cam,   target_plane_y);
     Vec3 target = vec3Add(target_a, vec3ScalarMultiply(vec3Subtract(target_b, target_a), t));
 
     // build rotation from looked at point
     Vec3 forward = vec3Normalize(vec3Subtract(target, result.coords));
-    result.yaw   = (float)atan2((double)-forward.x, (double)-forward.z);
+    result.yaw   = (float)atan2(-(double)forward.x, -(double)forward.z);
     result.pitch = (float)asin((double)forward.y);
     result.rotation = buildCameraQuaternion(result);
 
@@ -1979,7 +1977,7 @@ void updateLaserBuffer()
                 }
 
                 TileType types_to_check[2] = { NONE, getTileType(current_tile_coords) }; // trailing hitbox, followed by real type; trailing hitbox intersection takes priority
-                TrailingHitbox th = {0};
+                TrailingHitbox th = {0};                                                 // but normal collision will still be checked if the trailing hitbox exists but doesn't hit
                 if (trailingHitboxAtCoords(current_tile_coords, &th) && th.frames > 0)
                 {
                     types_to_check[0] = th.type;
@@ -2155,7 +2153,6 @@ void updateLaserBuffer()
                     }
 
                     // hit type is something that isn't NONE - do default behaviour
-                    //if (hit_type != NONE)
                     {
                         Vec3 coords_without_offset = VEC3_0;
                         float offset = 0.0f;
@@ -3505,34 +3502,6 @@ void gameFrame(double delta_time, Input* input)
         time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
     }
 
-    // perform alt <-> main camera interpolation
-    if (camera_mode == MAIN_TO_ALT)
-    {
-        camera_lerp_t += CAMERA_T_TIMESTEP;
-        if (camera_lerp_t >= 1) 
-        {
-            camera_lerp_t = 1.0f;
-            camera = saved_alt_camera;
-            camera.rotation = buildCameraQuaternion(camera);
-            camera_mode = ALT_WAITING;
-        }
-    }
-    if (camera_mode == ALT_TO_MAIN)
-    {
-        camera_lerp_t -= CAMERA_T_TIMESTEP;
-        if (camera_lerp_t <= 0)
-        {
-            camera_lerp_t = 0.0f;
-            camera = saved_main_camera;
-            camera.rotation = buildCameraQuaternion(camera);
-            camera_mode = MAIN_WAITING;
-        }
-    }
-    if (camera_lerp_t != 0 && camera_lerp_t != 1)
-    {
-        camera = lerpCamera(saved_main_camera, saved_alt_camera, camera_lerp_t, (float)camera_target_plane);
-    }
-
     ////////////
     // EDITOR //
     ////////////
@@ -4433,6 +4402,34 @@ void gameFrame(double delta_time, Input* input)
         {
             restart_position = (Int3){ 58, 2, 170 };
             if (game_progress < WORLD_2) game_progress = WORLD_2;
+        }
+
+        // perform alt <-> main camera interpolation
+        if (camera_mode == MAIN_TO_ALT)
+        {
+            camera_lerp_t += CAMERA_T_TIMESTEP;
+            if (camera_lerp_t >= 1) 
+            {
+                camera_lerp_t = 1.0f;
+                camera = saved_alt_camera;
+                camera.rotation = buildCameraQuaternion(camera);
+                camera_mode = ALT_WAITING;
+            }
+        }
+        if (camera_mode == ALT_TO_MAIN)
+        {
+            camera_lerp_t -= CAMERA_T_TIMESTEP;
+            if (camera_lerp_t <= 0)
+            {
+                camera_lerp_t = 0.0f;
+                camera = saved_main_camera;
+                camera.rotation = buildCameraQuaternion(camera);
+                camera_mode = MAIN_WAITING;
+            }
+        }
+        if (camera_lerp_t != 0 && camera_lerp_t != 1)
+        {
+            camera = lerpCamera(saved_main_camera, saved_alt_camera, camera_lerp_t, (float)camera_target_plane);
         }
 
         // create debug texts
