@@ -2400,7 +2400,7 @@ void gameInitializeState(char* level_name)
         world_state.locked_blocks[entity_index].id  = -1;
     }
 
-    Entity *entity_group = 0;
+    Entity* entity_group = 0;
     for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
     {
         TileType buffer_contents = world_state.buffer[buffer_index];
@@ -4003,9 +4003,17 @@ void gameFrame(double delta_time, Input* input)
                 temp_state.allow_movement_timer = 0;
             }
 
-            if (temp_state.allow_movement_timer == 0 && (input->keys_held & KEY_W || input->keys_held & KEY_A || input->keys_held & KEY_S || input->keys_held & KEY_D))
+            // HANDLE INPUT
+            bool allow_input = true;
+            if (temp_state.allow_movement_timer != 0) allow_input = false;
+            if (!cheating && !temp_state.player_hit_by_red && canFall(player)) allow_input = false;
+
+            // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
+            float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
+            if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) allow_input = false;
+
+            if (allow_input && (input->keys_held & KEY_W || input->keys_held & KEY_A || input->keys_held & KEY_S || input->keys_held & KEY_D))
             {
-                // MOVEMENT 
                 Direction input_direction = 0;
                 if      (input->keys_held & KEY_W) input_direction = NORTH; 
                 else if (input->keys_held & KEY_A) input_direction = WEST; 
@@ -4017,28 +4025,19 @@ void gameFrame(double delta_time, Input* input)
                     // FORWARD MOVEMENT
                     Int3 next_player_coords = getNextCoords(player->coords, input_direction);
 
-                    bool allow_input = false;
+                    bool allow_movement = false;
 
                     // allow movement if, given acceleration this frame along input direction, we would overshoot.
                     float sign = input_direction == NORTH || input_direction == WEST ? -1.0f : 1.0f;
                     float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(input_direction, sign);
                     float position_along_direction = getComponentAlongDirection(input_direction, player->position);
                     float coords_along_direction = getComponentAlongDirection(input_direction, intCoordsToNorm(player->coords));
-                    if (wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign)) allow_input = true;
+                    if (wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign)) allow_movement = true;
 
-                    // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
-                    float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
-                    if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) allow_input = false;
+                    // disallow movement if also moving in some other direction currently - probably just guards against moving while falling
+                    if (!vec3IsZero(vec3SetComponentAlongDirection(input_direction, player->velocity, 0))) allow_movement = false;
 
-                    if (!cheating)
-                    {
-                        // disallow movement if able to fall
-                        if (!temp_state.player_hit_by_red && canFall(player)) allow_input = false;
-                        // also disallow movement if also moving in some other direction currently - probably just guards against moving while falling
-                        if (!vec3IsZero(vec3SetComponentAlongDirection(input_direction, player->velocity, 0))) allow_input = false;
-                    }
-
-                    if (allow_input)
+                    if (allow_movement)
                     {
                         bool try_walk = false;
                         bool do_push = false;
@@ -4143,7 +4142,8 @@ void gameFrame(double delta_time, Input* input)
                         }
                         else if (try_climb)
                         {
-                            // only handles setting climbing direction to UP if player wants to climb up. everything else is handled later, because we want to keep climbing sometimes, even if there's been no input for it.
+                            // only handles setting climbing direction to UP if player wants to climb up. everything else is handled later, 
+                            // because i want to keep climbing sometimes, even if there's been no input for it.
                             bool do_climb = false; 
                             Int3 coords_above_player = getNextCoords(player->coords, UP);
                             TileType type_above_player = getTileType(coords_above_player);
@@ -4163,10 +4163,6 @@ void gameFrame(double delta_time, Input* input)
                     // TURN MOVEMENT
                     bool allow_turn = true;
                     if (player->falling) allow_turn = false;
-
-                    // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
-                    float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
-                    if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) allow_turn = false;
 
                     // get difference in position along axis of travel, and gate on some threshold to target
                     float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, intCoordsToNorm(player->coords)));
