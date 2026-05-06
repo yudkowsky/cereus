@@ -4,13 +4,6 @@
 #include <math.h> 
 #include <stdio.h> 
 
-/*
-#include <windows.h> // temp for debug
-#ifdef VOID
-#undef VOID
-#endif
-*/
-
 #define FOR(i, n) for (int i = 0; i < n; i++)
 
 // GLOBAL STATE
@@ -394,6 +387,12 @@ double physics_accumulator = 0;
 double timer_accumulator = 0;
 double global_time = 0; // will not work as a 'time elapsed' counter in editor mode because it grows slower during time slowdown
 
+DisplayInfo game_display = {0};
+Input prev_input = {0}; // copied from previous frame input to generate keys_pressed
+
+DrawCommand draw_commands[16768] = {0};
+int32 draw_command_count = 0;
+
 const char debug_level_name[64] = "testing";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
@@ -401,13 +400,10 @@ const char solved_level_path[64] = "data/meta/solved-levels.meta";
 const char undo_meta_path[64] = "data/meta/undo-buffer.meta";
 const char overworld_zero_name[64] = "overworld-zero";
 
-// CAMERA
+// camera
 const float CAMERA_SENSITIVITY = 0.005f;
 const float CAMERA_MOVE_STEP = 0.2f;
 const float CAMERA_FOV = 15.0f;
-
-DisplayInfo game_display = {0};
-Input prev_input = {0}; // copied from previous frame input to generate keys_pressed
 
 Camera camera = {0};
 Camera camera_with_ow_offset = {0};
@@ -418,26 +414,24 @@ Camera saved_alt_camera = {0};
 Camera saved_overworld_camera = {0};
 CameraMode saved_overworld_camera_mode = {0};
 
-Int3 camera_screen_offset = {0};
 const Int3 OVERWORLD_CAMERA_CENTER_START = { 58, 2, 197 };
+Int3 camera_screen_offset = {0};
 bool draw_level_boundary = false;
 Int3 ow_player_coords_for_offset = {0};
 bool silence_unlocks_due_to_restart_or_undo = false;
 
-float camera_lerp_t = 0.0f;
 const float CAMERA_T_TIMESTEP = 0.05f;
+float camera_lerp_t = 0.0f;
 int32 camera_target_plane = 0; // y level of xz plane which calculates targeted point during camera interpolation function
 
-DrawCommand draw_commands[16768] = {0};
-int32 draw_command_count = 0;
-
-Int3 level_dim = {0};
+// general state
 WorldState world_state = {0};
-GameProgress game_progress = WORLD_0;
-Int3 restart_position = {0};
-bool in_overworld = true;
 TemporaryState temp_state = {0};
 LaserBuffer laser_buffer[512] = {0}; // 512 = 64 max sources * 16 max laser turns
+GameProgress game_progress = WORLD_0;
+Int3 level_dim = {0};
+Int3 restart_position = {0};
+bool in_overworld = true;
 
 WorldState leap_of_faith_world_state_snapshot = {0}; // TODO: only need to copy entities. figure out smart way to do this without adding Entities struct that has all the entities in it - maybe some union?
 TemporaryState leap_of_faith_temp_state_snapshot = {0};
@@ -454,24 +448,23 @@ bool restart_last_turn = false;
 
 // debug state
 EditorState editor_state = {0};
-
 ShaderMode game_shader_mode = OLD;
 bool draw_trailing_hitboxes = false;
 bool cheating = false;
 
 // debug text
-Vec2 debug_text_start_coords = {0};
 const int32 MAX_DEBUG_TEXT_COUNT = 32;
 const float DEBUG_TEXT_Y_DIFF = 40.0f;
+Vec2 debug_text_start_coords = {0};
 char debug_text_buffer[32][256] = {0};
 int32 debug_text_count = 0;
 bool do_debug_text = false;
 
 // debug popups
-Vec2 debug_popup_start_coords = {0};
-DebugPopup debug_popups[32];
 const float DEBUG_POPUP_STEP_SIZE = 30.0f;
 const int32 DEFAULT_POPUP_TIME = 100;
+Vec2 debug_popup_start_coords = {0};
+DebugPopup debug_popups[32];
 
 // MATH HELPER FUNCTIONS
 
@@ -484,13 +477,6 @@ float floatAbs(float f)
 {
     return f > 0 ? f : -f;
 }
-
-/*
-float floatFractionalPart(float f)
-{
-    return f - (int32)f;
-}
-*/
 
 Vec3 intCoordsToNorm(Int3 int_coords)
 {
@@ -1745,7 +1731,7 @@ Vec3 vec3SetComponentAlongDirection(Direction direction, Vec3 vector, float f)
     }
 }
 
-Vec3 vec3AddFloatToVec3AlongDirection(Direction direction, float f, Vec3 v)
+Vec3 vec3AddFloatAlongDirection(Direction direction, float f, Vec3 v)
 {
     switch (direction)
     {
@@ -1985,10 +1971,10 @@ void updateLaserBuffer()
                 if (id_to_skip_timer > 0) id_to_skip_timer--;
                 else id_to_skip = 0;
 
-                // stop if oob
+                // stop if oob, and extend the laser for a bit
                 if (!intCoordsWithinLevelBounds(current_tile_coords))
                 {
-                    lb->end_coords = current_norm_coords;
+                    lb->end_coords = vec3Add(vec3ScalarMultiply(directionToVector(current_direction), 40.0f), current_norm_coords);
                     break;
                 }
 
@@ -3276,7 +3262,7 @@ void doPhysicsTick()
                 // move position by velocity + adjustment, then set velocity to decelerated value
                 float actual_movement = current_speed + movement_adjustment;
 
-                player->position = vec3AddFloatToVec3AlongDirection(direction_index, sign * actual_movement, player->position);
+                player->position = vec3AddFloatAlongDirection(direction_index, sign * actual_movement, player->position);
                 if (direction_index == NORTH || direction_index == SOUTH) player->velocity.z = sign * decelerated_speed;
                 else player->velocity.x = sign * decelerated_speed;
             }
@@ -3348,7 +3334,7 @@ void doPhysicsTick()
 
             if (difference_in_root_position_along_direction != 0)
             {
-                Vec3 test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, difference_in_root_position_along_direction, intCoordsToNorm(e->coords));
+                Vec3 test_position = vec3AddFloatAlongDirection(tied_entity_info->direction, difference_in_root_position_along_direction, intCoordsToNorm(e->coords));
                 float test_movement_towards_direction = getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, e->position));
 
                 bool do_standard_entity_move = false;
@@ -3359,7 +3345,7 @@ void doPhysicsTick()
                 if (do_standard_entity_move)
                 {
                     e->position = test_position;
-                    e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
+                    e->velocity = vec3AddFloatAlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
 
                     if (tied_entity_info->on_head)
                     {
@@ -3392,19 +3378,19 @@ void doPhysicsTick()
                         else
                         {
                             float sign = (tied_entity_info->direction == NORTH || tied_entity_info->direction == WEST) ? -1.0f : 1.0f;
-                            e->position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, sign * interpolation_distance_per_frame, e->position);
-                            e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, sign * interpolation_distance_per_frame, VEC3_0);
+                            e->position = vec3AddFloatAlongDirection(tied_entity_info->direction, sign * interpolation_distance_per_frame, e->position);
+                            e->velocity = vec3AddFloatAlongDirection(tied_entity_info->direction, sign * interpolation_distance_per_frame, VEC3_0);
                         }
                     }
                 }
                 else if (test_movement_towards_direction < -0.5)
                 {
                     // case where object should keep moving, but is offset by one unit because root entity has changed coords, but object on head / on stack will stop here, so isn't pushed by pushAll, but should still continue to end coords
-                    test_position = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, 1, test_position);
+                    test_position = vec3AddFloatAlongDirection(tied_entity_info->direction, 1, test_position);
                     if (getComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, intCoordsToNorm(e->coords))) < 0.0)
                     {
                         e->position = test_position;
-                        e->velocity = vec3AddFloatToVec3AlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
+                        e->velocity = vec3AddFloatAlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
                     }
                     else
                     {
@@ -3507,6 +3493,15 @@ void gameFrame(double delta_time, Input* input)
             if (camera_mode == MAIN_WAITING || camera_mode == ALT_TO_MAIN) camera_mode = MAIN_TO_ALT;
             else camera_mode = ALT_TO_MAIN;
         }
+        time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+    }
+
+    // toggle camera boundary lines
+    if (time_until_allow_meta_input == 0 && input->keys_held & KEY_T && !(editor_state.editor_mode == SELECT_WRITE))
+    {
+        draw_level_boundary = !draw_level_boundary;
+        if (draw_level_boundary) createDebugPopup("level / camera boundary visibility on", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
+        else                     createDebugPopup("level / camera boundary visibility off", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
         time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
     }
 
@@ -4690,9 +4685,8 @@ void gameFrame(double delta_time, Input* input)
     // DRAW 3D //
     /////////////
 
+    // draw lasers
     {
-        // draw lasers
-
         // final update laser buffer call
         updateLaserBuffer();
 
@@ -4784,13 +4778,6 @@ void gameFrame(double delta_time, Input* input)
         }
 
         // draw camera boundary lines
-        if (time_until_allow_meta_input == 0 && input->keys_held & KEY_T && !(editor_state.editor_mode == SELECT_WRITE))
-        {
-            draw_level_boundary = !draw_level_boundary;
-            if (draw_level_boundary) createDebugPopup("level / camera boundary visibility on", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
-            else                     createDebugPopup("level / camera boundary visibility off", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
         if (draw_level_boundary)
         {
             if (in_overworld)
