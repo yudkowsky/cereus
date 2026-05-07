@@ -3419,7 +3419,7 @@ void doPhysicsTick()
     }
 }
 
-void gameFrame(double delta_time, Input* input)
+bool gameFrame(double delta_time, Input* input)
 {   
     if (delta_time > 0.1) delta_time = 0.1;
     physics_accumulator += delta_time;
@@ -3954,18 +3954,6 @@ void gameFrame(double delta_time, Input* input)
 
                 updateLaserBuffer();
             }
-            if (time_until_allow_meta_input == 0 && input->keys_held & KEY_ESCAPE && !in_overworld)
-            {
-                // leave current level if not in overworld. TODO: why is saving solved levels required here?
-                char save_solved_levels[64][64] = {0};
-                memcpy(save_solved_levels, world_state.solved_levels, sizeof(save_solved_levels));
-                levelChangePrep("overworld");
-                gameInitializeState("overworld");
-                memcpy(world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
-                writeSolvedLevelsToFile();
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                temp_state.allow_movement_timer = 0;
-            }
 
             // HANDLE INPUT
             bool allow_input = true;
@@ -4371,6 +4359,28 @@ void gameFrame(double delta_time, Input* input)
                 mirror->mirror_orientation += 1;
                 if (mirror->mirror_orientation > MIRROR_DOWN) mirror->mirror_orientation = MIRROR_SIDE;
                 setTileDirection(mirror->direction, mirror->coords, mirror->mirror_orientation); // keep buffer in sync
+            }
+        }
+
+        // handle esc press TODO: this should be before the physics loop, because all that physics work is useless. figure out what other stuff should also be before the physics, / if anything has to be after.
+        if (time_until_allow_meta_input == 0 && input->keys_held & KEY_ESCAPE)
+        {
+            if (in_overworld)
+            {
+                // exit game
+                return true;
+            }
+            else
+            {
+                // leave current level if not in overworld. TODO: why is saving solved levels required here?
+                char save_solved_levels[64][64] = {0};
+                memcpy(save_solved_levels, world_state.solved_levels, sizeof(save_solved_levels));
+                levelChangePrep("overworld");
+                gameInitializeState("overworld");
+                memcpy(world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
+                writeSolvedLevelsToFile();
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                temp_state.allow_movement_timer = 0;
             }
         }
 
@@ -4915,4 +4925,6 @@ void gameFrame(double delta_time, Input* input)
 
     vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, camera_with_ow_offset, game_shader_mode);
     vulkanDraw();
+
+    return false;
 }

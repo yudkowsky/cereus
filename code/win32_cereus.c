@@ -4,7 +4,7 @@
 #include "win32_vulkan_bridge.h"
 #include "win32_cereus_bridge.h"
 
-// temp for sleep
+// temp for sleep TODO: fix up this whole system
 typedef MMRESULT (WINAPI *timeBeginPeriod_t)(UINT);
 typedef MMRESULT (WINAPI *timeEndPeriod_t)(UINT);
 
@@ -168,7 +168,9 @@ uint64 pollKeys()
     if (GetAsyncKeyState('Y') & 0x8000) held |= KEY_Y;
     if (GetAsyncKeyState('Z') & 0x8000) held |= KEY_Z;
 
-    // arrow keys aliased to wasd
+    // arrow keys aliased to wasd TODO: is this what i want to do? 
+    // maybe at some point these should all just be renamed to their functionality, and then bind multiple keys? 
+    // but before then i should figure out how rebinding controls works
     if (GetAsyncKeyState(VK_UP)    & 0x8000) held |= KEY_W;
     if (GetAsyncKeyState(VK_DOWN)  & 0x8000) held |= KEY_S;
     if (GetAsyncKeyState(VK_LEFT)  & 0x8000) held |= KEY_A;
@@ -309,7 +311,8 @@ int CALLBACK WinMain(
 
         input.keys_held = pollKeys();
 
-        gameFrame(delta_time, &input); 
+        bool quit = gameFrame(delta_time, &input); 
+        if (quit) return 0;
 
         input.mouse_dx = 0;
         input.mouse_dy = 0;
