@@ -2884,6 +2884,18 @@ bool wouldOvershoot(float speculative_velocity_along_direction, float position_a
 
 // GAME LOGIC
 
+void mimicRotationalOffset(Entity* copied_e, Entity* e)
+{
+    float rotation_direction_delta = getAngleOfYAxisRotation(directionToQuaternion(copied_e->direction), copied_e->rotation);
+    Vec4 transform = quaternionFromAxis(intCoordsToNorm(AXIS_Y), rotation_direction_delta);
+
+    Vec4 base_rotation = IDENTITY_QUATERNION;
+    if (getTileTypeFromId(e->id) == MIRROR) base_rotation = mirrorRotation(e->direction, e->mirror_orientation);
+    else base_rotation = directionToQuaternion(e->direction);
+
+    e->rotation = quaternionMultiply(transform, base_rotation);
+}
+
 void doPhysicsTick()
 {
     Entity* player = &world_state.player;
@@ -2940,6 +2952,7 @@ void doPhysicsTick()
             }
             else
             {
+                // failed animation, but still do that push. TODO: fix issue with snapping
                 Int3 start_pack_coords = getNextCoords(player->coords, oppositeDirection(temp_state.pack_turn_state.initial_player_direction));
                 moveEntityInBufferAndState(pack, start_pack_coords, player->direction);
                 player->direction = temp_state.pack_turn_state.initial_player_direction;
@@ -3316,15 +3329,7 @@ void doPhysicsTick()
         if (tied_entity_info->direction == NO_DIRECTION)
         {
             // rotation: find rotation from target to current of player, and apply the same rotation to target direction of the entity.
-            // TODO: wrap as function?
-            float player_target_to_current_angle = getAngleOfYAxisRotation(directionToQuaternion(player->direction), player->rotation);
-            Vec4 transform = quaternionFromAxis(intCoordsToNorm(AXIS_Y), player_target_to_current_angle);
-
-            Vec4 base_rotation = IDENTITY_QUATERNION;
-            if (getTileTypeFromId(e->id) == MIRROR) base_rotation = mirrorRotation(e->direction, e->mirror_orientation);
-            else base_rotation = directionToQuaternion(e->direction);
-
-            e->rotation = quaternionMultiply(transform, base_rotation);
+            mimicRotationalOffset(player, e);
 
             // follow along with player coords still. this is for the case where player is still moving when this rotation happens.
             e->position.x = player->position.x;
@@ -3355,14 +3360,7 @@ void doPhysicsTick()
                     if (tied_entity_info->on_head)
                     {
                         // apply player rotation too, in case player isn't done rotating when this move happens.
-                        float player_target_to_current_angle = getAngleOfYAxisRotation(directionToQuaternion(player->direction), player->rotation);
-                        Vec4 transform = quaternionFromAxis(intCoordsToNorm(AXIS_Y), player_target_to_current_angle);
-
-                        Vec4 base_rotation = IDENTITY_QUATERNION;
-                        if (getTileTypeFromId(e->id) == MIRROR) base_rotation = mirrorRotation(e->direction, e->mirror_orientation);
-                        else base_rotation = directionToQuaternion(e->direction);
-
-                        e->rotation = quaternionMultiply(transform, base_rotation);
+                        mimicRotationalOffset(player, e);
                     }
                 }
                 else if (root_e == pack)
