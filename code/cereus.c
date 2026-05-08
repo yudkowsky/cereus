@@ -235,8 +235,8 @@ typedef enum
     NO_TYPE = 0,
     GAMEPLAY_MODE_CHANGE,
     GAMEPLAY_SPEED_CHANGE,
-    DEBUG_STATE_VISIBILITY_CHANGE,
-    LEVEL_BOUNDARY_VISIBILITY_CHANGE,
+    DEBUG_STATE_VISIBILITY_TOGGLE,
+    LEVEL_BOUNDARY_VISIBILITY_TOGGLE,
     LEVEL_SAVE,
     MAIN_CAMERA_SAVE,
     ALT_CAMERA_SAVE,
@@ -244,6 +244,7 @@ typedef enum
     CHEAT_MODE_TOGGLE,
     SHADER_MODE_CHANGE,
     DRAW_TRAILING_HITBOX_TOGGLE,
+    STEP_THROUGH_TOGGLE,
 }
 PopupType;
 
@@ -383,9 +384,11 @@ const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 
 const double DEFAULT_PHYSICS_TIMESTEP = 1.0/60.0;
 double physics_timestep_multiplier = 1.0;
-double physics_accumulator = 0;
-double timer_accumulator = 0;
-double global_time = 0; // will not work as a 'time elapsed' counter in editor mode because it grows slower during time slowdown
+double physics_accumulator = 0; // time accumulator affected by physics timestep
+double timer_accumulator = 0; // true time accumulator
+double global_time = 0; // will not work as a 'time elapsed' counter in editor mode because also affected by physics timestep
+bool step_mode = false;
+bool step_to_next_tick = false;
 
 DisplayInfo game_display = {0};
 Input prev_input = {0}; // copied from previous frame input to generate keys_pressed
@@ -3496,8 +3499,8 @@ bool gameFrame(double delta_time, Input* input)
     if (time_until_allow_meta_input == 0 && input->keys_held & KEY_T && !(editor_state.editor_mode == SELECT_WRITE))
     {
         draw_level_boundary = !draw_level_boundary;
-        if (draw_level_boundary) createDebugPopup("level / camera boundary visibility on", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
-        else                     createDebugPopup("level / camera boundary visibility off", LEVEL_BOUNDARY_VISIBILITY_CHANGE);
+        if (draw_level_boundary) createDebugPopup("level / camera boundary visibility on", LEVEL_BOUNDARY_VISIBILITY_TOGGLE);
+        else                     createDebugPopup("level / camera boundary visibility off", LEVEL_BOUNDARY_VISIBILITY_TOGGLE);
         time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
     }
 
@@ -3846,6 +3849,22 @@ bool gameFrame(double delta_time, Input* input)
             createDebugPopup(timestep_text, PHYSICS_TIMESTEP_CHANGE);
         }
 
+        // handle step through physics mode
+        if (input->keys_held & KEY_6)
+        {
+            step_mode = !step_mode;
+            if (step_mode) createDebugPopup("step through physics on", STEP_THROUGH_TOGGLE);
+            else           createDebugPopup("step through physics off", STEP_THROUGH_TOGGLE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        if (input->keys_held & KEY_K)
+        {
+            step_to_next_tick = true;
+            createDebugPopup("stepped to next tick", NO_TYPE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
         if (input->keys_held & KEY_BACKSPACE)
         {
             camera = saved_main_camera;
@@ -3856,12 +3875,12 @@ bool gameFrame(double delta_time, Input* input)
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
 
-        // toggle debug press
+        // toggle debug text 
         if (input->keys_held & KEY_Y)
         {
             do_debug_text = !do_debug_text;
-            if (do_debug_text) createDebugPopup("debug state visibility on", DEBUG_STATE_VISIBILITY_CHANGE);
-            else               createDebugPopup("debug state visibility off", DEBUG_STATE_VISIBILITY_CHANGE);
+            if (do_debug_text) createDebugPopup("debug state visibility on", DEBUG_STATE_VISIBILITY_TOGGLE);
+            else               createDebugPopup("debug state visibility off", DEBUG_STATE_VISIBILITY_TOGGLE);
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
 
@@ -3884,6 +3903,16 @@ bool gameFrame(double delta_time, Input* input)
     ///////////////////////
     // MAIN PHYSICS LOOP //
     ///////////////////////
+
+    if (step_mode) 
+    {
+        if (step_to_next_tick) 
+        {
+            physics_accumulator = physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP;
+            step_to_next_tick = false;
+        }
+        else physics_accumulator = 0.0;
+    }
 
     while (physics_accumulator >= (physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP))
     {
@@ -4490,7 +4519,6 @@ bool gameFrame(double delta_time, Input* input)
             snprintf(attached_text, sizeof(attached_text), "pack attached: %i", temp_state.pack_attached);
             createDebugText(attached_text);
 
-            // TODO: step through physics
             /*
             // timer info
             char timer_info[256] = {0};
@@ -4577,8 +4605,8 @@ bool gameFrame(double delta_time, Input* input)
                 }
             }
         }
+
         physics_accumulator -= physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP;
-        if (time_until_allow_undo_or_restart_input > 0) time_until_allow_undo_or_restart_input--;
     }
 
     // SAVING STUFF (depends on changed state, so after loop)
@@ -4901,6 +4929,7 @@ bool gameFrame(double delta_time, Input* input)
         {
             FOR(popup_index, MAX_DEBUG_POPUP_COUNT) if (debug_popups[popup_index].frames_left > 0) debug_popups[popup_index].frames_left--;
             if (time_until_allow_meta_input > 0) time_until_allow_meta_input--;
+            if (time_until_allow_undo_or_restart_input > 0) time_until_allow_undo_or_restart_input--; // doesn't really need to be consistent across timesteps, but it won't really matter
 
             timer_accumulator -= 1.0/60.0;
         }
