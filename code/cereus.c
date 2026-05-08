@@ -506,6 +506,11 @@ bool vec3IsEqual(Vec3 a, Vec3 b)
     return (a.x == b.x && a.y == b.y && a.z == b.z); 
 }
 
+bool vec4IsEqual(Vec4 a, Vec4 b)
+{
+    return (a.x == b.x && a.y == b.y && a.z == b.z && a.w == b.w); 
+}
+
 Int3 int3Negate(Int3 coords) 
 {
     return (Int3){ -coords.x, -coords.y, -coords.z }; 
@@ -3267,30 +3272,31 @@ void doPhysicsTick()
             }
         }
 
-        // handle turn
+        // player rotation
+        float total_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
+        float frame_count = ceilf((float)fabs(total_angle) / MAX_ANGULAR_VELOCITY);
+        if (frame_count <= 1)
         {
-            // player rotation
-            float total_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
-            float frame_count = ceilf((float)fabs(total_angle) / MAX_ANGULAR_VELOCITY);
-            if (frame_count <= 1)
-            {
-                player->rotation = directionToQuaternion(player->direction);
-            }
-            else
-            {
-                float step_angle = total_angle / frame_count;
-                Vec4 rotation_this_frame = quaternionFromAxis(intCoordsToNorm(AXIS_Y), step_angle);
-                player->rotation = quaternionMultiply(rotation_this_frame, player->rotation);
-            }
+            player->rotation = directionToQuaternion(player->direction);
+        }
+        else
+        {
+            float step_angle = total_angle / frame_count;
+            Vec4 rotation_this_frame = quaternionFromAxis(intCoordsToNorm(AXIS_Y), step_angle);
+            player->rotation = quaternionMultiply(rotation_this_frame, player->rotation);
+        }
 
-            // pack rotation
-            if (temp_state.pack_attached)
-            {
-                // pack follows player movement if attached
-                Vec3 rotated_offset = vec3RotateByQuaternion(intCoordsToNorm(AXIS_Z), player->rotation); // AXIS_Z because pack is 0, 0, 1 relative to player 0, 0, 0, when player has no rotation.
-                pack->position = vec3Add(player->position, rotated_offset);
-                pack->rotation = player->rotation;
-            }
+        // pack rotation and movement
+        bool do_pack_rotation = false;
+        if (temp_state.pack_attached) do_pack_rotation = true;
+        else if (!vec4IsEqual(pack->rotation, directionToQuaternion(pack->direction))) do_pack_rotation = true; // pack has detached, but should still be rotating somewhere. i.e. player is currently falling. so use players rotation as before
+
+        if (do_pack_rotation)
+        {
+            // pack follows player movement if attached
+            Vec3 rotated_offset = vec3RotateByQuaternion(intCoordsToNorm(AXIS_Z), player->rotation); // AXIS_Z because pack is 0, 0, 1 relative to player 0, 0, 0, when player has no rotation.
+            pack->position = vec3Add(player->position, rotated_offset);
+            pack->rotation = player->rotation;
         }
     }
 
