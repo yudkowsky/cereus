@@ -58,7 +58,7 @@ typedef struct
 }
 Water;
 
-// for instancing of cubes
+// for instancing of cubes. not required in main build
 typedef struct 
 {
     float model[16];
@@ -133,24 +133,9 @@ typedef struct
     float view[16];
     float proj[16];
     float time;
-    float debug_mode;
     float cam_x, cam_y, cam_z;
-    float depth_threshold, normal_threshold;
 }
 WaterPushConstants;
-
-typedef struct
-{
-    float view[16];
-    float proj[16];
-    float inv_view_proj[16];
-    float cam_x, cam_y, cam_z;
-    float time;
-    float screen_width, screen_height;
-    float water_plane_y;
-    float viewport_x, viewport_y, viewport_width, viewport_height;
-}
-WaterComputePushConstants;
 
 typedef struct
 {
@@ -162,15 +147,6 @@ typedef struct
     uint32 index_count;
 }
 LoadedModel;
-
-typedef struct
-{
-    Vec3 min;
-    float model_id;
-    Vec3 max;
-    float _;
-}
-WaterAABB;
 
 typedef struct
 {
@@ -234,27 +210,14 @@ typedef struct VulkanState
     VkImageView normal_image_view;
     VkDescriptorSet normal_descriptor_set;
 
-    // water raytracing for color
-    VkImage water_rt_image;
-    VkDeviceMemory water_rt_memory;
-    VkImageView water_rt_view;
-    VkDescriptorSet water_rt_descriptor_set; // for sampling in fragment shader TODO: do i still need this? doing fully raytraced approach now.
-    VkDescriptorSet water_rt_storage_descriptor_set; // for writing in compute shader
-
-    // water raytracing for normal / depth for outline pass
-    VkImage water_rt_normal_depth_image;
-    VkDeviceMemory water_rt_normal_depth_memory;
-    VkImageView water_rt_normal_depth_view;
-    VkDescriptorSet water_rt_normal_depth_storage_descriptor_set; // compute writes
-    VkDescriptorSet water_rt_normal_depth_descriptor_set; // fragment reads
-
-    VkDescriptorSetLayout storage_image_descriptor_set_layout;
-
     // OIT resources for laser rendering
     VkImage oit_head_image;
     VkDeviceMemory oit_head_memory;
     VkImageView oit_head_view;
     VkDescriptorSet oit_head_storage_descriptor_set;
+
+    VkDescriptorSetLayout storage_image_descriptor_set_layout;
+    VkDescriptorSetLayout ssbo_descriptor_set_layout;
 
     // RENDER PASSES
 
@@ -279,9 +242,6 @@ typedef struct VulkanState
     // PIPELINES AND LAYOUTS
 
     VkPipelineLayout default_graphics_pipeline_layout;
-
-    VkPipeline water_compute_pipeline;
-    VkPipelineLayout water_compute_pipeline_layout;
 
     VkPipeline cube_pipeline;
     VkPipelineLayout cube_pipeline_layout; 
@@ -347,29 +307,6 @@ typedef struct VulkanState
     // models
     LoadedModel loaded_models[64];
     LoadedModel laser_cylinder_model; // TODO: probably index everything into loaded models; figure out what order i want to put stuff in, if can't just take their id
-
-    // uniform buffer for ray tracing
-    VkDescriptorSetLayout ubo_descriptor_set_layout;
-
-    VkBuffer water_aabb_buffer;
-    VkDeviceMemory water_aabb_memory;
-    void* water_aabb_mapped;
-    VkDescriptorSet water_aabb_descriptor_set;
-
-    // mesh handling for ray tracing
-    VkBuffer mesh_vertex_ssbo;
-    VkDeviceMemory mesh_vertex_ssbo_memory;
-    VkBuffer mesh_index_ssbo;
-    VkDeviceMemory mesh_index_ssbo_memory;
-    VkDescriptorSet mesh_vertex_descriptor_set;
-    VkDescriptorSet mesh_index_descriptor_set;
-    VkDescriptorSetLayout ssbo_descriptor_set_layout;
-
-    ModelMeshInfo mesh_info_table[64];
-
-    VkBuffer mesh_info_buffer;
-    VkDeviceMemory mesh_info_memory;
-    VkDescriptorSet mesh_info_descriptor_set;
 
     // OIT stuff
     VkBuffer oit_fragment_pool;
@@ -480,9 +417,6 @@ uint32 model_instance_count = 0;
 
 Water water_instances[8192];
 uint32 water_instance_count = 0;
-
-WaterAABB water_aabbs[16] = {0};
-uint32 water_aabb_count = 0;
 
 Cube cube_editor_outline_instances[1024];
 uint32 cube_editor_outline_instance_count = 0;
@@ -1293,171 +1227,6 @@ void loadAllEntities()
     vulkan_state.laser_cylinder_model = loadModel("data/assets/laser-cylinder.glb");
 }
 
-// only for entities that can be underwater
-void buildMeshSSBOs()
-{
-    // first pass: count total vertices and indices across all loaded models
-    uint32 total_vertices = 0;
-    uint32 total_indices = 0;
-    
-    for (uint32 model_index = 0; model_index < 64; model_index++)
-    {
-        if (vulkan_state.loaded_models[model_index].index_count == 0) continue;
-
-        vulkan_state.mesh_info_table[model_index].vertex_offset = total_vertices;
-        vulkan_state.mesh_info_table[model_index].index_offset = total_indices;
-        vulkan_state.mesh_info_table[model_index].index_count = vulkan_state.loaded_models[model_index].index_count;
-
-        // TODO: store vertex count in model instead of rederiving here
-        cgltf_data* data = vulkan_state.loaded_models[model_index].data;
-        if (!data) continue;
-
-        uint32 model_verts = 0;
-        uint32 model_indices = 0;
-        for (cgltf_size m = 0; m < data->meshes_count; m++)
-        {
-            for (cgltf_size p = 0; p < data->meshes[m].primitives_count; p++)
-            {
-                cgltf_primitive* prim = &data->meshes[m].primitives[p];
-                if (prim->attributes_count == 0 || !prim->indices) continue;
-                model_verts += (uint32)prim->attributes[0].data->count;
-                model_indices += (uint32)prim->indices->count;
-            }
-        }
-
-        total_vertices += model_verts;
-        total_indices += model_indices;
-    }
-
-    if (total_vertices == 0 || total_indices == 0) return;
-
-    // second pass: fill all combined arrays
-    Vertex* all_vertices = malloc(sizeof(Vertex) * total_vertices);
-    uint32* all_indices = malloc(sizeof(uint32) * total_indices);
-
-    uint32 vertex_cursor = 0;
-    uint32 index_cursor = 0;
-
-    for (uint32 model_index = 0; model_index < 64; model_index++)
-    {
-        cgltf_data* data = vulkan_state.loaded_models[model_index].data;
-        if (!data || vulkan_state.loaded_models[model_index].index_count == 0) continue;
-
-        for (cgltf_size mesh_index = 0; mesh_index < data->meshes_count; mesh_index++)
-        {
-            for (cgltf_size prim_index = 0; prim_index < data->meshes[mesh_index].primitives_count; prim_index++)
-            {
-                cgltf_primitive* prim = &data->meshes[mesh_index].primitives[prim_index];
-
-                cgltf_accessor* pos_acc = 0;
-                cgltf_accessor* normal_acc = 0;
-                cgltf_accessor* uv_acc = 0;
-
-                for (cgltf_size attribute_index = 0; attribute_index < prim->attributes_count; attribute_index++)
-                {
-                    if 		(prim->attributes[attribute_index].type == cgltf_attribute_type_position) pos_acc    = prim->attributes[attribute_index].data;
-                    else if (prim->attributes[attribute_index].type == cgltf_attribute_type_normal)   normal_acc = prim->attributes[attribute_index].data;
-                    else if (prim->attributes[attribute_index].type == cgltf_attribute_type_texcoord) uv_acc     = prim->attributes[attribute_index].data;
-                }
-                if (!pos_acc || !prim->indices) continue;
-
-                float base_color[4] = {1,1,1,1};
-                if (prim->material && prim->material->has_pbr_metallic_roughness)
-                {
-                    base_color[0] = prim->material->pbr_metallic_roughness.base_color_factor[0];
-                    base_color[1] = prim->material->pbr_metallic_roughness.base_color_factor[1];
-                    base_color[2] = prim->material->pbr_metallic_roughness.base_color_factor[2];
-                    base_color[3] = prim->material->pbr_metallic_roughness.base_color_factor[3];
-                }
-
-                uint32 prim_base_vertex = vertex_cursor;
-
-                for (cgltf_size v = 0; v < pos_acc->count; v++)
-                {
-                    Vertex* vertex = &all_vertices[vertex_cursor++];
-                    float pos[3] = {0};
-                    cgltf_accessor_read_float(pos_acc, v, pos, 3);
-                    vertex->x = pos[0]; vertex->y = pos[1]; vertex->z = pos[2];
-
-                    if (uv_acc) { float uv[2] = {0}; cgltf_accessor_read_float(uv_acc, v, uv, 2); vertex->u = uv[0]; vertex->v = uv[1]; }
-                    else { vertex->u = 0; vertex->v = 0; }
-
-                    if (normal_acc) { float n[3] = {0}; cgltf_accessor_read_float(normal_acc, v, n, 3); vertex->nx = n[0]; vertex->ny = n[1]; vertex->nz = n[2]; }
-                    else { vertex->nx = 0; vertex->ny = 1; vertex->nz = 0; }
-
-                    vertex->r = base_color[0]; vertex->g = base_color[1]; vertex->b = base_color[2];
-                }
-
-                for (cgltf_size idx = 0; idx < prim->indices->count; idx++)
-                {
-                    all_indices[index_cursor++] = (uint32)(cgltf_accessor_read_index(prim->indices, idx) + prim_base_vertex);
-                }
-            }
-        }
-    }
-
-    // upload data
-    uploadBufferToLocalDevice(all_vertices, sizeof(Vertex) * total_vertices, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, &vulkan_state.mesh_vertex_ssbo, &vulkan_state.mesh_vertex_ssbo_memory);
-    uploadBufferToLocalDevice(all_indices,  sizeof(uint32) * total_indices, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, &vulkan_state.mesh_index_ssbo, &vulkan_state.mesh_index_ssbo_memory);
-    uploadBufferToLocalDevice(vulkan_state.mesh_info_table, sizeof(ModelMeshInfo) * 64, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, &vulkan_state.mesh_info_buffer, &vulkan_state.mesh_info_memory);
-
-    free(all_vertices);
-    free(all_indices);
-
-    // allocate and update descriptor sets
-    VkDescriptorSetAllocateInfo ssbo_alloc = {0};
-    ssbo_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    ssbo_alloc.descriptorPool = vulkan_state.descriptor_pool;
-    ssbo_alloc.descriptorSetCount = 1;
-    ssbo_alloc.pSetLayouts = &vulkan_state.ssbo_descriptor_set_layout;
-
-    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &ssbo_alloc, &vulkan_state.mesh_vertex_descriptor_set);
-    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &ssbo_alloc, &vulkan_state.mesh_index_descriptor_set);
-    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &ssbo_alloc, &vulkan_state.mesh_info_descriptor_set);
-
-    VkDescriptorBufferInfo vert_buf = {0};
-    vert_buf.buffer = vulkan_state.mesh_vertex_ssbo;
-    vert_buf.offset = 0;
-    vert_buf.range = VK_WHOLE_SIZE;
-
-    VkDescriptorBufferInfo idx_buf = {0};
-    idx_buf.buffer = vulkan_state.mesh_index_ssbo;
-    idx_buf.offset = 0;
-    idx_buf.range = VK_WHOLE_SIZE;
-
-    VkDescriptorBufferInfo info_buf = {0};
-    info_buf.buffer = vulkan_state.mesh_info_buffer;
-    info_buf.offset = 0;
-    info_buf.range = VK_WHOLE_SIZE;
-
-    VkWriteDescriptorSet writes[3] = {0};
-
-    writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[0].dstSet = vulkan_state.mesh_vertex_descriptor_set;
-    writes[0].dstBinding = 0;
-    writes[0].descriptorCount = 1;
-    writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writes[0].pBufferInfo = &vert_buf;
-
-    writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[1].dstSet = vulkan_state.mesh_index_descriptor_set;
-    writes[1].dstBinding = 0;
-    writes[1].descriptorCount = 1;
-    writes[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writes[1].pBufferInfo = &idx_buf;
-
-    writes[2].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writes[2].dstSet = vulkan_state.mesh_info_descriptor_set;
-    writes[2].dstBinding = 0;
-    writes[2].descriptorCount = 1;
-    writes[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writes[2].pBufferInfo = &info_buf;
-
-    vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 3, writes, 0, 0);
-
-    LOG("built mesh SSBOs: %u total vertices, %u total indices\n", total_vertices, total_indices);
-}
-
 VkPipelineShaderStageCreateInfo loadShaderStage(char* path, VkShaderModule* module, VkShaderStageFlagBits stage_bit)
 {
     // load module
@@ -1703,94 +1472,6 @@ void createSwapchainResources(void)
         vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.scene_copy_image_view);
     }
 
-    // water raytracing output image
-    {
-        VkImageCreateInfo ci = {0};
-        ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        ci.imageType = VK_IMAGE_TYPE_2D;
-        ci.extent.width = vulkan_state.swapchain_extent.width;
-        ci.extent.height = vulkan_state.swapchain_extent.height;
-        ci.extent.depth = 1;
-        ci.mipLevels = 1;
-        ci.arrayLayers = 1;
-        ci.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-        ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-        ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        ci.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        ci.samples = VK_SAMPLE_COUNT_1_BIT;
-        ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        vkCreateImage(vulkan_state.logical_device_handle, &ci, 0, &vulkan_state.water_rt_image);
-
-        VkMemoryRequirements mem_req = {0};
-        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.water_rt_image, &mem_req);
-
-        VkMemoryAllocateInfo alloc = {0};
-        alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        alloc.allocationSize = mem_req.size;
-        alloc.memoryTypeIndex = findMemoryType(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-        vkAllocateMemory(vulkan_state.logical_device_handle, &alloc, 0, &vulkan_state.water_rt_memory);
-        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.water_rt_image, vulkan_state.water_rt_memory, 0);
-
-        VkImageViewCreateInfo view_ci = {0};
-        view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        view_ci.image = vulkan_state.water_rt_image;
-        view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view_ci.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-        view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        view_ci.subresourceRange.baseMipLevel = 0;
-        view_ci.subresourceRange.levelCount = 1;
-        view_ci.subresourceRange.baseArrayLayer = 0;
-        view_ci.subresourceRange.layerCount = 1;
-
-        vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.water_rt_view);
-    }
-
-    // water raytracing normal and depth image
-    {
-        VkImageCreateInfo ci = {0};
-        ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        ci.imageType = VK_IMAGE_TYPE_2D;
-        ci.extent.width = vulkan_state.swapchain_extent.width;
-        ci.extent.height = vulkan_state.swapchain_extent.height;
-        ci.extent.depth = 1;
-        ci.mipLevels = 1;
-        ci.arrayLayers = 1;
-        ci.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-        ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-        ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        ci.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        ci.samples = VK_SAMPLE_COUNT_1_BIT;
-        ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        vkCreateImage(vulkan_state.logical_device_handle, &ci, 0, &vulkan_state.water_rt_normal_depth_image);
-
-        VkMemoryRequirements mem_req = {0};
-        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.water_rt_normal_depth_image, &mem_req);
-
-        VkMemoryAllocateInfo alloc = {0};
-        alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        alloc.allocationSize = mem_req.size;
-        alloc.memoryTypeIndex = findMemoryType(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-        vkAllocateMemory(vulkan_state.logical_device_handle, &alloc, 0, &vulkan_state.water_rt_normal_depth_memory);
-        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.water_rt_normal_depth_image, vulkan_state.water_rt_normal_depth_memory, 0);
-
-        VkImageViewCreateInfo view_ci = {0};
-        view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        view_ci.image = vulkan_state.water_rt_normal_depth_image;
-        view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view_ci.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-        view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        view_ci.subresourceRange.baseMipLevel = 0;
-        view_ci.subresourceRange.levelCount = 1;
-        view_ci.subresourceRange.baseArrayLayer = 0;
-        view_ci.subresourceRange.layerCount = 1;
-
-        vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.water_rt_normal_depth_view);
-    }
-
     // OIT head pointer image
     {
         VkImageCreateInfo ci = {0};
@@ -1959,73 +1640,6 @@ void createSwapchainResources(void)
     wc_desc_write.pImageInfo = &wc_desc_info;
 
     vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &wc_desc_write, 0, 0); 
-
-    // TODO: naming here is abysmal 
-    {
-        VkDescriptorImageInfo image_info = {0};
-        image_info.imageView = vulkan_state.water_rt_view;
-        image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-        VkWriteDescriptorSet write = {0};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = vulkan_state.water_rt_storage_descriptor_set;
-        write.dstBinding = 0;
-        write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        write.pImageInfo = &image_info;
-
-        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
-    }
-
-    {
-        VkDescriptorImageInfo image_info = {0};
-        image_info.sampler = vulkan_state.pixel_art_sampler;
-        image_info.imageView = vulkan_state.water_rt_view;
-        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        VkWriteDescriptorSet write = {0};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = vulkan_state.water_rt_descriptor_set;
-        write.dstBinding = 0;
-        write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        write.pImageInfo = &image_info;
-
-        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
-    }
-
-    {
-        VkDescriptorImageInfo image_info = {0};
-        image_info.imageView = vulkan_state.water_rt_normal_depth_view;
-        image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-        VkWriteDescriptorSet write = {0};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = vulkan_state.water_rt_normal_depth_storage_descriptor_set;
-        write.dstBinding = 0;
-        write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        write.pImageInfo = &image_info;
-
-        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
-    }
-
-    {
-        VkDescriptorImageInfo image_info = {0};
-        image_info.sampler = vulkan_state.pixel_art_sampler;
-        image_info.imageView = vulkan_state.water_rt_normal_depth_view;
-        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
-        VkWriteDescriptorSet write = {0};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = vulkan_state.water_rt_normal_depth_descriptor_set;
-        write.dstBinding = 0;
-        write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        write.pImageInfo = &image_info;
-
-        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
-    }
 
     // OIT head image
     {
@@ -3038,35 +2652,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     vkCreateDescriptorSetLayout(vulkan_state.logical_device_handle, &descriptor_set_layout_creation_info, 0, &vulkan_state.descriptor_set_layout);
 
-    // UBO descriptor set layout for water AABB data
-    VkDescriptorSetLayoutBinding ubo_binding = {0};
-    ubo_binding.binding = 0;
-    ubo_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    ubo_binding.descriptorCount = 1;
-    ubo_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
-
-    VkDescriptorSetLayoutCreateInfo ubo_layout_ci = {0};
-    ubo_layout_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    ubo_layout_ci.bindingCount = 1;
-    ubo_layout_ci.pBindings = &ubo_binding;
-
-    vkCreateDescriptorSetLayout(vulkan_state.logical_device_handle, &ubo_layout_ci, 0, &vulkan_state.ubo_descriptor_set_layout);
-
-    // water rt layout
-    VkDescriptorSetLayoutBinding storage_image_binding = {0};
-    storage_image_binding.binding = 0;
-    storage_image_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    storage_image_binding.descriptorCount = 1;
-    storage_image_binding.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    VkDescriptorSetLayoutCreateInfo storage_image_layout_ci = {0};
-    storage_image_layout_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    storage_image_layout_ci.bindingCount = 1;
-    storage_image_layout_ci.pBindings = &storage_image_binding;
-
-    vkCreateDescriptorSetLayout(vulkan_state.logical_device_handle, &storage_image_layout_ci, 0, &vulkan_state.storage_image_descriptor_set_layout);
-
-    // ssbo layout
+    // ssbo layout TODO: comments / naming these 3 better
     VkDescriptorSetLayoutBinding ssbo_binding = {0};
     ssbo_binding.binding = 0;
     ssbo_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -3079,6 +2665,19 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     ssbo_layout_ci.pBindings = &ssbo_binding;
 
     vkCreateDescriptorSetLayout(vulkan_state.logical_device_handle, &ssbo_layout_ci, 0, &vulkan_state.ssbo_descriptor_set_layout);
+
+    VkDescriptorSetLayoutBinding storage_image_binding = {0};
+    storage_image_binding.binding = 0;
+    storage_image_binding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    storage_image_binding.descriptorCount = 1;
+    storage_image_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+    VkDescriptorSetLayoutCreateInfo storage_image_layout_ci = {0};
+    storage_image_layout_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    storage_image_layout_ci.bindingCount = 1;
+    storage_image_layout_ci.pBindings = &storage_image_binding;
+
+    vkCreateDescriptorSetLayout(vulkan_state.logical_device_handle, &storage_image_layout_ci, 0, &vulkan_state.storage_image_descriptor_set_layout);
 
     // descriptor pool allocates memory for all descriptor sets
     VkDescriptorPoolSize descriptor_pool_sizes[4] = {0};
@@ -3098,96 +2697,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     descriptor_pool_creation_info.maxSets = 1024;
 
     vkCreateDescriptorPool(vulkan_state.logical_device_handle, &descriptor_pool_creation_info, 0, &vulkan_state.descriptor_pool);
-
-    // create AABB UBO buffer
-    VkBufferCreateInfo aabb_buffer_ci = {0};
-    aabb_buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    aabb_buffer_ci.size = sizeof(WaterAABB) * 16 * 16; // 16 AABBs * 16 bytes for count
-    aabb_buffer_ci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    aabb_buffer_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    vkCreateBuffer(vulkan_state.logical_device_handle, &aabb_buffer_ci, 0, &vulkan_state.water_aabb_buffer);
-
-    VkMemoryRequirements aabb_memory_requirements = {0};
-    vkGetBufferMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.water_aabb_buffer, &aabb_memory_requirements);
-
-    VkMemoryAllocateInfo aabb_alloc = {0};
-    aabb_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    aabb_alloc.allocationSize = aabb_memory_requirements.size;
-    aabb_alloc.memoryTypeIndex = findMemoryType(aabb_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-    vkAllocateMemory(vulkan_state.logical_device_handle, &aabb_alloc, 0, &vulkan_state.water_aabb_memory);
-    vkBindBufferMemory(vulkan_state.logical_device_handle, vulkan_state.water_aabb_buffer, vulkan_state.water_aabb_memory, 0);
-    vkMapMemory(vulkan_state.logical_device_handle, vulkan_state.water_aabb_memory, 0, aabb_buffer_ci.size, 0, &vulkan_state.water_aabb_mapped);
-    
-    // allocate aabb descriptor set
-    VkDescriptorSetAllocateInfo aabb_descriptor_set_alloc = {0};
-    aabb_descriptor_set_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    aabb_descriptor_set_alloc.descriptorPool = vulkan_state.descriptor_pool;
-    aabb_descriptor_set_alloc.descriptorSetCount = 1;
-    aabb_descriptor_set_alloc.pSetLayouts = &vulkan_state.ubo_descriptor_set_layout;
-
-    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &aabb_descriptor_set_alloc, &vulkan_state.water_aabb_descriptor_set);
-
-    // point aabb descriptor at buffer (doesn't change on resize, so no point in having it in create swaphain resources)
-    VkDescriptorBufferInfo aabb_buf_info = {0};
-    aabb_buf_info.buffer = vulkan_state.water_aabb_buffer;
-    aabb_buf_info.offset = 0;
-    aabb_buf_info.range = VK_WHOLE_SIZE;
-
-    VkWriteDescriptorSet aabb_write = {0};
-    aabb_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    aabb_write.dstSet = vulkan_state.water_aabb_descriptor_set;
-    aabb_write.dstBinding = 0;
-    aabb_write.descriptorCount = 1;
-    aabb_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    aabb_write.pBufferInfo = &aabb_buf_info;
-
-    vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &aabb_write, 0, 0);
-
-    // TODO: need to name and organise stuff here
-
-	// storage image descriptor set (compute writes)
-    {
-        VkDescriptorSetAllocateInfo alloc_info = {0};
-        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        alloc_info.descriptorPool = vulkan_state.descriptor_pool;
-        alloc_info.descriptorSetCount = 1;
-        alloc_info.pSetLayouts = &vulkan_state.storage_image_descriptor_set_layout;
-
-        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.water_rt_storage_descriptor_set);
-    }
-
-    // sampled image descriptor set (fragment reads)
-    {
-        VkDescriptorSetAllocateInfo alloc_info = {0};
-        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        alloc_info.descriptorPool = vulkan_state.descriptor_pool;
-        alloc_info.descriptorSetCount = 1;
-        alloc_info.pSetLayouts = &vulkan_state.descriptor_set_layout;
-
-        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.water_rt_descriptor_set);
-    }
-
-    {
-        VkDescriptorSetAllocateInfo alloc_info = {0};
-        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        alloc_info.descriptorPool = vulkan_state.descriptor_pool;
-        alloc_info.descriptorSetCount = 1;
-        alloc_info.pSetLayouts = &vulkan_state.storage_image_descriptor_set_layout;
-
-        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.water_rt_normal_depth_storage_descriptor_set);
-    }
-
-    {
-        VkDescriptorSetAllocateInfo alloc_info = {0};
-        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        alloc_info.descriptorPool = vulkan_state.descriptor_pool;
-        alloc_info.descriptorSetCount = 1;
-        alloc_info.pSetLayouts = &vulkan_state.descriptor_set_layout;
-
-        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.water_rt_normal_depth_descriptor_set);
-    }
 
     VkDescriptorSetAllocateInfo depth_descriptor_set_alloc = {0};
     depth_descriptor_set_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -3241,35 +2750,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     }
 
 	createSwapchainResources();
-
-    // CREATE WATER COMPUTE PIPELINE
-
-    {
-        VkDescriptorSetLayout compute_set_layouts[8] = {
-            vulkan_state.storage_image_descriptor_set_layout,  // rt output
-            vulkan_state.descriptor_set_layout,                // depth
-            vulkan_state.descriptor_set_layout,                // underwater scene
-            vulkan_state.ubo_descriptor_set_layout,            // aabbs
-            vulkan_state.ssbo_descriptor_set_layout,		   // mesh vertices
-            vulkan_state.ssbo_descriptor_set_layout,		   // mesh indices
-            vulkan_state.ssbo_descriptor_set_layout,           // mesh info
-            vulkan_state.storage_image_descriptor_set_layout,  // rt output (normal + depth)
-        };
-
-        VkPushConstantRange push_constant_range = {0};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
-        push_constant_range.offset = 0;
-        push_constant_range.size = sizeof(WaterComputePushConstants);
-
-        VkPipelineLayoutCreateInfo layout_ci = {0};
-        layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layout_ci.setLayoutCount = 8;
-        layout_ci.pSetLayouts = compute_set_layouts;
-        layout_ci.pushConstantRangeCount = 1;
-        layout_ci.pPushConstantRanges = &push_constant_range;
-
-        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.water_compute_pipeline_layout);
-    }
 
 	// CREATE CUBE (INSTANCED) PIPELINE LAYOUT
 
@@ -3335,52 +2815,21 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         push_constant_range.offset = 0;
         push_constant_range.size = (uint32)sizeof(WaterPushConstants);
 
-        VkDescriptorSetLayout water_set_layouts[5] = 
+        VkDescriptorSetLayout water_set_layouts[3] = 
         { 
             vulkan_state.descriptor_set_layout,  	// atlas
             vulkan_state.descriptor_set_layout, 	// underwater scene copy
             vulkan_state.descriptor_set_layout,		// depth 
-            vulkan_state.descriptor_set_layout,     // rt result
-            vulkan_state.descriptor_set_layout,     // rt normal and depth
         };
 
         VkPipelineLayoutCreateInfo water_distortion_pipeline_layout_ci = {0};
         water_distortion_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        water_distortion_pipeline_layout_ci.setLayoutCount = 5;
+        water_distortion_pipeline_layout_ci.setLayoutCount = 3;
         water_distortion_pipeline_layout_ci.pSetLayouts = water_set_layouts;
         water_distortion_pipeline_layout_ci.pushConstantRangeCount = 1;
         water_distortion_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
 
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &water_distortion_pipeline_layout_ci, 0, &vulkan_state.water_distortion_pipeline_layout);
-    }
-
-    // CREATE PIPELINE FOR WATER COMPUTE SHADER
-
-    {
-        VkShaderModule compute_shader_module = {0};
-        void* bytes = 0;
-        size_t size = 0;
-        readEntireFile("data/shaders/spirv/water-raytrace.comp.spv", &bytes, &size);
-
-        VkShaderModuleCreateInfo module_ci = {0};
-        module_ci.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-        module_ci.codeSize = size;
-        module_ci.pCode = (uint32*)bytes;
-
-        vkCreateShaderModule(vulkan_state.logical_device_handle, &module_ci, 0, &compute_shader_module);
-        free(bytes);
-
-        VkComputePipelineCreateInfo pipeline_ci = {0};
-        pipeline_ci.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
-        pipeline_ci.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        pipeline_ci.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
-        pipeline_ci.stage.module = compute_shader_module;
-        pipeline_ci.stage.pName = "main";
-        pipeline_ci.layout = vulkan_state.water_compute_pipeline_layout;
-
-        vkCreateComputePipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &pipeline_ci, 0, &vulkan_state.water_compute_pipeline);
-
-        vkDestroyShaderModule(vulkan_state.logical_device_handle, compute_shader_module, 0);
     }
 
     // CREATE EDITOR OUTLINE PIPELINE LAYOUT
@@ -3790,8 +3239,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     createInstanceBuffer(&vulkan_state.water_instance_buffer, sizeof(WaterInstanceData) * WATER_INSTANCE_CAPACITY, &vulkan_state.water_instance_memory, &vulkan_state.water_instance_mapped);
 
     loadAllEntities();
-
-    buildMeshSSBOs();
 }
 
 void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, float global_time, Camera game_camera, ShaderMode shader_mode_from_game)
@@ -3811,8 +3258,6 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     cube_editor_outline_instance_count = 0;
     model_editor_outline_instance_count = 0;
     water_instance_count = 0;
-
-    water_aabb_count = 0;
 
     for (int asset_index = 0; asset_index < draw_command_count; asset_index++)
     {
@@ -3904,25 +3349,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
             cube->rotation    = command->rotation;
             cube->uv          = uv_rect;
         }
-
-        if (command->do_aabb)
-        {
-            if (water_aabb_count < 15)
-            {
-                // assumes everything that canBeUnderwater is 1x1 tile; so generate AABB +-0.5 from coords
-                WaterAABB* aabb = &water_aabbs[water_aabb_count];
-                aabb->min = (Vec3){ command->coords.x - 0.5f, command->coords.y - 0.5f, command->coords.z - 0.5f }; 
-                aabb->max = (Vec3){ command->coords.x + 0.5f, command->coords.y + 0.5f, command->coords.z + 0.5f };
-                aabb->model_id = (float)(command->sprite_id - MODEL_3D_VOID);
-                water_aabb_count++;
-            }
-        }
     }
-
-    // upload AABB buffer to UBO
-    uint32 aabb_count_padded[4] = { water_aabb_count, 0, 0, 0 };
-    memcpy(vulkan_state.water_aabb_mapped, aabb_count_padded, 16);
-    memcpy((uint8*)vulkan_state.water_aabb_mapped + 16, water_aabbs, sizeof(WaterAABB) * water_aabb_count);
 
     // fill cube instance buffer
     CubeInstanceData* cube_gpu_instances = (CubeInstanceData*)vulkan_state.cube_instance_mapped;
@@ -3956,13 +3383,6 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     water_flush_range.offset = 0;
     water_flush_range.size = VK_WHOLE_SIZE;
     vkFlushMappedMemoryRanges(vulkan_state.logical_device_handle, 1, &water_flush_range);
-
-    VkMappedMemoryRange aabb_flush_range = {0};
-    aabb_flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    aabb_flush_range.memory = vulkan_state.water_aabb_memory;
-    aabb_flush_range.offset = 0;
-    aabb_flush_range.size = VK_WHOLE_SIZE;
-    vkFlushMappedMemoryRanges(vulkan_state.logical_device_handle, 1, &aabb_flush_range);
 
     // handle water y level
     if (water_instance_count > 0)
@@ -4069,7 +3489,7 @@ void vulkanDraw(void)
     render_pass_begin_info.clearValueCount = 3;
     render_pass_begin_info.pClearValues = clear_values;
 
-    // UNDERWATER SCENE PASS (unused right now, because solid color fallback on ray miss)
+    // UNDERWATER SCENE PASS
 
     if (water_instance_count > 0)
     {
@@ -4167,94 +3587,6 @@ void vulkanDraw(void)
             copy_to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
             vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0, 1, &copy_to_read);
-        }
-
-        // WATER RAYTRACE COMPUTE PASS
-
-        {
-            VkImageMemoryBarrier rt_barriers[2] = {0};
-
-            rt_barriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            rt_barriers[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            rt_barriers[0].newLayout = VK_IMAGE_LAYOUT_GENERAL;
-            rt_barriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            rt_barriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            rt_barriers[0].image = vulkan_state.water_rt_image;
-            rt_barriers[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            rt_barriers[0].subresourceRange.baseMipLevel = 0;
-            rt_barriers[0].subresourceRange.levelCount = 1;
-            rt_barriers[0].subresourceRange.baseArrayLayer = 0;
-            rt_barriers[0].subresourceRange.layerCount = 1;
-            rt_barriers[0].srcAccessMask = 0;
-            rt_barriers[0].dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-
-            rt_barriers[1] = rt_barriers[0];
-            rt_barriers[1].image = vulkan_state.water_rt_normal_depth_image;
-
-            vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0, 2, rt_barriers);
-
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.water_compute_pipeline);
-
-            VkDescriptorSet compute_sets[8] = 
-            {
-                vulkan_state.water_rt_storage_descriptor_set,
-                vulkan_state.depth_descriptor_set,
-                vulkan_state.scene_copy_descriptor_set,
-                vulkan_state.water_aabb_descriptor_set,
-                vulkan_state.mesh_vertex_descriptor_set,
-                vulkan_state.mesh_index_descriptor_set,
-                vulkan_state.mesh_info_descriptor_set,
-                vulkan_state.water_rt_normal_depth_storage_descriptor_set
-            };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.water_compute_pipeline_layout, 0, 8, compute_sets, 0, 0);
-
-            WaterComputePushConstants compute_pc = {0};
-            memcpy(compute_pc.view, view_matrix, sizeof(compute_pc.view));
-            memcpy(compute_pc.proj, projection_matrix, sizeof(compute_pc.proj));
-
-            float view_proj[16];
-            mat4Multiply(view_proj, projection_matrix, view_matrix);
-            mat4Inverse(compute_pc.inv_view_proj, view_proj);
-
-            compute_pc.cam_x = vulkan_camera.coords.x;
-            compute_pc.cam_y = vulkan_camera.coords.y;
-            compute_pc.cam_z = vulkan_camera.coords.z;
-            compute_pc.time = water_time;
-            compute_pc.screen_width = (float)vulkan_state.swapchain_extent.width;
-            compute_pc.screen_height = (float)vulkan_state.swapchain_extent.height;
-            compute_pc.water_plane_y = vulkan_state.water_plane_y;
-            compute_pc.viewport_x = viewport_x;
-            compute_pc.viewport_y = viewport_y;
-            compute_pc.viewport_width = viewport_width;
-            compute_pc.viewport_height = viewport_height;
-
-            vkCmdPushConstants(command_buffer, vulkan_state.water_compute_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(WaterComputePushConstants), &compute_pc);
-
-            uint32 group_x = (vulkan_state.swapchain_extent.width + 7) / 8;
-            uint32 group_y = (vulkan_state.swapchain_extent.height + 7) / 8;
-            vkCmdDispatch(command_buffer, group_x, group_y, 1);
-
-            // transition rt images for fragment shader reading
-            VkImageMemoryBarrier rt_to_read[2] = {0};
-
-            rt_to_read[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            rt_to_read[0].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-            rt_to_read[0].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            rt_to_read[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            rt_to_read[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            rt_to_read[0].image = vulkan_state.water_rt_image;
-            rt_to_read[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            rt_to_read[0].subresourceRange.baseMipLevel = 0;
-            rt_to_read[0].subresourceRange.levelCount = 1;
-            rt_to_read[0].subresourceRange.baseArrayLayer = 0;
-            rt_to_read[0].subresourceRange.layerCount = 1;
-            rt_to_read[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            rt_to_read[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-            rt_to_read[1] = rt_to_read[0];
-            rt_to_read[1].image = vulkan_state.water_rt_normal_depth_image;
-
-            vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 2, rt_to_read);
         }
     }
 
@@ -4406,14 +3738,12 @@ void vulkanDraw(void)
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline);
 
-            VkDescriptorSet water_sets[5] = {
+            VkDescriptorSet water_sets[3] = {
                 vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index],
                 vulkan_state.scene_copy_descriptor_set,
                 vulkan_state.depth_descriptor_set,
-                vulkan_state.water_rt_descriptor_set,
-                vulkan_state.water_rt_normal_depth_descriptor_set
             };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline_layout, 0, 5, water_sets, 0, 0);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline_layout, 0, 3, water_sets, 0, 0);
 
             VkBuffer water_buffers[2] = { water_data->vertex_buffer, vulkan_state.water_instance_buffer };
             VkDeviceSize water_offsets[2] = { 0, 0 };
@@ -4424,12 +3754,9 @@ void vulkanDraw(void)
             memcpy(water_pc.view, view_matrix, sizeof(water_pc.view));
             memcpy(water_pc.proj, projection_matrix, sizeof(water_pc.proj));
             water_pc.time = water_time;
-            water_pc.debug_mode = (shader_mode == OUTLINE_TEST) ? 1.0f : 0.0f;
             water_pc.cam_x = vulkan_camera.coords.x;
             water_pc.cam_y = vulkan_camera.coords.y;
             water_pc.cam_z = vulkan_camera.coords.z;
-            water_pc.depth_threshold = depth_threshold;
-            water_pc.normal_threshold = normal_threshold;
 
             vkCmdPushConstants(command_buffer, vulkan_state.water_distortion_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &water_pc);
 
@@ -4815,15 +4142,6 @@ void vulkanResize(uint32 width, uint32 height)
     vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.scene_copy_image, 0);
     vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.scene_copy_image_memory, 0);
 	
-    // destroy rt stuff
-    vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.water_rt_view, 0);
-    vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.water_rt_image, 0);
-    vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.water_rt_memory, 0);
-
-    vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.water_rt_normal_depth_view, 0);
-    vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.water_rt_normal_depth_image, 0);
-    vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.water_rt_normal_depth_memory, 0);
-
     // destroy OIT resources
     vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.oit_head_view, 0);
     vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.oit_head_image, 0);

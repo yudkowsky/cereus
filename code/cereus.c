@@ -1409,7 +1409,7 @@ SpriteId getModelId(TileType tile)
     }
 }
 
-void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation, Vec4 color, bool do_aabb, Vec4 start_clip_plane, Vec4 end_clip_plane)
+void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotation, Vec4 color, Vec4 start_clip_plane, Vec4 end_clip_plane)
 {
     if (id < 0) return;
     DrawCommand* command = &draw_commands[draw_command_count++];
@@ -1419,7 +1419,6 @@ void drawAsset(SpriteId id, AssetType type, Vec3 coords, Vec3 scale, Vec4 rotati
     command->scale = scale;
     command->rotation = rotation;
     command->color = color;
-    command->do_aabb = do_aabb;
     command->start_clip_plane = start_clip_plane;
     command->end_clip_plane = end_clip_plane;
 }
@@ -1445,7 +1444,7 @@ void drawText(char* string, Vec2 coords, float scale, float alpha)
         Vec3 draw_coords = { pen_x, pen_y, 0};
         Vec3 draw_scale = { scale * aspect, scale, 1};
         Vec4 color = { 0.0f, 0.0f, 0.0f, alpha };
-        drawAsset(id, SPRITE_2D, draw_coords, draw_scale, IDENTITY_QUATERNION, color, false, VEC4_0, VEC4_0);
+        drawAsset(id, SPRITE_2D, draw_coords, draw_scale, IDENTITY_QUATERNION, color, VEC4_0, VEC4_0);
         pen_x += scale * aspect;
     }
 }
@@ -4384,7 +4383,7 @@ bool gameFrame(double delta_time, Input* input)
             }
         }
 
-        // update overworld player coords for camera offset if player not removed. if player is removed, these coords persist, so that camera doesn't jump wildly when changing player pos in editor
+        // update overworld player coords for camera offset if player not removed
         if (in_overworld)
         {
             if (!player->removed) ow_player_coords_for_offset = player->coords;
@@ -4448,50 +4447,81 @@ bool gameFrame(double delta_time, Input* input)
             // display level name
             createDebugText(world_state.level_name);
 
+            /*
             // game progress info
             char game_text[256] = {0};
             snprintf(game_text, sizeof(game_text), "game progress: %d", game_progress);
             createDebugText(game_text);
+            */
 
             // player info
             char player_text[256] = {0};
-            snprintf(player_text, sizeof(player_text), "player info: coords: %i, %i, %i, pos norm: %f, %f, %f, velocity: %f, %f, %f", player->coords.x, player->coords.y, player->coords.z, player->position.x, player->position.y, player->position.z, player->velocity.x, player->velocity.y, player->velocity.z);
+            snprintf(player_text, sizeof(player_text), "player info: coords: %i, %i, %i, pos norm: %.1f, %.1f, %.1f, velocity: %.1f, %.1f, %.1f", player->coords.x, player->coords.y, player->coords.z, player->position.x, player->position.y, player->position.z, player->velocity.x, player->velocity.y, player->velocity.z);
             createDebugText(player_text);
+            
+            // pack info
+            char pack_text[256] = {0};
+            snprintf(pack_text, sizeof(pack_text), "pack info: coords: %i, %i, %i, pos norm: %.1f, %.1f, %.1f, velocity: %.1f, %.1f, %.1f", pack->coords.x, pack->coords.y, pack->coords.z, pack->position.x, pack->position.y, pack->position.z, pack->velocity.x, pack->velocity.y, pack->velocity.z);
+            createDebugText(pack_text);
 
             // mirror info
+            /*
             char mirror_text[256] = {0};
             Entity m = world_state.mirrors[0];
             snprintf(mirror_text, sizeof(mirror_text), "mirror: coords: %i, %i, %i; direction: %i; orientation: %i", m.coords.x, m.coords.y, m.coords.z, m.direction, m.mirror_orientation);
             createDebugText(mirror_text);
+            */
 
             // entities tied to player movement
-            char tied_info[256] = {0};
+            char tied_text[256] = {0};
             TiedEntity te_1 = temp_state.entities_tied_to_movement[0];
             TiedEntity te_2 = temp_state.entities_tied_to_movement[1];
-            snprintf(tied_info, sizeof(tied_info), "tied entity 1: id: %i, dir: %i, on_head: %i, tied entity 2: id: %i, dir: %i, on_head: %i", te_1.id, te_1.direction, te_1.on_head, te_2.id, te_2.direction, te_2.on_head);
-            createDebugText(tied_info);
+            snprintf(tied_text, sizeof(tied_text), "tied entity 1: id: %i, dir: %i, on_head: %i, tied entity 2: id: %i, dir: %i, on_head: %i", te_1.id, te_1.direction, te_1.on_head, te_2.id, te_2.direction, te_2.on_head);
+            createDebugText(tied_text);
 
+            char tied_count_text[256] = {0};
+            int32 tied_entity_count = 0;
+            FOR(te_index, MAX_ENTITIES_TIED_TO_MOVEMENT) if (temp_state.entities_tied_to_movement[te_index].id != 0) tied_entity_count++;
+            snprintf(tied_count_text, sizeof(tied_count_text), "tied_entity_count: %i", tied_entity_count);
+            createDebugText(tied_count_text);
+
+            // pack attached
+            char attached_text[256] = {0};
+            snprintf(attached_text, sizeof(attached_text), "pack attached: %i", temp_state.pack_attached);
+            createDebugText(attached_text);
+
+            // TODO: step through physics
+            /*
+            // timer info
             char timer_info[256] = {0};
             snprintf(timer_info, sizeof(timer_info), "meta: %i, undo/restart: %i", time_until_allow_meta_input, time_until_allow_undo_or_restart_input);
             createDebugText(timer_info);
+            */
 
-            // show current selected id + coords
-            char edit_text[256] = {0};
-            snprintf(edit_text, sizeof(edit_text), "selected id: %d", editor_state.selected_id);
-            createDebugText(edit_text);
+            /*
+            // show undo deltas in buffer
+            char undo_buffer_text[256] = {0};
+            snprintf(undo_buffer_text, sizeof(undo_buffer_text), "undo deltas in buffer: %d", undo_buffer.delta_count);
+            createDebugText(undo_buffer_text);
+            */
 
+            /*
+            // trailing hitbox info // TODO: so what's going on here? did this old issue ever get figured out?
             char th_text[256] = {0};
             int32 th_count = 0;
             FOR(th_index, MAX_TRAILING_HITBOX_COUNT) if (temp_state.trailing_hitboxes[th_index].id != 0) th_count++;
             TrailingHitbox th1 = temp_state.trailing_hitboxes[0];
             TrailingHitbox th2 = temp_state.trailing_hitboxes[1];
             TrailingHitbox th3 = temp_state.trailing_hitboxes[2];
-            snprintf(th_text, sizeof(th_text), "1: %d %d %d; 2: %d %d %d; 3: %d %d %d; count: %i", th1.type, th1.id, th1.frames, th2.type, th2.id, th2.frames, th3.type, th3.id, th3.frames, th_count);
+            snprintf(th_text, sizeof(th_text), "trailing hitboxes: 1: %d %d %d; 2: %d %d %d; 3: %d %d %d; count: %i", th1.type, th1.id, th1.frames, th2.type, th2.id, th2.frames, th3.type, th3.id, th3.frames, th_count);
             createDebugText(th_text);
+            */
 
+            /*
             char climb_text[256] = {0};
             snprintf(climb_text, sizeof(climb_text), "climbing direction: %i", temp_state.climbing_direction);
             createDebugText(climb_text);
+            /*
 
             /*
             // debug lasers
@@ -4504,11 +4534,6 @@ bool gameFrame(double delta_time, Input* input)
                 if (do_debug_text) createDebugText(lb_text);
             }
             */
-
-            // show undo deltas in buffer
-            char undo_buffer_text[256] = {0};
-            snprintf(undo_buffer_text, sizeof(undo_buffer_text), "undo deltas in buffer: %d", undo_buffer.delta_count);
-            createDebugText(undo_buffer_text);
 
             // draw selected id info
             if (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE)
@@ -4720,7 +4745,7 @@ bool gameFrame(double delta_time, Input* input)
             float alpha = 1.0f;
             Vec4 color_with_alpha = { color_without_alpha.x, color_without_alpha.y, color_without_alpha.z, alpha };
 
-            drawAsset(0, LASER, center, scale, rotation, color_with_alpha, false, lb.start_clip_plane, lb.end_clip_plane); // the model doesnt matter
+            drawAsset(0, LASER, center, scale, rotation, color_with_alpha, lb.start_clip_plane, lb.end_clip_plane); // the model doesnt matter
         }
 
         // draw most things (not player or pack) TODO: after models can include pack here because can be DEFAULT_SCALE. after actual shaders for the color of the player can also include player here
@@ -4733,12 +4758,6 @@ bool gameFrame(double delta_time, Input* input)
                 Entity* e = getEntityAtCoords(bufferIndexToCoords(tile_index));
                 if (e) // TODO: guard is here while i translate over some levels, since i offset all of the enums, but the level files are still the same
                 {
-                    bool do_aabb = false;
-                    if (canBeUnderwater(draw_tile) && e->position.y < 2.0f)
-                    {
-                        do_aabb = true;
-                    }
-
                     if (e->locked) draw_tile = LOCKED_BLOCK;
                     if (draw_tile == WIN_BLOCK)
                     {
@@ -4748,11 +4767,11 @@ bool gameFrame(double delta_time, Input* input)
 
                     if (game_shader_mode == OLD)
                     {
-                        drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position, DEFAULT_SCALE, e->rotation, VEC4_0, do_aabb, VEC4_0, VEC4_0); 
+                        drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position, DEFAULT_SCALE, e->rotation, VEC4_0, VEC4_0, VEC4_0); 
                     }
                     else
                     {
-                        drawAsset(getModelId(draw_tile), MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, VEC4_0, do_aabb, VEC4_0, VEC4_0);
+                        drawAsset(getModelId(draw_tile), MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, VEC4_0, VEC4_0, VEC4_0);
                     }
                 }
             }
@@ -4760,28 +4779,23 @@ bool gameFrame(double delta_time, Input* input)
             {
                 if (game_shader_mode != OLD && getCube3DId(draw_tile) == CUBE_3D_WATER) 
                 {
-                    drawAsset(MODEL_3D_WATER, WATER_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), VEC4_0, false, VEC4_0, VEC4_0);
+                    drawAsset(MODEL_3D_WATER, WATER_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), VEC4_0, VEC4_0, VEC4_0);
                 }
-                drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), VEC4_0, false, VEC4_0, VEC4_0);
+                drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), VEC4_0, VEC4_0, VEC4_0);
             }
         }
 
         if (!world_state.player.removed)
         {
-            bool do_player_aabb = false;
-            if (player->position.y < 2.0f) do_player_aabb = true;
-
             // TODO: this is terrible (fix with shaders)
-            if (temp_state.player_hit_by_red && temp_state.player_hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
-            else if (temp_state.player_hit_by_red)                             drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
-            else if (temp_state.player_hit_by_blue)                            drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
-            else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, do_player_aabb, VEC4_0, VEC4_0);
+            if (temp_state.player_hit_by_red && temp_state.player_hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, VEC4_0, VEC4_0);
+            else if (temp_state.player_hit_by_red)                             drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, VEC4_0, VEC4_0);
+            else if (temp_state.player_hit_by_blue)                            drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, VEC4_0, VEC4_0);
+            else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, VEC4_0, VEC4_0);
         }
         if (!world_state.pack.removed) 
         {
-            bool do_pack_aabb = false;
-            if (player->position.y < 2.0f) do_pack_aabb = true;
-            drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position, PLAYER_SCALE, world_state.pack.rotation, VEC4_0, do_pack_aabb, VEC4_0, VEC4_0);
+            drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position, PLAYER_SCALE, world_state.pack.rotation, VEC4_0, VEC4_0, VEC4_0);
         }
 
         // draw camera boundary lines
@@ -4815,8 +4829,8 @@ bool gameFrame(double delta_time, Input* input)
                         x_draw_coords = vec3Add(x_draw_coords, outline_offset);
                         z_draw_coords = vec3Add(z_draw_coords, outline_offset);
 
-                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, VEC4_0, false, VEC4_0, VEC4_0);
-                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, VEC4_0, false, VEC4_0, VEC4_0);
+                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, VEC4_0, VEC4_0, VEC4_0);
+                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, VEC4_0, VEC4_0, VEC4_0);
                         x_draw_offset += OVERWORLD_SCREEN_SIZE_X;
                     }
                     x_draw_offset = 0;
@@ -4832,10 +4846,10 @@ bool gameFrame(double delta_time, Input* input)
                 Vec3 z_draw_coords_far  = (Vec3){ (float)level_dim.x / 2.0f, (float)level_dim.y / 2.0f, (float)level_dim.z + 0.5f };
                 Vec3 x_draw_scale = (Vec3){ 0,                         (float)level_dim.y, (float)level_dim.z + 1.0f };
                 Vec3 z_draw_scale = (Vec3){ (float)level_dim.x + 1.0f, (float)level_dim.y, 0 };
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_near, x_draw_scale, IDENTITY_QUATERNION, VEC4_0, false, VEC4_0, VEC4_0);
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_near, z_draw_scale, IDENTITY_QUATERNION, VEC4_0, false, VEC4_0, VEC4_0);
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_far,  x_draw_scale, IDENTITY_QUATERNION, VEC4_0, false, VEC4_0, VEC4_0);
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_far,  z_draw_scale, IDENTITY_QUATERNION, VEC4_0, false, VEC4_0, VEC4_0);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_near, x_draw_scale, IDENTITY_QUATERNION, VEC4_0, VEC4_0, VEC4_0);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_near, z_draw_scale, IDENTITY_QUATERNION, VEC4_0, VEC4_0, VEC4_0);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_far,  x_draw_scale, IDENTITY_QUATERNION, VEC4_0, VEC4_0, VEC4_0);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_far,  z_draw_scale, IDENTITY_QUATERNION, VEC4_0, VEC4_0, VEC4_0);
             }
         }
 
@@ -4846,7 +4860,7 @@ bool gameFrame(double delta_time, Input* input)
             {
                 TrailingHitbox th = temp_state.trailing_hitboxes[th_index];
                 if (th.frames == 0) continue;
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC4_0, false, VEC4_0, VEC4_0);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC4_0, VEC4_0, VEC4_0);
             }
         }
     }
@@ -4863,12 +4877,12 @@ bool gameFrame(double delta_time, Input* input)
             // crosshair
             Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
             Vec3 center_screen = { ((float)game_display.client_width / 2), ((float)game_display.client_height / 2), 0.0f };
-            drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, color_with_alpha, false, VEC4_0, VEC4_0);
+            drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, color_with_alpha, VEC4_0, VEC4_0);
 
             // picked block
             Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
             Vec3 picked_block_coords = { game_display.client_width - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
-            drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, color_with_alpha, false, VEC4_0, VEC4_0);
+            drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, color_with_alpha, VEC4_0, VEC4_0);
 
             if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
             {
@@ -4876,7 +4890,7 @@ bool gameFrame(double delta_time, Input* input)
                 if (game_shader_mode != OLD) selected_id = getModelId(getTileTypeFromId(editor_state.selected_id));
                 Entity* selected_e = 0;
                 if (editor_state.selected_id > 0) selected_e = getEntityFromId(editor_state.selected_id);
-                if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position, DEFAULT_SCALE, selected_e->rotation, VEC4_0, false, VEC4_0, VEC4_0);
+                if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position, DEFAULT_SCALE, selected_e->rotation, VEC4_0, VEC4_0, VEC4_0);
             }
         }
 
