@@ -10,7 +10,8 @@ layout(set = 0, binding = 0) uniform sampler2D atlas_texture;
 layout(set = 1, binding = 0) uniform sampler2D underwater_texture;
 layout(set = 2, binding = 0) uniform sampler2D depth_texture;
 
-layout(push_constant) uniform PushConstants {
+layout(push_constant) uniform PushConstants 
+{
     mat4 view;
     mat4 proj;
     float time;
@@ -18,17 +19,20 @@ layout(push_constant) uniform PushConstants {
     vec3 cam_pos;
     float depth_threshold;
     float normal_threshold;
-} pc;
+}
+pc;
 
 const float z_near = 1.0;
 const float z_far = 300.0;
 const vec3 water_tint = vec3(0.00, 0.01, 0.04);
 
-float linearize_depth(float d) {
+float linearize_depth(float d) 
+{
     return z_near * z_far / (z_far - d * (z_far - z_near));
 }
 
-void main() {
+void main() 
+{
     vec3 N = normalize(frag_normal);
     vec2 texture_size = vec2(textureSize(depth_texture, 0));
     vec2 screen_uv = gl_FragCoord.xy / texture_size;
@@ -49,7 +53,8 @@ void main() {
 
     // reject refracted sample if it sampled something above water (would be wrong)
     float refracted_scene_depth = linearize_depth(texture(depth_texture, refracted_uv).r);
-    if (refracted_scene_depth < water_surface_depth) {
+    if (refracted_scene_depth < water_surface_depth) 
+    {
         refracted_uv = screen_uv;
     }
 

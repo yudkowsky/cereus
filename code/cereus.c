@@ -3984,7 +3984,7 @@ bool gameFrame(double delta_time, Input* input)
 
             if (allow_input && (input->keys_held & KEY_W || input->keys_held & KEY_A || input->keys_held & KEY_S || input->keys_held & KEY_D))
             {
-                Direction input_direction = 0;
+                Direction input_direction = NO_DIRECTION;
                 if      (input->keys_held & KEY_W) input_direction = NORTH; 
                 else if (input->keys_held & KEY_A) input_direction = WEST; 
                 else if (input->keys_held & KEY_S) input_direction = SOUTH; 
@@ -4006,6 +4006,9 @@ bool gameFrame(double delta_time, Input* input)
 
                     // disallow movement if also moving in some other direction currently - probably just guards against moving while falling
                     if (!vec3IsZero(vec3SetComponentAlongDirection(input_direction, player->velocity, 0))) allow_movement = false;
+
+                    // disallow movement forward if climbing UP. likely doesn't actually matter, would just be walking into a ladder
+                    if (temp_state.climbing_direction == UP) allow_movement = false;
 
                     if (allow_movement)
                     {
@@ -4133,6 +4136,7 @@ bool gameFrame(double delta_time, Input* input)
                     // TURN MOVEMENT
                     bool allow_turn = true;
                     if (player->falling) allow_turn = false;
+                    if (temp_state.climbing_direction != NO_DIRECTION) allow_turn = false;
 
                     // get difference in position along axis of travel, and gate on some threshold to target
                     float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, intCoordsToNorm(player->coords)));
@@ -4202,7 +4206,6 @@ bool gameFrame(double delta_time, Input* input)
                         bool do_push = false;
                         bool allow_down_climb = false;
 
-                        // TODO: condense these branches using Int3 pushing_coords or something
                         Int3 pushing_coords = INT3_0;
                         if (temp_state.pack_attached) pushing_coords = next_pack_coords;
                         else pushing_coords = next_player_coords;
@@ -4284,7 +4287,8 @@ bool gameFrame(double delta_time, Input* input)
                             saved_overworld_camera_mode = MAIN_WAITING;
                         }
                     }
-                    // TODO(anims): zero animations of player and pack. probably should clear all animations, period?
+
+                    zeroAnimations();
                     levelChangePrep(wb->next_level);
                     gameInitializeState(wb->next_level);
                     time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
@@ -4363,9 +4367,6 @@ bool gameFrame(double delta_time, Input* input)
 
         // decrement allow movement timer, if movement should be disabled for a few frames
         if (temp_state.allow_movement_timer > 0) temp_state.allow_movement_timer--;
-
-        // TODO: disallow any input when climbing direction isn't no dir. probably want to do something like this that's a bit more intelligent. also probably want to be able to change climbing direction sometimes
-        if (temp_state.climbing_direction != NO_DIRECTION) temp_state.allow_movement_timer = 1;
 
         // all mirrors with direction >=UP are moved to the next orientation with direction NORTH.
         FOR(mirror_index, MAX_ENTITY_INSTANCE_COUNT)
