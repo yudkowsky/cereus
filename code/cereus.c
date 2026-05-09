@@ -3240,8 +3240,7 @@ void doPhysicsTick()
             }
         }
     }
-
-    if (temp_state.climbing_direction == DOWN)
+    else if (temp_state.climbing_direction == DOWN)
     {
         float y_coord_difference = -getComponentAlongDirection(UP, vec3Subtract(intCoordsToNorm(player->coords), player->position));
         if (y_coord_difference > CLIMBING_SPEED)
@@ -3322,7 +3321,8 @@ void doPhysicsTick()
                 float remaining_distance = sign * difference_in_position_along_direction;
                 float stopping_distance = oneDimensionalDecelerationSimulation(current_speed, PLAYER_MAX_DECELERATION);
                 float distance_error = remaining_distance - stopping_distance;
-                int32 frames_to_stop = (int32)ceilf(current_speed / PLAYER_MAX_DECELERATION);
+                int32 frames_to_stop = (int32)(ceilf(current_speed / PLAYER_MAX_DECELERATION));
+                if (frames_to_stop < 1) frames_to_stop = 1;
                 float movement_adjustment = distance_error / (float)frames_to_stop;
 
                 float decelerated_speed = current_speed - PLAYER_MAX_DECELERATION;
@@ -4313,6 +4313,9 @@ bool gameFrame(double delta_time, Input* input)
 
                             createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
                             moveEntityInBufferAndState(player, next_player_coords, player->direction);
+
+                            // set velocity to 0 for sharper movement
+                            player->velocity = VEC3_0;
                         }
                     }
                 }
@@ -4542,12 +4545,12 @@ bool gameFrame(double delta_time, Input* input)
 
             // player info
             char player_text[256] = {0};
-            snprintf(player_text, sizeof(player_text), "player info: coords: %i, %i, %i, pos norm: %.1f, %.1f, %.1f, velocity: %.1f, %.1f, %.1f", player->coords.x, player->coords.y, player->coords.z, player->position.x, player->position.y, player->position.z, player->velocity.x, player->velocity.y, player->velocity.z);
+            snprintf(player_text, sizeof(player_text), "player info: coords: %i, %i, %i, pos norm: %.2f, %.2f, %.2f, velocity: %.2f, %.2f, %.2f", player->coords.x, player->coords.y, player->coords.z, player->position.x, player->position.y, player->position.z, player->velocity.x, player->velocity.y, player->velocity.z);
             createDebugText(player_text);
             
             // pack info
             char pack_text[256] = {0};
-            snprintf(pack_text, sizeof(pack_text), "pack info: coords: %i, %i, %i, pos norm: %.1f, %.1f, %.1f, velocity: %.1f, %.1f, %.1f", pack->coords.x, pack->coords.y, pack->coords.z, pack->position.x, pack->position.y, pack->position.z, pack->velocity.x, pack->velocity.y, pack->velocity.z);
+            snprintf(pack_text, sizeof(pack_text), "pack info: coords: %i, %i, %i, pos norm: %.2f, %.2f, %.2f, velocity: %.2f, %.2f, %.2f", pack->coords.x, pack->coords.y, pack->coords.z, pack->position.x, pack->position.y, pack->position.z, pack->velocity.x, pack->velocity.y, pack->velocity.z);
             createDebugText(pack_text);
 
             // mirror info
