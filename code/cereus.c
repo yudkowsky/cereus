@@ -2262,7 +2262,6 @@ void setFalling(Entity* e)
     FOR(stack_fall_index, stack_size)
     {
         Entity* e_in_stack = getEntityAtCoords(current_start_coords);
-        if (e_in_stack->removed) return; // if any entities in the stack are removed, don't do the fall
 
         // two checks which have to do with breaking a stack so that everything below a point falls, but not above a certain point
         if (e_in_stack->id == PACK_ID && temp_state.pack_attached && stack_fall_index != 0) break; // if e is pack, and pack_attached, and this isn't the entity on which the function was called, break fall here
@@ -2967,142 +2966,7 @@ void doPhysicsTick()
     }
     if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0) temp_state.pack_turn_state.pack_intermediate_states_timer--;
 
-    updatePackDetached();
-
-    // climb logic
-    if (temp_state.climbing_direction == UP)
-    {
-        float y_coord_difference = getComponentAlongDirection(UP, vec3Subtract(intCoordsToNorm(player->coords), player->position));
-
-        if (y_coord_difference > CLIMBING_SPEED)
-        {
-            // just keep climbing, already commited to this movement.
-            player->position.y += CLIMBING_SPEED;
-            player->velocity.y = CLIMBING_SPEED;
-            pack->position.y += CLIMBING_SPEED;
-            pack->velocity.y = CLIMBING_SPEED;
-        }
-        else
-        {
-            // movement crosses tile boundary so will require a check against what's above and infront:
-            // maybe continue climbing
-            // maybe pack should detach but otherwise keep climbing
-            // maybe end climb and start moving forwards
-            // maybe reverse direction if path is occupied either above or infront
-
-            bool try_climb_more = false;
-            bool move_forwards = false;
-            bool do_push_forwards = false;
-            bool reverse_direction = false;
-
-            Int3 coords_ahead = getNextCoords(player->coords, player->direction);
-            TileType type_ahead = getTileType(coords_ahead);
-
-            if (type_ahead == LADDER)
-            {
-                try_climb_more = true;
-            }
-            else if (type_ahead == NONE)
-            {
-                move_forwards = true;
-            }
-            else if (isPushable(type_ahead) && canPush(coords_ahead, player->direction))
-            {
-                move_forwards = true;
-                do_push_forwards = true;
-            }
-            else
-            {
-                reverse_direction = true;
-            }
-
-            if (try_climb_more)
-            {
-                bool climb_more = false;
-                bool push_up = false;
-
-                Int3 coords_above_player = getNextCoords(player->coords, UP);
-                TileType type_above_player = getTileType(coords_above_player);
-
-                if (type_above_player == NONE)
-                {
-                    climb_more = true;
-                }
-                else if (isPushable(type_above_player) && canPushUp(coords_above_player))
-                {
-                    climb_more = true;
-                    push_up = true;
-                }
-
-                if (climb_more)
-                {
-                    createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
-                    if (push_up) pushUp(coords_above_player, player);
-                    moveEntityInBufferAndState(player, coords_above_player, player->direction);
-
-                    player->position.y += CLIMBING_SPEED;
-                    player->velocity.y = CLIMBING_SPEED;
-
-                    if (temp_state.pack_attached)
-                    {
-                        bool pack_stays_with_player = false;
-                        bool pack_pushes = false;
-
-                        Int3 coords_above_pack = getNextCoords(pack->coords, UP);
-                        TileType type_above_pack = getTileType(coords_above_pack);
-
-                        if (type_above_pack == NONE)
-                        {
-                            pack_stays_with_player = true;
-                        }
-                        else if (isPushable(type_above_pack) && canPushUp(coords_above_pack))
-                        {
-                            pack_stays_with_player = true;
-                            pack_pushes = true;
-                        }
-
-                        if (pack_stays_with_player)
-                        {
-                            createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
-                            if (pack_pushes) pushUp(coords_above_pack, pack);
-                            moveEntityInBufferAndState(pack, coords_above_pack, player->direction);
-
-                            pack->position.y += CLIMBING_SPEED;
-                            pack->velocity.y = CLIMBING_SPEED;
-                        }
-                        else
-                        {
-                            temp_state.pack_attached = false;
-                        }
-                    }
-                }
-                else
-                {
-                    reverse_direction = true;
-                }
-            }
-
-            if (move_forwards)
-            {
-                player->position = intCoordsToNorm(player->coords); // normalise y coord
-                player->velocity = VEC3_0;
-                temp_state.climbing_direction = NO_DIRECTION;
-                if (do_push_forwards) pushAll(coords_ahead, player->direction, false, player);
-                doStandardMovement(player->direction, coords_ahead);
-            }
-
-            if (reverse_direction)
-            {
-                temp_state.climbing_direction = DOWN;
-            }
-        }
-    }
-
-    if (temp_state.climbing_direction == DOWN)
-    {
-        // just let player fall for now
-        temp_state.climbing_direction = NO_DIRECTION;
-    }
+    updatePackDetached(); // TODO: is this necessary here? why?
 
     // falling logic for entities
     Entity* falling_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
@@ -3224,6 +3088,15 @@ void doPhysicsTick()
                         temp_state.pack_attached = false;
                     }
                 }
+
+                // special case: if falling onto block where tile ahead is ladder (pointing right direction), then player catches the ladder and starts climbing down, and stops falling.
+                Int3 coords_ahead_and_below = getNextCoords(coords_below, player->direction);
+                if (getTileType(coords_ahead_and_below) == LADDER && getTileDirection(coords_ahead_and_below) == oppositeDirection(player->direction))
+                {
+                    createDebugPopup("catch ladder", NO_TYPE);
+                    temp_state.climbing_direction = DOWN;
+                    player->falling = false;
+                }
             }
             else
             {
@@ -3240,11 +3113,189 @@ void doPhysicsTick()
         }
     }
 
-    // do animations and handle some state, in particular entities tied to player movement
-    // this is in this function because of the state handling
+    // climb logic
+    if (temp_state.climbing_direction == UP)
+    {
+        float y_coord_difference = getComponentAlongDirection(UP, vec3Subtract(intCoordsToNorm(player->coords), player->position));
+
+        if (y_coord_difference > CLIMBING_SPEED)
+        {
+            // just keep climbing, already commited to this movement.
+            player->position.y += CLIMBING_SPEED;
+            player->velocity.y = CLIMBING_SPEED;
+            pack->position.y += CLIMBING_SPEED;
+            pack->velocity.y = CLIMBING_SPEED;
+        }
+        else
+        {
+            // movement crosses tile boundary so will require a check against what's above and infront:
+            // maybe continue climbing
+            // maybe pack should detach but otherwise keep climbing
+            // maybe end climb and start moving forwards
+            // maybe reverse direction if path is occupied either above or infront
+
+            bool try_climb_more = false;
+            bool move_forwards = false;
+            bool do_push_forwards = false;
+            bool reverse_direction = false;
+
+            Int3 coords_ahead = getNextCoords(player->coords, player->direction);
+            TileType type_ahead = getTileType(coords_ahead);
+
+            if (type_ahead == LADDER)
+            {
+                try_climb_more = true;
+            }
+            else if (type_ahead == NONE)
+            {
+                move_forwards = true;
+            }
+            else if (isPushable(type_ahead) && canPush(coords_ahead, player->direction))
+            {
+                move_forwards = true;
+                do_push_forwards = true;
+            }
+            else
+            {
+                reverse_direction = true;
+            }
+
+            if (try_climb_more)
+            {
+                bool climb_more = false;
+                bool push_up = false;
+
+                Int3 coords_above_player = getNextCoords(player->coords, UP);
+                TileType type_above_player = getTileType(coords_above_player);
+
+                if (type_above_player == NONE)
+                {
+                    climb_more = true;
+                }
+                else if (isPushable(type_above_player) && canPushUp(coords_above_player))
+                {
+                    climb_more = true;
+                    push_up = true;
+                }
+
+                if (climb_more)
+                {
+                    createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
+                    if (push_up) pushUp(coords_above_player, player);
+                    moveEntityInBufferAndState(player, coords_above_player, player->direction);
+                    player->position.y += CLIMBING_SPEED;
+                    player->velocity.y = CLIMBING_SPEED;
+
+                    if (temp_state.pack_attached)
+                    {
+                        bool pack_stays_with_player = false;
+                        bool pack_pushes = false;
+
+                        Int3 coords_above_pack = getNextCoords(pack->coords, UP);
+                        TileType type_above_pack = getTileType(coords_above_pack);
+
+                        if (type_above_pack == NONE)
+                        {
+                            pack_stays_with_player = true;
+                        }
+                        else if (isPushable(type_above_pack) && canPushUp(coords_above_pack))
+                        {
+                            pack_stays_with_player = true;
+                            pack_pushes = true;
+                        }
+
+                        if (pack_stays_with_player)
+                        {
+                            createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
+                            if (pack_pushes) pushUp(coords_above_pack, pack);
+                            moveEntityInBufferAndState(pack, coords_above_pack, player->direction);
+
+                            pack->position.y += CLIMBING_SPEED;
+                            pack->velocity.y = CLIMBING_SPEED;
+                        }
+                        else
+                        {
+                            temp_state.pack_attached = false;
+                        }
+                    }
+                }
+                else
+                {
+                    reverse_direction = true;
+                }
+            }
+
+            if (move_forwards)
+            {
+                player->position = intCoordsToNorm(player->coords); // normalise y coord
+                player->velocity = VEC3_0;
+                temp_state.climbing_direction = NO_DIRECTION;
+                if (do_push_forwards) pushAll(coords_ahead, player->direction, false, player);
+                doStandardMovement(player->direction, coords_ahead);
+            }
+
+            if (reverse_direction)
+            {
+                temp_state.climbing_direction = DOWN;
+            }
+        }
+    }
+
+    if (temp_state.climbing_direction == DOWN)
+    {
+        float y_coord_difference = -getComponentAlongDirection(UP, vec3Subtract(intCoordsToNorm(player->coords), player->position));
+        if (y_coord_difference > CLIMBING_SPEED)
+        {
+            // just keep climbing, already commited to this movement.
+            player->position.y -= CLIMBING_SPEED;
+            player->velocity.y = -CLIMBING_SPEED;
+            pack->position.y -= CLIMBING_SPEED;
+            pack->velocity.y = -CLIMBING_SPEED;
+        }
+        else
+        {
+            // movement crosses tile boundary so will require a check against what's below, and also maybe detach pack.
+            Int3 coords_below_player = getNextCoords(player->coords, DOWN);
+            TileType type_below_player = getTileType(coords_below_player);
+
+            // TODO: if player is blue while climbing and there is pushable beneath, then we actually want to push that thing down, I think? very much an edge case.
+            // probably in this case, when player climbs down, i want her to just move one tile at the time, and be able to move off of that thing when she lands, maybe?
+            // so this might be correct regardless.
+            bool land_here = false;
+            if (type_below_player != NONE) land_here = true;
+
+            if (land_here)
+            {
+                temp_state.climbing_direction = NO_DIRECTION;
+                player->position = intCoordsToNorm(player->coords);
+                player->velocity = VEC3_0;
+
+                createDebugPopup("landed here", NO_TYPE);
+            }
+            else
+            {
+                // continue climbing down
+                createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
+                moveEntityInBufferAndState(player, coords_below_player, player->direction);
+                player->position.y -= CLIMBING_SPEED;
+                player->velocity.y = -CLIMBING_SPEED;
+
+                if (temp_state.pack_attached)
+                {
+                    // TODO: assume no detachment for now
+                    Int3 coords_below_pack = getNextCoords(pack->coords, DOWN);
+                    //TileType type_below_pack = getTileType(coords_below_pack);
+
+                    createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
+                    moveEntityInBufferAndState(pack, coords_below_pack, pack->direction);
+                    pack->position.y -= CLIMBING_SPEED;
+                    pack->velocity.y = -CLIMBING_SPEED;
+                }
+            }
+        }
+    }
 
     // player movement
-    if (temp_state.climbing_direction == NO_DIRECTION)
     {
         // handle directional movement
         FOR(direction_index, 4)
@@ -3976,7 +4027,9 @@ bool gameFrame(double delta_time, Input* input)
             // HANDLE INPUT
             bool allow_input = true;
             if (temp_state.allow_movement_timer != 0) allow_input = false;
-            if (!cheating && !temp_state.player_hit_by_red && canFall(player)) allow_input = false;
+            
+            // if able to fall (and not climbing) then don't allow movement
+            if (canFall(player) && !temp_state.player_hit_by_red && !cheating && temp_state.climbing_direction == NO_DIRECTION) allow_input = false;
 
             // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
             float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
@@ -4010,7 +4063,13 @@ bool gameFrame(double delta_time, Input* input)
                     // disallow movement forward if climbing UP. likely doesn't actually matter, would just be walking into a ladder
                     if (temp_state.climbing_direction == UP) allow_movement = false;
 
-                    if (allow_movement)
+                    if (temp_state.climbing_direction == DOWN)
+                    {
+                        temp_state.climbing_direction = UP;
+
+                        createDebugPopup("reverse direction DOWN -> UP", NO_TYPE);
+                    }
+                    else if (allow_movement)
                     {
                         bool try_walk = false;
                         bool do_push = false;
@@ -4193,12 +4252,19 @@ bool gameFrame(double delta_time, Input* input)
                 }
                 else if (input_direction == oppositeDirection(player->direction))
                 {
-                    // maybe move backwards
+                    // BACKWARDS MOVEMENT
                     Direction move_direction = oppositeDirection(player->direction);
 
                     Int3 coords_below = getNextCoords(player->coords, DOWN);
                     TileType type_below = getTileType(coords_below);
-                    if (type_below == LADDER && getTileDirection(coords_below) == move_direction)
+
+                    if (temp_state.climbing_direction == UP)
+                    {
+                        temp_state.climbing_direction = DOWN;
+
+                        createDebugPopup("reverse direction UP -> DOWN", NO_TYPE);
+                    }
+                    else if (type_below == LADDER && getTileDirection(coords_below) == move_direction)
                     {
                         Int3 next_player_coords = getNextCoords(player->coords, move_direction);
                         Int3 next_pack_coords = getNextCoords(pack->coords, move_direction);
@@ -4536,11 +4602,9 @@ bool gameFrame(double delta_time, Input* input)
             createDebugText(th_text);
             */
 
-            /*
             char climb_text[256] = {0};
             snprintf(climb_text, sizeof(climb_text), "climbing direction: %i", temp_state.climbing_direction);
             createDebugText(climb_text);
-            /*
 
             /*
             // debug lasers
