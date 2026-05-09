@@ -83,7 +83,7 @@ typedef struct
     Color color;
 
     // for win blocks
-    char next_level[64]; // TODO: make level names an enum so don't need to carry around 64 * char * 2 per entity
+    char next_level[64]; // NOTE: make level names an enum so don't need to carry around 64 * char * 2 per entity
 
     // for locked blocks (and other entities that are locked)
     bool locked;
@@ -648,7 +648,7 @@ float getAngleOfYAxisRotation(Vec4 a, Vec4 b)
     return 2.0f * atan2f(from_a_to_b.y, from_a_to_b.w); // can do this because rotation is fully around the y axis
 }
 
-// TODO: could use the optimised version when i understand quaternions better. for now, this is more transparent
+// NOTE: could use the optimised version when i understand quaternions better. for now, this is more transparent
 Vec3 vec3RotateByQuaternion(Vec3 v, Vec4 q)
 {
     Vec4 v_as_quaternion = (Vec4){ v.x, v.y, v.z, 0 };
@@ -1664,7 +1664,7 @@ int32 getPushableStackSize(Int3 first_entity_coords)
 
 // TRAILING HITBOXES
 
-void createTrailingHitbox(int32 id, Int3 coords, int32 frames, TileType type) // TODO: derive type from id in here instead of passing
+void createTrailingHitbox(int32 id, Int3 coords, int32 frames)
 {
     int32 hitbox_index = -1;
     FOR(find_hitbox_index, MAX_TRAILING_HITBOX_COUNT)
@@ -1677,7 +1677,7 @@ void createTrailingHitbox(int32 id, Int3 coords, int32 frames, TileType type) //
     temp_state.trailing_hitboxes[hitbox_index].id = id;
     temp_state.trailing_hitboxes[hitbox_index].coords = coords;
     temp_state.trailing_hitboxes[hitbox_index].frames = frames;
-    temp_state.trailing_hitboxes[hitbox_index].type = type;
+    temp_state.trailing_hitboxes[hitbox_index].type = getTileTypeFromId(id);
 }
 
 bool trailingHitboxAtCoords(Int3 coords, TrailingHitbox* trailing_hitbox)
@@ -1842,7 +1842,7 @@ void pushAll(Int3 coords, Direction direction, bool on_head, Entity* root_entity
 
             if (next_type != NONE) break; // this is possible because of the inverse push index seeking. if not none, won't be pushable either, so break.
 
-            createTrailingHitbox(e->id, e->coords, TRAILING_HITBOX_TIME, getTileType(e->coords));
+            createTrailingHitbox(e->id, e->coords, TRAILING_HITBOX_TIME);
             moveEntityInBufferAndState(e, next_coords, e->direction);
 
             int32 write_index = getWriteIndexInTiedEntities(e->id);
@@ -1873,7 +1873,7 @@ void pushUp(Int3 coords, Entity* root_entity)
         Entity* e = getEntityAtCoords(current_coords);
         Int3 next_coords = getNextCoords(current_coords, UP);
 
-        createTrailingHitbox(e->id, e->coords, TRAILING_HITBOX_TIME, getTileType(e->coords));
+        createTrailingHitbox(e->id, e->coords, TRAILING_HITBOX_TIME);
         moveEntityInBufferAndState(e, next_coords, e->direction);
 
         int32 write_index = getWriteIndexInTiedEntities(e->id);
@@ -2170,9 +2170,6 @@ void updateLaserBuffer()
                             if (this_is_th) e = getEntityFromId(th.id);
                             else e = getEntityAtCoords(current_tile_coords);
 
-                            // TODO: temp so that i can get into the overworld after this shift
-                            if (!e) continue;
-
                             // check if should skip this id, if so passthrough
                             bool passthrough = false;
                             if (e->id == id_to_skip) passthrough = true;
@@ -2317,6 +2314,11 @@ void initUndoBuffer()
 // i want to write undo buffer to a file on every movement, because if player closes the game, and undo buffer is not up to date, then bad things happen.
 // but the write function takes >10ms, for some reason? maybe fwrite is just really slow, or i should thread it? 
 // either way, i'm not writing undo buffer to a file at all right now, because it causes noticeable lag.
+//
+// before i decide how to handle this, think about what I actually want the experience to be when closing the game. Should you automatically go back to where you were in a level,
+// or be spat out in the overworld where that level is? because if so, I could just write the updated undo buffer when entering a new level? still need to fix speed, can't have 10ms hang
+// for no reason, but maybe i don't need to be writing to undo buffer on every move...
+
 /*
 void writeUndoBufferToFile()
 {
@@ -2327,7 +2329,7 @@ void writeUndoBufferToFile()
 }
 void loadUndoBufferFromFile()
 {
-    FILE* file = fopen(undo_meta_path, "rb");
+
     if (!file)
     {
         initUndoBuffer();
@@ -2811,13 +2813,13 @@ void doStandardMovement(Direction direction, Int3 next_player_coords)
     if (temp_state.player_hit_by_blue) do_on_head_movement = false;
     if (do_on_head_movement) pushAll(coords_above_player, direction, true, player);
 
-    createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
+    createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
     moveEntityInBufferAndState(player, next_player_coords, player->direction);
 
     // move pack also if pack is attached
     if (temp_state.pack_attached)
     {
-        createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
+        createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
         Int3 next_pack_coords = getNextCoords(pack->coords, direction);
         moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
     }
@@ -2920,7 +2922,7 @@ void doPhysicsTick()
             if (allow_diagonal)
             {
                 if (do_push) pushAll(diagonal_coords, diagonal_push_direction, false, pack);
-                createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
+                createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
                 moveEntityInBufferAndState(pack, diagonal_coords, player->direction);
             }
             else
@@ -2947,7 +2949,7 @@ void doPhysicsTick()
             if (allow_orthogonal)
             {
                 if (do_push) pushAll(orthogonal_coords, orthogonal_push_direction, false, pack);
-                createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
+                createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
                 moveEntityInBufferAndState(pack, orthogonal_coords, player->direction);
             }
             else
@@ -3034,7 +3036,7 @@ void doPhysicsTick()
 
                 if (climb_more)
                 {
-                    createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
+                    createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
                     if (push_up) pushUp(coords_above_player, player);
                     moveEntityInBufferAndState(player, coords_above_player, player->direction);
 
@@ -3061,7 +3063,7 @@ void doPhysicsTick()
 
                         if (pack_stays_with_player)
                         {
-                            createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
+                            createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
                             if (pack_pushes) pushUp(coords_above_pack, pack);
                             moveEntityInBufferAndState(pack, coords_above_pack, player->direction);
 
@@ -3145,8 +3147,7 @@ void doPhysicsTick()
                 {
                     if (want_to_fall)
                     {
-                        TileType type = getTileType(e->coords);
-                        createTrailingHitbox(e->id, e->coords, FALL_TRAILING_HITBOX_TIME, type);
+                        createTrailingHitbox(e->id, e->coords, FALL_TRAILING_HITBOX_TIME);
 
                         e->position.y = test_y_position;
                         e->velocity.y = test_y_velocity;
@@ -3196,7 +3197,7 @@ void doPhysicsTick()
         {
             if (want_to_fall)
             {
-                createTrailingHitbox(PLAYER_ID, player->coords, FALL_TRAILING_HITBOX_TIME, PLAYER);
+                createTrailingHitbox(PLAYER_ID, player->coords, FALL_TRAILING_HITBOX_TIME);
 
                 player->position.y = test_y_position;
                 player->velocity.y = test_y_velocity;
@@ -3207,7 +3208,7 @@ void doPhysicsTick()
                 {
                     if (canFall(pack))
                     {
-                        createTrailingHitbox(PACK_ID, pack->coords, FALL_TRAILING_HITBOX_TIME, PACK);
+                        createTrailingHitbox(PACK_ID, pack->coords, FALL_TRAILING_HITBOX_TIME);
 
                         pack->position.y = test_y_position;
                         pack->velocity.y = test_y_velocity;
@@ -3887,21 +3888,6 @@ bool gameFrame(double delta_time, Input* input)
             else               createDebugPopup("debug state visibility off", DEBUG_STATE_VISIBILITY_TOGGLE);
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
-
-        // TODO: temp for level setup change
-        if (input->keys_held & KEY_5)
-        {
-            for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
-            {
-                if (world_state.buffer[buffer_index] == WIN_BLOCK)
-                {
-                    world_state.buffer[buffer_index] = WATER;
-                    world_state.buffer[buffer_index + 1] = NORTH;
-                }
-            }
-            memset(&world_state.win_blocks, 0, sizeof(world_state.win_blocks));
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
     }
 
     ///////////////////////
@@ -4242,7 +4228,7 @@ bool gameFrame(double delta_time, Input* input)
                             // move pack first, because moving backwards.
                             if (temp_state.pack_attached)
                             {
-                                createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME, PACK);
+                                createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
                                 if (do_push) pushAll(next_pack_coords, move_direction, false, pack);
                                 moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
                             }
@@ -4256,7 +4242,7 @@ bool gameFrame(double delta_time, Input* input)
                             TileType type_on_head = getTileType(coords_on_head);
                             if (isPushable(type_on_head) && canPush(coords_on_head, move_direction)) pushAll(coords_on_head, move_direction, true, player);
 
-                            createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME, PLAYER);
+                            createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
                             moveEntityInBufferAndState(player, next_player_coords, player->direction);
                         }
                     }
@@ -4378,7 +4364,7 @@ bool gameFrame(double delta_time, Input* input)
         // decrement allow movement timer, if movement should be disabled for a few frames
         if (temp_state.allow_movement_timer > 0) temp_state.allow_movement_timer--;
 
-        // TODO: TEMP: disallow any input when climbing direction isn't no dir. probably want to do something like this that's a bit more intelligent. also probably want to be able to change climbing direction sometimes
+        // TODO: disallow any input when climbing direction isn't no dir. probably want to do something like this that's a bit more intelligent. also probably want to be able to change climbing direction sometimes
         if (temp_state.climbing_direction != NO_DIRECTION) temp_state.allow_movement_timer = 1;
 
         // all mirrors with direction >=UP are moved to the next orientation with direction NORTH.
