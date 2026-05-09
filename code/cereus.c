@@ -3093,7 +3093,6 @@ void doPhysicsTick()
                 Int3 coords_ahead_and_below = getNextCoords(coords_below, player->direction);
                 if (getTileType(coords_ahead_and_below) == LADDER && getTileDirection(coords_ahead_and_below) == oppositeDirection(player->direction))
                 {
-                    createDebugPopup("catch ladder", NO_TYPE);
                     temp_state.climbing_direction = DOWN;
                     player->falling = false;
                 }
@@ -3123,8 +3122,12 @@ void doPhysicsTick()
             // just keep climbing, already commited to this movement.
             player->position.y += CLIMBING_SPEED;
             player->velocity.y = CLIMBING_SPEED;
-            pack->position.y += CLIMBING_SPEED;
-            pack->velocity.y = CLIMBING_SPEED;
+
+            if (temp_state.pack_attached)
+            {
+                pack->position.y += CLIMBING_SPEED;
+                pack->velocity.y = CLIMBING_SPEED;
+            }
         }
         else
         {
@@ -3216,6 +3219,8 @@ void doPhysicsTick()
                         else
                         {
                             temp_state.pack_attached = false;
+                            pack->position = intCoordsToNorm(pack->coords);
+                            pack->velocity = VEC3_0;
                         }
                     }
                 }
@@ -3248,8 +3253,12 @@ void doPhysicsTick()
             // just keep climbing, already commited to this movement.
             player->position.y -= CLIMBING_SPEED;
             player->velocity.y = -CLIMBING_SPEED;
-            pack->position.y -= CLIMBING_SPEED;
-            pack->velocity.y = -CLIMBING_SPEED;
+
+            if (temp_state.pack_attached)
+            {
+                pack->position.y -= CLIMBING_SPEED;
+                pack->velocity.y = -CLIMBING_SPEED;
+            }
         }
         else
         {
@@ -3259,7 +3268,7 @@ void doPhysicsTick()
 
             // TODO: if player is blue while climbing and there is pushable beneath, then we actually want to push that thing down, I think? very much an edge case.
             // probably in this case, when player climbs down, i want her to just move one tile at the time, and be able to move off of that thing when she lands, maybe?
-            // so this might be correct regardless.
+            // so this might be correct regardless. remember if want to do this, handle this in pack case also
             bool land_here = false;
             if (type_below_player != NONE) land_here = true;
 
@@ -3268,8 +3277,6 @@ void doPhysicsTick()
                 temp_state.climbing_direction = NO_DIRECTION;
                 player->position = intCoordsToNorm(player->coords);
                 player->velocity = VEC3_0;
-
-                createDebugPopup("landed here", NO_TYPE);
             }
             else
             {
@@ -3281,14 +3288,25 @@ void doPhysicsTick()
 
                 if (temp_state.pack_attached)
                 {
-                    // TODO: assume no detachment for now
                     Int3 coords_below_pack = getNextCoords(pack->coords, DOWN);
-                    //TileType type_below_pack = getTileType(coords_below_pack);
+                    TileType type_below_pack = getTileType(coords_below_pack);
 
-                    createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
-                    moveEntityInBufferAndState(pack, coords_below_pack, pack->direction);
-                    pack->position.y -= CLIMBING_SPEED;
-                    pack->velocity.y = -CLIMBING_SPEED;
+                    bool pack_stays_with_player = false;
+                    if (type_below_pack == NONE) pack_stays_with_player = true;
+
+                    if (pack_stays_with_player)
+                    {
+                        createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
+                        moveEntityInBufferAndState(pack, coords_below_pack, pack->direction);
+                        pack->position.y -= CLIMBING_SPEED;
+                        pack->velocity.y = -CLIMBING_SPEED;
+                    }
+                    else
+                    {
+                        temp_state.pack_attached = false;
+                        pack->position = intCoordsToNorm(pack->coords);
+                        pack->velocity = VEC3_0;
+                    }
                 }
             }
         }
@@ -3611,8 +3629,8 @@ bool gameFrame(double delta_time, Input* input)
                     Entity *entity= getEntityAtCoords(raycast_output.hit_coords);
                     if (entity != 0)
                     {
-                        entity->coords = (Int3){0};
-                        entity->position = (Vec3){0};
+                        entity->coords = INT3_0;
+                        entity->position = VEC3_0;
                         entity->removed = true;
                     }
                     setTileType(NONE, raycast_output.hit_coords);
@@ -4066,8 +4084,6 @@ bool gameFrame(double delta_time, Input* input)
                     if (temp_state.climbing_direction == DOWN)
                     {
                         temp_state.climbing_direction = UP;
-
-                        createDebugPopup("reverse direction DOWN -> UP", NO_TYPE);
                     }
                     else if (allow_movement)
                     {
@@ -4261,8 +4277,6 @@ bool gameFrame(double delta_time, Input* input)
                     if (temp_state.climbing_direction == UP)
                     {
                         temp_state.climbing_direction = DOWN;
-
-                        createDebugPopup("reverse direction UP -> DOWN", NO_TYPE);
                     }
                     else if (type_below == LADDER && getTileDirection(coords_below) == move_direction)
                     {
@@ -4550,7 +4564,7 @@ bool gameFrame(double delta_time, Input* input)
             
             // pack info
             char pack_text[256] = {0};
-            snprintf(pack_text, sizeof(pack_text), "pack info: coords: %i, %i, %i, pos norm: %.2f, %.2f, %.2f, velocity: %.2f, %.2f, %.2f", pack->coords.x, pack->coords.y, pack->coords.z, pack->position.x, pack->position.y, pack->position.z, pack->velocity.x, pack->velocity.y, pack->velocity.z);
+            snprintf(pack_text, sizeof(pack_text), "pack info: coords: %i, %i, %i, pos norm: %.2f, %.2f, %.2f, velocity: %.2f, %.2f, %.2f, attached: %i", pack->coords.x, pack->coords.y, pack->coords.z, pack->position.x, pack->position.y, pack->position.z, pack->velocity.x, pack->velocity.y, pack->velocity.z, temp_state.pack_attached);
             createDebugText(pack_text);
 
             // mirror info
