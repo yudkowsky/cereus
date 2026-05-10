@@ -2883,8 +2883,6 @@ bool wouldOvershoot(float speculative_velocity_along_direction, float position_a
     return would_overshoot;
 }
 
-// GAME LOGIC
-
 void mimicRotationalOffset(Entity* copied_e, Entity* e)
 {
     float rotation_direction_delta = getAngleOfYAxisRotation(directionToQuaternion(copied_e->direction), copied_e->rotation);
@@ -2953,7 +2951,8 @@ void doPhysicsTick()
             }
             else
             {
-                // failed animation, but still do that push. TODO: fix issue with snapping
+                // failed animation, but still do that push
+                // TODO: fix issue with snapping of failed animation push case; somewhat unclear why this happens, maybe because pack returns to correct position, and somehow animations are cancelled?
                 Int3 start_pack_coords = getNextCoords(player->coords, oppositeDirection(temp_state.pack_turn_state.initial_player_direction));
                 moveEntityInBufferAndState(pack, start_pack_coords, player->direction);
                 player->direction = temp_state.pack_turn_state.initial_player_direction;
@@ -2966,7 +2965,15 @@ void doPhysicsTick()
     }
     if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0) temp_state.pack_turn_state.pack_intermediate_states_timer--;
 
-    updatePackDetached(); // TODO: is this necessary here? why?
+    // TODO: this updating of pack every frame means that the pack snaps to where it would be if it were attached. e.g. player turns s.t. pack is behind player direction,
+    // but player hasn't gotten that rotation yet, and this causes snap of just less than 90deg to behind where player is currently looking.
+    // similarly, when climb causes attach, pack can snap up to where player is descending from, or into a block which is behind where player is ascending from. this is not good
+    //
+    // some things to consider when handling this: i want to not actually attach the pack unless the player is fully at the right place, e.g. shouldn't snap up if player climbs down and then up
+    // without having been fully in the correct position to attach.
+    // but i also want to be able to turn and then walk before the turn is fully finished, and still attach pack - this is a case where the player will never have fully correct rotation
+    // and also be in the correct tile. so need to be at least a little bit intelligent here.
+    updatePackDetached();
 
     // falling logic for entities
     Entity* falling_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
@@ -3989,8 +3996,6 @@ bool gameFrame(double delta_time, Input* input)
                 // UNDO
                 if (performUndo())
                 {
-                    updatePackDetached();
-
                     if (undos_performed == 0) time_until_allow_undo_or_restart_input = 9;
                     else if (undos_performed < 2) time_until_allow_undo_or_restart_input = 8;
                     else if (undos_performed < 6) time_until_allow_undo_or_restart_input = 7;

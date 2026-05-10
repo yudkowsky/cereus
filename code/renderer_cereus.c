@@ -3489,6 +3489,17 @@ void vulkanDraw(void)
     render_pass_begin_info.clearValueCount = 3;
     render_pass_begin_info.pClearValues = clear_values;
 
+    // TODO: new order of scene rendering;
+    //
+    // shadow maps
+    // main scene pass
+    // outline post pass
+    // copy color -> scene_copy_image
+    // water pass, using outlines (outlines will be a bit distorted...)
+    // oit lasers (tag under water)
+    // oit resolve (do custom stuff if under water)
+    // sprite pass
+
     // UNDERWATER SCENE PASS
 
     if (water_instance_count > 0)
@@ -3516,8 +3527,6 @@ void vulkanDraw(void)
             vkCmdPushConstants(command_buffer, vulkan_state.cube_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(InstancedPushConstants), &underwater_cube_pc);
             vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
         }
-
-        // don't render models here since models are raytraced for refraction
 
         vkCmdEndRenderPass(command_buffer);
 
@@ -3738,7 +3747,8 @@ void vulkanDraw(void)
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline);
 
-            VkDescriptorSet water_sets[3] = {
+            VkDescriptorSet water_sets[3] = 
+            {
                 vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index],
                 vulkan_state.scene_copy_descriptor_set,
                 vulkan_state.depth_descriptor_set,
