@@ -16,20 +16,16 @@ layout(push_constant) uniform PushConstants
     mat4 view;
     mat4 proj;
     float time;
-    float debug_mode;
-    float cam_x;
-    float cam_y;
-    float cam_z;
 }
 pc;
 
 void main()
 {
     vec4 world_pos = instance_model * vec4(in_position, 1.0);
-
 	world_pos.y += waterHeight(world_pos.xyz, pc.time);
+    frag_world_pos = world_pos.xyz;
+
     frag_normal = waterNormal(world_pos.xyz, pc.time);
 
-    frag_world_pos = world_pos.xyz;
     gl_Position = pc.proj * pc.view * world_pos;
 }

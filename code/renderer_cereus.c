@@ -133,7 +133,6 @@ typedef struct
     float view[16];
     float proj[16];
     float time;
-    float cam_x, cam_y, cam_z;
 }
 WaterPushConstants;
 
@@ -2810,16 +2809,15 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         push_constant_range.offset = 0;
         push_constant_range.size = (uint32)sizeof(WaterPushConstants);
 
-        VkDescriptorSetLayout water_set_layouts[3] = 
+        VkDescriptorSetLayout water_set_layouts[2] =
         { 
-            vulkan_state.descriptor_set_layout,  	// atlas
             vulkan_state.descriptor_set_layout, 	// underwater scene copy
             vulkan_state.descriptor_set_layout,		// depth 
         };
 
         VkPipelineLayoutCreateInfo water_distortion_pipeline_layout_ci = {0};
         water_distortion_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        water_distortion_pipeline_layout_ci.setLayoutCount = 3;
+        water_distortion_pipeline_layout_ci.setLayoutCount = 2;
         water_distortion_pipeline_layout_ci.pSetLayouts = water_set_layouts;
         water_distortion_pipeline_layout_ci.pushConstantRangeCount = 1;
         water_distortion_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
@@ -3707,13 +3705,12 @@ void vulkanDraw(void)
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline);
 
-            VkDescriptorSet water_sets[3] = 
+            VkDescriptorSet water_sets[2] = 
             {
-                vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index],
                 vulkan_state.scene_copy_descriptor_set,
                 vulkan_state.depth_descriptor_set,
             };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline_layout, 0, 3, water_sets, 0, 0);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline_layout, 0, 2, water_sets, 0, 0);
 
             VkBuffer water_buffers[2] = { water_data->vertex_buffer, vulkan_state.water_instance_buffer };
             VkDeviceSize water_offsets[2] = { 0, 0 };
@@ -3724,9 +3721,6 @@ void vulkanDraw(void)
             memcpy(water_pc.view, view_matrix, sizeof(water_pc.view));
             memcpy(water_pc.proj, projection_matrix, sizeof(water_pc.proj));
             water_pc.time = water_time;
-            water_pc.cam_x = vulkan_camera.coords.x;
-            water_pc.cam_y = vulkan_camera.coords.y;
-            water_pc.cam_z = vulkan_camera.coords.z;
 
             vkCmdPushConstants(command_buffer, vulkan_state.water_distortion_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &water_pc);
 
