@@ -206,8 +206,7 @@ Input;
 
 typedef enum ShaderMode
 {
-    OLD,
-    OUTLINE,
-    OUTLINE_TEST,
+    SHADER_MODE_DEFAULT,
+    SHADER_MODE_OUTLINE_TEST,
 }
 ShaderMode;

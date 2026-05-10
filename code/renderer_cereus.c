@@ -403,7 +403,7 @@ const char* ATLAS_3D_PATH 	= "data/sprites/atlas-3d.png";
 VulkanState vulkan_state;
 DisplayInfo vulkan_display = {0};
 Camera vulkan_camera = {0};
-ShaderMode shader_mode = OLD;
+ShaderMode shader_mode = SHADER_MODE_DEFAULT;
 
 float water_time = 0.0f;
 const float depth_threshold = 5.0f;
@@ -2346,8 +2346,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkShaderModule cube_frag_smh = {0};
     VkShaderModule outline_select_vert_smh = {0};
     VkShaderModule outline_select_frag_smh = {0};
-    //VkShaderModule laser_fill_vert_smh = {0};
-    //VkShaderModule laser_fill_frag_smh = {0};
     VkShaderModule sprite_vert_smh = {0};
     VkShaderModule sprite_frag_smh = {0};
     VkShaderModule model_vert_smh = {0};
@@ -2365,8 +2363,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 	VkPipelineShaderStageCreateInfo cube_frag_stage_ci 	 	       = loadShaderStage("data/shaders/spirv/tri.frag.spv", 	  	  	 &cube_frag_smh, 	  		 VK_SHADER_STAGE_FRAGMENT_BIT);
     VkPipelineShaderStageCreateInfo outline_select_vert_stage_ci   = loadShaderStage("data/shaders/spirv/outline-select.vert.spv", 	 &outline_select_vert_smh, 	 VK_SHADER_STAGE_VERTEX_BIT);
 	VkPipelineShaderStageCreateInfo outline_select_frag_stage_ci   = loadShaderStage("data/shaders/spirv/outline-select.frag.spv", 	 &outline_select_frag_smh, 	 VK_SHADER_STAGE_FRAGMENT_BIT);
-	//VkPipelineShaderStageCreateInfo laser_fill_vert_stage_ci       = loadShaderStage("data/shaders/spirv/laser-fill.vert.spv",       &laser_fill_vert_smh,   	 VK_SHADER_STAGE_VERTEX_BIT);
-	//VkPipelineShaderStageCreateInfo laser_fill_frag_stage_ci       = loadShaderStage("data/shaders/spirv/laser-fill.frag.spv",       &laser_fill_frag_smh,   	 VK_SHADER_STAGE_FRAGMENT_BIT);
 	VkPipelineShaderStageCreateInfo sprite_vert_stage_ci  	       = loadShaderStage("data/shaders/spirv/sprite.vert.spv",  	  	 &sprite_vert_smh,  		 VK_SHADER_STAGE_VERTEX_BIT);
 	VkPipelineShaderStageCreateInfo sprite_frag_stage_ci  	       = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  	 &sprite_frag_smh,  		 VK_SHADER_STAGE_FRAGMENT_BIT);
 	VkPipelineShaderStageCreateInfo model_vert_stage_ci 	 	   = loadShaderStage("data/shaders/spirv/model.vert.spv",   	  	 &model_vert_smh,   		 VK_SHADER_STAGE_VERTEX_BIT);
@@ -2382,7 +2378,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     VkPipelineShaderStageCreateInfo cube_shader_stages[2]  	 	      = { cube_vert_stage_ci,    	      cube_frag_stage_ci }; 
     VkPipelineShaderStageCreateInfo outline_select_shader_stages[2]   = { outline_select_vert_stage_ci,   outline_select_frag_stage_ci }; 
-    //VkPipelineShaderStageCreateInfo laser_shader_stages[2]   	      = { laser_fill_vert_stage_ci,       laser_fill_frag_stage_ci };
     VkPipelineShaderStageCreateInfo sprite_shader_stages[2]  	      = { sprite_vert_stage_ci,  	      sprite_frag_stage_ci };
    	VkPipelineShaderStageCreateInfo model_shader_stages[2]   	      = { model_vert_stage_ci,   	      model_frag_stage_ci };
     VkPipelineShaderStageCreateInfo outline_post_shader_stages[2]     = { outline_post_vert_stage_ci,     outline_post_frag_stage_ci };
@@ -3500,105 +3495,6 @@ void vulkanDraw(void)
     // oit resolve (do custom stuff if under water)
     // sprite pass
 
-    // UNDERWATER SCENE PASS
-
-    if (water_instance_count > 0)
-    {
-        vkCmdBeginRenderPass(command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-        vkCmdSetViewport(command_buffer, 0, 1, &viewport);
-        vkCmdSetScissor(command_buffer, 0, 1, &scissor);
-
-        if (cube_instance_count > 0)
-        {
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline);
-
-            VkBuffer cube_buffers[2] = { vulkan_state.cube_vertex_buffer, vulkan_state.cube_instance_buffer };
-            VkDeviceSize cube_offsets[2] = { 0, 0 };
-            vkCmdBindVertexBuffers(command_buffer, 0, 2, cube_buffers, cube_offsets);
-            vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
-
-            InstancedPushConstants underwater_cube_pc = {0};
-            memcpy(underwater_cube_pc.view, view_matrix, sizeof(underwater_cube_pc.view));
-            memcpy(underwater_cube_pc.proj, projection_matrix, sizeof(underwater_cube_pc.proj));
-            underwater_cube_pc.water_base_y = vulkan_state.water_plane_y;
-            underwater_cube_pc.time = water_time;
-
-            vkCmdPushConstants(command_buffer, vulkan_state.cube_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(InstancedPushConstants), &underwater_cube_pc);
-            vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
-        }
-
-        vkCmdEndRenderPass(command_buffer);
-
-        // COPY UNDERWATER SCENE TO scene_copy_image
-
-        {
-            VkImageMemoryBarrier swap_to_src = {0};
-            swap_to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            swap_to_src.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-            swap_to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-            swap_to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            swap_to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            swap_to_src.image = vulkan_state.swapchain_images[swapchain_image_index];
-            swap_to_src.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            swap_to_src.subresourceRange.baseMipLevel = 0;
-            swap_to_src.subresourceRange.levelCount = 1;
-            swap_to_src.subresourceRange.baseArrayLayer = 0;
-            swap_to_src.subresourceRange.layerCount = 1;
-            swap_to_src.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-            swap_to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-
-            vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, &swap_to_src);
-
-            VkImageMemoryBarrier copy_to_dst = {0};
-            copy_to_dst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            copy_to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            copy_to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            copy_to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            copy_to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            copy_to_dst.image = vulkan_state.scene_copy_image;
-            copy_to_dst.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            copy_to_dst.subresourceRange.baseMipLevel = 0;
-            copy_to_dst.subresourceRange.levelCount = 1;
-            copy_to_dst.subresourceRange.baseArrayLayer = 0;
-            copy_to_dst.subresourceRange.layerCount = 1;
-            copy_to_dst.srcAccessMask = 0;
-            copy_to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-            vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, &copy_to_dst);
-
-            VkImageCopy copy_region = {0};
-            copy_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            copy_region.srcSubresource.layerCount = 1;
-            copy_region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            copy_region.dstSubresource.layerCount = 1;
-            copy_region.extent.width = vulkan_state.swapchain_extent.width;
-            copy_region.extent.height = vulkan_state.swapchain_extent.height;
-            copy_region.extent.depth = 1;
-
-            vkCmdCopyImage(command_buffer,
-                vulkan_state.swapchain_images[swapchain_image_index], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                vulkan_state.scene_copy_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                1, &copy_region);
-
-            VkImageMemoryBarrier swap_back = swap_to_src;
-            swap_back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-            swap_back.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-            swap_back.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-            swap_back.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-            vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, 0, 0, 0, 1, &swap_back);
-
-            VkImageMemoryBarrier copy_to_read = copy_to_dst;
-            copy_to_read.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            copy_to_read.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            copy_to_read.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            copy_to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-            vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0, 1, &copy_to_read);
-        }
-    }
-
     // FULL SCENE PASS
 
     vkCmdBeginRenderPass(command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
@@ -3661,69 +3557,133 @@ void vulkanDraw(void)
 
     // OUTLINE POST PASS (above-water only)
 
-    if (shader_mode != OLD)
+    VkImageMemoryBarrier depth_to_read = {0};
+    depth_to_read.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    depth_to_read.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depth_to_read.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+    depth_to_read.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    depth_to_read.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    depth_to_read.image = vulkan_state.depth_image;
+    depth_to_read.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+    depth_to_read.subresourceRange.baseMipLevel = 0;
+    depth_to_read.subresourceRange.levelCount = 1;
+    depth_to_read.subresourceRange.baseArrayLayer = 0;
+    depth_to_read.subresourceRange.layerCount = 1;
+    depth_to_read.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    depth_to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &depth_to_read);
+
+    VkRenderPassBeginInfo post_rp_begin = {0};
+    post_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    post_rp_begin.renderPass = vulkan_state.outline_post_render_pass;
+    post_rp_begin.framebuffer = vulkan_state.outline_post_framebuffers[swapchain_image_index];
+    post_rp_begin.renderArea.offset = (VkOffset2D){0, 0};
+    post_rp_begin.renderArea.extent = vulkan_state.swapchain_extent;
+    post_rp_begin.clearValueCount = 0;
+
+    vkCmdBeginRenderPass(command_buffer, &post_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+
+    VkViewport post_viewport = {0};
+    post_viewport.x = 0;
+    post_viewport.y = 0;
+    post_viewport.width = (float)vulkan_state.swapchain_extent.width;
+    post_viewport.height = (float)vulkan_state.swapchain_extent.height;
+    post_viewport.minDepth = 0.0f;
+    post_viewport.maxDepth = 1.0f;
+
+    VkRect2D post_scissor = {0};
+    post_scissor.extent.width = vulkan_state.swapchain_extent.width;
+    post_scissor.extent.height = vulkan_state.swapchain_extent.height;
+
+    vkCmdSetViewport(command_buffer, 0, 1, &post_viewport);
+    vkCmdSetScissor(command_buffer, 0, 1, &post_scissor);
+
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline);
+    VkDescriptorSet post_sets[2] = { vulkan_state.depth_descriptor_set, vulkan_state.normal_descriptor_set };
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline_layout, 0, 2, post_sets, 0, 0);
+
+    float focal_length = (float)vulkan_state.swapchain_extent.height / ((2 * 3.141592653f) * tanf(vulkan_camera.fov / 360.0f));
+
+    float post_pc[6] = 
     {
-        VkImageMemoryBarrier depth_to_read = {0};
-        depth_to_read.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        depth_to_read.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        depth_to_read.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-        depth_to_read.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        depth_to_read.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        depth_to_read.image = vulkan_state.depth_image;
-        depth_to_read.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-        depth_to_read.subresourceRange.baseMipLevel = 0;
-        depth_to_read.subresourceRange.levelCount = 1;
-        depth_to_read.subresourceRange.baseArrayLayer = 0;
-        depth_to_read.subresourceRange.layerCount = 1;
-        depth_to_read.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        depth_to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        1.0f / (float)vulkan_state.swapchain_extent.width,
+        1.0f / (float)vulkan_state.swapchain_extent.height,
+        depth_threshold, 
+        normal_threshold, 
+        focal_length,
+        (shader_mode == SHADER_MODE_OUTLINE_TEST) ? 1.0f : 0.0f
+    };
+    vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 6, post_pc);
 
-        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &depth_to_read);
+    vkCmdDraw(command_buffer, 3, 1, 0, 0);
+    vkCmdEndRenderPass(command_buffer);
 
-        VkRenderPassBeginInfo post_rp_begin = {0};
-        post_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        post_rp_begin.renderPass = vulkan_state.outline_post_render_pass;
-        post_rp_begin.framebuffer = vulkan_state.outline_post_framebuffers[swapchain_image_index];
-        post_rp_begin.renderArea.offset = (VkOffset2D){0, 0};
-        post_rp_begin.renderArea.extent = vulkan_state.swapchain_extent;
-        post_rp_begin.clearValueCount = 0;
+    // COPY UNDERWATER SCENE TO scene_copy_image
 
-        vkCmdBeginRenderPass(command_buffer, &post_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+    VkImageMemoryBarrier swap_to_src = {0};
+    swap_to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    swap_to_src.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    swap_to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    swap_to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    swap_to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    swap_to_src.image = vulkan_state.swapchain_images[swapchain_image_index];
+    swap_to_src.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    swap_to_src.subresourceRange.baseMipLevel = 0;
+    swap_to_src.subresourceRange.levelCount = 1;
+    swap_to_src.subresourceRange.baseArrayLayer = 0;
+    swap_to_src.subresourceRange.layerCount = 1;
+    swap_to_src.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    swap_to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 
-        VkViewport post_viewport = {0};
-        post_viewport.x = 0;
-        post_viewport.y = 0;
-        post_viewport.width = (float)vulkan_state.swapchain_extent.width;
-        post_viewport.height = (float)vulkan_state.swapchain_extent.height;
-        post_viewport.minDepth = 0.0f;
-        post_viewport.maxDepth = 1.0f;
+    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, &swap_to_src);
 
-        VkRect2D post_scissor = {0};
-        post_scissor.extent.width = vulkan_state.swapchain_extent.width;
-        post_scissor.extent.height = vulkan_state.swapchain_extent.height;
+    VkImageMemoryBarrier copy_to_dst = {0};
+    copy_to_dst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    copy_to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    copy_to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    copy_to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    copy_to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    copy_to_dst.image = vulkan_state.scene_copy_image;
+    copy_to_dst.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy_to_dst.subresourceRange.baseMipLevel = 0;
+    copy_to_dst.subresourceRange.levelCount = 1;
+    copy_to_dst.subresourceRange.baseArrayLayer = 0;
+    copy_to_dst.subresourceRange.layerCount = 1;
+    copy_to_dst.srcAccessMask = 0;
+    copy_to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
-        vkCmdSetViewport(command_buffer, 0, 1, &post_viewport);
-        vkCmdSetScissor(command_buffer, 0, 1, &post_scissor);
+    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, &copy_to_dst);
 
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline);
-        VkDescriptorSet post_sets[2] = { vulkan_state.depth_descriptor_set, vulkan_state.normal_descriptor_set };
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline_layout, 0, 2, post_sets, 0, 0);
+    VkImageCopy copy_region = {0};
+    copy_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy_region.srcSubresource.layerCount = 1;
+    copy_region.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy_region.dstSubresource.layerCount = 1;
+    copy_region.extent.width = vulkan_state.swapchain_extent.width;
+    copy_region.extent.height = vulkan_state.swapchain_extent.height;
+    copy_region.extent.depth = 1;
 
-        float focal_length = (float)vulkan_state.swapchain_extent.height / ((2 * 3.141592653f) * tanf(vulkan_camera.fov / 360.0f));
+    vkCmdCopyImage(command_buffer,
+        vulkan_state.swapchain_images[swapchain_image_index], VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        vulkan_state.scene_copy_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1, &copy_region);
 
-        float post_pc[6] = {
-            1.0f / (float)vulkan_state.swapchain_extent.width,
-            1.0f / (float)vulkan_state.swapchain_extent.height,
-            depth_threshold, 
-            normal_threshold, 
-            focal_length,
-            (shader_mode == OUTLINE_TEST) ? 1.0f : 0.0f
-        };
-        vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 6, post_pc);
+    VkImageMemoryBarrier swap_back = swap_to_src;
+    swap_back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    swap_back.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    swap_back.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    swap_back.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
-        vkCmdDraw(command_buffer, 3, 1, 0, 0);
-        vkCmdEndRenderPass(command_buffer);
-    }
+    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, 0, 0, 0, 1, &swap_back);
+
+    VkImageMemoryBarrier copy_to_read = copy_to_dst;
+    copy_to_read.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    copy_to_read.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    copy_to_read.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    copy_to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0, 1, &copy_to_read);
 
     // WATER DISTORTION + TINT + OUTLINE PASS
 
@@ -3777,294 +3737,274 @@ void vulkanDraw(void)
 
     // OVERLAY PASS (editor outlines + lasers + sprites)
 
+    // clear oit resources 
     {
-        if (shader_mode == OLD)
+        // transition head image to TRANSFER_DST for clearing
+        VkImageMemoryBarrier head_to_clear = {0};
+        head_to_clear.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        head_to_clear.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        head_to_clear.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        head_to_clear.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        head_to_clear.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        head_to_clear.image = vulkan_state.oit_head_image;
+        head_to_clear.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        head_to_clear.subresourceRange.baseMipLevel = 0;
+        head_to_clear.subresourceRange.levelCount = 1;
+        head_to_clear.subresourceRange.baseArrayLayer = 0;
+        head_to_clear.subresourceRange.layerCount = 1;
+        head_to_clear.srcAccessMask = 0;
+        head_to_clear.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, &head_to_clear);
+
+        VkClearColorValue clear_val = {0};
+        clear_val.uint32[0] = 0xFFFFFFFF;
+        VkImageSubresourceRange clear_range = {0};
+        clear_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        clear_range.baseMipLevel = 0;
+        clear_range.levelCount = 1;
+        clear_range.baseArrayLayer = 0;
+        clear_range.layerCount = 1;
+        vkCmdClearColorImage(command_buffer, vulkan_state.oit_head_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_val, 1, &clear_range);
+
+        // transition head image to GENERAL for shader access
+        VkImageMemoryBarrier head_to_general = {0};
+        head_to_general.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        head_to_general.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        head_to_general.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        head_to_general.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        head_to_general.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        head_to_general.image = vulkan_state.oit_head_image;
+        head_to_general.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        head_to_general.subresourceRange.baseMipLevel = 0;
+        head_to_general.subresourceRange.levelCount = 1;
+        head_to_general.subresourceRange.baseArrayLayer = 0;
+        head_to_general.subresourceRange.layerCount = 1;
+        head_to_general.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        head_to_general.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &head_to_general);
+
+        // clear counter to 0
+        vkCmdFillBuffer(command_buffer, vulkan_state.oit_counter_buffer, 0, 4, 0);
+
+        VkMemoryBarrier counter_barrier = {0};
+        counter_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        counter_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        counter_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &counter_barrier, 0, 0, 0, 0);
+    }
+
+    VkRenderPassBeginInfo overlay_rp_begin = {0};
+    overlay_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    overlay_rp_begin.renderPass = vulkan_state.overlay_render_pass;
+    overlay_rp_begin.framebuffer = vulkan_state.overlay_framebuffers[swapchain_image_index];
+    overlay_rp_begin.renderArea.offset = (VkOffset2D){0, 0};
+    overlay_rp_begin.renderArea.extent = vulkan_state.swapchain_extent;
+    overlay_rp_begin.clearValueCount = 0;
+
+    vkCmdBeginRenderPass(command_buffer, &overlay_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+
+    vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+    vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+
+    // selected outlines (on top of everything)
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.editor_outline_pipeline);
+
+    // cube outlines
+    {
+        VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.cube_vertex_buffer, &offset);
+        vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+        for (uint32 cube_outline_index = 0; cube_outline_index < cube_editor_outline_instance_count; cube_outline_index++)
         {
-            VkImageMemoryBarrier depth_to_read = {0};
-            depth_to_read.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            depth_to_read.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-            depth_to_read.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-            depth_to_read.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            depth_to_read.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            depth_to_read.image = vulkan_state.depth_image;
-            depth_to_read.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-            depth_to_read.subresourceRange.baseMipLevel = 0;
-            depth_to_read.subresourceRange.levelCount = 1;
-            depth_to_read.subresourceRange.baseArrayLayer = 0;
-            depth_to_read.subresourceRange.layerCount = 1;
-            depth_to_read.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-            depth_to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-            vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &depth_to_read);
-        }
-
-        // clear oit resources 
-        {
-            // transition head image to TRANSFER_DST for clearing
-            VkImageMemoryBarrier head_to_clear = {0};
-            head_to_clear.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            head_to_clear.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            head_to_clear.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            head_to_clear.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            head_to_clear.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            head_to_clear.image = vulkan_state.oit_head_image;
-            head_to_clear.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            head_to_clear.subresourceRange.baseMipLevel = 0;
-            head_to_clear.subresourceRange.levelCount = 1;
-            head_to_clear.subresourceRange.baseArrayLayer = 0;
-            head_to_clear.subresourceRange.layerCount = 1;
-            head_to_clear.srcAccessMask = 0;
-            head_to_clear.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-            vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, &head_to_clear);
-
-            VkClearColorValue clear_val = {0};
-            clear_val.uint32[0] = 0xFFFFFFFF;
-            VkImageSubresourceRange clear_range = {0};
-            clear_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            clear_range.baseMipLevel = 0;
-            clear_range.levelCount = 1;
-            clear_range.baseArrayLayer = 0;
-            clear_range.layerCount = 1;
-            vkCmdClearColorImage(command_buffer, vulkan_state.oit_head_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_val, 1, &clear_range);
-
-            // transition head image to GENERAL for shader access
-            VkImageMemoryBarrier head_to_general = {0};
-            head_to_general.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            head_to_general.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            head_to_general.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-            head_to_general.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            head_to_general.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            head_to_general.image = vulkan_state.oit_head_image;
-            head_to_general.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            head_to_general.subresourceRange.baseMipLevel = 0;
-            head_to_general.subresourceRange.levelCount = 1;
-            head_to_general.subresourceRange.baseArrayLayer = 0;
-            head_to_general.subresourceRange.layerCount = 1;
-            head_to_general.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            head_to_general.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-
-            vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &head_to_general);
-
-            // clear counter to 0
-            vkCmdFillBuffer(command_buffer, vulkan_state.oit_counter_buffer, 0, 4, 0);
-
-            VkMemoryBarrier counter_barrier = {0};
-            counter_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-            counter_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            counter_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-
-            vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &counter_barrier, 0, 0, 0, 0);
-        }
-
-        VkRenderPassBeginInfo overlay_rp_begin = {0};
-        overlay_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        overlay_rp_begin.renderPass = vulkan_state.overlay_render_pass;
-        overlay_rp_begin.framebuffer = vulkan_state.overlay_framebuffers[swapchain_image_index];
-        overlay_rp_begin.renderArea.offset = (VkOffset2D){0, 0};
-        overlay_rp_begin.renderArea.extent = vulkan_state.swapchain_extent;
-        overlay_rp_begin.clearValueCount = 0;
-
-        vkCmdBeginRenderPass(command_buffer, &overlay_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
-
-        vkCmdSetViewport(command_buffer, 0, 1, &viewport);
-        vkCmdSetScissor(command_buffer, 0, 1, &scissor);
-
-        // selected outlines (on top of everything)
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.editor_outline_pipeline);
-
-        // cube outlines
-        {
-            VkDeviceSize offset = 0;
-            vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.cube_vertex_buffer, &offset);
-            vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
-
-            for (uint32 cube_outline_index = 0; cube_outline_index < cube_editor_outline_instance_count; cube_outline_index++)
-            {
-                Cube* cube = &cube_editor_outline_instances[cube_outline_index];
-
-                float model_matrix[16];
-                mat4BuildTRS(model_matrix, cube->coords, cube->rotation, cube->scale);
-
-                PushConstants pc = {0};
-                memcpy(pc.model, model_matrix, sizeof(pc.model));
-                memcpy(pc.view, view_matrix, sizeof(pc.view));
-                memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
-                pc.uv_rect = cube->uv;
-                pc.water_base_y = -999.0f;
-                pc.time = water_time;
-
-                vkCmdPushConstants(command_buffer, vulkan_state.editor_outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
-                vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, 1, 0, 0, 0);
-            }
-        }
-
-        // model outlines
-        for (uint32 model_outline_index = 0; model_outline_index < model_editor_outline_instance_count; model_outline_index++)
-        {
-            Model* model = &model_editor_outline_instances[model_outline_index];
-            LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
-            if (model_data->index_count == 0) continue;
-
-            VkDeviceSize offset = 0;
-            vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
-            vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+            Cube* cube = &cube_editor_outline_instances[cube_outline_index];
 
             float model_matrix[16];
-            mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
+            mat4BuildTRS(model_matrix, cube->coords, cube->rotation, cube->scale);
 
             PushConstants pc = {0};
             memcpy(pc.model, model_matrix, sizeof(pc.model));
             memcpy(pc.view, view_matrix, sizeof(pc.view));
             memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
-            pc.uv_rect = (Vec4){0, 0, 1, 1};
+            pc.uv_rect = cube->uv;
             pc.water_base_y = -999.0f;
             pc.time = water_time;
 
             vkCmdPushConstants(command_buffer, vulkan_state.editor_outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
-            vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
+            vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, 1, 0, 0, 0);
         }
+    }
 
-        // OIT laser pass
-        LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
-        if (laser_mesh->index_count > 0 && laser_instance_count > 0 && shader_mode != OUTLINE_TEST)
+    // model outlines
+    for (uint32 model_outline_index = 0; model_outline_index < model_editor_outline_instance_count; model_outline_index++)
+    {
+        Model* model = &model_editor_outline_instances[model_outline_index];
+        LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
+        if (model_data->index_count == 0) continue;
+
+        VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
+        vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+        float model_matrix[16];
+        mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
+
+        PushConstants pc = {0};
+        memcpy(pc.model, model_matrix, sizeof(pc.model));
+        memcpy(pc.view, view_matrix, sizeof(pc.view));
+        memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
+        pc.uv_rect = (Vec4){0, 0, 1, 1};
+        pc.water_base_y = -999.0f;
+        pc.time = water_time;
+
+        vkCmdPushConstants(command_buffer, vulkan_state.editor_outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
+        vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
+    }
+
+    // OIT laser pass
+    LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
+    if (laser_mesh->index_count > 0 && laser_instance_count > 0 && shader_mode != SHADER_MODE_OUTLINE_TEST)
+    {
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.oit_laser_pipeline);
+
+        VkDescriptorSet oit_sets[3] = 
         {
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.oit_laser_pipeline);
+            vulkan_state.oit_head_storage_descriptor_set,
+            vulkan_state.oit_fragment_pool_descriptor_set,
+            vulkan_state.oit_counter_descriptor_set,
+        };
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.oit_laser_pipeline_layout, 0, 3, oit_sets, 0, 0);
 
-            VkDescriptorSet oit_sets[3] = 
-            {
-                vulkan_state.oit_head_storage_descriptor_set,
-                vulkan_state.oit_fragment_pool_descriptor_set,
-                vulkan_state.oit_counter_descriptor_set,
-            };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.oit_laser_pipeline_layout, 0, 3, oit_sets, 0, 0);
+        VkDeviceSize laser_vb_offset = 0;
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_vb_offset);
+        vkCmdBindIndexBuffer(command_buffer, laser_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-            VkDeviceSize laser_vb_offset = 0;
-            vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_vb_offset);
-            vkCmdBindIndexBuffer(command_buffer, laser_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+        float proj_view_matrix[16] = {0};
+        mat4Multiply(proj_view_matrix, projection_matrix, view_matrix);
 
-            float proj_view_matrix[16] = {0};
-            mat4Multiply(proj_view_matrix, projection_matrix, view_matrix);
-
-            for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
-            {
-                Laser* laser = &laser_instances[laser_index];
-
-                float width = 2.0f;
-                Vec3 laser_scale = { width, width, laser->length };
-
-                float model_matrix[16];
-                mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
-
-                LaserPushConstants laser_pc = {0};
-                memcpy(laser_pc.model, model_matrix, sizeof(laser_pc.model));
-
-                float intersection_matrix[16];
-                Vec3 unit_scale = { 1.0f, 1.0f, 1.0f };
-                mat4BuildTRS(intersection_matrix, laser->center, laser->rotation, unit_scale);
-                float inverse_intersection_matrix[16];
-                mat4Inverse(inverse_intersection_matrix, intersection_matrix);
-                memcpy(laser_pc.inverse_intersection, inverse_intersection_matrix, sizeof(inverse_intersection_matrix));
-
-                memcpy(laser_pc.proj_view_matrix, proj_view_matrix, sizeof(proj_view_matrix));
-
-                laser_pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 0.1f };
-
-                float* m = intersection_matrix;
-                Vec4 ws = laser->start_clip_plane;
-                laser_pc.start_clip_plane = (Vec4){
-                    m[0]*ws.x  + m[1]*ws.y  + m[2]*ws.z  + m[3]*ws.w,
-                    m[4]*ws.x  + m[5]*ws.y  + m[6]*ws.z  + m[7]*ws.w,
-                    m[8]*ws.x  + m[9]*ws.y  + m[10]*ws.z + m[11]*ws.w,
-                    m[12]*ws.x + m[13]*ws.y + m[14]*ws.z + m[15]*ws.w,
-                };
-
-                ws = laser->end_clip_plane;
-                laser_pc.end_clip_plane = (Vec4){
-                    m[0]*ws.x  + m[1]*ws.y  + m[2]*ws.z  + m[3]*ws.w,
-                    m[4]*ws.x  + m[5]*ws.y  + m[6]*ws.z  + m[7]*ws.w,
-                    m[8]*ws.x  + m[9]*ws.y  + m[10]*ws.z + m[11]*ws.w,
-                    m[12]*ws.x + m[13]*ws.y + m[14]*ws.z + m[15]*ws.w,
-                };
-
-                laser_pc.camera_position = vulkan_camera.coords;
-                laser_pc.half_length = (laser->length) * 0.5f;
-
-                vkCmdPushConstants(command_buffer, vulkan_state.oit_laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &laser_pc);
-                vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
-            }
-        }
-
-        // barrier between OIT write and resolve
+        for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
         {
-            VkMemoryBarrier oit_barrier = {0};
-            oit_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-            oit_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            oit_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            Laser* laser = &laser_instances[laser_index];
 
-            vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_DEPENDENCY_BY_REGION_BIT, 1, &oit_barrier, 0, 0, 0, 0);
-        }
-
-        // OIT resolve pass
-        {
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.oit_resolve_pipeline);
-
-            VkDescriptorSet oit_sets[4] = 
-            {
-                vulkan_state.oit_head_storage_descriptor_set,
-                vulkan_state.oit_fragment_pool_descriptor_set,
-                vulkan_state.oit_counter_descriptor_set,
-                vulkan_state.depth_descriptor_set,
-            };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.oit_resolve_pipeline_layout, 0, 4, oit_sets, 0, 0);
-
-            float oit_depth_threshold = 0.5f;
-            vkCmdPushConstants(command_buffer, vulkan_state.oit_resolve_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float), &oit_depth_threshold);
-
-            vkCmdDraw(command_buffer, 3, 1, 0, 0);
-        }
-
-        // sprites
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline);
-
-        VkDeviceSize sprite_vb_offset = 0;
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &sprite_vb_offset);
-        vkCmdBindIndexBuffer(command_buffer, vulkan_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
-
-        float ortho[16], view2d[16];
-        mat4BuildOrtho(ortho, 0.0f, (float)vulkan_state.swapchain_extent.width, 0.0f, (float)vulkan_state.swapchain_extent.height, 0.0f, 1.0f);
-        mat4Identity(view2d);
-
-        int32 last_sprite_asset = -1;
-
-        for (uint32 sprite_instance_index = 0; sprite_instance_index < sprite_instance_count; sprite_instance_index++)
-        {
-            Sprite* sprite = &sprite_instances[sprite_instance_index];
-
-            if ((int32)sprite->asset_index != last_sprite_asset)
-            {
-                vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[sprite->asset_index], 0, 0);
-                last_sprite_asset = (int32)sprite->asset_index;
-            }
+            float width = 2.0f;
+            Vec3 laser_scale = { width, width, laser->length };
 
             float model_matrix[16];
-            Vec4 identity_quaternion = { 0, 0, 0, 1 };
-            mat4BuildTRS(model_matrix, sprite->coords, identity_quaternion, sprite->size);
+            mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
 
-            PushConstants push_constants = {0};
-            memcpy(push_constants.model, model_matrix, sizeof(push_constants.model));
-            memcpy(push_constants.view, view2d, sizeof(push_constants.view));
-            memcpy(push_constants.proj, ortho, sizeof(push_constants.proj));
-            push_constants.uv_rect = sprite->uv;
-            push_constants.alpha = sprite->alpha;
+            LaserPushConstants laser_pc = {0};
+            memcpy(laser_pc.model, model_matrix, sizeof(laser_pc.model));
 
-            vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &push_constants);
+            float intersection_matrix[16];
+            Vec3 unit_scale = { 1.0f, 1.0f, 1.0f };
+            mat4BuildTRS(intersection_matrix, laser->center, laser->rotation, unit_scale);
+            float inverse_intersection_matrix[16];
+            mat4Inverse(inverse_intersection_matrix, intersection_matrix);
+            memcpy(laser_pc.inverse_intersection, inverse_intersection_matrix, sizeof(inverse_intersection_matrix));
 
-            vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
+            memcpy(laser_pc.proj_view_matrix, proj_view_matrix, sizeof(proj_view_matrix));
+
+            laser_pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 0.1f };
+
+            float* m = intersection_matrix;
+            Vec4 ws = laser->start_clip_plane;
+            laser_pc.start_clip_plane = (Vec4)
+            {
+                m[0]*ws.x  + m[1]*ws.y  + m[2]*ws.z  + m[3]*ws.w,
+                m[4]*ws.x  + m[5]*ws.y  + m[6]*ws.z  + m[7]*ws.w,
+                m[8]*ws.x  + m[9]*ws.y  + m[10]*ws.z + m[11]*ws.w,
+                m[12]*ws.x + m[13]*ws.y + m[14]*ws.z + m[15]*ws.w,
+            };
+
+            ws = laser->end_clip_plane;
+            laser_pc.end_clip_plane = (Vec4)
+            {
+                m[0]*ws.x  + m[1]*ws.y  + m[2]*ws.z  + m[3]*ws.w,
+                m[4]*ws.x  + m[5]*ws.y  + m[6]*ws.z  + m[7]*ws.w,
+                m[8]*ws.x  + m[9]*ws.y  + m[10]*ws.z + m[11]*ws.w,
+                m[12]*ws.x + m[13]*ws.y + m[14]*ws.z + m[15]*ws.w,
+            };
+
+            laser_pc.camera_position = vulkan_camera.coords;
+            laser_pc.half_length = (laser->length) * 0.5f;
+
+            vkCmdPushConstants(command_buffer, vulkan_state.oit_laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &laser_pc);
+            vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
+        }
+    }
+
+    // barrier between OIT write and resolve
+    {
+        VkMemoryBarrier oit_barrier = {0};
+        oit_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        oit_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        oit_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_DEPENDENCY_BY_REGION_BIT, 1, &oit_barrier, 0, 0, 0, 0);
+    }
+
+    // OIT resolve pass
+    {
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.oit_resolve_pipeline);
+
+        VkDescriptorSet oit_sets[4] = 
+        {
+            vulkan_state.oit_head_storage_descriptor_set,
+            vulkan_state.oit_fragment_pool_descriptor_set,
+            vulkan_state.oit_counter_descriptor_set,
+            vulkan_state.depth_descriptor_set,
+        };
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.oit_resolve_pipeline_layout, 0, 4, oit_sets, 0, 0);
+
+        float oit_depth_threshold = 0.5f;
+        vkCmdPushConstants(command_buffer, vulkan_state.oit_resolve_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float), &oit_depth_threshold);
+
+        vkCmdDraw(command_buffer, 3, 1, 0, 0);
+    }
+
+    // sprites
+    vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline);
+
+    VkDeviceSize sprite_vb_offset = 0;
+    vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &sprite_vb_offset);
+    vkCmdBindIndexBuffer(command_buffer, vulkan_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+    float ortho[16], view2d[16];
+    mat4BuildOrtho(ortho, 0.0f, (float)vulkan_state.swapchain_extent.width, 0.0f, (float)vulkan_state.swapchain_extent.height, 0.0f, 1.0f);
+    mat4Identity(view2d);
+
+    int32 last_sprite_asset = -1;
+
+    for (uint32 sprite_instance_index = 0; sprite_instance_index < sprite_instance_count; sprite_instance_index++)
+    {
+        Sprite* sprite = &sprite_instances[sprite_instance_index];
+
+        if ((int32)sprite->asset_index != last_sprite_asset)
+        {
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[sprite->asset_index], 0, 0);
+            last_sprite_asset = (int32)sprite->asset_index;
         }
 
-        vkCmdEndRenderPass(command_buffer);
+        float model_matrix[16];
+        Vec4 identity_quaternion = { 0, 0, 0, 1 };
+        mat4BuildTRS(model_matrix, sprite->coords, identity_quaternion, sprite->size);
+
+        PushConstants push_constants = {0};
+        memcpy(push_constants.model, model_matrix, sizeof(push_constants.model));
+        memcpy(push_constants.view, view2d, sizeof(push_constants.view));
+        memcpy(push_constants.proj, ortho, sizeof(push_constants.proj));
+        push_constants.uv_rect = sprite->uv;
+        push_constants.alpha = sprite->alpha;
+
+        vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &push_constants);
+
+        vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
     }
+
+    vkCmdEndRenderPass(command_buffer);
 
     vkEndCommandBuffer(command_buffer);
 

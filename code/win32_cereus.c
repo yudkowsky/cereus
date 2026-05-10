@@ -342,7 +342,7 @@ int CALLBACK WinMain(
         frame_time_index = (frame_time_index + 1) % 60;
         
         title_update_counter++;
-        if (title_update_counter >= 300)
+        if (title_update_counter >= 100)
         {
             double avg_ms = 0.0;
             for (int i = 0; i < 60; i++) avg_ms += frame_times[i];

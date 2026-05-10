@@ -451,7 +451,7 @@ bool restart_last_turn = false;
 
 // debug state
 EditorState editor_state = {0};
-ShaderMode game_shader_mode = OLD;
+ShaderMode game_shader_mode = SHADER_MODE_DEFAULT;
 bool draw_trailing_hitboxes = false;
 bool cheating = false;
 
@@ -1949,7 +1949,7 @@ void updateLaserBuffer()
             LaserBuffer* lb = &laser_buffer[source_index * MAX_LASER_TURNS_ALLOWED + laser_turn_index];
 
             // start of some segment: always move one tile forward from where we are before we start checking for anything
-            float laser_source_start_offset = game_shader_mode == OLD ? 0.5f : 0.4f;
+            float laser_source_start_offset = 0.4f;
             if (laser_turn_index == 0) lb->start_coords = vec3Add(source->position, vec3ScalarMultiply(directionToVector(current_direction), laser_source_start_offset));
             else lb->start_coords = current_norm_coords;
             lb->direction = current_direction;
@@ -3831,23 +3831,15 @@ bool gameFrame(double delta_time, Input* input)
         // change model states
         if (input->keys_held & KEY_7)
         {
-            game_shader_mode = OUTLINE_TEST;
+            game_shader_mode = SHADER_MODE_OUTLINE_TEST;
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             createDebugPopup("shader mode: testing outlines", SHADER_MODE_CHANGE);
         }
         if (input->keys_held & KEY_8)
         {
-            game_shader_mode = OUTLINE;
+            game_shader_mode = SHADER_MODE_DEFAULT;
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             createDebugPopup("shader mode: outlines", SHADER_MODE_CHANGE);
-        }
-        if (input->keys_held & KEY_9)
-        {
-            game_shader_mode = OLD; 
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-
-
-            createDebugPopup("shader mode: old", SHADER_MODE_CHANGE);
         }
 
         // change camera fov for editor
@@ -4870,22 +4862,12 @@ bool gameFrame(double delta_time, Input* input)
                         else if (!in_overworld && findInSolvedLevels(world_state.level_name) != -1) draw_tile = WON_BLOCK;
                     }
 
-                    if (game_shader_mode == OLD)
-                    {
-                        drawAsset(getCube3DId(draw_tile), CUBE_3D, e->position, DEFAULT_SCALE, e->rotation, VEC4_0, VEC4_0, VEC4_0); 
-                    }
-                    else
-                    {
-                        drawAsset(getModelId(draw_tile), MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, VEC4_0, VEC4_0, VEC4_0);
-                    }
+                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, VEC4_0, VEC4_0, VEC4_0);
                 }
             }
             else
             {
-                if (game_shader_mode != OLD && getCube3DId(draw_tile) == CUBE_3D_WATER) 
-                {
-                    drawAsset(MODEL_3D_WATER, WATER_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), VEC4_0, VEC4_0, VEC4_0);
-                }
+                if (getCube3DId(draw_tile) == CUBE_3D_WATER) drawAsset(MODEL_3D_WATER, WATER_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), VEC4_0, VEC4_0, VEC4_0);
                 drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), VEC4_0, VEC4_0, VEC4_0);
             }
         }
@@ -4991,8 +4973,7 @@ bool gameFrame(double delta_time, Input* input)
 
             if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
             {
-                SpriteId selected_id = getCube3DId(MIRROR);
-                if (game_shader_mode != OLD) selected_id = getModelId(getTileTypeFromId(editor_state.selected_id));
+                SpriteId selected_id = getModelId(getTileTypeFromId(editor_state.selected_id));
                 Entity* selected_e = 0;
                 if (editor_state.selected_id > 0) selected_e = getEntityFromId(editor_state.selected_id);
                 if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position, DEFAULT_SCALE, selected_e->rotation, VEC4_0, VEC4_0, VEC4_0);
