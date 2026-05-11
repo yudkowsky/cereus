@@ -2,11 +2,10 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define CGLTF_IMPLEMENTATION
 
-#include <stdio.h>
-#include "win32_vulkan_bridge.h"
 #include <vulkan/vulkan.h>
 #include "stb_image.h"
 #include "cgltf.h"
+#include "everything.h"
 
 typedef struct 
 {
@@ -95,10 +94,10 @@ typedef struct
     float proj[16];
     Vec4 uv_rect;
     float alpha;
-    float water_base_y;
+    float water_plane_y;
     float time;
 }
-PushConstants; // TODO: rename. also don't use for sprites - they don't need the time / water_base_y fields.
+PushConstants; // TODO: rename. also don't use for sprites - they don't need the time / water_plane_y fields.
 
 typedef struct 
 {
@@ -117,7 +116,7 @@ typedef struct
 {
     float view[16];
     float proj[16];
-    float water_base_y;
+    float water_plane_y;
     float time;
 }
 InstancedPushConstants;
@@ -129,7 +128,7 @@ typedef struct
     float inv_view_proj[16];
     float time;
     float focal_length;
-    float water_base_y;
+    float water_plane_y;
 }
 WaterPushConstants;
 
@@ -3568,6 +3567,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     }
 
     vulkan_state.paint_image_first_upload = true;
+
+    vulkan_state.water_plane_y = WATER_PLANE_Y;
 }
 
 void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, float water_time_from_game, Camera camera_from_game, ShaderMode shader_mode_from_game, WaterPaintTexture* paint_from_game)
@@ -3711,9 +3712,6 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     water_flush_range.offset = 0;
     water_flush_range.size = VK_WHOLE_SIZE;
     vkFlushMappedMemoryRanges(vulkan_state.logical_device_handle, 1, &water_flush_range);
-
-    // handle water y level
-    vulkan_state.water_plane_y = water_instances[0].coords.y + 1.2f;
 }
 
 void vulkanDraw(void)
@@ -3887,7 +3885,7 @@ void vulkanDraw(void)
         InstancedPushConstants cube_pc = {0};
         memcpy(cube_pc.view, view_matrix, sizeof(cube_pc.view));
         memcpy(cube_pc.proj, projection_matrix, sizeof(cube_pc.proj));
-        cube_pc.water_base_y = -999.0f;
+        cube_pc.water_plane_y = -999.0f;
         cube_pc.time = water_time;
 
         vkCmdPushConstants(command_buffer, vulkan_state.cube_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(InstancedPushConstants), &cube_pc);
@@ -3915,7 +3913,7 @@ void vulkanDraw(void)
             memcpy(model_pc.view, view_matrix, sizeof(model_pc.view));
             memcpy(model_pc.proj, projection_matrix, sizeof(model_pc.proj));
             model_pc.uv_rect = (Vec4){0, 0, 1, 1};
-            model_pc.water_base_y = -999.0f;
+            model_pc.water_plane_y = -999.0f;
             model_pc.time = water_time;
 
             vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
@@ -4096,7 +4094,7 @@ void vulkanDraw(void)
             mat4Inverse(water_pc.inv_view_proj, proj_view);
             water_pc.time = water_time;
             water_pc.focal_length = focal_length;
-            water_pc.water_base_y = vulkan_state.water_plane_y;
+            water_pc.water_plane_y = vulkan_state.water_plane_y;
 
             vkCmdPushConstants(command_buffer, vulkan_state.water_depth_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &water_pc);
 
@@ -4148,7 +4146,7 @@ void vulkanDraw(void)
             mat4Inverse(water_pc.inv_view_proj, proj_view);
             water_pc.time = water_time;
             water_pc.focal_length = focal_length;
-            water_pc.water_base_y = vulkan_state.water_plane_y;
+            water_pc.water_plane_y = vulkan_state.water_plane_y;
 
             vkCmdPushConstants(command_buffer, vulkan_state.water_distortion_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &water_pc);
 
@@ -4252,7 +4250,7 @@ void vulkanDraw(void)
             memcpy(pc.view, view_matrix, sizeof(pc.view));
             memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
             pc.uv_rect = cube->uv;
-            pc.water_base_y = -999.0f;
+            pc.water_plane_y = -999.0f;
             pc.time = water_time;
 
             vkCmdPushConstants(command_buffer, vulkan_state.editor_outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
@@ -4279,7 +4277,7 @@ void vulkanDraw(void)
         memcpy(pc.view, view_matrix, sizeof(pc.view));
         memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
         pc.uv_rect = (Vec4){0, 0, 1, 1};
-        pc.water_base_y = -999.0f;
+        pc.water_plane_y = -999.0f;
         pc.time = water_time;
 
         vkCmdPushConstants(command_buffer, vulkan_state.editor_outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);

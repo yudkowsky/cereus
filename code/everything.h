@@ -1,6 +1,55 @@
 #pragma once
 
-#include "types.h"
+#include <stdint.h> // many of these imports are temporary, but haven't set up alternatives yet
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <math.h> 
+
+// TYPES
+
+typedef int8_t int8;
+typedef int16_t int16;
+typedef int32_t int32;
+typedef int64_t int64;
+
+typedef uint8_t uint8;
+typedef uint16_t uint16;
+typedef uint32_t uint32;
+typedef uint64_t uint64;
+
+typedef struct Vec2
+{
+    float x, y;
+}
+Vec2;
+
+typedef struct Vec3
+{
+    float x, y, z;
+}
+Vec3;
+
+typedef struct Vec4
+{
+    float x, y, z, w;
+}
+Vec4;
+
+typedef struct Int2
+{
+    int32 x, y;
+}
+Int2;
+
+typedef struct Int3
+{
+    int32 x, y, z;
+}
+Int3;
+
+// WORLDSTATE STRUCTS
 
 typedef struct RendererPlatformHandles
 {
@@ -206,6 +255,8 @@ typedef enum ShaderMode
 }
 ShaderMode;
 
+#define WATER_PLANE_Y 2.2f
+
 #define WATER_PAINT_WIDTH 1024
 #define WATER_PAINT_HEIGHT 1024
 
@@ -215,3 +266,14 @@ typedef struct WaterPaintTexture
     bool dirty;
 }
 WaterPaintTexture;
+
+// FUCNTIONS
+
+void gameInitialize(char* level_name, DisplayInfo);
+bool gameFrame(double delta_time, Input*);
+void gameRedraw(DisplayInfo);
+
+void vulkanInitialize(RendererPlatformHandles, DisplayInfo);
+void vulkanResize(uint32 width, uint32 height);
+void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, float global_time, Camera camera, ShaderMode shader_mode, WaterPaintTexture* water_paint_texture);
+void vulkanDraw();

@@ -1,8 +1,5 @@
 #include <windows.h>
-#include <stdbool.h>
-#include <stdio.h>
-#include "win32_vulkan_bridge.h"
-#include "win32_cereus_bridge.h"
+#include "everything.h"
 
 // temp for sleep TODO: fix up this whole system
 typedef MMRESULT (WINAPI *timeBeginPeriod_t)(UINT);

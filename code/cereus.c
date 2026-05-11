@@ -1,8 +1,4 @@
-#include "win32_cereus_bridge.h"
-#include "worldstate_structs.h"
-#include <string.h> // many of these imports are temporary, but haven't set up alternatives yet
-#include <math.h> 
-#include <stdio.h> 
+#include "everything.h"
 
 #define FOR(i, n) for (int i = 0; i < n; i++)
 
@@ -190,6 +186,7 @@ typedef enum
     PLACE_BREAK = 1,
     SELECT = 2,
     SELECT_WRITE = 3,
+    WATER_PAINT = 4,
 }
 EditorMode;
 
@@ -3623,132 +3620,123 @@ bool gameFrame(double delta_time, Input* input)
         memset(&editor_state.edit_buffer, 0, sizeof(editor_state.edit_buffer));
     }
 
-    // MAIN EDITOR MODE FUNCTIONALITY (mostly anything to do with the raycasts)
+    // MAIN EDITOR MODE FUNCTIONALITY
 
     if (time_until_allow_meta_input == 0)
     {
+        RaycastHit raycast_output = raycastHitCube(camera_with_ow_offset.coords, vec3RotateByQuaternion(vec3Negate(intCoordsToNorm(AXIS_Z)), camera_with_ow_offset.rotation), MAX_RAYCAST_SEEK_LENGTH);
+
+        // place / break / rotate tiles
         if (editor_state.editor_mode == PLACE_BREAK)
         {
-            if (input->keys_held & KEY_LEFT_MOUSE || input->keys_held & KEY_RIGHT_MOUSE || input->keys_held & KEY_MIDDLE_MOUSE || input->keys_held & KEY_R || input->keys_held & KEY_F|| input->keys_held & KEY_H|| input->keys_held & KEY_G)
+            if ((input->keys_held & KEY_LEFT_MOUSE || input->keys_held & KEY_F) && raycast_output.hit) 
             {
-                Vec3 neg_z_basis = {0, 0, -1};
-                RaycastHit raycast_output = raycastHitCube(camera_with_ow_offset.coords, vec3RotateByQuaternion(neg_z_basis, camera_with_ow_offset.rotation), MAX_RAYCAST_SEEK_LENGTH);
-
-                if ((input->keys_held & KEY_LEFT_MOUSE || input->keys_held & KEY_F) && raycast_output.hit) 
+                Entity *entity= getEntityAtCoords(raycast_output.hit_coords);
+                if (entity != 0)
                 {
-                    Entity *entity= getEntityAtCoords(raycast_output.hit_coords);
-                    if (entity != 0)
-                    {
-                        entity->coords = (Int3){0};
-                        entity->position = (Vec3){0};
-                        entity->removed = true;
-                    }
-                    setTileType(NONE, raycast_output.hit_coords);
-                    setTileDirection(NORTH, raycast_output.hit_coords, 0);
+                    entity->coords = (Int3){0};
+                    entity->position = (Vec3){0};
+                    entity->removed = true;
                 }
-                else if ((input->keys_held & KEY_RIGHT_MOUSE || input->keys_held & KEY_H) && raycast_output.hit) 
-                {
-                    if (intCoordsWithinLevelBounds(raycast_output.place_coords))
-                    {
-                        if (editor_state.picked_tile == PLAYER) editorPlaceOnlyInstanceOfTile(player, raycast_output.place_coords, PLAYER, PLAYER_ID);
-                        else if (editor_state.picked_tile == PACK) editorPlaceOnlyInstanceOfTile(pack, raycast_output.place_coords, PACK, PACK_ID);
-                        if (isSource(editor_state.picked_tile)) 
-                        {
-                            setTileType(editor_state.picked_tile, raycast_output.place_coords); 
-                            setTileDirection(NORTH, raycast_output.place_coords, 0);
-                            setEntityInstanceInGroup(world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
-                        }
-                        else
-                        {
-                            setTileType(editor_state.picked_tile, raycast_output.place_coords);
-
-                            Entity* entity_group = 0;
-                            switch (editor_state.picked_tile)
-                            {
-                                case BOX:          entity_group = world_state.boxes;          break;
-                                case MIRROR:       entity_group = world_state.mirrors;        break;
-                                case GLASS:        entity_group = world_state.glass_blocks;  break;
-                                case WIN_BLOCK:    entity_group = world_state.win_blocks;    break;
-                                case LOCKED_BLOCK: entity_group = world_state.locked_blocks; break;
-                                default: entity_group = 0;
-                            }
-                            if (entity_group != 0) 
-                            {
-                                setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
-                                setTileDirection(NORTH, raycast_output.place_coords, 0);
-                            }
-                            else 
-                            {
-                                setTileDirection(NORTH, raycast_output.place_coords, 0);
-                            }
-                        }
-                    }
-                }
-                else if (input->keys_held & KEY_R && raycast_output.hit)
-                {   
-                    TileType type = getTileType(raycast_output.hit_coords);
-                    if (type == MIRROR)
-                    {
-                        Entity* mirror = getEntityAtCoords(raycast_output.hit_coords);
-                        if (mirror)
-                        {
-                            mirror->direction++;
-                            if (mirror->direction >= UP)
-                            {
-                                mirror->direction = NORTH;
-                                mirror->mirror_orientation++;
-                                if (mirror->mirror_orientation > MIRROR_DOWN) mirror->mirror_orientation = MIRROR_SIDE;
-                            }
-                            setTileDirection(mirror->direction, raycast_output.hit_coords, mirror->mirror_orientation);
-                            mirror->rotation = mirrorRotation(mirror->direction, mirror->mirror_orientation);
-                        }
-                    }
-                    else if (isEntity(type))
-                    {
-                        Direction direction = getTileDirection(raycast_output.hit_coords);
-                        if (direction == DOWN) direction = NORTH;
-                        else direction++;
-                        setTileDirection(direction, raycast_output.hit_coords, 0); // mirror rotation case is handled later
-                        Entity* e = getEntityAtCoords(raycast_output.hit_coords);
-                        if (e != 0)
-                        {
-                            e->direction = direction;
-                            e->rotation = directionToQuaternion(direction);
-                        }
-                    }
-                    else if (type == LADDER)
-                    {
-                        Direction direction = getTileDirection(raycast_output.hit_coords);
-                        if (direction == EAST) direction = NORTH;
-                        else direction++;
-                        setTileDirection(direction, raycast_output.hit_coords, 0);
-                    }
-                }
-                else if ((input->keys_held & KEY_MIDDLE_MOUSE || input->keys_held & KEY_G) && raycast_output.hit) editor_state.picked_tile = getTileType(raycast_output.hit_coords);
+                setTileType(NONE, raycast_output.hit_coords);
+                setTileDirection(NORTH, raycast_output.hit_coords, 0);
 
                 time_until_allow_meta_input = PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT;
             }
-            if (input->keys_held & KEY_L)
+            else if ((input->keys_held & KEY_RIGHT_MOUSE || input->keys_held & KEY_H) && raycast_output.hit) 
             {
-                editor_state.picked_tile++;
-                if (editor_state.picked_tile == LADDER + 1) editor_state.picked_tile = VOID;
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                if (intCoordsWithinLevelBounds(raycast_output.place_coords))
+                {
+                    if (editor_state.picked_tile == PLAYER) editorPlaceOnlyInstanceOfTile(player, raycast_output.place_coords, PLAYER, PLAYER_ID);
+                    else if (editor_state.picked_tile == PACK) editorPlaceOnlyInstanceOfTile(pack, raycast_output.place_coords, PACK, PACK_ID);
+                    if (isSource(editor_state.picked_tile)) 
+                    {
+                        setTileType(editor_state.picked_tile, raycast_output.place_coords); 
+                        setTileDirection(NORTH, raycast_output.place_coords, 0);
+                        setEntityInstanceInGroup(world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
+                    }
+                    else
+                    {
+                        setTileType(editor_state.picked_tile, raycast_output.place_coords);
+
+                        Entity* entity_group = 0;
+                        switch (editor_state.picked_tile)
+                        {
+                            case BOX:          entity_group = world_state.boxes;          break;
+                            case MIRROR:       entity_group = world_state.mirrors;        break;
+                            case GLASS:        entity_group = world_state.glass_blocks;  break;
+                            case WIN_BLOCK:    entity_group = world_state.win_blocks;    break;
+                            case LOCKED_BLOCK: entity_group = world_state.locked_blocks; break;
+                            default: entity_group = 0;
+                        }
+                        if (entity_group != 0) 
+                        {
+                            setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
+                            setTileDirection(NORTH, raycast_output.place_coords, 0);
+                        }
+                        else 
+                        {
+                            setTileDirection(NORTH, raycast_output.place_coords, 0);
+                        }
+                    }
+                }
+
+                time_until_allow_meta_input = PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT;
             }
-            if (input->keys_held & KEY_M)
+            else if (input->keys_held & KEY_R && raycast_output.hit)
+            {   
+                TileType type = getTileType(raycast_output.hit_coords);
+                if (type == MIRROR)
+                {
+                    Entity* mirror = getEntityAtCoords(raycast_output.hit_coords);
+                    if (mirror)
+                    {
+                        mirror->direction++;
+                        if (mirror->direction >= UP)
+                        {
+                            mirror->direction = NORTH;
+                            mirror->mirror_orientation++;
+                            if (mirror->mirror_orientation > MIRROR_DOWN) mirror->mirror_orientation = MIRROR_SIDE;
+                        }
+                        setTileDirection(mirror->direction, raycast_output.hit_coords, mirror->mirror_orientation);
+                        mirror->rotation = mirrorRotation(mirror->direction, mirror->mirror_orientation);
+                    }
+                }
+                else if (isEntity(type))
+                {
+                    Direction direction = getTileDirection(raycast_output.hit_coords);
+                    if (direction == DOWN) direction = NORTH;
+                    else direction++;
+                    setTileDirection(direction, raycast_output.hit_coords, 0); // mirror rotation case is handled later
+                    Entity* e = getEntityAtCoords(raycast_output.hit_coords);
+                    if (e != 0)
+                    {
+                        e->direction = direction;
+                        e->rotation = directionToQuaternion(direction);
+                    }
+                }
+                else if (type == LADDER)
+                {
+                    Direction direction = getTileDirection(raycast_output.hit_coords);
+                    if (direction == EAST) direction = NORTH;
+                    else direction++;
+                    setTileDirection(direction, raycast_output.hit_coords, 0);
+                }
+
+                time_until_allow_meta_input = PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT;
+            }
+            else if ((input->keys_held & KEY_MIDDLE_MOUSE || input->keys_held & KEY_G) && raycast_output.hit) 
             {
-                clearSolvedLevels();
-                createDebugPopup("solved levels cleared", NO_TYPE);
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+                editor_state.picked_tile = getTileType(raycast_output.hit_coords);
+                time_until_allow_meta_input = PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT;
             }
         }
 
+        // select and edit tile metadata
         if (editor_state.editor_mode == SELECT)
         {
             if (input->keys_held & KEY_LEFT_MOUSE)
             {
-                Vec3 neg_z_basis = {0, 0, -1};
-                RaycastHit raycast_output = raycastHitCube(camera_with_ow_offset.coords, vec3RotateByQuaternion(neg_z_basis, camera_with_ow_offset.rotation), MAX_RAYCAST_SEEK_LENGTH);
-
                 if (isEntity(getTileType(raycast_output.hit_coords)))
                 {
                     editor_state.selected_id = getEntityAtCoords(raycast_output.hit_coords)->id;
@@ -3791,6 +3779,12 @@ bool gameFrame(double delta_time, Input* input)
                 }
             }
         }
+
+        // paint onto water texture
+        if (editor_state.editor_mode == WATER_PAINT)
+        {
+            // need to raytrace to collision point on 
+        }
     }
 
     // EDITOR KEYBINDS - separate check for time_until_allow_meta_input because might have been modified above, and if so want to skip this
@@ -3812,14 +3806,10 @@ bool gameFrame(double delta_time, Input* input)
             editor_state.editor_mode = SELECT;
             createDebugPopup("select mode", GAMEPLAY_MODE_CHANGE);
         }
-
-        // toggle cheating
         if (input->keys_held & KEY_3)
         {
-            cheating = !cheating;
-            if (cheating) createDebugPopup("cheating", CHEAT_MODE_TOGGLE);
-            else createDebugPopup("not cheating", CHEAT_MODE_TOGGLE);
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            editor_state.editor_mode = WATER_PAINT;
+            createDebugPopup("paint mode", GAMEPLAY_MODE_CHANGE);
         }
 
         // toggle drawing trailing hitboxes as cube outlines
@@ -3831,7 +3821,7 @@ bool gameFrame(double delta_time, Input* input)
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
 
-        // change model states
+        // change shader mode
         if (input->keys_held & KEY_7)
         {
             game_shader_mode = SHADER_MODE_OUTLINE_TEST;
@@ -3843,6 +3833,31 @@ bool gameFrame(double delta_time, Input* input)
             game_shader_mode = SHADER_MODE_DEFAULT;
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             createDebugPopup("shader mode: outlines", SHADER_MODE_CHANGE);
+        }
+
+        // toggle cheating
+        if (input->keys_held & KEY_9)
+        {
+            cheating = !cheating;
+            if (cheating) createDebugPopup("cheating", CHEAT_MODE_TOGGLE);
+            else createDebugPopup("not cheating", CHEAT_MODE_TOGGLE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        // increment chosen tile
+        if (input->keys_held & KEY_L)
+        {
+            editor_state.picked_tile++;
+            if (editor_state.picked_tile == LADDER + 1) editor_state.picked_tile = VOID;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        // clear solved levels
+        if (input->keys_held & KEY_M)
+        {
+            clearSolvedLevels();
+            createDebugPopup("solved levels cleared", NO_TYPE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
 
         // change camera fov for editor
