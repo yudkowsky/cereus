@@ -1923,19 +1923,22 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     // VK_KHR_surface: required to present to a window
     // VK_KHR_win32_surface: win32 binding for WSI
     // (surface = bridge between vulkan and platform)
-    const char* instance_extensions[] = { "VK_KHR_surface", "VK_KHR_win32_surface" };
+    char* instance_extensions[] = { "VK_KHR_surface", "VK_KHR_win32_surface" };
+    char* validation_layers[] = { "VK_LAYER_KHRONOS_validation" };
 
 	VkApplicationInfo api_info = {0};
     api_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
     api_info.apiVersion = VK_API_VERSION_1_3;
 
-    VkInstanceCreateInfo instance_creation_info = {0};
-    instance_creation_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-    instance_creation_info.pApplicationInfo = &api_info;
-    instance_creation_info.enabledExtensionCount = 2;
-    instance_creation_info.ppEnabledExtensionNames = instance_extensions;
+    VkInstanceCreateInfo instance_ci = {0};
+    instance_ci.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+    instance_ci.pApplicationInfo = &api_info;
+    instance_ci.enabledExtensionCount = 2;
+    instance_ci.ppEnabledExtensionNames = instance_extensions;
+    instance_ci.enabledLayerCount = 1;
+    instance_ci.ppEnabledLayerNames = validation_layers;
 
-    vkCreateInstance(&instance_creation_info, 0, &vulkan_state.vulkan_instance_handle);
+    vkCreateInstance(&instance_ci, 0, &vulkan_state.vulkan_instance_handle);
 
 	VkWin32SurfaceCreateInfoKHR surface_creation_info = {0};
     surface_creation_info.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
@@ -2124,6 +2127,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkPhysicalDeviceFeatures device_features = {0};
     device_features.fillModeNonSolid = VK_TRUE;
     device_features.wideLines = VK_TRUE;
+    device_features.fragmentStoresAndAtomics = VK_TRUE;
 
     VkDeviceCreateInfo device_info = {0}; // struct that bundles everthing the driver needs to create the logical device
     device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -3474,12 +3478,12 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         VkImageCreateInfo paint_image_ci = {0};
         paint_image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         paint_image_ci.imageType = VK_IMAGE_TYPE_2D;
-        paint_image_ci.extent.width = WATER_PAINT_WIDTH;
-        paint_image_ci.extent.height = WATER_PAINT_HEIGHT;
+        paint_image_ci.extent.width = WATER_PAINT_TOTAL;
+        paint_image_ci.extent.height = WATER_PAINT_TOTAL;
         paint_image_ci.extent.depth = 1;
         paint_image_ci.mipLevels = 1;
         paint_image_ci.arrayLayers = 1;
-        paint_image_ci.format = VK_FORMAT_R32_SFLOAT;
+        paint_image_ci.format = VK_FORMAT_R32G32B32A32_SFLOAT;
         paint_image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
         paint_image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         paint_image_ci.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -3503,7 +3507,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         paint_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         paint_view_ci.image = vulkan_state.paint_image;
         paint_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        paint_view_ci.format = VK_FORMAT_R32_SFLOAT;
+        paint_view_ci.format = VK_FORMAT_R32G32B32A32_SFLOAT;
         paint_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         paint_view_ci.subresourceRange.baseMipLevel = 0;
         paint_view_ci.subresourceRange.levelCount = 1;
@@ -3515,7 +3519,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     // persistent staging buffer
     {
-        VkDeviceSize paint_size_bytes = (VkDeviceSize)WATER_PAINT_WIDTH * WATER_PAINT_HEIGHT * 4;
+        VkDeviceSize paint_size_bytes = (VkDeviceSize)WATER_PAINT_TOTAL * WATER_PAINT_TOTAL * sizeof(Vec4);
 
         VkBufferCreateInfo staging_buffer_ci = {0};
         staging_buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -3750,6 +3754,9 @@ void vulkanDraw(void)
 
     if (vulkan_state.water_paint_texture && vulkan_state.water_paint_texture->dirty)
     {
+        // TODO: slow... will want to either expose this mapped memory to game, and handle like that, or only write affected pixels on any given frame
+        memcpy(vulkan_state.paint_staging_mapped, vulkan_state.water_paint_texture->values, sizeof(Vec4) * WATER_PAINT_TOTAL * WATER_PAINT_TOTAL);
+
         VkImageMemoryBarrier paint_to_transfer = {0};
         paint_to_transfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         paint_to_transfer.oldLayout = vulkan_state.paint_image_first_upload ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -3779,7 +3786,7 @@ void vulkanDraw(void)
         paint_copy.imageSubresource.baseArrayLayer = 0;
         paint_copy.imageSubresource.layerCount = 1;
         paint_copy.imageOffset = (VkOffset3D){ 0, 0, 0 };
-        paint_copy.imageExtent = (VkExtent3D){ WATER_PAINT_WIDTH, WATER_PAINT_HEIGHT, 1 };
+        paint_copy.imageExtent = (VkExtent3D){ WATER_PAINT_TOTAL, WATER_PAINT_TOTAL, 1 };
 
         vkCmdCopyBufferToImage(command_buffer, vulkan_state.paint_staging_buffer, vulkan_state.paint_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &paint_copy);
 
@@ -3801,6 +3808,7 @@ void vulkanDraw(void)
         vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &paint_to_shader);
 
         vulkan_state.paint_image_first_upload = false;
+        vulkan_state.water_paint_texture->dirty = false;
     }
 
     VkClearValue clear_values[3];
@@ -4429,6 +4437,7 @@ void vulkanDraw(void)
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline);
         vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &sprite_vb_offset);
         vkCmdBindIndexBuffer(command_buffer, vulkan_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
+        //vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
         vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.paint_descriptor_set, 0, 0);
 
         float debug_size = 200.0f;

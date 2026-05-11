@@ -1,7 +1,6 @@
 #pragma once
 
-#include <stdint.h> // many of these imports are temporary, but haven't set up alternatives yet
-#include <stdbool.h>
+#include <stdbool.h> // many of these imports are temporary, but haven't set up alternatives yet
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -257,12 +256,13 @@ ShaderMode;
 
 #define WATER_PLANE_Y 2.2f
 
-#define WATER_PAINT_WIDTH 1024
-#define WATER_PAINT_HEIGHT 1024
+#define WATER_PAINT_TILE_COUNT 64
+#define WATER_PAINT_RESOLUTION 16
+#define WATER_PAINT_TOTAL WATER_PAINT_TILE_COUNT * WATER_PAINT_RESOLUTION
 
 typedef struct WaterPaintTexture
 {
-    float values[WATER_PAINT_WIDTH * WATER_PAINT_HEIGHT];
+    Vec4 values[WATER_PAINT_TOTAL * WATER_PAINT_TOTAL];
     bool dirty;
 }
 WaterPaintTexture;

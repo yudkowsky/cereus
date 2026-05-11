@@ -3538,31 +3538,28 @@ bool gameFrame(double delta_time, Input* input)
         Vec3 right_camera_basis, forward_camera_basis;
         cameraBasisFromYaw(camera.yaw, &right_camera_basis, &forward_camera_basis);
 
-        if (editor_state.editor_mode == PLACE_BREAK || editor_state.editor_mode == SELECT)
+        if (input->keys_held & KEY_W) 
         {
-            if (input->keys_held & KEY_W) 
-            {
-                camera.coords.x += forward_camera_basis.x * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
-                camera.coords.z += forward_camera_basis.z * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
-            }
-            if (input->keys_held & KEY_A) 
-            {
-                camera.coords.x -= right_camera_basis.x * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
-                camera.coords.z -= right_camera_basis.z * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
-            }
-            if (input->keys_held & KEY_S) 
-            {
-                camera.coords.x -= forward_camera_basis.x * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
-                camera.coords.z -= forward_camera_basis.z * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
-            }
-            if (input->keys_held & KEY_D) 
-            {
-                camera.coords.x += right_camera_basis.x * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
-                camera.coords.z += right_camera_basis.z * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
-            }
-            if (input->keys_held & KEY_SPACE) camera.coords.y += CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
-            if (input->keys_held & KEY_SHIFT) camera.coords.y -= CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+            camera.coords.x += forward_camera_basis.x * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+            camera.coords.z += forward_camera_basis.z * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
         }
+        if (input->keys_held & KEY_A) 
+        {
+            camera.coords.x -= right_camera_basis.x * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+            camera.coords.z -= right_camera_basis.z * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+        }
+        if (input->keys_held & KEY_S) 
+        {
+            camera.coords.x -= forward_camera_basis.x * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+            camera.coords.z -= forward_camera_basis.z * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+        }
+        if (input->keys_held & KEY_D) 
+        {
+            camera.coords.x += right_camera_basis.x * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+            camera.coords.z += right_camera_basis.z * CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+        }
+        if (input->keys_held & KEY_SPACE) camera.coords.y += CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
+        if (input->keys_held & KEY_SHIFT) camera.coords.y -= CAMERA_MOVE_STEP * (float)delta_time * 60.0f;
     }
 
     // alternative camera: switch modes on tab. defined as meta input, so can move player at same time as tab camera change.
@@ -3783,7 +3780,21 @@ bool gameFrame(double delta_time, Input* input)
         // paint onto water texture
         if (editor_state.editor_mode == WATER_PAINT)
         {
-            // need to raytrace to collision point on 
+            /*
+            // TODO: gate reasonably, e.g looking towards plane / not clicking somewhere the texture won't be
+            Vec3 point = cameraLookingAtPointOnPlane(camera, WATER_PLANE_Y);
+
+            // translate world coords to integer coords on texture
+            int32 texture_x = (int32)(point.x + (0.5 / WATER_PAINT_TILE_COUNT) * WATER_PAINT_TILE_COUNT) / WATER_PAINT_TILE_COUNT) * WATER_PAINT_RESOLUTION;
+            */
+
+            if (input->keys_held & KEY_LEFT_MOUSE)
+            {
+                Vec4 blue = (Vec4){ 0.0f, 0.0f, 1.0f, 1.0f };
+                FOR(i, WATER_PAINT_TOTAL * WATER_PAINT_TOTAL) water_paint_texture.values[i] = blue;
+                water_paint_texture.dirty = true;
+                createDebugPopup("tried to paint!", NO_TYPE);
+            }
         }
     }
 
