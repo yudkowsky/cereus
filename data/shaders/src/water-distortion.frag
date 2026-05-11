@@ -24,6 +24,8 @@ pc;
 
 const float max_tint_depth = 1.0;
 const vec3 water_tint = vec3(0.00, 0.01, 0.04);
+const float tint_min = 0.5;
+const float tint_max = 0.9;
 
 const float outline_radius_px = 2.0;
 const float max_depth_difference = 0.1; // outline suppressed past this TODO: might want to scale this based on depth
@@ -40,13 +42,13 @@ void main()
 {
     vec2 texel = 1.0 / vec2(textureSize(depth_texture, 0));
     vec2 screen_uv = gl_FragCoord.xy * texel;
+    vec3 scene = texture(scene_texture, screen_uv).rgb;
 
     // tint scene
-    vec3 scene = texture(scene_texture, screen_uv).rgb;
-    float water_surface_lin = linearizeDepth(gl_FragCoord.z);
-    float scene_lin_center = linearizeDepth(texture(depth_texture, screen_uv).r);
-    float underwater_distance = max(scene_lin_center - water_surface_lin, 0.0);
-    float tint_amount = clamp(underwater_distance / max_tint_depth, 0.0, 0.8);
+    float water_surface_linear_depth = linearizeDepth(gl_FragCoord.z);
+    float scene_center_linear_depth = linearizeDepth(texture(depth_texture, screen_uv).r);
+    float underwater_distance = max(scene_center_linear_depth - water_surface_linear_depth, 0.0);
+    float tint_amount = clamp(underwater_distance / max_tint_depth, tint_min, tint_max);
     vec3 base_color = mix(scene, water_tint, tint_amount);
 
     // waterline detection
