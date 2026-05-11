@@ -20,9 +20,9 @@ glslc model-blackline.vert -g -o ..\spirv\model-blackline.vert.spv
 glslc model-blackline.frag -g -o ..\spirv\model-blackline.frag.spv
 glslc outline-post.vert -g -o ..\spirv\outline-post.vert.spv
 glslc outline-post.frag -g -o ..\spirv\outline-post.frag.spv
+glslc water-depth.frag -g -o ..\spirv\water-depth.frag.spv
 glslc water-distortion.vert -g -o ..\spirv\water-distortion.vert.spv
 glslc water-distortion.frag -g -o ..\spirv\water-distortion.frag.spv
-glslc water-raytrace.comp -g -o ..\spirv\water-raytrace.comp.spv
 popd
 
 IF EXIST ..\..\build_cereus rmdir \S \Q ..\..\build_cereus 2>nul

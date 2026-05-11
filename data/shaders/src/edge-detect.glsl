@@ -10,3 +10,11 @@ bool detectNormalEdge(vec3 center, vec3 up, vec3 down, vec3 left, vec3 right, fl
     float max_diff = max(max(1.0 - dot(center, up), 1.0 - dot(center, down)), max(1.0 - dot(center, left), 1.0 - dot(center, right)));
     return max_diff > threshold ? true : false;
 }
+
+// TODO: doesn't really belong here, but I want it in some included file, and don't want too many files floating around
+float linearizeDepth(float raw_depth)
+{
+    float z_near = 1.0;
+    float z_far  = 300.0;
+    return (z_near * z_far) / (z_far - raw_depth * (z_far - z_near));
+}

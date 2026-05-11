@@ -15,7 +15,10 @@ layout(push_constant) uniform PushConstants
 {
     mat4 view;
     mat4 proj;
+    mat4 inv_view_proj;
     float time;
+    float focal_length;
+    float water_base_y;
 }
 pc;
 

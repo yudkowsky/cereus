@@ -3,11 +3,11 @@
 #include "edge-detect.glsl"
 
 layout(location = 0) in vec2 frag_uv;
+
 layout(location = 0) out vec4 out_color;
 
 layout(set = 0, binding = 0) uniform sampler2D depth_texture;
 layout(set = 1, binding = 0) uniform sampler2D normal_texture;
-layout(set = 2, binding = 0) uniform sampler2D rt_result;
 
 layout(push_constant) uniform PushConstants
 {
@@ -19,23 +19,16 @@ layout(push_constant) uniform PushConstants
 }
 pc;
 
-float linearize(float raw_depth)
-{
-    float z_near = 1.0;
-    float z_far  = 300.0;
-    return (z_near * z_far) / (z_far - raw_depth * (z_far - z_near));
-}
-
 void main()
 {
     vec2 step = pc.texel_size;
 
 	// depth edge detection
-    float center = linearize(texture(depth_texture, frag_uv).r);
-    float up     = linearize(texture(depth_texture, frag_uv + vec2(0.0,    step.y)).r);
-    float down   = linearize(texture(depth_texture, frag_uv - vec2(0.0,    step.y)).r);
-    float left   = linearize(texture(depth_texture, frag_uv - vec2(step.x, 0.0)).r);
-    float right  = linearize(texture(depth_texture, frag_uv + vec2(step.x, 0.0)).r);
+    float center = linearizeDepth(texture(depth_texture, frag_uv).r);
+    float up     = linearizeDepth(texture(depth_texture, frag_uv + vec2(0.0,    step.y)).r);
+    float down   = linearizeDepth(texture(depth_texture, frag_uv - vec2(0.0,    step.y)).r);
+    float left   = linearizeDepth(texture(depth_texture, frag_uv - vec2(step.x, 0.0)).r);
+    float right  = linearizeDepth(texture(depth_texture, frag_uv + vec2(step.x, 0.0)).r);
     bool do_depth_edge = detectDepthEdge(center, up, down, left, right, pc.focal_length, pc.depth_threshold);
 
     // normal edge detection
@@ -64,5 +57,3 @@ void main()
         else discard;
     }
 }
-
-
