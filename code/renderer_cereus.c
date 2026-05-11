@@ -8,12 +8,6 @@
 #include "stb_image.h"
 #include "cgltf.h"
 
-#define LOG(text, ...) do { \
-    char log_buffer[512]; \
-    snprintf(log_buffer, sizeof(log_buffer), text, ##__VA_ARGS__); \
-    OutputDebugStringA(log_buffer); \
-} while(0)
-
 typedef struct 
 {
     float x, y, z;
@@ -294,6 +288,21 @@ typedef struct VulkanState
     int32 atlas_2d_asset_index;
 	int32 atlas_font_asset_index;
     int32 atlas_3d_asset_index;
+
+    // water paint texture
+    WaterPaintTexture* water_paint_texture;
+
+    VkImage paint_image;
+    VkDeviceMemory paint_image_memory;
+    VkImageView paint_image_view;
+    VkDescriptorSet paint_descriptor_set;
+    VkSampler paint_sampler;
+
+    VkBuffer paint_staging_buffer;
+    VkDeviceMemory paint_staging_memory;
+    void* paint_staging_mapped;
+
+    bool paint_image_first_upload;
 
     // geometry buffers
 	VkBuffer sprite_vertex_buffer;
@@ -1090,14 +1099,14 @@ LoadedModel loadModel(char* path)
     cgltf_result parse_result = cgltf_parse_file(&options, path, &data);
     if (parse_result != cgltf_result_success)
     {
-        LOG("failed to parse gltf file: %s\n", path);
+        //LOG("failed to parse gltf file: %s\n", path);
         return result;
     }
 
     cgltf_result load_result = cgltf_load_buffers(&options, data, path);
     if (load_result != cgltf_result_success)
     {
-        LOG("failed to load gltf buffers: %s\n", path);
+        //LOG("failed to load gltf buffers: %s\n", path);
         cgltf_free(data);
         return result;
     }
@@ -1119,7 +1128,7 @@ LoadedModel loadModel(char* path)
     }
     if (total_verts == 0 || total_indices == 0)
     {
-        LOG("no geometry in: %s\n", path);
+        //LOG("no geometry in: %s\n", path);
         cgltf_free(data);
         return result;
     }
@@ -1220,7 +1229,7 @@ LoadedModel loadModel(char* path)
     free(vertices);
     free(indices);
 
-    LOG("loaded model: %s (%u verts, %u indices)\n", path, (uint32)total_verts, (uint32)total_indices);
+    //LOG("loaded model: %s (%u verts, %u indices)\n", path, (uint32)total_verts, (uint32)total_indices);
 
     return result;
 }
@@ -3438,17 +3447,137 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     createInstanceBuffer(&vulkan_state.water_instance_buffer, sizeof(WaterInstanceData) * WATER_INSTANCE_CAPACITY, &vulkan_state.water_instance_memory, &vulkan_state.water_instance_mapped);
 
     loadAllEntities();
+
+    // PAINT TEXTURE RESOURCES
+
+    // linear sampler for smooth interpolation when sampling the paint texture
+    {
+        VkSamplerCreateInfo paint_sampler_ci = {0};
+        paint_sampler_ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        paint_sampler_ci.magFilter = VK_FILTER_LINEAR;
+        paint_sampler_ci.minFilter = VK_FILTER_LINEAR;
+        paint_sampler_ci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        paint_sampler_ci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        paint_sampler_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        paint_sampler_ci.anisotropyEnable = VK_FALSE;
+        paint_sampler_ci.maxAnisotropy = 1.0f;
+        paint_sampler_ci.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        paint_sampler_ci.unnormalizedCoordinates = VK_FALSE;
+        paint_sampler_ci.compareEnable = VK_FALSE;
+        paint_sampler_ci.compareOp = VK_COMPARE_OP_ALWAYS;
+        paint_sampler_ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+
+        vkCreateSampler(vulkan_state.logical_device_handle, &paint_sampler_ci, 0, &vulkan_state.paint_sampler);
+    }
+
+    // paint image
+    {
+        VkImageCreateInfo paint_image_ci = {0};
+        paint_image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        paint_image_ci.imageType = VK_IMAGE_TYPE_2D;
+        paint_image_ci.extent.width = WATER_PAINT_WIDTH;
+        paint_image_ci.extent.height = WATER_PAINT_HEIGHT;
+        paint_image_ci.extent.depth = 1;
+        paint_image_ci.mipLevels = 1;
+        paint_image_ci.arrayLayers = 1;
+        paint_image_ci.format = VK_FORMAT_R32_SFLOAT;
+        paint_image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        paint_image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        paint_image_ci.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        paint_image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        paint_image_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        vkCreateImage(vulkan_state.logical_device_handle, &paint_image_ci, 0, &vulkan_state.paint_image);
+
+        VkMemoryRequirements paint_memory_requirements = {0};
+        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.paint_image, &paint_memory_requirements);
+
+        VkMemoryAllocateInfo paint_alloc = {0};
+        paint_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        paint_alloc.allocationSize = paint_memory_requirements.size;
+        paint_alloc.memoryTypeIndex = findMemoryType(paint_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        vkAllocateMemory(vulkan_state.logical_device_handle, &paint_alloc, 0, &vulkan_state.paint_image_memory);
+        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.paint_image, vulkan_state.paint_image_memory, 0);
+
+        VkImageViewCreateInfo paint_view_ci = {0};
+        paint_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        paint_view_ci.image = vulkan_state.paint_image;
+        paint_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        paint_view_ci.format = VK_FORMAT_R32_SFLOAT;
+        paint_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        paint_view_ci.subresourceRange.baseMipLevel = 0;
+        paint_view_ci.subresourceRange.levelCount = 1;
+        paint_view_ci.subresourceRange.baseArrayLayer = 0;
+        paint_view_ci.subresourceRange.layerCount = 1;
+
+        vkCreateImageView(vulkan_state.logical_device_handle, &paint_view_ci, 0, &vulkan_state.paint_image_view);
+    }
+
+    // persistent staging buffer
+    {
+        VkDeviceSize paint_size_bytes = (VkDeviceSize)WATER_PAINT_WIDTH * WATER_PAINT_HEIGHT * 4;
+
+        VkBufferCreateInfo staging_buffer_ci = {0};
+        staging_buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        staging_buffer_ci.size = paint_size_bytes;
+        staging_buffer_ci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        staging_buffer_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        vkCreateBuffer(vulkan_state.logical_device_handle, &staging_buffer_ci, 0, &vulkan_state.paint_staging_buffer);
+
+        VkMemoryRequirements staging_memory_requirements = {0};
+        vkGetBufferMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.paint_staging_buffer, &staging_memory_requirements);
+
+        VkMemoryAllocateInfo staging_alloc = {0};
+        staging_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        staging_alloc.allocationSize = staging_memory_requirements.size;
+        staging_alloc.memoryTypeIndex = findMemoryType(staging_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+        vkAllocateMemory(vulkan_state.logical_device_handle, &staging_alloc, 0, &vulkan_state.paint_staging_memory);
+        vkBindBufferMemory(vulkan_state.logical_device_handle, vulkan_state.paint_staging_buffer, vulkan_state.paint_staging_memory, 0);
+
+        vkMapMemory(vulkan_state.logical_device_handle, vulkan_state.paint_staging_memory, 0, paint_size_bytes, 0, &vulkan_state.paint_staging_mapped);
+        memset(vulkan_state.paint_staging_mapped, 0, (size_t)paint_size_bytes);
+    }
+
+    // descriptor set
+    {
+        VkDescriptorSetAllocateInfo paint_desc_alloc = {0};
+        paint_desc_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        paint_desc_alloc.descriptorPool = vulkan_state.descriptor_pool;
+        paint_desc_alloc.descriptorSetCount = 1;
+        paint_desc_alloc.pSetLayouts = &vulkan_state.descriptor_set_layout;
+
+        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &paint_desc_alloc, &vulkan_state.paint_descriptor_set);
+
+        VkDescriptorImageInfo paint_desc_info = {0};
+        paint_desc_info.sampler = vulkan_state.paint_sampler;
+        paint_desc_info.imageView = vulkan_state.paint_image_view;
+        paint_desc_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkWriteDescriptorSet paint_desc_write = {0};
+        paint_desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        paint_desc_write.dstSet = vulkan_state.paint_descriptor_set;
+        paint_desc_write.dstBinding = 0;
+        paint_desc_write.descriptorCount = 1;
+        paint_desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        paint_desc_write.pImageInfo = &paint_desc_info;
+
+        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &paint_desc_write, 0, 0);
+    }
+
+    vulkan_state.paint_image_first_upload = true;
 }
 
-void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, float global_time, Camera game_camera, ShaderMode shader_mode_from_game)
+void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, float water_time_from_game, Camera camera_from_game, ShaderMode shader_mode_from_game, WaterPaintTexture* paint_from_game)
 {  
     vkWaitForFences(vulkan_state.logical_device_handle, 1, &vulkan_state.in_flight_fences[vulkan_state.current_frame], VK_TRUE, UINT64_MAX);
 
-    vulkan_camera = game_camera;
-
+    vulkan_camera = camera_from_game;
     shader_mode = shader_mode_from_game;
-
-    water_time = global_time;
+    water_time = water_time_from_game;
+    vulkan_state.water_paint_texture = paint_from_game;
 
     sprite_instance_count = 0;
     cube_instance_count = 0;
@@ -3619,6 +3748,63 @@ void vulkanDraw(void)
     command_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
 
+    // upload paint texture if dirty
+
+    if (vulkan_state.water_paint_texture && vulkan_state.water_paint_texture->dirty)
+    {
+        VkImageMemoryBarrier paint_to_transfer = {0};
+        paint_to_transfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        paint_to_transfer.oldLayout = vulkan_state.paint_image_first_upload ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        paint_to_transfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        paint_to_transfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        paint_to_transfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        paint_to_transfer.image = vulkan_state.paint_image;
+        paint_to_transfer.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        paint_to_transfer.subresourceRange.baseMipLevel = 0;
+        paint_to_transfer.subresourceRange.levelCount = 1;
+        paint_to_transfer.subresourceRange.baseArrayLayer = 0;
+        paint_to_transfer.subresourceRange.layerCount = 1;
+        paint_to_transfer.srcAccessMask = vulkan_state.paint_image_first_upload ? 0 : VK_ACCESS_SHADER_READ_BIT;
+        paint_to_transfer.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+        VkPipelineStageFlags paint_src_stage = vulkan_state.paint_image_first_upload ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+
+        vkCmdPipelineBarrier(command_buffer, paint_src_stage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, &paint_to_transfer);
+
+        // copy staging to image
+        VkBufferImageCopy paint_copy = {0};
+        paint_copy.bufferOffset = 0;
+        paint_copy.bufferRowLength = 0;
+        paint_copy.bufferImageHeight = 0;
+        paint_copy.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        paint_copy.imageSubresource.mipLevel = 0;
+        paint_copy.imageSubresource.baseArrayLayer = 0;
+        paint_copy.imageSubresource.layerCount = 1;
+        paint_copy.imageOffset = (VkOffset3D){ 0, 0, 0 };
+        paint_copy.imageExtent = (VkExtent3D){ WATER_PAINT_WIDTH, WATER_PAINT_HEIGHT, 1 };
+
+        vkCmdCopyBufferToImage(command_buffer, vulkan_state.paint_staging_buffer, vulkan_state.paint_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &paint_copy);
+
+        VkImageMemoryBarrier paint_to_shader = {0};
+        paint_to_shader.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        paint_to_shader.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        paint_to_shader.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        paint_to_shader.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        paint_to_shader.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        paint_to_shader.image = vulkan_state.paint_image;
+        paint_to_shader.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        paint_to_shader.subresourceRange.baseMipLevel = 0;
+        paint_to_shader.subresourceRange.levelCount = 1;
+        paint_to_shader.subresourceRange.baseArrayLayer = 0;
+        paint_to_shader.subresourceRange.layerCount = 1;
+        paint_to_shader.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        paint_to_shader.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &paint_to_shader);
+
+        vulkan_state.paint_image_first_upload = false;
+    }
+
     VkClearValue clear_values[3];
     clear_values[0].color.float32[0] = 0.005f;
     clear_values[0].color.float32[1] = 0.008f;
@@ -3680,17 +3866,6 @@ void vulkanDraw(void)
     render_pass_begin_info.renderArea.extent = vulkan_state.swapchain_extent;
     render_pass_begin_info.clearValueCount = 3;
     render_pass_begin_info.pClearValues = clear_values;
-
-    // TODO: new order of scene rendering;
-    //
-    // shadow maps
-    // main scene pass
-    // outline post pass
-    // copy color -> scene_copy_image
-    // water pass, using outlines (outlines will be a bit distorted...)
-    // oit lasers (tag under water)
-    // oit resolve (do custom stuff if under water)
-    // sprite pass
 
     // FULL SCENE PASS
 
@@ -4248,6 +4423,36 @@ void vulkanDraw(void)
 
         vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &push_constants);
 
+        vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
+    }
+
+    // debug: draw paint texture in corner
+    {
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline);
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &sprite_vb_offset);
+        vkCmdBindIndexBuffer(command_buffer, vulkan_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.paint_descriptor_set, 0, 0);
+
+        float debug_size = 200.0f;
+        float debug_margin = 10.0f;
+        Vec3 debug_coords;
+        debug_coords.x = (float)vulkan_state.swapchain_extent.width - debug_margin - debug_size * 0.5f;
+        debug_coords.y = (float)vulkan_state.swapchain_extent.height - (debug_margin + debug_size * 0.5f);
+        debug_coords.z = 0.0f;
+        Vec3 debug_scale = { debug_size, debug_size, 1.0f };
+
+        float debug_model[16];
+        Vec4 identity_quaternion = { 0, 0, 0, 1 };
+        mat4BuildTRS(debug_model, debug_coords, identity_quaternion, debug_scale);
+
+        PushConstants debug_pc = {0};
+        memcpy(debug_pc.model, debug_model, sizeof(debug_pc.model));
+        memcpy(debug_pc.view, view2d, sizeof(debug_pc.view));
+        memcpy(debug_pc.proj, ortho, sizeof(debug_pc.proj));
+        debug_pc.uv_rect = (Vec4){ 0.0f, 0.0f, 1.0f, 1.0f };
+        debug_pc.alpha = 1.0f;
+
+        vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &debug_pc);
         vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
     }
 

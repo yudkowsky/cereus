@@ -91,18 +91,20 @@ typedef struct
 }
 Entity;
 
+#define MAX_ENTITY_INSTANCE_COUNT 64
+
 // the 2MB buffer is dense representation of the level encoded by coords
 typedef struct
 {
     uint8 buffer[2000000]; // 2 bytes info per tile 
     Entity player;
     Entity pack;
-    Entity boxes[64];
-    Entity mirrors[64];
-    Entity sources[64];
-    Entity glass_blocks[64];
-    Entity win_blocks[64];
-    Entity locked_blocks[64];
+    Entity boxes[MAX_ENTITY_INSTANCE_COUNT];
+    Entity mirrors[MAX_ENTITY_INSTANCE_COUNT];
+    Entity sources[MAX_ENTITY_INSTANCE_COUNT];
+    Entity glass_blocks[MAX_ENTITY_INSTANCE_COUNT];
+    Entity win_blocks[MAX_ENTITY_INSTANCE_COUNT];
+    Entity locked_blocks[MAX_ENTITY_INSTANCE_COUNT];
 
     char level_name[64];
 
@@ -334,7 +336,6 @@ const int32 TRAILING_HITBOX_TIME = 7;
 const int32 FALL_TRAILING_HITBOX_TIME = 10; // TODO: this number should maybe be derived based on individual circumstance. but maybe just using a max is fine too, since collisions check if a trailing hitbox is relevant before using
 const int32 TIME_AFTER_UNDO_UNTIL_PHYSICS_START = 4;
 
-const int32 MAX_ENTITY_INSTANCE_COUNT = 64;
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
 const int32 MAX_ENTITIES_TIED_TO_MOVEMENT = 32;
 const int32 MAX_SOURCE_COUNT = 32;
@@ -348,9 +349,6 @@ const int32 MAX_DEBUG_POPUP_COUNT = 32;
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
 const Int3 AXIS_Z = { 0, 0, 1 };
-const Int3 INT3_0 = { 0, 0, 0 };
-const Vec3 VEC3_0 = { 0, 0, 0 };
-const Vec4 VEC4_0 = { 0, 0, 0, 0 };
 const Vec4 IDENTITY_QUATERNION  = { 0, 0, 0, 1 };
 
 const int32 PLAYER_ID = 1;
@@ -468,6 +466,9 @@ const float DEBUG_POPUP_STEP_SIZE = 30.0f;
 const int32 DEFAULT_POPUP_TIME = 100;
 Vec2 debug_popup_start_coords = {0};
 DebugPopup debug_popups[32];
+
+// water paint
+WaterPaintTexture water_paint_texture = {0};
 
 // MATH HELPER FUNCTIONS
 
@@ -591,7 +592,7 @@ float vec3Length(Vec3 v)
 Vec3 vec3Normalize(Vec3 v)
 {
     float length_squared = v.x*v.x + v.y*v.y + v.z*v.z;
-    if (length_squared <= 1e-8f) return VEC3_0; 
+    if (length_squared <= 1e-8f) return (Vec3){0}; 
     float inverse_length = 1.0f / sqrtf(length_squared);
     return vec3ScalarMultiply(v, inverse_length);
 }
@@ -918,7 +919,7 @@ Vec3 directionToVector(Direction direction)
         case EAST:  return (Vec3){  1,  0,  0 };
         case UP:    return (Vec3){  0,  1,  0 };
         case DOWN:  return (Vec3){  0, -1,  0 };
-        default: return VEC3_0;
+        default: return (Vec3){0};
     }
 }
 
@@ -1452,7 +1453,7 @@ void drawText(char* string, Vec2 coords, float scale, float alpha)
         Vec3 draw_coords = { pen_x, pen_y, 0};
         Vec3 draw_scale = { scale * aspect, scale, 1};
         Vec4 color = { 0.0f, 0.0f, 0.0f, alpha };
-        drawAsset(id, SPRITE_2D, draw_coords, draw_scale, IDENTITY_QUATERNION, color, VEC4_0, VEC4_0);
+        drawAsset(id, SPRITE_2D, draw_coords, draw_scale, IDENTITY_QUATERNION, color, (Vec4){0}, (Vec4){0});
         pen_x += scale * aspect;
     }
 }
@@ -1732,7 +1733,7 @@ Vec3 vec3SetComponentAlongDirection(Direction direction, Vec3 vector, float f)
         case EAST: return (Vec3){ f, vector.y, vector.z };
         case UP:
         case DOWN: return (Vec3){ vector.x, f, vector.z };
-        default: return VEC3_0;
+        default: return (Vec3){0};
     }
 }
 
@@ -1746,7 +1747,7 @@ Vec3 vec3AddFloatAlongDirection(Direction direction, float f, Vec3 v)
         case EAST: return (Vec3){ v.x + f, v.y, v.z };
         case UP:
         case DOWN: return (Vec3){ v.x, v.y + f, v.z };
-        default: return VEC3_0;
+        default: return (Vec3){0};
     }
 }
 
@@ -2040,7 +2041,7 @@ void updateLaserBuffer()
 
                         // find next laser direction, and mirror normal direction. also decide how to clip: different when hitting the mirror side-on compared to hitting back of mirror
                         Direction next_laser_direction = NO_DIRECTION;
-                        Vec3 mirror_normal = VEC3_0;
+                        Vec3 mirror_normal = (Vec3){0};
                         bool backside_clip_plane = false;
                         switch (mirror->mirror_orientation)
                         {
@@ -2161,7 +2162,7 @@ void updateLaserBuffer()
 
                     // hit type is something that isn't NONE - do default behaviour
                     {
-                        Vec3 coords_without_offset = VEC3_0;
+                        Vec3 coords_without_offset = (Vec3){0};
                         float offset = 0.0f;
                         // if entity there could be a real hit with a passthrough. in any other case, just stop here.
                         if (isEntity(hit_type))
@@ -2476,6 +2477,8 @@ void gameInitializeState(char* level_name)
     camera_target_plane = player->coords.y;
 
     updateLaserBuffer();
+
+    water_paint_texture.dirty = true;
 }
 
 void recalculateDebugStartCoords()
@@ -2503,7 +2506,7 @@ void gameRedraw(DisplayInfo display_from_platform)
     if (draw_command_count == 0) return;
     game_display = display_from_platform;
     recalculateDebugStartCoords();
-    vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, camera_with_ow_offset, game_shader_mode); 
+    vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, camera_with_ow_offset, game_shader_mode, &water_paint_texture);
     vulkanDraw();
 }
 
@@ -2682,7 +2685,7 @@ void zeroAnimations()
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
             Entity* e = &moving_entity_group[group_index][entity_index];
-            e->velocity = VEC3_0;
+            e->velocity = (Vec3){0};
             e->rotation = directionToQuaternion(e->direction);
         }
     }
@@ -2690,9 +2693,9 @@ void zeroAnimations()
     Entity* player = &world_state.player;
     Entity* pack = &world_state.pack;
     player->rotation = directionToQuaternion(player->direction);
-    player->velocity = VEC3_0;
+    player->velocity = (Vec3){0};
     pack->rotation = directionToQuaternion(pack->direction);
-    pack->velocity = VEC3_0;
+    pack->velocity = (Vec3){0};
 
     memset(&temp_state, 0, sizeof(TemporaryState));
     temp_state.climbing_direction = NO_DIRECTION; // okay, i see what Anton meant here. maybe consider having 0 as NO_DIRECTION if this becomes annoying elsewhere
@@ -3227,7 +3230,7 @@ void doPhysicsTick()
                         {
                             temp_state.pack_attached = false;
                             pack->position = intCoordsToNorm(pack->coords);
-                            pack->velocity = VEC3_0;
+                            pack->velocity = (Vec3){0};
                         }
                     }
                 }
@@ -3240,7 +3243,7 @@ void doPhysicsTick()
             if (move_forwards)
             {
                 player->position = intCoordsToNorm(player->coords); // normalise y coord
-                player->velocity = VEC3_0;
+                player->velocity = (Vec3){0};
                 temp_state.climbing_direction = NO_DIRECTION;
                 if (do_push_forwards) pushAll(coords_ahead, player->direction, false, player);
                 doStandardMovement(player->direction, coords_ahead);
@@ -3283,7 +3286,7 @@ void doPhysicsTick()
             {
                 temp_state.climbing_direction = NO_DIRECTION;
                 player->position = intCoordsToNorm(player->coords);
-                player->velocity = VEC3_0;
+                player->velocity = (Vec3){0};
             }
             else
             {
@@ -3312,7 +3315,7 @@ void doPhysicsTick()
                     {
                         temp_state.pack_attached = false;
                         pack->position = intCoordsToNorm(pack->coords);
-                        pack->velocity = VEC3_0;
+                        pack->velocity = (Vec3){0};
                     }
                 }
             }
@@ -3432,7 +3435,7 @@ void doPhysicsTick()
                 if (do_standard_entity_move)
                 {
                     e->position = test_position;
-                    e->velocity = vec3AddFloatAlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
+                    e->velocity = vec3AddFloatAlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), (Vec3){0});
 
                     if (tied_entity_info->on_head)
                     {
@@ -3452,14 +3455,14 @@ void doPhysicsTick()
                         if (difference < interpolation_distance_per_frame)
                         {
                             e->position = intCoordsToNorm(e->coords);
-                            e->velocity = VEC3_0;
+                            e->velocity = (Vec3){0};
                             tied_entity_info->id = 0;
                         }
                         else
                         {
                             float sign = (tied_entity_info->direction == NORTH || tied_entity_info->direction == WEST) ? -1.0f : 1.0f;
                             e->position = vec3AddFloatAlongDirection(tied_entity_info->direction, sign * interpolation_distance_per_frame, e->position);
-                            e->velocity = vec3AddFloatAlongDirection(tied_entity_info->direction, sign * interpolation_distance_per_frame, VEC3_0);
+                            e->velocity = vec3AddFloatAlongDirection(tied_entity_info->direction, sign * interpolation_distance_per_frame, (Vec3){0});
                         }
                     }
                 }
@@ -3470,12 +3473,12 @@ void doPhysicsTick()
                     if (getComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, intCoordsToNorm(e->coords))) < 0.0)
                     {
                         e->position = test_position;
-                        e->velocity = vec3AddFloatAlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), VEC3_0);
+                        e->velocity = vec3AddFloatAlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), (Vec3){0});
                     }
                     else
                     {
                         e->position = intCoordsToNorm(e->coords);
-                        e->velocity = VEC3_0;
+                        e->velocity = (Vec3){0};
                         tied_entity_info->id = 0;
                     }
                 }
@@ -3483,7 +3486,7 @@ void doPhysicsTick()
             else 
             {
                 e->position = intCoordsToNorm(e->coords);
-                e->velocity = VEC3_0;
+                e->velocity = (Vec3){0};
             }
 
             bool clear_entity_from_tied_to_movement = false;
@@ -3636,8 +3639,8 @@ bool gameFrame(double delta_time, Input* input)
                     Entity *entity= getEntityAtCoords(raycast_output.hit_coords);
                     if (entity != 0)
                     {
-                        entity->coords = INT3_0;
-                        entity->position = VEC3_0;
+                        entity->coords = (Int3){0};
+                        entity->position = (Vec3){0};
                         entity->removed = true;
                     }
                     setTileType(NONE, raycast_output.hit_coords);
@@ -4283,7 +4286,7 @@ bool gameFrame(double delta_time, Input* input)
                         bool do_push = false;
                         bool allow_down_climb = false;
 
-                        Int3 pushing_coords = INT3_0;
+                        Int3 pushing_coords = (Int3){0};
                         if (temp_state.pack_attached) pushing_coords = next_pack_coords;
                         else pushing_coords = next_player_coords;
 
@@ -4326,7 +4329,7 @@ bool gameFrame(double delta_time, Input* input)
                             moveEntityInBufferAndState(player, next_player_coords, player->direction);
 
                             // set velocity to 0 for sharper movement
-                            player->velocity = VEC3_0;
+                            player->velocity = (Vec3){0};
                         }
                     }
                 }
@@ -4490,7 +4493,7 @@ bool gameFrame(double delta_time, Input* input)
         }
         else 
         {
-            ow_player_coords_for_offset = INT3_0;
+            ow_player_coords_for_offset = (Int3){0};
         }
 
         // update restart coords based on current coords of the player, and also update game progress if this is relevant
@@ -4625,7 +4628,7 @@ bool gameFrame(double delta_time, Input* input)
             FOR(lb_index, 64)
             {
                 LaserBuffer lb = laser_buffer[lb_index];
-                if (vec3IsEqual(lb.start_coords, VEC3_0)) continue;
+                if (vec3IsEqual(lb.start_coords, (Vec3){0})) continue;
                 char lb_text[256] = {0};
                 snprintf(lb_text, sizeof(lb_text), "laser start coords: %.2f, %.2f, %.2f, laser end coords: %.2f, %.2f, %.2f", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z);
                 if (do_debug_text) createDebugText(lb_text);
@@ -4862,27 +4865,27 @@ bool gameFrame(double delta_time, Input* input)
                         else if (!in_overworld && findInSolvedLevels(world_state.level_name) != -1) draw_tile = WON_BLOCK;
                     }
 
-                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, VEC4_0, VEC4_0, VEC4_0);
+                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
                 }
             }
             else
             {
-                if (getCube3DId(draw_tile) == CUBE_3D_WATER) drawAsset(MODEL_3D_WATER, WATER_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), VEC4_0, VEC4_0, VEC4_0);
-                drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), VEC4_0, VEC4_0, VEC4_0);
+                if (getCube3DId(draw_tile) == CUBE_3D_WATER) drawAsset(MODEL_3D_WATER, WATER_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
+                drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
             }
         }
 
         if (!world_state.player.removed)
         {
             // TODO: this is terrible (fix with shaders)
-            if (temp_state.player_hit_by_red && temp_state.player_hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, VEC4_0, VEC4_0);
-            else if (temp_state.player_hit_by_red)                             drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, VEC4_0, VEC4_0);
-            else if (temp_state.player_hit_by_blue)                            drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, VEC4_0, VEC4_0);
-            else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, VEC4_0, VEC4_0, VEC4_0);
+            if (temp_state.player_hit_by_red && temp_state.player_hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
+            else if (temp_state.player_hit_by_red)                             drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position, PLAYER_SCALE, player->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
+            else if (temp_state.player_hit_by_blue)                            drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position, PLAYER_SCALE, player->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
+            else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
         }
         if (!world_state.pack.removed) 
         {
-            drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position, PLAYER_SCALE, world_state.pack.rotation, VEC4_0, VEC4_0, VEC4_0);
+            drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position, PLAYER_SCALE, world_state.pack.rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
         }
 
         // draw camera boundary lines
@@ -4916,8 +4919,8 @@ bool gameFrame(double delta_time, Input* input)
                         x_draw_coords = vec3Add(x_draw_coords, outline_offset);
                         z_draw_coords = vec3Add(z_draw_coords, outline_offset);
 
-                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, VEC4_0, VEC4_0, VEC4_0);
-                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, VEC4_0, VEC4_0, VEC4_0);
+                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
                         x_draw_offset += OVERWORLD_SCREEN_SIZE_X;
                     }
                     x_draw_offset = 0;
@@ -4933,10 +4936,10 @@ bool gameFrame(double delta_time, Input* input)
                 Vec3 z_draw_coords_far  = (Vec3){ (float)level_dim.x / 2.0f, (float)level_dim.y / 2.0f, (float)level_dim.z + 0.5f };
                 Vec3 x_draw_scale = (Vec3){ 0,                         (float)level_dim.y, (float)level_dim.z + 1.0f };
                 Vec3 z_draw_scale = (Vec3){ (float)level_dim.x + 1.0f, (float)level_dim.y, 0 };
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_near, x_draw_scale, IDENTITY_QUATERNION, VEC4_0, VEC4_0, VEC4_0);
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_near, z_draw_scale, IDENTITY_QUATERNION, VEC4_0, VEC4_0, VEC4_0);
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_far,  x_draw_scale, IDENTITY_QUATERNION, VEC4_0, VEC4_0, VEC4_0);
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_far,  z_draw_scale, IDENTITY_QUATERNION, VEC4_0, VEC4_0, VEC4_0);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_near, x_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_near, z_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_far,  x_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_far,  z_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
             }
         }
 
@@ -4947,7 +4950,7 @@ bool gameFrame(double delta_time, Input* input)
             {
                 TrailingHitbox th = temp_state.trailing_hitboxes[th_index];
                 if (th.frames == 0) continue;
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, VEC4_0, VEC4_0, VEC4_0);
+                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, intCoordsToNorm(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
             }
         }
     }
@@ -4964,19 +4967,19 @@ bool gameFrame(double delta_time, Input* input)
             // crosshair
             Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
             Vec3 center_screen = { ((float)game_display.client_width / 2), ((float)game_display.client_height / 2), 0.0f };
-            drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, color_with_alpha, VEC4_0, VEC4_0);
+            drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, color_with_alpha, (Vec4){0}, (Vec4){0});
 
             // picked block
             Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
             Vec3 picked_block_coords = { game_display.client_width - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
-            drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, color_with_alpha, VEC4_0, VEC4_0);
+            drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, color_with_alpha, (Vec4){0}, (Vec4){0});
 
             if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
             {
                 SpriteId selected_id = getModelId(getTileTypeFromId(editor_state.selected_id));
                 Entity* selected_e = 0;
                 if (editor_state.selected_id > 0) selected_e = getEntityFromId(editor_state.selected_id);
-                if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position, DEFAULT_SCALE, selected_e->rotation, VEC4_0, VEC4_0, VEC4_0);
+                if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position, DEFAULT_SCALE, selected_e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
             }
         }
 
@@ -5024,7 +5027,7 @@ bool gameFrame(double delta_time, Input* input)
         }
     }
 
-    vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, camera_with_ow_offset, game_shader_mode);
+    vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, camera_with_ow_offset, game_shader_mode, &water_paint_texture);
     vulkanDraw();
 
     return false;

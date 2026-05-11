@@ -2,11 +2,6 @@
 
 #include "types.h"
 
-// windows is defining VOID -> void
-#ifdef VOID 
-#undef VOID
-#endif
-
 typedef struct RendererPlatformHandles
 {
     void* module_handle;
@@ -210,3 +205,13 @@ typedef enum ShaderMode
     SHADER_MODE_OUTLINE_TEST,
 }
 ShaderMode;
+
+#define WATER_PAINT_WIDTH 1024
+#define WATER_PAINT_HEIGHT 1024
+
+typedef struct WaterPaintTexture
+{
+    float values[WATER_PAINT_WIDTH * WATER_PAINT_HEIGHT];
+    bool dirty;
+}
+WaterPaintTexture;
