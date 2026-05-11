@@ -22,8 +22,11 @@ layout(push_constant) uniform PushConstants
 }
 pc;
 
+const float max_tint_depth = 1.0;
+const vec3 water_tint = vec3(0.00, 0.01, 0.04);
+
 const float outline_radius_px = 2.0;
-const float max_depth_difference = 0.02; // outline suppressed past this
+const float max_depth_difference = 0.1; // outline suppressed past this TODO: might want to scale this based on depth
 
 const vec2 offsets[8] = vec2[]
 (
@@ -38,13 +41,19 @@ void main()
     vec2 texel = 1.0 / vec2(textureSize(depth_texture, 0));
     vec2 screen_uv = gl_FragCoord.xy * texel;
 
-    float center_water_lin = linearizeDepth(gl_FragCoord.z);
+    // tint scene
+    vec3 scene = texture(scene_texture, screen_uv).rgb;
+    float water_surface_lin = linearizeDepth(gl_FragCoord.z);
+    float scene_lin_center = linearizeDepth(texture(depth_texture, screen_uv).r);
+    float underwater_distance = max(scene_lin_center - water_surface_lin, 0.0);
+    float tint_amount = clamp(underwater_distance / max_tint_depth, 0.0, 0.8);
+    vec3 base_color = mix(scene, water_tint, tint_amount);
 
+    // waterline detection
     bool this_is_outline = false;
-
-    for (int i = 0; i < 8; ++i) 
+    for (int offset_index = 0; offset_index < 8; offset_index++) 
     {
-        vec2 sample_uv = screen_uv + offsets[i] * outline_radius_px * texel;
+        vec2 sample_uv = screen_uv + offsets[offset_index] * outline_radius_px * texel;
 
         float scene_raw_depth = texture(depth_texture, sample_uv).r;
         float water_raw_depth = texture(water_depth_texture, sample_uv).r;
@@ -62,5 +71,6 @@ void main()
         }
     }
 
-    out_color = vec4(this_is_outline ? vec3(1.0, 0.0, 1.0) : vec3(1.0), 1.0);
+    vec3 final_color = this_is_outline ? vec3(0.0) : base_color;
+    out_color = vec4(final_color, 1.0);
 }
