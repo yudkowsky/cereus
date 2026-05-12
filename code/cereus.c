@@ -3806,7 +3806,7 @@ bool gameFrame(double delta_time, Input* input)
                     FOR(x_index, 2 * brush_radius - 1)
                     {
                         Int2 draw_pos = { top_left.x + x_index, top_left.y + y_index };
-                        if (draw_pos.x >= 0 && draw_pos.y >= 0 && draw_pos.x < 1024 && draw_pos.y < 1024)
+                        if (draw_pos.x >= 0 && draw_pos.y >= 0 && draw_pos.x < WATER_PAINT_SIDE && draw_pos.y < WATER_PAINT_SIDE)
                         {
                             float draw_multiplier = 1.0f;
                             float unnormalized_multiplier = (float)(brush_radius*brush_radius - ((x_index - brush_radius)*(x_index - brush_radius) + (y_index - brush_radius)*(y_index - brush_radius)));
@@ -3814,7 +3814,7 @@ bool gameFrame(double delta_time, Input* input)
                             if (unnormalized_multiplier < 0) draw_multiplier = 0.0f;
                             else draw_multiplier = unnormalized_multiplier / (brush_radius*brush_radius);
 
-                            int32 in_array = draw_pos.y * WATER_PAINT_TOTAL + draw_pos.x;
+                            int32 in_array = draw_pos.y * WATER_PAINT_SIDE + draw_pos.x;
                             float speculative_value = water_paint_texture.values[in_array].x + (paint_magnitude * draw_multiplier);
                             if      (speculative_value > 1.0f) water_paint_texture.values[in_array].x = 1.0f;
                             else if (speculative_value < 0.0f) water_paint_texture.values[in_array].x = 0.0f;
@@ -3827,7 +3827,7 @@ bool gameFrame(double delta_time, Input* input)
             if (input->keys_held & KEY_4)
             {
                 // reset
-                FOR(i, WATER_PAINT_TOTAL * WATER_PAINT_TOTAL) water_paint_texture.values[i] = (Vec4){ 0.5f, 0.0f, 0.0f, 1.0f };
+                FOR(i, WATER_PAINT_SIDE * WATER_PAINT_SIDE) water_paint_texture.values[i] = (Vec4){ 0.5f, 0.0f, 0.0f, 1.0f };
 
                 water_paint_texture.dirty = true;
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;

@@ -23,12 +23,18 @@ layout(push_constant) uniform PushConstants
 pc;
 
 const float max_tint_depth = 1.0;
-const vec3 water_tint = vec3(0.00, 0.01, 0.04);
+const vec3 water_depth_tint = vec3(0.00, 0.01, 0.04);
 const float tint_min = 0.5;
 const float tint_max = 0.9;
 
 const float outline_radius_px = 2.0;
-const float max_depth_difference = 0.1; // outline suppressed past this TODO: might want to scale this based on depth
+const float max_depth_difference = 0.1;
+
+const float min_normal_y = 0.98;
+const float grid_push_by_normal = 0.5;
+const float half_grid_line_width = 0.03;
+const vec3 grid_line_tint = { 0.2, 0.4, 0.6 };
+const float grid_opacity = 0.1;
 
 const vec2 offsets[8] = vec2[]
 (
@@ -37,6 +43,7 @@ const vec2 offsets[8] = vec2[]
     vec2( 0.7071,  0.7071), vec2( 0.7071, -0.7071),
     vec2(-0.7071,  0.7071), vec2(-0.7071, -0.7071)
 );
+
 
 void main() 
 {
@@ -49,7 +56,19 @@ void main()
     float scene_center_linear_depth = linearizeDepth(texture(depth_texture, screen_uv).r);
     float underwater_distance = max(scene_center_linear_depth - water_surface_linear_depth, 0.0);
     float tint_amount = clamp(underwater_distance / max_tint_depth, tint_min, tint_max);
-    vec3 base_color = mix(scene, water_tint, tint_amount);
+    vec3 base_color = mix(scene, water_depth_tint, tint_amount);
+
+    // grid lines
+    vec2 pushed_xz = frag_world_pos.xz + frag_normal.xz * grid_push_by_normal;
+    vec2 grid_pos = pushed_xz - 0.5;
+
+    vec2 distance_to_line = abs(fract(grid_pos) - 0.5);
+    float max_distance_to_line = max(distance_to_line.x, distance_to_line.y);
+    float normal_coefficient = clamp((frag_normal.y - min_normal_y) / (1.0 - min_normal_y), 0.0, 1.0);
+    if (normal_coefficient < 0.3) normal_coefficient = 0;
+
+    float grid_mask = max_distance_to_line > (0.5 - (half_grid_line_width * normal_coefficient)) ? 1.0 : 0.0;
+    base_color = mix(base_color, grid_line_tint, grid_mask * grid_opacity * normal_coefficient);
 
     // waterline detection
     bool this_is_outline = false;

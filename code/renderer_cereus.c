@@ -3478,8 +3478,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         VkImageCreateInfo paint_image_ci = {0};
         paint_image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         paint_image_ci.imageType = VK_IMAGE_TYPE_2D;
-        paint_image_ci.extent.width = WATER_PAINT_TOTAL;
-        paint_image_ci.extent.height = WATER_PAINT_TOTAL;
+        paint_image_ci.extent.width = WATER_PAINT_SIDE;
+        paint_image_ci.extent.height = WATER_PAINT_SIDE;
         paint_image_ci.extent.depth = 1;
         paint_image_ci.mipLevels = 1;
         paint_image_ci.arrayLayers = 1;
@@ -3519,7 +3519,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     // persistent staging buffer
     {
-        VkDeviceSize paint_size_bytes = (VkDeviceSize)WATER_PAINT_TOTAL * WATER_PAINT_TOTAL * sizeof(Vec4);
+        VkDeviceSize paint_size_bytes = (VkDeviceSize)WATER_PAINT_SIDE * WATER_PAINT_SIDE * sizeof(Vec4);
 
         VkBufferCreateInfo staging_buffer_ci = {0};
         staging_buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -3755,7 +3755,7 @@ void vulkanDraw(void)
     if (vulkan_state.water_paint_texture && vulkan_state.water_paint_texture->dirty)
     {
         // TODO: slow... will want to either expose this mapped memory to game, and handle like that, or only write affected pixels on any given frame
-        memcpy(vulkan_state.paint_staging_mapped, vulkan_state.water_paint_texture->values, sizeof(Vec4) * WATER_PAINT_TOTAL * WATER_PAINT_TOTAL);
+        memcpy(vulkan_state.paint_staging_mapped, vulkan_state.water_paint_texture->values, sizeof(Vec4) * WATER_PAINT_SIDE * WATER_PAINT_SIDE);
 
         VkImageMemoryBarrier paint_to_transfer = {0};
         paint_to_transfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -3786,7 +3786,7 @@ void vulkanDraw(void)
         paint_copy.imageSubresource.baseArrayLayer = 0;
         paint_copy.imageSubresource.layerCount = 1;
         paint_copy.imageOffset = (VkOffset3D){ 0, 0, 0 };
-        paint_copy.imageExtent = (VkExtent3D){ WATER_PAINT_TOTAL, WATER_PAINT_TOTAL, 1 };
+        paint_copy.imageExtent = (VkExtent3D){ WATER_PAINT_SIDE, WATER_PAINT_SIDE, 1 };
 
         vkCmdCopyBufferToImage(command_buffer, vulkan_state.paint_staging_buffer, vulkan_state.paint_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &paint_copy);
 
