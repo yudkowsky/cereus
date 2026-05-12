@@ -951,7 +951,7 @@ int32 loadAsset(char* path)
     vulkan_state.asset_cache[vulkan_state.asset_cache_count].image = texture_image;
     vulkan_state.asset_cache[vulkan_state.asset_cache_count].memory = texture_image_memory;
     vulkan_state.asset_cache[vulkan_state.asset_cache_count].view = texture_image_view;
-    strcpy(vulkan_state.asset_cache[vulkan_state.asset_cache_count].path, path);
+    snprintf(vulkan_state.asset_cache[vulkan_state.asset_cache_count].path, 256, "%s", path);
 
     vulkan_state.asset_cache_count++;
 
@@ -1132,8 +1132,13 @@ LoadedModel loadModel(char* path)
         return result;
     }
 
-    Vertex* vertices = malloc(sizeof(Vertex) * total_verts);
-    uint32* indices = malloc(sizeof(uint32) * total_indices);
+    if (total_verts > SIZE_MAX / sizeof(Vertex) || total_indices > SIZE_MAX / sizeof(uint32))
+    {
+        cgltf_free(data);
+        return result;
+    }
+    Vertex* vertices = calloc(total_verts, sizeof(Vertex));
+    uint32* indices = calloc(total_indices, sizeof(uint32));
 
     cgltf_size vert_offset = 0;
     cgltf_size index_offset = 0;
@@ -1336,7 +1341,7 @@ void createSwapchainResources(void)
 
     // swapchain image views
     vkGetSwapchainImagesKHR(vulkan_state.logical_device_handle, vulkan_state.swapchain_handle, &vulkan_state.swapchain_image_count, 0);
-    vulkan_state.swapchain_images = malloc(sizeof(VkImage) * vulkan_state.swapchain_image_count);
+    vulkan_state.swapchain_images = calloc(vulkan_state.swapchain_image_count, sizeof(VkImage));
     vkGetSwapchainImagesKHR(vulkan_state.logical_device_handle, vulkan_state.swapchain_handle, &vulkan_state.swapchain_image_count, vulkan_state.swapchain_images);
 
     vulkan_state.swapchain_image_views = realloc(vulkan_state.swapchain_image_views, sizeof(VkImageView) * vulkan_state.swapchain_image_count);
@@ -1952,7 +1957,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
 	if (device_count == 0) return;
 
-	VkPhysicalDevice* physical_devices = malloc(sizeof(*physical_devices) * device_count);
+	VkPhysicalDevice* physical_devices = calloc(device_count, sizeof(*physical_devices));
 	vkEnumeratePhysicalDevices(vulkan_state.vulkan_instance_handle, &device_count, physical_devices);
 	
 	// loop over devices to pick one that 1. does graphics and 2. can present to win32 surface
@@ -1969,7 +1974,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
 		uint32 family_count = 0;
 		vkGetPhysicalDeviceQueueFamilyProperties(physical_devices[device_increment], &family_count, 0);
-        VkQueueFamilyProperties* families = malloc(sizeof(*families) * family_count);
+        VkQueueFamilyProperties* families = calloc(family_count, sizeof(*families));
         vkGetPhysicalDeviceQueueFamilyProperties(physical_devices[device_increment], &family_count, families);
 
         int local_graphics_family_index = -1;
@@ -1990,7 +1995,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
             {
                 uint32 device_extension_count = 0;
                 vkEnumerateDeviceExtensionProperties(physical_devices[device_increment], 0, &device_extension_count, 0);
-                VkExtensionProperties* extensions = malloc(sizeof(*extensions) * device_extension_count); // NOTE: may be malloc(0)
+                VkExtensionProperties* extensions = calloc(device_extension_count, sizeof(*extensions)); // NOTE: may be calloc(0, ...)
                 vkEnumerateDeviceExtensionProperties(physical_devices[device_increment], 0, &device_extension_count, extensions);
 
                 bool has_swapchain = false;
@@ -2025,7 +2030,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     
     if (present_mode_count == 0) return;
 
-    VkPresentModeKHR* present_modes = malloc(sizeof(*present_modes) * present_mode_count);
+    VkPresentModeKHR* present_modes = calloc(present_mode_count, sizeof(*present_modes));
     vkGetPhysicalDeviceSurfacePresentModesKHR(vulkan_state.physical_device_handle, vulkan_state.surface_handle, &present_mode_count, present_modes);
 
     //VkPresentModeKHR chosen_present_mode = VK_PRESENT_MODE_FIFO_KHR; 
@@ -2053,7 +2058,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
 	if (surface_format_count == 0) return;
 
-    VkSurfaceFormatKHR* surface_formats = malloc(sizeof(*surface_formats) * surface_format_count);
+    VkSurfaceFormatKHR* surface_formats = calloc(surface_format_count, sizeof(*surface_formats));
     vkGetPhysicalDeviceSurfaceFormatsKHR(vulkan_state.physical_device_handle, vulkan_state.surface_handle, &surface_format_count, surface_formats);
 
     VkSurfaceFormatKHR chosen_surface_format = surface_formats[0]; // some random guaranteed - will now overwrite if possible
@@ -2455,9 +2460,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     vulkan_state.frames_in_flight = 1;
 	vulkan_state.current_frame = 0;
-	vulkan_state.image_available_semaphores = malloc(sizeof(VkSemaphore) * vulkan_state.frames_in_flight);
-    vulkan_state.render_finished_semaphores = malloc(sizeof(VkSemaphore) * vulkan_state.frames_in_flight);
-    vulkan_state.in_flight_fences = malloc(sizeof(VkFence) * vulkan_state.frames_in_flight);
+	vulkan_state.image_available_semaphores = calloc(vulkan_state.frames_in_flight, sizeof(VkSemaphore));
+    vulkan_state.render_finished_semaphores = calloc(vulkan_state.frames_in_flight, sizeof(VkSemaphore));
+    vulkan_state.in_flight_fences = calloc(vulkan_state.frames_in_flight, sizeof(VkFence));
 											
     // struct that tells vulkan what kind of semaphore you want (binary)
     VkSemaphoreCreateInfo semaphore_info = {0};
