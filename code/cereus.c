@@ -3780,20 +3780,49 @@ bool gameFrame(double delta_time, Input* input)
         // paint onto water texture
         if (editor_state.editor_mode == WATER_PAINT)
         {
-            /*
-            // TODO: gate reasonably, e.g looking towards plane / not clicking somewhere the texture won't be
-            Vec3 point = cameraLookingAtPointOnPlane(camera, WATER_PLANE_Y);
-
-            // translate world coords to integer coords on texture
-            int32 texture_x = (int32)(point.x + (0.5 / WATER_PAINT_TILE_COUNT) * WATER_PAINT_TILE_COUNT) / WATER_PAINT_TILE_COUNT) * WATER_PAINT_RESOLUTION;
-            */
-
-            if (input->keys_held & KEY_LEFT_MOUSE)
+            if ((input->keys_held & KEY_LEFT_MOUSE || input->keys_held & KEY_RIGHT_MOUSE) && camera.pitch < 0)
             {
-                Vec4 blue = (Vec4){ 0.0f, 0.0f, 1.0f, 1.0f };
-                FOR(i, WATER_PAINT_TOTAL * WATER_PAINT_TOTAL) water_paint_texture.values[i] = blue;
+                int32 brush_radius = 20; // TODO: scale with scroll wheel
+
+                Vec3 point_on_plane = cameraLookingAtPointOnPlane(camera, WATER_PLANE_Y);
+
+                // translate world coords to integer coords on texture // TODO: check the rounding
+                Int2 center = {0};
+                center.x = (int32)((point_on_plane.x + (0.5 / WATER_PAINT_RESOLUTION) + 0.5f) * WATER_PAINT_RESOLUTION);
+                center.y = (int32)((point_on_plane.z + (0.5 / WATER_PAINT_RESOLUTION) + 0.5f) * WATER_PAINT_RESOLUTION);
+                Int2 top_left = { center.x - brush_radius, center.y - brush_radius };
+
+                // decide magnitude up or down. for now just setting 0.1 or -0.1 depending on button pressed
+                float paint_magnitude = 0.0f;
+                if      (input->keys_held & KEY_LEFT_MOUSE)  paint_magnitude =  0.03f;
+                else if (input->keys_held & KEY_RIGHT_MOUSE) paint_magnitude = -0.03f;
+
+                FOR(y_index, 2 * brush_radius)
+                {
+                    FOR(x_index, 2 * brush_radius)
+                    {
+                        Int2 draw_pos = { top_left.x + x_index, top_left.y + y_index };
+                        if (draw_pos.x >= 0 && draw_pos.y >= 0 && draw_pos.x < 1024 && draw_pos.y < 1024)
+                        {
+                            int32 in_array = draw_pos.y * WATER_PAINT_TOTAL + draw_pos.x;
+                            float speculative_value = water_paint_texture.values[in_array].x + paint_magnitude;
+                            if      (speculative_value > 1.0f) water_paint_texture.values[in_array].x = 1.0f;
+                            else if (speculative_value < 0.0f) water_paint_texture.values[in_array].x = 0.0f;
+                            else                            water_paint_texture.values[in_array].x = speculative_value;
+                        }
+                    }
+                }
                 water_paint_texture.dirty = true;
-                createDebugPopup("tried to paint!", NO_TYPE);
+            }
+            if (input->keys_held & KEY_4)
+            {
+                // reset
+                FOR(i, WATER_PAINT_TOTAL * WATER_PAINT_TOTAL) water_paint_texture.values[i] = (Vec4){ 0.5f, 0.0f, 0.0f, 1.0f };
+
+                water_paint_texture.dirty = true;
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+
+                createDebugPopup("test test", NO_TYPE);
             }
         }
     }
