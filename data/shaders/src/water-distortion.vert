@@ -24,11 +24,14 @@ pc;
 
 void main()
 {
-    vec4 world_pos = instance_model * vec4(in_position, 1.0);
-	world_pos.y += waterHeight(world_pos.xyz, pc.time);
-    frag_world_pos = world_pos.xyz;
+    vec4 grid_world = instance_model * vec4(in_position, 1.0);
+    vec2 grid_xz = grid_world.xz;
 
-    frag_normal = waterNormal(world_pos.xyz, pc.time);
+    vec3 displacement = waterDisplacement(grid_xz, pc.time);
+    vec4 world_pos = grid_world + vec4(displacement, 0.0);
+
+    frag_world_pos = world_pos.xyz;
+    frag_normal = waterNormal(grid_xz, pc.time);
 
     gl_Position = pc.proj * pc.view * world_pos;
 }

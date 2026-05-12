@@ -1,28 +1,64 @@
-// this function is currently very simple, but could theoretically be more 
-// involved while still letting the rest of the setup work without changes
-float waterHeight(vec3 world_pos, float time)
+struct GerstnerWave
 {
-    float height = 0.0;
-    
-    // poor man's ocean
-    height += 0.040 * sin(dot(vec2(1.0, 0.0),  world_pos.xz) * 3.0 + time * 1.5);
-    height += 0.030 * sin(dot(vec2(0.0, 1.0),  world_pos.xz) * 2.0 + time * 1.0);
-    height += 0.015 * sin(dot(vec2(0.7, 0.7),  world_pos.xz) * 5.0 + time * 2.0);
-    height += 0.010 * sin(dot(vec2(-0.5, 0.8), world_pos.xz) * 8.0 + time * 3.0);
-    height += 0.005 * sin(dot(vec2(0.9, -0.4), world_pos.xz) * 13.0 + time * 4.0);
-    height += 0.003 * sin(dot(vec2(-0.3, -0.9),world_pos.xz) * 20.0 + time * 5.0);
-    
-    return height;
+    vec2 direction;
+    float wavelength;
+    float amplitude;
+    float speed;
+    float steepness;
+};
+
+GerstnerWave waves[6] = GerstnerWave[6]
+(
+    GerstnerWave(normalize(vec2( 1.0,  0.3)), 8.0, 0.08, 2.2, 0.6),
+    GerstnerWave(normalize(vec2( 0.6,  1.0)), 5.5, 0.05, 1.8, 0.6),
+    GerstnerWave(normalize(vec2( 0.8, -0.5)), 3.5, 0.03, 1.5, 0.5),
+    GerstnerWave(normalize(vec2(-0.4,  0.9)), 2.2, 0.02, 1.2, 0.4),
+    GerstnerWave(normalize(vec2(-0.9, -0.2)), 1.4, 0.01, 0.9, 0.3),
+    GerstnerWave(normalize(vec2( 0.3, -0.8)), 0.9, 0.01, 0.7, 0.25)
+);
+
+// returns offset to flat grid position. will change x and z, not just y
+vec3 waterDisplacement(vec2 grid_xz, float time)
+{
+    vec3 displacement = vec3(0.0);
+
+    for (int wave_index = 0; wave_index < 6; wave_index++)
+    {
+        GerstnerWave wave = waves[wave_index];
+        float wavenumber = 6.2831853 / wave.wavelength;
+        float dispersion = wave.speed * wavenumber;
+        float phase      = wavenumber * dot(wave.direction, grid_xz) - dispersion * time;
+        float cosine     = cos(phase);
+        float sine       = sin(phase);
+        float pinch      = wave.steepness * wave.amplitude;
+
+        displacement.x += pinch * wave.direction.x * cosine;
+        displacement.z += pinch * wave.direction.y * cosine;
+        displacement.y += wave.amplitude * sine;
+    }
+    return displacement;
 }
 
-// forward difference using waterHeight
-vec3 waterNormal(vec3 world_pos, float time)
+vec3 waterNormal(vec2 grid_xz, float time)
 {
-    float epsilon = 0.001;
-    float height = waterHeight(world_pos, time);
-    float height_at_x = waterHeight(world_pos + vec3(epsilon, 0.0, 0.0), time);
-    float height_at_z = waterHeight(world_pos + vec3(0.0, 0.0, epsilon), time);
-    float dhdx = (height_at_x - height) / epsilon;
-    float dhdz = (height_at_z - height) / epsilon;
-    return normalize(vec3(-dhdx, 1.0, -dhdz));
+    float bump_x = 0.0;
+    float bump_z = 0.0;
+    float horizontality = 1.0;
+
+    for (int wave_index = 0; wave_index < 6; wave_index++)
+    {
+        GerstnerWave wave = waves[wave_index];
+        float wavenumber = 6.2831853 / wave.wavelength;
+        float dispersion = wave.speed * wavenumber;
+        float phase      = wavenumber * dot(wave.direction, grid_xz) - dispersion * time;
+        float cosine     = cos(phase);
+        float sine       = sin(phase);
+        float slope      = wavenumber * wave.amplitude;
+        float sharpness  = wave.steepness * slope;
+
+        bump_x -= wave.direction.x * slope * cosine;
+        bump_z -= wave.direction.y * slope * cosine;
+        horizontality -= sharpness * sine;
+    }
+    return normalize(vec3(bump_x, horizontality, bump_z));
 }

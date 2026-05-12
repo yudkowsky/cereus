@@ -22,11 +22,13 @@ pc;
 
 void main()
 {
+    /*
     if (pc.water_base_y > -100.0)
     {
         float water_y = pc.water_base_y + waterHeight(frag_world_pos.xyz, pc.time);
         if (frag_world_pos.y > water_y) discard;
     }
+    */
 
     out_color = vec4(1.0, 0.0, 1.0, 1.0);
     out_normal = vec4(0.0);

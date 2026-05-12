@@ -3810,6 +3810,7 @@ bool gameFrame(double delta_time, Input* input)
                         {
                             float draw_multiplier = 1.0f;
                             float unnormalized_multiplier = (float)(brush_radius*brush_radius - ((x_index - brush_radius)*(x_index - brush_radius) + (y_index - brush_radius)*(y_index - brush_radius)));
+
                             if (unnormalized_multiplier < 0) draw_multiplier = 0.0f;
                             else draw_multiplier = unnormalized_multiplier / (brush_radius*brush_radius);
 
