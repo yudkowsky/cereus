@@ -4440,7 +4440,7 @@ void vulkanDraw(void)
         //vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
         vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.paint_descriptor_set, 0, 0);
 
-        float debug_size = 200.0f;
+        float debug_size = 500.0f;
         float debug_margin = 10.0f;
         Vec3 debug_coords;
         debug_coords.x = (float)vulkan_state.swapchain_extent.width - debug_margin - debug_size * 0.5f;

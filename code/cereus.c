@@ -479,6 +479,11 @@ float floatAbs(float f)
     return f > 0 ? f : -f;
 }
 
+int32 intAbs(int32 num)
+{
+    return num > 0 ? num : -num;
+}
+
 Vec3 intCoordsToNorm(Int3 int_coords)
 {
     return (Vec3){ (float)int_coords.x, (float)int_coords.y, (float)int_coords.z };
@@ -3782,7 +3787,7 @@ bool gameFrame(double delta_time, Input* input)
         {
             if ((input->keys_held & KEY_LEFT_MOUSE || input->keys_held & KEY_RIGHT_MOUSE) && camera.pitch < 0)
             {
-                int32 brush_radius = 20; // TODO: scale with scroll wheel
+                int32 brush_radius = 100; // TODO: scale with scroll wheel
 
                 Vec3 point_on_plane = cameraLookingAtPointOnPlane(camera, WATER_PLANE_Y);
 
@@ -3792,23 +3797,27 @@ bool gameFrame(double delta_time, Input* input)
                 center.y = (int32)((point_on_plane.z + (0.5 / WATER_PAINT_RESOLUTION) + 0.5f) * WATER_PAINT_RESOLUTION);
                 Int2 top_left = { center.x - brush_radius, center.y - brush_radius };
 
-                // decide magnitude up or down. for now just setting 0.1 or -0.1 depending on button pressed
                 float paint_magnitude = 0.0f;
-                if      (input->keys_held & KEY_LEFT_MOUSE)  paint_magnitude =  0.03f;
-                else if (input->keys_held & KEY_RIGHT_MOUSE) paint_magnitude = -0.03f;
+                if      (input->keys_held & KEY_LEFT_MOUSE)  paint_magnitude =  0.05f;
+                else if (input->keys_held & KEY_RIGHT_MOUSE) paint_magnitude = -0.05f;
 
-                FOR(y_index, 2 * brush_radius)
+                FOR(y_index, 2 * brush_radius - 1)
                 {
-                    FOR(x_index, 2 * brush_radius)
+                    FOR(x_index, 2 * brush_radius - 1)
                     {
                         Int2 draw_pos = { top_left.x + x_index, top_left.y + y_index };
                         if (draw_pos.x >= 0 && draw_pos.y >= 0 && draw_pos.x < 1024 && draw_pos.y < 1024)
                         {
+                            float draw_multiplier = 1.0f;
+                            float unnormalized_multiplier = (float)(brush_radius*brush_radius - ((x_index - brush_radius)*(x_index - brush_radius) + (y_index - brush_radius)*(y_index - brush_radius)));
+                            if (unnormalized_multiplier < 0) draw_multiplier = 0.0f;
+                            else draw_multiplier = unnormalized_multiplier / (brush_radius*brush_radius);
+
                             int32 in_array = draw_pos.y * WATER_PAINT_TOTAL + draw_pos.x;
-                            float speculative_value = water_paint_texture.values[in_array].x + paint_magnitude;
+                            float speculative_value = water_paint_texture.values[in_array].x + (paint_magnitude * draw_multiplier);
                             if      (speculative_value > 1.0f) water_paint_texture.values[in_array].x = 1.0f;
                             else if (speculative_value < 0.0f) water_paint_texture.values[in_array].x = 0.0f;
-                            else                            water_paint_texture.values[in_array].x = speculative_value;
+                            else                               water_paint_texture.values[in_array].x = speculative_value;
                         }
                     }
                 }
