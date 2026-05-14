@@ -30,9 +30,10 @@ const float tint_max = 0.9;
 const float outline_radius_px = 2.0;
 const float max_depth_difference = 0.1;
 
-const float min_normal_y = 0.975;
-const float grid_push_by_normal = 0.3;
-const float half_grid_line_width = 0.025;
+const float min_normal_y = 0.95;
+const float grid_push_by_normal = 10.0;
+const float sin_noise_multiplier = 0.02;
+const float half_grid_line_width = 0.02;
 const float corner_size = 0.075;
 const vec3 grid_line_tint = { 0.2, 0.4, 0.6 };
 const float grid_opacity = 0.1;
@@ -45,22 +46,21 @@ const vec2 offsets[8] = vec2[]
     vec2(-0.7071,  0.7071), vec2(-0.7071, -0.7071)
 );
 
-float sinNoise(vec2 world_pos)
+float sinNoise(vec2 world_pos, float time) 
 {
-    float per_tile = 4.0;
-    vec2 distance = abs(fract(world_pos * per_tile) - 0.5);
-    float scalar = max(0.5 - length(distance), 0.0);
-    uint parity = uint(world_pos.x * per_tile) + uint(world_pos.y * per_tile);
-    if (parity - 2 * (parity / 2) == 1) scalar = -scalar;
-    return scalar;
+    float per_tile = 6.0;
+    vec2 point = (world_pos - time / per_tile) * per_tile * 3.14159;
+    return sin(point.x) * sin(point.y) * 0.5;
 }
 
 void main() 
 {
-    float push_dir = sinNoise(frag_world_pos.xz);
+    /*
+    float push_dir = sinNoise(frag_world_pos.xz, pc.time);
     if (push_dir < 0.0) out_color = vec4(0.0, -push_dir, 0.0, 1.0);
     else out_color = vec4(push_dir, 0.0, 0.0, 1.0);
     return;
+    */
 
     vec2 texel = 1.0 / vec2(textureSize(depth_texture, 0));
     vec2 screen_uv = gl_FragCoord.xy * texel;
@@ -74,12 +74,11 @@ void main()
     vec3 base_color = mix(scene, water_depth_tint, tint_amount);
 
     // grid lines
-    float normal_coefficient = clamp((frag_normal.y - min_normal_y) / (1.0 - min_normal_y), 0.0, 1.0);
-    float effective_half_width = half_grid_line_width * normal_coefficient;
-    float effective_corner_size = corner_size * normal_coefficient;
+    float effective_half_width = half_grid_line_width;
+    float effective_corner_size = corner_size;
 
     vec2 normal_push = frag_normal.xz * grid_push_by_normal;
-    vec2 pushed_xz = frag_world_pos.xz + normal_push;
+    vec2 pushed_xz = frag_world_pos.xz; + normal_push;
     vec2 grid_pos = pushed_xz - 0.5;
 
     // is this on the grid?
@@ -87,7 +86,7 @@ void main()
     float inner_size = 0.5 - effective_half_width - effective_corner_size;
     vec2 pos_to_inner = distance_to_line - vec2(inner_size);
     float sdf = length(max(pos_to_inner, vec2(0.0))) + min(max(pos_to_inner.x, pos_to_inner.y), 0.0) - effective_corner_size;
-    if (sdf > 0.0) base_color = mix(base_color, grid_line_tint, grid_opacity * normal_coefficient);
+    if (sdf > 0.0) base_color = mix(base_color, grid_line_tint, grid_opacity);
 
     // waterline detection
     bool this_is_outline = false;
