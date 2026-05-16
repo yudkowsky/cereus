@@ -57,12 +57,8 @@ float sinNoise(vec2 world_pos, float time)
 
 void main() 
 {
-    /*
-    float push_dir = sinNoise(frag_world_pos.xz, pc.time);
-    if (push_dir < 0.0) out_color = vec4(0.0, -push_dir, 0.0, 1.0);
-    else out_color = vec4(push_dir, 0.0, 0.0, 1.0);
+    out_color = vec4(1.0, 0.0, 0.0, 1.0);
     return;
-    */
 
     vec2 texel = 1.0 / vec2(textureSize(depth_texture, 0));
     vec2 screen_uv = gl_FragCoord.xy * texel;

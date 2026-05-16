@@ -330,7 +330,7 @@ const float GRAVITY = -0.03f;
 const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
 const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
 const int32 TRAILING_HITBOX_TIME = 7;
-const int32 FALL_TRAILING_HITBOX_TIME = 10; // TODO: this number should maybe be derived based on individual circumstance. but maybe just using a max is fine too, since collisions check if a trailing hitbox is relevant before using
+const int32 FALL_TRAILING_HITBOX_TIME = 10;
 const int32 TIME_AFTER_UNDO_UNTIL_PHYSICS_START = 4;
 
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
@@ -561,19 +561,19 @@ Vec3 vec3Subtract(Vec3 a, Vec3 b)
     return (Vec3){ a.x-b.x, a.y-b.y, a.z-b.z }; 
 }
 
-Int3 int3ScalarMultiply(Int3 position, int32 scalar) 
+Int3 int3ScalarMultiply(Int3 v, int32 s) 
 {
-    return (Int3){ position.x*scalar, position.y*scalar, position.z*scalar }; 
+    return (Int3){ v.x*s, v.y*s, v.z*s }; 
 }
 
-Vec3 vec3ScalarMultiply(Vec3 position, float scalar) 
+Vec3 vec3ScalarMultiply(Vec3 v, float s) 
 {
-    return (Vec3){ position.x*scalar, position.y*scalar, position.z*scalar }; 
+    return (Vec3){ v.x*s, v.y*s, v.z*s }; 
 }
 
-Vec3 vec3Abs(Vec3 a) 
+Vec3 vec3Abs(Vec3 v) 
 {
-    return (Vec3){ floatAbs(a.x), floatAbs(a.y), floatAbs(a.z) }; 
+    return (Vec3){ floatAbs(v.x), floatAbs(v.y), floatAbs(v.z) }; 
 }
 
 float vec3Inner(Vec3 a, Vec3 b)
@@ -1905,13 +1905,11 @@ void updateLaserBuffer()
 {
     Entity* player = &world_state.player;
 
-    // set all lasers to inactive. will make them active in the loop
-    memset(laser_buffer, 0, sizeof(laser_buffer));
-
+    FOR(laser_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED) laser_buffer[laser_index].color = NO_COLOR;
     temp_state.player_hit_by_red   = false;
     temp_state.player_hit_by_blue  = false;
 
-    // if a source is magenta, create entry in sources_as_primary of it as both red and blue
+    // if a source is magenta, create entry in sources as primary of it as both red and blue
     // TODO: probably shouldn't rebuild this buffer every time function is called, could just update when sources are moved / on level rebuild
     Entity sources_as_primary[256] = {0};
     int32 primary_index = 0;
@@ -1921,14 +1919,18 @@ void updateLaserBuffer()
         if (s->removed || s->locked) continue;
         if (s->color < MAGENTA)
         {
-            sources_as_primary[primary_index++] = *s;
+            sources_as_primary[primary_index] = *s; 
+            // color is already set correctly
+            primary_index++;
         }
         else if (s->color == MAGENTA)
         {
             sources_as_primary[primary_index] = *s;
-            sources_as_primary[primary_index++].color = RED;
+            sources_as_primary[primary_index].color = RED;
+            primary_index++;
             sources_as_primary[primary_index] = *s;
-            sources_as_primary[primary_index++].color = BLUE;
+            sources_as_primary[primary_index].color = BLUE;
+            primary_index++;
         }
     }
 
