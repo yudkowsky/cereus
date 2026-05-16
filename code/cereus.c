@@ -399,7 +399,7 @@ const char undo_meta_path[64] = "data/meta/undo-buffer.meta";
 const char overworld_zero_name[64] = "overworld-zero";
 
 // camera
-const float CAMERA_SENSITIVITY = 0.005f;
+const float CAMERA_SENSITIVITY = 0.0003f;
 const float CAMERA_MOVE_STEP = 0.2f;
 const float CAMERA_FOV = 15.0f;
 

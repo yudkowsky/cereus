@@ -34,7 +34,7 @@ const float min_normal_y = 0.95;
 const float grid_push_by_normal = 10.0;
 const float sin_noise_multiplier = 0.02;
 const float half_grid_line_width = 0.02;
-const float corner_size = 0.075;
+const float corner_size = 0.025;
 const vec3 grid_line_tint = { 0.2, 0.4, 0.6 };
 const float grid_opacity = 0.1;
 
@@ -46,12 +46,14 @@ const vec2 offsets[8] = vec2[]
     vec2(-0.7071,  0.7071), vec2(-0.7071, -0.7071)
 );
 
+/*
 float sinNoise(vec2 world_pos, float time) 
 {
     float per_tile = 6.0;
     vec2 point = (world_pos - time / per_tile) * per_tile * 3.14159;
     return sin(point.x) * sin(point.y) * 0.5;
 }
+*/
 
 void main() 
 {
@@ -77,8 +79,8 @@ void main()
     float effective_half_width = half_grid_line_width;
     float effective_corner_size = corner_size;
 
-    vec2 normal_push = frag_normal.xz * grid_push_by_normal;
-    vec2 pushed_xz = frag_world_pos.xz; + normal_push;
+    //vec2 normal_push = frag_normal.xz * grid_push_by_normal;
+    vec2 pushed_xz = frag_world_pos.xz;// + normal_push;
     vec2 grid_pos = pushed_xz - 0.5;
 
     // is this on the grid?
