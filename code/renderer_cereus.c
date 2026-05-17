@@ -239,6 +239,9 @@ typedef struct VulkanState
     VkImageView h0_image_view;
     VkDescriptorSet h0_descriptor_set;
 
+    // TODO: temp output to visualise
+    VkDescriptorSet h0_sampled_descriptor_set;
+
     // RENDER PASSES
 
     // scene pass (cubes, models, select outlines)
@@ -261,7 +264,7 @@ typedef struct VulkanState
     VkRenderPass overlay_render_pass;
     VkFramebuffer* overlay_framebuffers;
 
-    float water_plane_y; // set every frame TODO: maybe just hardcode
+    float water_plane_y; // set every frame TODO: this is now hardcoded, stop using this?
 
     // PIPELINES AND LAYOUTS
 
@@ -1651,50 +1654,6 @@ void createSwapchainResources(void)
         vkBindBufferMemory(vulkan_state.logical_device_handle, vulkan_state.oit_counter_buffer, vulkan_state.oit_counter_memory, 0);
     }
 
-    // h0 spectrum image
-    {
-        VkImageCreateInfo h0_image_ci = {0};
-        h0_image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        h0_image_ci.imageType = VK_IMAGE_TYPE_2D;
-        h0_image_ci.extent.width = FFT_SIZE;
-        h0_image_ci.extent.height = FFT_SIZE;
-        h0_image_ci.extent.depth = 1;
-        h0_image_ci.mipLevels = 1;
-        h0_image_ci.arrayLayers = 1;
-        h0_image_ci.format = VK_FORMAT_R32G32_SFLOAT;
-        h0_image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-        h0_image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        h0_image_ci.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        h0_image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
-        h0_image_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        vkCreateImage(vulkan_state.logical_device_handle, &h0_image_ci, 0, &vulkan_state.h0_image);
-
-        VkMemoryRequirements mem_req = {0};
-        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.h0_image, &mem_req);
-
-        VkMemoryAllocateInfo alloc = {0};
-        alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        alloc.allocationSize = mem_req.size;
-        alloc.memoryTypeIndex = findMemoryType(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-        vkAllocateMemory(vulkan_state.logical_device_handle, &alloc, 0, &vulkan_state.h0_image_memory);
-        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.h0_image, vulkan_state.h0_image_memory, 0);
-
-        VkImageViewCreateInfo view_ci = {0};
-        view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        view_ci.image = vulkan_state.h0_image;
-        view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view_ci.format = VK_FORMAT_R32G32_SFLOAT; // complex number
-        view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        view_ci.subresourceRange.baseMipLevel = 0;
-        view_ci.subresourceRange.levelCount = 1;
-        view_ci.subresourceRange.baseArrayLayer = 0;
-        view_ci.subresourceRange.layerCount = 1;
-
-        vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.h0_image_view);
-    }
-
     // command buffers
     vulkan_state.swapchain_command_buffers = realloc(vulkan_state.swapchain_command_buffers, sizeof(VkCommandBuffer) * vulkan_state.swapchain_image_count);
 
@@ -2562,8 +2521,52 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     //vulkan_state.images_in_flight = calloc(vulkan_state.swapchain_image_count, sizeof(VkFence)); // calloc because we want these to start at VK_NULL_HANDLE, i.e. 0.
 
-    // LOADING SHADER MODULES
+    // TODO: this isnt in createSwapchainResources because it needs to exist before then... is this the best place for it, though?
+    // h0 spectrum image
+    {
+        VkImageCreateInfo h0_image_ci = {0};
+        h0_image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        h0_image_ci.imageType = VK_IMAGE_TYPE_2D;
+        h0_image_ci.extent.width = FFT_SIZE;
+        h0_image_ci.extent.height = FFT_SIZE;
+        h0_image_ci.extent.depth = 1;
+        h0_image_ci.mipLevels = 1;
+        h0_image_ci.arrayLayers = 1;
+        h0_image_ci.format = VK_FORMAT_R32G32_SFLOAT;
+        h0_image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        h0_image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        h0_image_ci.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        h0_image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        h0_image_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
+        vkCreateImage(vulkan_state.logical_device_handle, &h0_image_ci, 0, &vulkan_state.h0_image);
+
+        VkMemoryRequirements mem_req = {0};
+        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.h0_image, &mem_req);
+
+        VkMemoryAllocateInfo alloc = {0};
+        alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc.allocationSize = mem_req.size;
+        alloc.memoryTypeIndex = findMemoryType(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        vkAllocateMemory(vulkan_state.logical_device_handle, &alloc, 0, &vulkan_state.h0_image_memory);
+        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.h0_image, vulkan_state.h0_image_memory, 0);
+
+        VkImageViewCreateInfo view_ci = {0};
+        view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_ci.image = vulkan_state.h0_image;
+        view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_ci.format = VK_FORMAT_R32G32_SFLOAT; // complex number
+        view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        view_ci.subresourceRange.baseMipLevel = 0;
+        view_ci.subresourceRange.levelCount = 1;
+        view_ci.subresourceRange.baseArrayLayer = 0;
+        view_ci.subresourceRange.layerCount = 1;
+
+        vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.h0_image_view);
+    }
+
+    // LOADING SHADER MODULES
 
     VkShaderModule fft_spectrum_smh = {0};
     VkShaderModule cube_vert_smh = {0};
@@ -2999,6 +3002,31 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         write.dstBinding = 0;
         write.descriptorCount = 1;
         write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        write.pImageInfo = &image_info;
+
+        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
+    }
+
+    // TODO: temp for visualisation from storage image
+    {
+        VkDescriptorSetAllocateInfo alloc_info = {0};
+        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        alloc_info.descriptorPool = vulkan_state.descriptor_pool;
+        alloc_info.descriptorSetCount = 1;
+        alloc_info.pSetLayouts = &vulkan_state.descriptor_set_layout;
+        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.h0_sampled_descriptor_set);
+
+        VkDescriptorImageInfo image_info = {0};
+        image_info.sampler = vulkan_state.pixel_art_sampler;
+        image_info.imageView = vulkan_state.h0_image_view;
+        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        VkWriteDescriptorSet write = {0};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = vulkan_state.h0_sampled_descriptor_set;
+        write.dstBinding = 0;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         write.pImageInfo = &image_info;
 
         vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
@@ -3727,7 +3755,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         pc.wind_direction_x = 1.0f;
         pc.wind_direction_z = 0.0f;
         pc.wind_speed = 30.0f;
-        pc.amplitude = 1e-4f;
+        pc.amplitude = 1.0f;
         pc.gravity = 9.81f;
         pc.random_seed = 1337;
 
@@ -4635,10 +4663,11 @@ void vulkanDraw(void)
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline);
         vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &sprite_vb_offset);
         vkCmdBindIndexBuffer(command_buffer, vulkan_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
-        //vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.paint_descriptor_set, 0, 0);
+        //vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.paint_descriptor_set, 0, 0);
+        // TODO: temp draw h0 spectrum instead
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.h0_sampled_descriptor_set, 0, 0);
 
-        float debug_size = 300.0f;
+        float debug_size = 600.0f;
         float debug_margin = 10.0f;
         Vec3 debug_coords;
         debug_coords.x = (float)vulkan_state.swapchain_extent.width - debug_margin - debug_size * 0.5f;
