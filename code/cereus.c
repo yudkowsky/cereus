@@ -3789,19 +3789,28 @@ bool gameFrame(double delta_time, Input* input)
         {
             if ((input->keys_held & KEY_LEFT_MOUSE || input->keys_held & KEY_RIGHT_MOUSE) && camera.pitch < 0)
             {
-                int32 brush_radius = 100; // TODO: scale with scroll wheel
+                // TODO: scale with scroll wheel
+                int32 paint_radius = 16;
+                int32 erase_radius = 32;
+
+                float paint_magnitude = 0.0f;
+                int32 brush_radius = 0;
+                if (input->keys_held & KEY_LEFT_MOUSE)  
+                {
+                    paint_magnitude =  0.05f;
+                    brush_radius = paint_radius;
+                }
+                else if (input->keys_held & KEY_RIGHT_MOUSE) 
+                {
+                    paint_magnitude = -0.05f;
+                    brush_radius = erase_radius;
+                }
 
                 Vec3 point_on_plane = cameraLookingAtPointOnPlane(camera, WATER_PLANE_Y);
-
-                // translate world coords to integer coords on texture // TODO: check the rounding
                 Int2 center = {0};
                 center.x = (int32)((point_on_plane.x + (0.5 / WATER_PAINT_RESOLUTION) + 0.5f) * WATER_PAINT_RESOLUTION);
                 center.y = (int32)((point_on_plane.z + (0.5 / WATER_PAINT_RESOLUTION) + 0.5f) * WATER_PAINT_RESOLUTION);
                 Int2 top_left = { center.x - brush_radius, center.y - brush_radius };
-
-                float paint_magnitude = 0.0f;
-                if      (input->keys_held & KEY_LEFT_MOUSE)  paint_magnitude =  0.05f;
-                else if (input->keys_held & KEY_RIGHT_MOUSE) paint_magnitude = -0.05f;
 
                 FOR(y_index, 2 * brush_radius - 1)
                 {
@@ -3829,12 +3838,12 @@ bool gameFrame(double delta_time, Input* input)
             if (input->keys_held & KEY_4)
             {
                 // reset
-                FOR(i, WATER_PAINT_SIDE * WATER_PAINT_SIDE) water_paint_texture.values[i] = (Vec4){ 0.5f, 0.0f, 0.0f, 1.0f };
+                FOR(i, WATER_PAINT_SIDE * WATER_PAINT_SIDE) water_paint_texture.values[i] = (Vec4){ 0.0f, 0.0f, 0.0f, 1.0f };
 
                 water_paint_texture.dirty = true;
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
 
-                createDebugPopup("test test", NO_TYPE);
+                createDebugPopup("reset water texture", NO_TYPE);
             }
         }
     }

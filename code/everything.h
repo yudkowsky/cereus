@@ -161,8 +161,6 @@ typedef struct DrawCommand
     Vec4 color;
     bool do_aabb;
 
-    // used only for making sure lasers aren't partially visible through mirrors.
-    // TODO: find some more intelligent way of packing this information so not every call needs this
     Vec4 start_clip_plane;
 	Vec4 end_clip_plane;
 }
@@ -258,7 +256,7 @@ ShaderMode;
 
 #define WATER_PAINT_TILE_COUNT 64
 #define WATER_PAINT_RESOLUTION 16
-#define WATER_PAINT_SIDE WATER_PAINT_TILE_COUNT * WATER_PAINT_RESOLUTION
+#define WATER_PAINT_SIDE (WATER_PAINT_TILE_COUNT * WATER_PAINT_RESOLUTION)
 
 typedef struct WaterPaintTexture
 {

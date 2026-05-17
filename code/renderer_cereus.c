@@ -2995,16 +2995,17 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         push_constant_range.offset = 0;
         push_constant_range.size = (uint32)sizeof(WaterPushConstants);
 
-        VkDescriptorSetLayout water_set_layouts[3] =
+        VkDescriptorSetLayout water_set_layouts[4] =
         { 
             vulkan_state.descriptor_set_layout, 	// underwater scene copy
             vulkan_state.descriptor_set_layout,		// scene depth 
             vulkan_state.descriptor_set_layout,     // water depth
+            vulkan_state.descriptor_set_layout,
         };
 
         VkPipelineLayoutCreateInfo water_distortion_pipeline_layout_ci = {0};
         water_distortion_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        water_distortion_pipeline_layout_ci.setLayoutCount = 3;
+        water_distortion_pipeline_layout_ci.setLayoutCount = 4;
         water_distortion_pipeline_layout_ci.pSetLayouts = water_set_layouts;
         water_distortion_pipeline_layout_ci.pushConstantRangeCount = 1;
         water_distortion_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
@@ -4133,13 +4134,14 @@ void vulkanDraw(void)
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline);
 
-            VkDescriptorSet water_sets[3] = 
+            VkDescriptorSet water_sets[4] = 
             {
                 vulkan_state.scene_copy_descriptor_set,
                 vulkan_state.depth_descriptor_set,
                 vulkan_state.water_depth_descriptor_set,
+                vulkan_state.paint_descriptor_set,
             };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline_layout, 0, 3, water_sets, 0, 0);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline_layout, 0, 4, water_sets, 0, 0);
 
             VkBuffer water_buffers[2] = { water_data->vertex_buffer, vulkan_state.water_instance_buffer };
             VkDeviceSize water_offsets[2] = { 0, 0 };
