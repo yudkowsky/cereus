@@ -205,6 +205,8 @@ typedef struct
     Int3 selected_coords;
     TileType picked_tile;
 
+    float brush_radius_modifier;
+
     int32 selected_id;
     WritingField writing_field;
 
@@ -244,6 +246,7 @@ typedef enum
     SHADER_MODE_CHANGE,
     DRAW_TRAILING_HITBOX_TOGGLE,
     STEP_THROUGH_TOGGLE,
+    PAINT_BRUSH_RADIUS_CHANGE,
 }
 PopupType;
 
@@ -3787,11 +3790,17 @@ bool gameFrame(double delta_time, Input* input)
         // paint onto water texture
         if (editor_state.editor_mode == WATER_PAINT)
         {
-            if ((input->keys_held & KEY_LEFT_MOUSE || input->keys_held & KEY_RIGHT_MOUSE) && camera.pitch < 0)
+            if ((input->keys_held & KEY_LEFT_MOUSE || input->keys_held & KEY_RIGHT_MOUSE || input->mouse_scroll_this_frame != 0) && camera.pitch < 0)
             {
-                // TODO: scale with scroll wheel
-                int32 paint_radius = 16;
-                int32 erase_radius = 32;
+                editor_state.brush_radius_modifier += input->mouse_scroll_this_frame; // does nothing on most frames
+                int32 paint_radius = (int32)(16.0f + editor_state.brush_radius_modifier);
+                int32 erase_radius = (int32)(32.0f + editor_state.brush_radius_modifier);
+                if (input->mouse_scroll_this_frame != 0)
+                {
+                    char paint_text[256] = {0};
+                    snprintf(paint_text, sizeof(paint_text), "new brush size: %i", paint_radius);
+                    createDebugPopup(paint_text, PAINT_BRUSH_RADIUS_CHANGE);
+                }
 
                 float paint_magnitude = 0.0f;
                 int32 brush_radius = 0;

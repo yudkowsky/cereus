@@ -46,6 +46,11 @@ LRESULT CALLBACK windowMessageProcessor(
             if (character == '\b' || character == '\r' || (character >= 32 && character < 128)) pushTextChar(&input, character);
             return 0;
         }
+        case WM_MOUSEWHEEL:
+        {
+            input.mouse_scroll_this_frame += GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
+            return 0;
+        }
         case WM_ACTIVATE:
         {
             if (LOWORD(wParam) == WA_INACTIVE)
@@ -313,6 +318,7 @@ int CALLBACK WinMain(
 
         input.mouse_dx = 0;
         input.mouse_dy = 0;
+        input.mouse_scroll_this_frame = 0;
         input.text.count = 0;
 
         centerCursorInWindow();

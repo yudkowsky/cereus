@@ -238,6 +238,7 @@ typedef struct Input
 {
 	float mouse_dx;
     float mouse_dy;
+    int32 mouse_scroll_this_frame;
 
     uint64 keys_held; // get from platform layer
     uint64 keys_pressed; // calculated in game layer from previous input 
