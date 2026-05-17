@@ -1,0 +1,89 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rg32f) uniform image2D h0_image;
+
+layout(push_constant) uniform PushConstants
+{
+    int texture_size;
+    float tile_length;
+    float wind_direction_x;
+    float wind_direction_z;
+    float wind_speed;
+    float amplitude;
+    float gravity;
+    uint random_seed;
+}
+pc;
+
+const float TAU = 6.2831853071;
+
+// generate uniform pseudorandom numbers
+float uniform_random(uvec2 texel, uint seed)
+{
+    uvec3 v = uvec3(texel, seed);
+    v = v * 1234577u + 12345691u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    v ^= v >> 16u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    return float(v.x) / 4294967295.0; // div by uint max -> (0, 1)
+}
+
+// NOTE: based on Tessendorf paper "simulating ocean water"
+void main()
+{
+    uvec2 texel = gl_GlobalInvocationID.xy;
+    if (texel.x >= uint(pc.texture_size) || texel.y >= uint(pc.texture_size)) return;
+
+    // center
+    int frequency_x = int(texel.x) - pc.texture_size / 2;
+    int frequency_z = int(texel.y) - pc.texture_size / 2;
+
+    // wave vector in world space
+    vec2 wave_vector = vec2(TAU * float(frequency_x), TAU * float(frequency_z)) / pc.tile_length;
+    float wave_number = length(wave_vector);
+
+    // sample two well-behaved random numbers
+    float uniform_a = max(uniform_random(texel, pc.random_seed), 1e-6); // avoid log(0)
+    float uniform_b = uniform_random(texel, pc.random_seed + 1); 
+    float gaussian_radius = sqrt(-2.0 * log(uniform_a));
+    float gaussian_angle = TAU * uniform_b;
+    vec2 gaussian_complex = vec2(gaussian_radius * cos(gaussian_angle), gaussian_radius * sin(gaussian_angle));
+
+    // evaluate Phillips spectrum at this wave vector, outputs expected energy of wave travelling along wave_vector given wind direction and speed
+    float spectrum_energy;
+    if (wave_number < 1e-6)
+    {
+        spectrum_energy = 0.0;
+    }
+    else
+    {
+        float wave_number_squared = wave_number * wave_number;
+        float wave_number_quartic = wave_number_squared * wave_number_squared;
+
+        // largest wave the wind can sustain is v^2 / g
+        float max_wave_size_from_wind = pc.wind_speed * pc.wind_speed / pc.gravity;
+
+        // waves along the wind direction get more energy
+        vec2 wave_direction = wave_vector / wave_number;
+        vec2 wind_direction = normalize(vec2(pc.wind_direction_x, pc.wind_direction_z));
+        float wave_alignment_with_wind = dot(wave_direction, wind_direction);
+
+        // main Phillips formula
+        spectrum_energy = pc.amplitude * exp(-1.0 / (wave_number_squared * max_wave_size_from_wind * max_wave_size_from_wind)) / wave_number_quartic * wave_alignment_with_wind * wave_alignment_with_wind;
+
+        // smoothly suppress very small waves
+        float small_wave_dampening = 0.001;
+        float damping_wavelength = max_wave_size_from_wind * small_wave_dampening;
+        spectrum_energy *= exp(-wave_number_squared * damping_wavelength * damping_wavelength);
+    }
+
+    // each gaussian has variance 1, so want to /2
+    vec2 initial_amplitude = gaussian_complex * sqrt(spectrum_energy * 0.5);
+    imageStore(h0_image, ivec2(texel), vec4(initial_amplitude, 0.0, 0.0));
+}
