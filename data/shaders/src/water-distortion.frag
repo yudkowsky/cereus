@@ -97,7 +97,7 @@ void main()
     float inner_size = 0.5 - effective_half_width - effective_corner_size;
     vec2 pos_to_inner = distance_to_line - vec2(inner_size);
     float sdf = length(max(pos_to_inner, vec2(0.0))) + min(max(pos_to_inner.x, pos_to_inner.y), 0.0) - effective_corner_size;
-    if (sdf > 0.0) 
+    //if (sdf > 0.0) 
     {
         //base_color = mix(base_color, grid_line_tint, grid_opacity);
         vec2 paint_uv = (frag_world_pos.xz + 0.5) / WATER_PAINT_TILE_COUNT;

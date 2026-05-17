@@ -259,6 +259,8 @@ ShaderMode;
 #define WATER_PAINT_RESOLUTION 16
 #define WATER_PAINT_SIDE (WATER_PAINT_TILE_COUNT * WATER_PAINT_RESOLUTION)
 
+#define FFT_SIZE 256
+
 typedef struct WaterPaintTexture
 {
     Vec4 values[WATER_PAINT_SIDE * WATER_PAINT_SIDE];

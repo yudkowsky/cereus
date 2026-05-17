@@ -23,6 +23,7 @@ glslc outline-post.frag -g -o ..\spirv\outline-post.frag.spv
 glslc water-depth.frag -g -o ..\spirv\water-depth.frag.spv
 glslc water-distortion.vert -g -o ..\spirv\water-distortion.vert.spv
 glslc water-distortion.frag -g -o ..\spirv\water-distortion.frag.spv
+glslc fft-spectrum.comp -g -o ..\spirv\fft-spectrum.comp.spv
 popd
 
 IF EXIST ..\..\build_cereus rmdir \S \Q ..\..\build_cereus 2>nul
