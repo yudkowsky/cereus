@@ -1,0 +1,62 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rg32f) uniform readonly image2D h0_image;
+layout(set = 1, binding = 0, rg32f) uniform writeonly image2D h_evolved_image;
+
+layout(push_constant) uniform PushConstants
+{
+    int texture_size;
+    float tile_length;
+    float gravity;
+    float time;
+}
+pc;
+
+const float TAU = 6.2831853071;
+
+vec2 complex_multiply(vec2 a, vec2 b)
+{
+    return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+
+vec2 complex_conjugate(vec2 z)
+{
+    return vec2(z.x, -z.y);
+}
+
+void main()
+{
+    uvec2 texel = gl_GlobalInvocationID.xy;
+    if (texel.x >= uint(pc.texture_size) || texel.y >= uint(pc.texture_size)) return;
+
+    int frequency_x = (int(texel.x) <= pc.texture_size / 2) ? int(texel.x) : int(texel.x) - pc.texture_size;
+    int frequency_z = (int(texel.y) <= pc.texture_size / 2) ? int(texel.y) : int(texel.y) - pc.texture_size;
+    ivec2 frequency = ivec2(frequency_x, frequency_z);
+
+    // wave vector and dispersion frequency
+    vec2 wave_vector = TAU * vec2(frequency) / pc.tile_length;
+    float wave_number = length(wave_vector);
+    float dispersion_frequency = sqrt(pc.gravity * wave_number);
+
+    // read h0(k) at this texel
+    vec2 h0_k = imageLoad(h0_image, ivec2(texel)).xy;
+
+    // read h0(-k) to mirror about texture center
+    ivec2 mirrored_texel = ivec2(pc.texture_size) - ivec2(texel);
+
+    // wrap
+    mirrored_texel.x = mirrored_texel.x % pc.texture_size;
+    mirrored_texel.y = mirrored_texel.y % pc.texture_size;
+    vec2 h0_minus_k = imageLoad(h0_image, mirrored_texel).xy;
+
+    // time-evolution factors
+    float angle = dispersion_frequency * pc.time;
+    vec2 rotation_forward = vec2(cos(angle), sin(angle));
+    vec2 rotation_backward = vec2(cos(angle), -sin(angle));
+
+    vec2 h_evolved = complex_multiply(h0_k, rotation_forward) + complex_multiply(complex_conjugate(h0_minus_k), rotation_backward);
+
+    imageStore(h_evolved_image, ivec2(texel), vec4(h_evolved, 0.0, 0.0));
+}

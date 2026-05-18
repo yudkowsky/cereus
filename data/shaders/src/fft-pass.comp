@@ -1,0 +1,70 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0, rg32f) uniform readonly  image2D source_image;
+layout(set = 1, binding = 0, rg32f) uniform writeonly image2D dest_image;
+
+layout(push_constant) uniform PushConstants
+{
+    int texture_size;
+    int level;
+    int direction;
+}
+pc;
+
+const float PI = 3.14159265358979;
+
+vec2 complex_multiply(vec2 a, vec2 b)
+{
+    return vec2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+
+void main()
+{
+    // TODO: after this works, do better naming / maybe add some comments
+    int butterfly_index = int(gl_GlobalInvocationID.x);
+    int row_index       = int(gl_GlobalInvocationID.y);
+
+    int N = pc.texture_size;
+    if (butterfly_index >= N / 2 || row_index >= N) return;
+
+    int r = N >> pc.level;
+    int l = 1 << (pc.level - 1);
+
+    int j      = butterfly_index / r;
+    int offset = butterfly_index % r;
+
+    int src_a_pos = j * (2 * r) + offset;
+    int src_b_pos = src_a_pos + r;
+
+    int dst_a_pos = j * r + offset;
+    int dst_b_pos = dst_a_pos + N / 2;
+
+    ivec2 src_a_coord, src_b_coord, dst_a_coord, dst_b_coord;
+    if (pc.direction == 0)
+    {
+        src_a_coord = ivec2(src_a_pos, row_index);
+        src_b_coord = ivec2(src_b_pos, row_index);
+        dst_a_coord = ivec2(dst_a_pos, row_index);
+        dst_b_coord = ivec2(dst_b_pos, row_index);
+    }
+    else
+    {
+        src_a_coord = ivec2(row_index, src_a_pos);
+        src_b_coord = ivec2(row_index, src_b_pos);
+        dst_a_coord = ivec2(row_index, dst_a_pos);
+        dst_b_coord = ivec2(row_index, dst_b_pos);
+    }
+
+    // twiddle
+    float angle = PI * float(j) / float(l);
+    vec2 twiddle = vec2(cos(angle), sin(angle));
+
+    // ping pong
+    vec2 a = imageLoad(source_image, src_a_coord).xy;
+    vec2 b = complex_multiply(imageLoad(source_image, src_b_coord).xy, twiddle);
+
+    imageStore(dest_image, dst_a_coord, vec4(a + b, 0.0, 0.0));
+    imageStore(dest_image, dst_b_coord, vec4(a - b, 0.0, 0.0));
+}
