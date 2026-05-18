@@ -25,6 +25,7 @@ glslc water-distortion.vert -g -o ..\spirv\water-distortion.vert.spv
 glslc water-distortion.frag -g -o ..\spirv\water-distortion.frag.spv
 glslc fft-spectrum.comp -g -o ..\spirv\fft-spectrum.comp.spv
 glslc fft-evolved.comp -g -o ..\spirv\fft-evolved.comp.spv
+glslc fft-pass.comp -g -o ..\spirv\fft-pass.comp.spv
 popd
 
 IF EXIST ..\..\build_cereus rmdir \S \Q ..\..\build_cereus 2>nul

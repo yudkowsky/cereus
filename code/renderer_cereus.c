@@ -156,6 +156,14 @@ FFTEvolvedPushConstants;
 
 typedef struct
 {
+    int32 texture_size;
+    int32 level;
+    int32 direction;
+}
+FFTPassPushConstants;
+
+typedef struct
+{
     cgltf_data* data;
     VkBuffer vertex_buffer;
     VkDeviceMemory vertex_memory;
@@ -250,12 +258,20 @@ typedef struct VulkanState
     VkDescriptorSet h0_descriptor_set;
     VkDescriptorSet h0_sampled_descriptor_set; // TODO: temp output to visualise
 
-    // time evolved spectrum
-    VkImage h_evolved_image;
-    VkDeviceMemory h_evolved_image_memory;
-    VkImageView h_evolved_image_view;
-    VkDescriptorSet h_evolved_descriptor_set; // compute write
-    VkDescriptorSet h_evolved_sampled_descriptor_set; // inverse FFT read 
+    // ping ponging buffers for FFT implementation
+    VkImage fft_buffer_a_image;
+    VkDeviceMemory fft_buffer_a_image_memory;
+    VkImageView fft_buffer_a_image_view;
+    VkDescriptorSet fft_buffer_a_descriptor_set;
+    VkDescriptorSet fft_buffer_a_sampled_descriptor_set;
+
+    VkImage fft_buffer_b_image;
+    VkDeviceMemory fft_buffer_b_image_memory;
+    VkImageView fft_buffer_b_image_view;
+    VkDescriptorSet fft_buffer_b_descriptor_set;
+    VkDescriptorSet fft_buffer_b_sampled_descriptor_set;
+
+    // real valued heightfield for water vertex shader
 
     // RENDER PASSES
 
@@ -317,6 +333,9 @@ typedef struct VulkanState
 
     VkPipeline fft_evolved_pipeline;
     VkPipelineLayout fft_evolved_pipeline_layout;
+
+    VkPipeline fft_pass_pipeline;
+    VkPipelineLayout fft_pass_pipeline_layout;
 
     // shared resources
     VkSampler pixel_art_sampler;
@@ -2584,7 +2603,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.h0_image_view);
     }
 
-    // h_evolved spectrum image
+    // fft buffers spectrum image
     {
         VkImageCreateInfo image_ci = {0};
         image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -2601,22 +2620,25 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
         image_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-        vkCreateImage(vulkan_state.logical_device_handle, &image_ci, 0, &vulkan_state.h_evolved_image);
+        vkCreateImage(vulkan_state.logical_device_handle, &image_ci, 0, &vulkan_state.fft_buffer_a_image);
+        vkCreateImage(vulkan_state.logical_device_handle, &image_ci, 0, &vulkan_state.fft_buffer_b_image);
 
         VkMemoryRequirements mem_req = {0};
-        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.h_evolved_image, &mem_req);
+        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.fft_buffer_a_image, &mem_req);
 
         VkMemoryAllocateInfo alloc = {0};
         alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         alloc.allocationSize = mem_req.size;
         alloc.memoryTypeIndex = findMemoryType(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-        vkAllocateMemory(vulkan_state.logical_device_handle, &alloc, 0, &vulkan_state.h_evolved_image_memory);
-        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.h_evolved_image, vulkan_state.h_evolved_image_memory, 0);
+        vkAllocateMemory(vulkan_state.logical_device_handle, &alloc, 0, &vulkan_state.fft_buffer_a_image_memory);
+        vkAllocateMemory(vulkan_state.logical_device_handle, &alloc, 0, &vulkan_state.fft_buffer_b_image_memory); // NOTE: using same alloc, almost certainly fine
+        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.fft_buffer_a_image, vulkan_state.fft_buffer_a_image_memory, 0);
+        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.fft_buffer_b_image, vulkan_state.fft_buffer_b_image_memory, 0);
 
         VkImageViewCreateInfo view_ci = {0};
         view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        view_ci.image = vulkan_state.h_evolved_image;
+        view_ci.image = vulkan_state.fft_buffer_a_image;
         view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
         view_ci.format = VK_FORMAT_R32G32_SFLOAT;
         view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -2625,7 +2647,11 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         view_ci.subresourceRange.baseArrayLayer = 0;
         view_ci.subresourceRange.layerCount = 1;
 
-        vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.h_evolved_image_view);
+        vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.fft_buffer_a_image_view);
+
+        view_ci.image = vulkan_state.fft_buffer_b_image;
+
+        vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.fft_buffer_b_image_view);
     }
 
     // LOADING SHADER MODULES
@@ -2649,6 +2675,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkShaderModule oit_resolve_frag_smh = {0};
     VkShaderModule fft_spectrum_smh = {0};
     VkShaderModule fft_evolved_smh = {0};
+    VkShaderModule fft_pass_smh = {0};
 
     VkPipelineShaderStageCreateInfo cube_vert_stage_ci 	 	       = loadShaderStage("data/shaders/spirv/tri.vert.spv", 	  	  	 &cube_vert_smh, 	  		 VK_SHADER_STAGE_VERTEX_BIT);
 	VkPipelineShaderStageCreateInfo cube_frag_stage_ci 	 	       = loadShaderStage("data/shaders/spirv/tri.frag.spv", 	  	  	 &cube_frag_smh, 	  		 VK_SHADER_STAGE_FRAGMENT_BIT);
@@ -2669,6 +2696,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkPipelineShaderStageCreateInfo oit_resolve_frag_stage_ci      = loadShaderStage("data/shaders/spirv/oit-resolve.frag.spv",      &oit_resolve_frag_smh,      VK_SHADER_STAGE_FRAGMENT_BIT);
     VkPipelineShaderStageCreateInfo fft_spectrum_stage_ci          = loadShaderStage("data/shaders/spirv/fft-spectrum.comp.spv",     &fft_spectrum_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
     VkPipelineShaderStageCreateInfo fft_evolved_stage_ci           = loadShaderStage("data/shaders/spirv/fft-evolved.comp.spv",      &fft_evolved_smh,           VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo fft_pass_stage_ci              = loadShaderStage("data/shaders/spirv/fft-pass.comp.spv",         &fft_pass_smh,              VK_SHADER_STAGE_COMPUTE_BIT);
 
     VkPipelineShaderStageCreateInfo cube_shader_stages[2]  	 	      = { cube_vert_stage_ci,    	      cube_frag_stage_ci }; 
     VkPipelineShaderStageCreateInfo outline_select_shader_stages[2]   = { outline_select_vert_stage_ci,   outline_select_frag_stage_ci }; 
@@ -2976,7 +3004,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     descriptor_pool_sizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     descriptor_pool_sizes[1].descriptorCount = 4;
     descriptor_pool_sizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    descriptor_pool_sizes[2].descriptorCount = 4 + 1 + 1 + 1; // +1 for oit head image, +1 for h0, +1 for h_evolved
+    descriptor_pool_sizes[2].descriptorCount = 4 + 1 + 1 + 1 + 1; // oit head image, h0, fft_buffer_a and b
     descriptor_pool_sizes[3].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     descriptor_pool_sizes[3].descriptorCount = 8 + 2; // +2 for oit pool and counter
     
@@ -3096,22 +3124,22 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
     }
 
-    // h_evolved storage
+    // fft buffer a and b storage
     {
         VkDescriptorSetAllocateInfo alloc_info = {0};
         alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         alloc_info.descriptorPool = vulkan_state.descriptor_pool;
         alloc_info.descriptorSetCount = 1;
         alloc_info.pSetLayouts = &vulkan_state.storage_image_descriptor_set_layout;
-        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.h_evolved_descriptor_set);
+        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.fft_buffer_a_descriptor_set);
 
         VkDescriptorImageInfo image_info = {0};
-        image_info.imageView = vulkan_state.h_evolved_image_view;
+        image_info.imageView = vulkan_state.fft_buffer_a_image_view;
         image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
         VkWriteDescriptorSet write = {0};
         write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = vulkan_state.h_evolved_descriptor_set;
+        write.dstSet = vulkan_state.fft_buffer_a_descriptor_set;
         write.dstBinding = 0;
         write.descriptorCount = 1;
         write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -3120,23 +3148,72 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
     }
 
-    // h_evolved sampled
+    // fft_buffer_a sampled
     {
         VkDescriptorSetAllocateInfo alloc_info = {0};
         alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         alloc_info.descriptorPool = vulkan_state.descriptor_pool;
         alloc_info.descriptorSetCount = 1;
         alloc_info.pSetLayouts = &vulkan_state.descriptor_set_layout;
-        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.h_evolved_sampled_descriptor_set);
+        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.fft_buffer_a_sampled_descriptor_set);
 
         VkDescriptorImageInfo image_info = {0};
         image_info.sampler = vulkan_state.pixel_art_sampler;
-        image_info.imageView = vulkan_state.h_evolved_image_view;
+        image_info.imageView = vulkan_state.fft_buffer_a_image_view;
         image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 
         VkWriteDescriptorSet write = {0};
         write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = vulkan_state.h_evolved_sampled_descriptor_set;
+        write.dstSet = vulkan_state.fft_buffer_a_sampled_descriptor_set;
+        write.dstBinding = 0;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.pImageInfo = &image_info;
+
+        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
+    }
+
+    // fft_buffer_b storage TODO: smarter way to do this, duplicated code here
+    {
+        VkDescriptorSetAllocateInfo alloc_info = {0};
+        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        alloc_info.descriptorPool = vulkan_state.descriptor_pool;
+        alloc_info.descriptorSetCount = 1;
+        alloc_info.pSetLayouts = &vulkan_state.storage_image_descriptor_set_layout;
+        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.fft_buffer_b_descriptor_set);
+
+        VkDescriptorImageInfo image_info = {0};
+        image_info.imageView = vulkan_state.fft_buffer_b_image_view;
+        image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        VkWriteDescriptorSet write = {0};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = vulkan_state.fft_buffer_b_descriptor_set;
+        write.dstBinding = 0;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        write.pImageInfo = &image_info;
+
+        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
+    }
+
+    // fft_buffer_b sampled
+    {
+        VkDescriptorSetAllocateInfo alloc_info = {0};
+        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        alloc_info.descriptorPool = vulkan_state.descriptor_pool;
+        alloc_info.descriptorSetCount = 1;
+        alloc_info.pSetLayouts = &vulkan_state.descriptor_set_layout;
+        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.fft_buffer_b_sampled_descriptor_set);
+
+        VkDescriptorImageInfo image_info = {0};
+        image_info.sampler = vulkan_state.pixel_art_sampler;
+        image_info.imageView = vulkan_state.fft_buffer_b_image_view;
+        image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+        VkWriteDescriptorSet write = {0};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = vulkan_state.fft_buffer_b_sampled_descriptor_set;
         write.dstBinding = 0;
         write.descriptorCount = 1;
         write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -3350,20 +3427,43 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         push_constant_range.offset = 0;
         push_constant_range.size = (uint32)sizeof(FFTEvolvedPushConstants);
 
-        VkDescriptorSetLayout evolve_set_layouts[2] =
+        VkDescriptorSetLayout evolved_set_layouts[2] =
         {
             vulkan_state.storage_image_descriptor_set_layout, // h0 read
-            vulkan_state.storage_image_descriptor_set_layout, // h_evolved write
+            vulkan_state.storage_image_descriptor_set_layout, // fft_buffer_a write
         };
 
         VkPipelineLayoutCreateInfo layout_ci = {0};
         layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         layout_ci.setLayoutCount = 2;
-        layout_ci.pSetLayouts = evolve_set_layouts;
+        layout_ci.pSetLayouts = evolved_set_layouts;
         layout_ci.pushConstantRangeCount = 1;
         layout_ci.pPushConstantRanges = &push_constant_range;
 
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.fft_evolved_pipeline_layout);
+    }
+
+    // FFT PASS PIPELINE LAYOUT
+    {
+        VkPushConstantRange push_constant_range = {0};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = (uint32)sizeof(FFTPassPushConstants);
+
+        VkDescriptorSetLayout fft_pass_set_layouts[2] =
+        {
+            vulkan_state.storage_image_descriptor_set_layout,
+            vulkan_state.storage_image_descriptor_set_layout,
+        };
+
+        VkPipelineLayoutCreateInfo layout_ci = {0};
+        layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layout_ci.setLayoutCount = 2;
+        layout_ci.pSetLayouts = fft_pass_set_layouts;
+        layout_ci.pushConstantRangeCount = 1;
+        layout_ci.pPushConstantRanges = &push_constant_range;
+
+        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.fft_pass_pipeline_layout);
     }
 
     // BASE GRAPHICS PIPELINE INFO
@@ -3733,6 +3833,16 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateComputePipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &pipeline_ci, 0, &vulkan_state.fft_evolved_pipeline);
     }
 
+    // define FFT pass compute pipeline
+    {
+        VkComputePipelineCreateInfo pipeline_ci = {0};
+        pipeline_ci.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipeline_ci.stage = fft_pass_stage_ci;
+        pipeline_ci.layout = vulkan_state.fft_pass_pipeline_layout;
+
+        vkCreateComputePipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &pipeline_ci, 0, &vulkan_state.fft_pass_pipeline);
+    }
+
     createInstanceBuffer(&vulkan_state.cube_instance_buffer, sizeof(CubeInstanceData) * CUBE_INSTANCE_CAPACITY, &vulkan_state.cube_instance_memory, &vulkan_state.cube_instance_mapped);
     createInstanceBuffer(&vulkan_state.water_instance_buffer, sizeof(WaterInstanceData) * WATER_INSTANCE_CAPACITY, &vulkan_state.water_instance_memory, &vulkan_state.water_instance_mapped);
 
@@ -3873,7 +3983,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         cb_begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(command_buffer, &cb_begin);
 
-        VkImageMemoryBarrier to_general[2] = {0};
+        VkImageMemoryBarrier to_general[3] = {0};
         to_general[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         to_general[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         to_general[0].newLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -3889,9 +3999,12 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         to_general[0].dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
 
         to_general[1] = to_general[0];
-        to_general[1].image = vulkan_state.h_evolved_image;
+        to_general[1].image = vulkan_state.fft_buffer_a_image;
 
-        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0, 2, to_general);
+        to_general[2] = to_general[0];
+        to_general[2].image = vulkan_state.fft_buffer_b_image;
+
+        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0, 3, to_general);
 
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.fft_spectrum_pipeline);
         vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.fft_spectrum_pipeline_layout, 0, 1, &vulkan_state.h0_descriptor_set, 0, 0);
@@ -3902,7 +4015,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         pc.wind_direction_x = 1.0f;
         pc.wind_direction_z = 0.0f;
         pc.wind_speed = 30.0f;
-        pc.amplitude = 1.0f;
+        pc.amplitude = 1e-6f;
         pc.gravity = 9.81f;
         pc.random_seed = 1337;
 
@@ -4106,12 +4219,12 @@ void vulkanDraw(void)
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.fft_evolved_pipeline);
 
-        VkDescriptorSet evolve_sets[2] =
+        VkDescriptorSet evolved_sets[2] =
         {
             vulkan_state.h0_descriptor_set,
-            vulkan_state.h_evolved_descriptor_set,
+            vulkan_state.fft_buffer_a_descriptor_set,
         };
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.fft_evolved_pipeline_layout, 0, 2, evolve_sets, 0, 0);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.fft_evolved_pipeline_layout, 0, 2, evolved_sets, 0, 0);
 
         FFTEvolvedPushConstants pc = {0};
         pc.texture_size = FFT_SIZE;
@@ -4122,17 +4235,59 @@ void vulkanDraw(void)
         vkCmdPushConstants(command_buffer, vulkan_state.fft_evolved_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(FFTEvolvedPushConstants), &pc);
         vkCmdDispatch(command_buffer, FFT_SIZE / 16, FFT_SIZE / 16, 1);
 
-        // make compute writes to h_evolved visible to subsequent shader reads (debug viz, later: IFFT)
-        VkMemoryBarrier evolve_barrier = {0};
-        evolve_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        evolve_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        evolve_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        VkMemoryBarrier evolved_barrier = {0};
+        evolved_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        evolved_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        evolved_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &evolve_barrier, 0, 0, 0, 0);
+        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &evolved_barrier, 0, 0, 0, 0);
+    }
+
+    // FFT PASSES (8 horizontal, then 8 vertical)
+    {
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.fft_pass_pipeline);
+
+        int32 log2_fft_size = 8; // log2(256)
+        
+        // tracks which buffer is currently the source
+        bool source_is_a = true;
+
+        for (int32 pass_index = 0; pass_index < 2 * log2_fft_size; pass_index++)
+        {
+            int32 direction = (pass_index < log2_fft_size) ? 0 : 1; // first 8 horizontal, next 8 vertical
+            int32 level = (pass_index % log2_fft_size) + 1;
+
+            VkDescriptorSet pass_sets[2] =
+            {
+                source_is_a ? vulkan_state.fft_buffer_a_descriptor_set : vulkan_state.fft_buffer_b_descriptor_set, // source
+                source_is_a ? vulkan_state.fft_buffer_b_descriptor_set : vulkan_state.fft_buffer_a_descriptor_set, // dest
+            };
+
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.fft_pass_pipeline_layout, 0, 2, pass_sets, 0, 0);
+
+            FFTPassPushConstants pc = {0};
+            pc.texture_size = FFT_SIZE;
+            pc.level = level;
+            pc.direction = direction;
+
+            vkCmdPushConstants(command_buffer, vulkan_state.fft_pass_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(FFTPassPushConstants), &pc);
+
+            vkCmdDispatch(command_buffer, (FFT_SIZE / 2) / 16, FFT_SIZE / 16, 1);
+
+            // barrier so next pass sees the writes
+            VkMemoryBarrier pass_barrier = {0};
+            pass_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            pass_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            pass_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+            vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &pass_barrier, 0, 0, 0, 0);
+
+            // ping pong
+            source_is_a = !source_is_a;
+        }
     }
 
     // upload paint texture if dirty
-
     if (vulkan_state.water_paint_texture && vulkan_state.water_paint_texture->dirty)
     {
         // TODO: slow... will want to either expose this mapped memory to game, and handle like that, or only write affected pixels on any given frame
@@ -4820,7 +4975,7 @@ void vulkanDraw(void)
         vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &sprite_vb_offset);
         vkCmdBindIndexBuffer(command_buffer, vulkan_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
         //vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.paint_descriptor_set, 0, 0);
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.h_evolved_sampled_descriptor_set, 0, 0);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.fft_buffer_a_sampled_descriptor_set, 0, 0);
 
         float debug_size = 600.0f;
         float debug_margin = 10.0f;

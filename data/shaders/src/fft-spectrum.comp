@@ -31,7 +31,7 @@ float uniform_random(uvec2 texel, uint seed)
     v.x += v.y * v.z;
     v.y += v.z * v.x;
     v.z += v.x * v.y;
-    return float(v.x) / 4294967295.0; // div by uint max -> (0, 1)
+    return float(v.x) / 4294967295.0; // div by uint max into (0, 1)
 }
 
 // NOTE: based on Tessendorf paper "simulating ocean water"
@@ -40,9 +40,9 @@ void main()
     uvec2 texel = gl_GlobalInvocationID.xy;
     if (texel.x >= uint(pc.texture_size) || texel.y >= uint(pc.texture_size)) return;
 
-    // center
-    int frequency_x = int(texel.x) - pc.texture_size / 2;
-    int frequency_z = int(texel.y) - pc.texture_size / 2;
+    // center, weird wrap around thing
+    int frequency_x = (int(texel.x) <= pc.texture_size / 2) ? int(texel.x) : int(texel.x) - pc.texture_size;
+    int frequency_z = (int(texel.y) <= pc.texture_size / 2) ? int(texel.y) : int(texel.y) - pc.texture_size;
 
     // wave vector in world space
     vec2 wave_vector = vec2(TAU * float(frequency_x), TAU * float(frequency_z)) / pc.tile_length;
