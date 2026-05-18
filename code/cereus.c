@@ -3802,16 +3802,15 @@ bool gameFrame(double delta_time, Input* input)
                     createDebugPopup(paint_text, PAINT_BRUSH_RADIUS_CHANGE);
                 }
 
-                float paint_magnitude = 0.0f;
+                float paint_magnitude = 0.2f;
                 int32 brush_radius = 0;
                 if (input->keys_held & KEY_LEFT_MOUSE)  
                 {
-                    paint_magnitude =  0.05f;
                     brush_radius = paint_radius;
                 }
                 else if (input->keys_held & KEY_RIGHT_MOUSE) 
                 {
-                    paint_magnitude = -0.05f;
+                    paint_magnitude = -paint_magnitude;
                     brush_radius = erase_radius;
                 }
 

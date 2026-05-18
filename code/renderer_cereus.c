@@ -164,6 +164,12 @@ FFTPassPushConstants;
 
 typedef struct
 {
+    int32 texture_size;
+}
+FFTFinalizePushConstants;
+
+typedef struct
+{
     cgltf_data* data;
     VkBuffer vertex_buffer;
     VkDeviceMemory vertex_memory;
@@ -271,7 +277,15 @@ typedef struct VulkanState
     VkDescriptorSet fft_buffer_b_descriptor_set;
     VkDescriptorSet fft_buffer_b_sampled_descriptor_set;
 
-    // real valued heightfield for water vertex shader
+    // real valued heightfield for water vertex shader TODO: rename water_
+    VkImage displacement_image;
+    VkDeviceMemory displacement_image_memory;
+    VkImageView displacement_image_view;
+    VkDescriptorSet displacement_descriptor_set;
+    VkDescriptorSet displacement_sampled_descriptor_set;
+
+    // linear sampler which repeats for tileable textures TODO: put samplers together
+    VkSampler tiling_linear_sampler;
 
     // RENDER PASSES
 
@@ -336,6 +350,11 @@ typedef struct VulkanState
 
     VkPipeline fft_pass_pipeline;
     VkPipelineLayout fft_pass_pipeline_layout;
+
+     // TODO: think about if i want this extra compute pass for the sake of cleanliness, or if i'd prefer to sample fft_buffer_a in water vertex shader.
+     // downside would be if i wanted multiple inputs and outputs affecting / consuming water displacement.
+    VkPipeline fft_finalize_pipeline;             
+    VkPipelineLayout fft_finalize_pipeline_layout;
 
     // shared resources
     VkSampler pixel_art_sampler;
@@ -2654,6 +2673,50 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.fft_buffer_b_image_view);
     }
 
+    // water displacement image
+    {
+        VkImageCreateInfo image_ci = {0};
+        image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        image_ci.imageType = VK_IMAGE_TYPE_2D;
+        image_ci.extent.width = FFT_SIZE;
+        image_ci.extent.height = FFT_SIZE;
+        image_ci.extent.depth = 1;
+        image_ci.mipLevels = 1;
+        image_ci.arrayLayers = 1;
+        image_ci.format = VK_FORMAT_R32_SFLOAT;
+        image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        image_ci.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        image_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        
+        vkCreateImage(vulkan_state.logical_device_handle, &image_ci, 0, &vulkan_state.displacement_image);
+        
+        VkMemoryRequirements mem_req = {0};
+        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.displacement_image, &mem_req);
+        
+        VkMemoryAllocateInfo alloc = {0};
+        alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc.allocationSize = mem_req.size;
+        alloc.memoryTypeIndex = findMemoryType(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        
+        vkAllocateMemory(vulkan_state.logical_device_handle, &alloc, 0, &vulkan_state.displacement_image_memory);
+        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.displacement_image, vulkan_state.displacement_image_memory, 0);
+        
+        VkImageViewCreateInfo view_ci = {0};
+        view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_ci.image = vulkan_state.displacement_image;
+        view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_ci.format = VK_FORMAT_R32_SFLOAT;
+        view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        view_ci.subresourceRange.baseMipLevel = 0;
+        view_ci.subresourceRange.levelCount = 1;
+        view_ci.subresourceRange.baseArrayLayer = 0;
+        view_ci.subresourceRange.layerCount = 1;
+        
+        vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.displacement_image_view);
+    }
+
     // LOADING SHADER MODULES
 
     VkShaderModule cube_vert_smh = {0};
@@ -2676,6 +2739,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkShaderModule fft_spectrum_smh = {0};
     VkShaderModule fft_evolved_smh = {0};
     VkShaderModule fft_pass_smh = {0};
+    VkShaderModule fft_finalize_smh = {0};
 
     VkPipelineShaderStageCreateInfo cube_vert_stage_ci 	 	       = loadShaderStage("data/shaders/spirv/tri.vert.spv", 	  	  	 &cube_vert_smh, 	  		 VK_SHADER_STAGE_VERTEX_BIT);
 	VkPipelineShaderStageCreateInfo cube_frag_stage_ci 	 	       = loadShaderStage("data/shaders/spirv/tri.frag.spv", 	  	  	 &cube_frag_smh, 	  		 VK_SHADER_STAGE_FRAGMENT_BIT);
@@ -2697,6 +2761,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkPipelineShaderStageCreateInfo fft_spectrum_stage_ci          = loadShaderStage("data/shaders/spirv/fft-spectrum.comp.spv",     &fft_spectrum_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
     VkPipelineShaderStageCreateInfo fft_evolved_stage_ci           = loadShaderStage("data/shaders/spirv/fft-evolved.comp.spv",      &fft_evolved_smh,           VK_SHADER_STAGE_COMPUTE_BIT);
     VkPipelineShaderStageCreateInfo fft_pass_stage_ci              = loadShaderStage("data/shaders/spirv/fft-pass.comp.spv",         &fft_pass_smh,              VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo fft_finalize_stage_ci          = loadShaderStage("data/shaders/spirv/fft-finalize.comp.spv",     &fft_finalize_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
 
     VkPipelineShaderStageCreateInfo cube_shader_stages[2]  	 	      = { cube_vert_stage_ci,    	      cube_frag_stage_ci }; 
     VkPipelineShaderStageCreateInfo outline_select_shader_stages[2]   = { outline_select_vert_stage_ci,   outline_select_frag_stage_ci }; 
@@ -2743,7 +2808,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     vertex_input_simple.vertexBindingDescriptionCount = 1;
     vertex_input_simple.pVertexBindingDescriptions = &vertex_binding_simple;
     vertex_input_simple.vertexAttributeDescriptionCount = 4;
-    vertex_input_simple.pVertexAttributeDescriptions = vertex_attributes_simple;
+    vertex_input_simple.pVertexAttributeDescriptions = vertex_attributes_simple      ;
 
     // cube vertex input (instanced)
     VkVertexInputBindingDescription vertex_bindings_instanced[2] = {0};
@@ -2936,32 +3001,54 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
 	// descriptors + pipeline layout (shared by sprite and cube pipelines)
 
-    VkSamplerCreateInfo sampler_creation_info = {0};
-    sampler_creation_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO; // TODO: double check all this info at some point
-    sampler_creation_info.magFilter = VK_FILTER_NEAREST;
-    sampler_creation_info.minFilter = VK_FILTER_NEAREST;
-    sampler_creation_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampler_creation_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampler_creation_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    sampler_creation_info.anisotropyEnable = VK_FALSE;
-    sampler_creation_info.maxAnisotropy = 1.0f;
-    sampler_creation_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-    sampler_creation_info.unnormalizedCoordinates = VK_FALSE;
-    sampler_creation_info.compareEnable = VK_FALSE;
-    sampler_creation_info.compareOp = VK_COMPARE_OP_ALWAYS;
-    sampler_creation_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    sampler_creation_info.mipLodBias = 0.0f;
-    sampler_creation_info.minLod = 0.0f;
-    sampler_creation_info.maxLod = 0.0f;
+    // pixel art sampler
+    {
+        VkSamplerCreateInfo sampler_creation_info = {0};
+        sampler_creation_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        sampler_creation_info.magFilter = VK_FILTER_NEAREST;
+        sampler_creation_info.minFilter = VK_FILTER_NEAREST;
+        sampler_creation_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_creation_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_creation_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        sampler_creation_info.anisotropyEnable = VK_FALSE;
+        sampler_creation_info.maxAnisotropy = 1.0f;
+        sampler_creation_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        sampler_creation_info.unnormalizedCoordinates = VK_FALSE;
+        sampler_creation_info.compareEnable = VK_FALSE;
+        sampler_creation_info.compareOp = VK_COMPARE_OP_ALWAYS;
+        sampler_creation_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        sampler_creation_info.mipLodBias = 0.0f;
+        sampler_creation_info.minLod = 0.0f;
+        sampler_creation_info.maxLod = 0.0f;
 
-    vkCreateSampler(vulkan_state.logical_device_handle, &sampler_creation_info, 0, &vulkan_state.pixel_art_sampler);
+        vkCreateSampler(vulkan_state.logical_device_handle, &sampler_creation_info, 0, &vulkan_state.pixel_art_sampler);
+    }
+
+    // linear sampler with repeat
+    {
+        VkSamplerCreateInfo sampler_ci = {0};
+        sampler_ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        sampler_ci.magFilter = VK_FILTER_LINEAR;
+        sampler_ci.minFilter = VK_FILTER_LINEAR;
+        sampler_ci.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_ci.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_ci.anisotropyEnable = VK_FALSE;
+        sampler_ci.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        sampler_ci.unnormalizedCoordinates = VK_FALSE;
+        sampler_ci.compareEnable = VK_FALSE;
+        sampler_ci.compareOp = VK_COMPARE_OP_ALWAYS;
+        sampler_ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        
+        vkCreateSampler(vulkan_state.logical_device_handle, &sampler_ci, 0, &vulkan_state.tiling_linear_sampler);
+    }
 
     // standard descriptor set for normal vertex / fragment shader pairs
 	VkDescriptorSetLayoutBinding descriptor_set_binding = {0};
 	descriptor_set_binding.binding = 0;
     descriptor_set_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     descriptor_set_binding.descriptorCount = 1;
-    descriptor_set_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
+    descriptor_set_binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
 
     VkDescriptorSetLayoutCreateInfo descriptor_set_layout_creation_info = {0};
     descriptor_set_layout_creation_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -3004,7 +3091,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     descriptor_pool_sizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     descriptor_pool_sizes[1].descriptorCount = 4;
     descriptor_pool_sizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    descriptor_pool_sizes[2].descriptorCount = 4 + 1 + 1 + 1 + 1; // oit head image, h0, fft_buffer_a and b
+    descriptor_pool_sizes[2].descriptorCount = 4 + 1 + 1 + 1 + 1 + 1; // oit head image, h0, fft_buffer_a and b, water displacement TODO: this is silly
     descriptor_pool_sizes[3].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     descriptor_pool_sizes[3].descriptorCount = 8 + 2; // +2 for oit pool and counter
     
@@ -3222,6 +3309,55 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
     }
 
+    // displacement storage
+    {
+        VkDescriptorSetAllocateInfo alloc_info = {0};
+        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        alloc_info.descriptorPool = vulkan_state.descriptor_pool;
+        alloc_info.descriptorSetCount = 1;
+        alloc_info.pSetLayouts = &vulkan_state.storage_image_descriptor_set_layout;
+        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.displacement_descriptor_set);
+        
+        VkDescriptorImageInfo image_info = {0};
+        image_info.imageView = vulkan_state.displacement_image_view;
+        image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        
+        VkWriteDescriptorSet write = {0};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = vulkan_state.displacement_descriptor_set;
+        write.dstBinding = 0;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        write.pImageInfo = &image_info;
+        
+        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
+    }
+
+    // displacement sampled
+    {
+        VkDescriptorSetAllocateInfo alloc_info = {0};
+        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        alloc_info.descriptorPool = vulkan_state.descriptor_pool;
+        alloc_info.descriptorSetCount = 1;
+        alloc_info.pSetLayouts = &vulkan_state.descriptor_set_layout;
+        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.displacement_sampled_descriptor_set);
+        
+        VkDescriptorImageInfo image_info = {0};
+        image_info.sampler = vulkan_state.tiling_linear_sampler;
+        image_info.imageView = vulkan_state.displacement_image_view;
+        image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+        
+        VkWriteDescriptorSet write = {0};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        write.dstSet = vulkan_state.displacement_sampled_descriptor_set;
+        write.dstBinding = 0;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.pImageInfo = &image_info;
+        
+        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
+    }
+
 	createSwapchainResources();
 
 	// CREATE CUBE (INSTANCED) PIPELINE LAYOUT
@@ -3284,10 +3420,20 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         push_constant_range.offset = 0;
         push_constant_range.size = (uint32)sizeof(WaterPushConstants);
 
+        // Need displacement texture for the vertex shader
+        VkDescriptorSetLayout water_depth_set_layouts[5] =
+        {
+            vulkan_state.descriptor_set_layout,  // unused
+            vulkan_state.descriptor_set_layout,  // unused
+            vulkan_state.descriptor_set_layout,  // unused
+            vulkan_state.descriptor_set_layout,  // unused
+            vulkan_state.descriptor_set_layout,  // displacement texture
+        };
+
         VkPipelineLayoutCreateInfo layout_ci = {0};
         layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layout_ci.setLayoutCount = 0;
-        layout_ci.pSetLayouts = 0;
+        layout_ci.setLayoutCount = 5;
+        layout_ci.pSetLayouts = water_depth_set_layouts;
         layout_ci.pushConstantRangeCount = 1;
         layout_ci.pPushConstantRanges = &push_constant_range;
 
@@ -3301,17 +3447,18 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         push_constant_range.offset = 0;
         push_constant_range.size = (uint32)sizeof(WaterPushConstants);
 
-        VkDescriptorSetLayout water_set_layouts[4] =
+        VkDescriptorSetLayout water_set_layouts[5] =
         { 
             vulkan_state.descriptor_set_layout, 	// underwater scene copy
             vulkan_state.descriptor_set_layout,		// scene depth 
             vulkan_state.descriptor_set_layout,     // water depth
-            vulkan_state.descriptor_set_layout,
+            vulkan_state.descriptor_set_layout,     // paint texture
+            vulkan_state.descriptor_set_layout,     // displacement texture
         };
 
         VkPipelineLayoutCreateInfo water_distortion_pipeline_layout_ci = {0};
         water_distortion_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        water_distortion_pipeline_layout_ci.setLayoutCount = 4;
+        water_distortion_pipeline_layout_ci.setLayoutCount = 5;
         water_distortion_pipeline_layout_ci.pSetLayouts = water_set_layouts;
         water_distortion_pipeline_layout_ci.pushConstantRangeCount = 1;
         water_distortion_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
@@ -3464,6 +3611,29 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         layout_ci.pPushConstantRanges = &push_constant_range;
 
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.fft_pass_pipeline_layout);
+    }
+
+    // FFT FINALIZE PIPELINE LAYOUT
+    {
+        VkPushConstantRange push_constant_range = {0};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = (uint32)sizeof(FFTFinalizePushConstants);
+        
+        VkDescriptorSetLayout finalize_set_layouts[2] =
+        {
+            vulkan_state.storage_image_descriptor_set_layout, // read from fft_buffer_a
+            vulkan_state.storage_image_descriptor_set_layout, // write to displacement
+        };
+        
+        VkPipelineLayoutCreateInfo layout_ci = {0};
+        layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layout_ci.setLayoutCount = 2;
+        layout_ci.pSetLayouts = finalize_set_layouts;
+        layout_ci.pushConstantRangeCount = 1;
+        layout_ci.pPushConstantRanges = &push_constant_range;
+        
+        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.fft_finalize_pipeline_layout);
     }
 
     // BASE GRAPHICS PIPELINE INFO
@@ -3843,6 +4013,16 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateComputePipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &pipeline_ci, 0, &vulkan_state.fft_pass_pipeline);
     }
 
+    // define FFT finalize compute pipeline
+    {
+        VkComputePipelineCreateInfo pipeline_ci = {0};
+        pipeline_ci.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+        pipeline_ci.stage = fft_finalize_stage_ci;
+        pipeline_ci.layout = vulkan_state.fft_finalize_pipeline_layout;
+        
+        vkCreateComputePipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &pipeline_ci, 0, &vulkan_state.fft_finalize_pipeline);
+    }
+
     createInstanceBuffer(&vulkan_state.cube_instance_buffer, sizeof(CubeInstanceData) * CUBE_INSTANCE_CAPACITY, &vulkan_state.cube_instance_memory, &vulkan_state.cube_instance_mapped);
     createInstanceBuffer(&vulkan_state.water_instance_buffer, sizeof(WaterInstanceData) * WATER_INSTANCE_CAPACITY, &vulkan_state.water_instance_memory, &vulkan_state.water_instance_mapped);
 
@@ -3983,7 +4163,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         cb_begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(command_buffer, &cb_begin);
 
-        VkImageMemoryBarrier to_general[3] = {0};
+        VkImageMemoryBarrier to_general[4] = {0};
         to_general[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         to_general[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         to_general[0].newLayout = VK_IMAGE_LAYOUT_GENERAL;
@@ -4004,18 +4184,21 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         to_general[2] = to_general[0];
         to_general[2].image = vulkan_state.fft_buffer_b_image;
 
-        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0, 3, to_general);
+        to_general[3] = to_general[0];
+        to_general[3].image = vulkan_state.displacement_image;
+
+        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0, 4, to_general);
 
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.fft_spectrum_pipeline);
         vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.fft_spectrum_pipeline_layout, 0, 1, &vulkan_state.h0_descriptor_set, 0, 0);
 
         FFTSpectrumPushConstants pc = {0};
         pc.texture_size = FFT_SIZE;
-        pc.tile_length = 100.0f;
+        pc.tile_length = 20.0f;
         pc.wind_direction_x = 1.0f;
-        pc.wind_direction_z = 0.0f;
-        pc.wind_speed = 30.0f;
-        pc.amplitude = 1e-6f;
+        pc.wind_direction_z = 0.5f;
+        pc.wind_speed = 15.0f;
+        pc.amplitude = 1e-5f;
         pc.gravity = 9.81f;
         pc.random_seed = 1337;
 
@@ -4228,7 +4411,7 @@ void vulkanDraw(void)
 
         FFTEvolvedPushConstants pc = {0};
         pc.texture_size = FFT_SIZE;
-        pc.tile_length = 100.0f;
+        pc.tile_length = 10.0f;
         pc.gravity = 9.81f;
         pc.time = water_time;
 
@@ -4285,6 +4468,34 @@ void vulkanDraw(void)
             // ping pong
             source_is_a = !source_is_a;
         }
+    }
+
+    // FFT FINALIZE: real part of fft_buffer_a, normalize
+    {
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.fft_finalize_pipeline);
+        
+        VkDescriptorSet finalize_sets[2] =
+        {
+            vulkan_state.fft_buffer_a_descriptor_set,   // source (read)
+            vulkan_state.displacement_descriptor_set,   // destination (write)
+        };
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.fft_finalize_pipeline_layout, 0, 2, finalize_sets, 0, 0);
+        
+        FFTFinalizePushConstants pc = {0};
+        pc.texture_size = FFT_SIZE;
+        
+        vkCmdPushConstants(command_buffer, vulkan_state.fft_finalize_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(FFTFinalizePushConstants), &pc);
+        
+        // dispatch one thread per texel
+        vkCmdDispatch(command_buffer, FFT_SIZE / 16, FFT_SIZE / 16, 1);
+        
+        // make displacement writes visible to subsequent vertex shader reads
+        VkMemoryBarrier finalize_barrier = {0};
+        finalize_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        finalize_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        finalize_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        
+        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, 0, 1, &finalize_barrier, 0, 0, 0, 0);
     }
 
     // upload paint texture if dirty
@@ -4624,6 +4835,7 @@ void vulkanDraw(void)
             vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_depth_pipeline);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_depth_pipeline_layout, 4, 1, &vulkan_state.displacement_sampled_descriptor_set, 0, 0);
 
             VkBuffer water_buffers[2] = { water_data->vertex_buffer, vulkan_state.water_instance_buffer };
             VkDeviceSize water_offsets[2] = { 0, 0 };
@@ -4669,14 +4881,15 @@ void vulkanDraw(void)
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline);
 
-            VkDescriptorSet water_sets[4] = 
+            VkDescriptorSet water_sets[5] = 
             {
                 vulkan_state.scene_copy_descriptor_set,
                 vulkan_state.depth_descriptor_set,
                 vulkan_state.water_depth_descriptor_set,
                 vulkan_state.paint_descriptor_set,
+                vulkan_state.displacement_sampled_descriptor_set,
             };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline_layout, 0, 4, water_sets, 0, 0);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline_layout, 0, 5, water_sets, 0, 0);
 
             VkBuffer water_buffers[2] = { water_data->vertex_buffer, vulkan_state.water_instance_buffer };
             VkDeviceSize water_offsets[2] = { 0, 0 };
@@ -4974,10 +5187,10 @@ void vulkanDraw(void)
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline);
         vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &sprite_vb_offset);
         vkCmdBindIndexBuffer(command_buffer, vulkan_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
-        //vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.paint_descriptor_set, 0, 0);
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.fft_buffer_a_sampled_descriptor_set, 0, 0);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.paint_descriptor_set, 0, 0);
+        //vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.fft_buffer_a_sampled_descriptor_set, 0, 0);
 
-        float debug_size = 600.0f;
+        float debug_size = 300.0f;
         float debug_margin = 10.0f;
         Vec3 debug_coords;
         debug_coords.x = (float)vulkan_state.swapchain_extent.width - debug_margin - debug_size * 0.5f;

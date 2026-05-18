@@ -61,15 +61,6 @@ const vec2 offsets[8] = vec2[]
     vec2(-0.7071,  0.7071), vec2(-0.7071, -0.7071)
 );
 
-/*
-float sinNoise(vec2 world_pos, float time) 
-{
-    float per_tile = 6.0;
-    vec2 point = (world_pos - time / per_tile) * per_tile * 3.14159;
-    return sin(point.x) * sin(point.y) * 0.5;
-}
-*/
-
 void main() 
 {
     vec2 texel = 1.0 / vec2(textureSize(depth_texture, 0));
@@ -83,27 +74,26 @@ void main()
     float tint_amount = clamp(underwater_distance / max_tint_depth, tint_min, tint_max);
     vec3 base_color = mix(scene, water_depth_tint, tint_amount);
 
-    // grid lines
-    float effective_half_width = half_grid_line_width;
-    float effective_corner_size = corner_size;
+    // sample paint texture at this world position
+    vec2 paint_uv = (frag_world_pos.xz + 0.5) / WATER_PAINT_TILE_COUNT;
+    vec2 snapped = (floor(paint_uv * WATER_PAINT_SIDE) + 0.5) / WATER_PAINT_SIDE;
+    float paint_value = texture(paint_texture, snapped).r;
 
-    //vec2 normal_push = frag_normal.xz * grid_push_by_normal;
-    //vec2 pushed_xz = frag_world_pos.xz;// + normal_push;
-    //vec2 grid_pos = pushed_xz - 0.5;
-    vec2 grid_pos = frag_world_pos.xz - 0.5;
+    // grid line width and opacity scale with paint
+    float effective_half_width = half_grid_line_width * paint_value;
+    float effective_corner_size = corner_size * paint_value;
+    float effective_opacity = grid_opacity * paint_value;
 
     // is this on the grid?
+    vec2 grid_pos = frag_world_pos.xz - 0.5;
     vec2 distance_to_line = abs(fract(grid_pos) - 0.5);
     float inner_size = 0.5 - effective_half_width - effective_corner_size;
     vec2 pos_to_inner = distance_to_line - vec2(inner_size);
     float sdf = length(max(pos_to_inner, vec2(0.0))) + min(max(pos_to_inner.x, pos_to_inner.y), 0.0) - effective_corner_size;
-    //if (sdf > 0.0) 
+
+    if (sdf > 0.0) 
     {
-        //base_color = mix(base_color, grid_line_tint, grid_opacity);
-        vec2 paint_uv = (frag_world_pos.xz + 0.5) / WATER_PAINT_TILE_COUNT;
-        vec2 snapped = (floor(paint_uv * WATER_PAINT_SIDE) + 0.5) / WATER_PAINT_SIDE;
-        out_color = vec4(texture(paint_texture, snapped).r, 0.0, 0.0, 1.0);
-        return;
+        base_color = mix(base_color, grid_line_tint, effective_opacity);
     }
 
     // waterline detection
