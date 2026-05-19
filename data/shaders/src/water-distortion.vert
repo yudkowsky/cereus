@@ -1,7 +1,5 @@
 #version 450
 
-#include "water-height.glsl"
-
 layout(location = 0) in vec3 in_position;
 layout(location = 1) in vec2 in_uv;
 layout(location = 2) in vec3 in_normal;
@@ -21,24 +19,28 @@ layout(push_constant) uniform PushConstants
     float time;
     float focal_length;
     float water_base_y;
+    float tile_length;
 }
 pc;
-
-const float tile_length = 32.0; // TODO: pass via push constant, want to tune later
-const float displacement_scale = 1.0;
 
 void main()
 {
     vec4 grid_world = instance_model * vec4(in_position, 1.0);
     vec2 grid_xz = grid_world.xz;
 
-    vec2 fft_uv = grid_xz / tile_length;
-    float height = texture(displacement_texture, fft_uv).r * displacement_scale;
-
+    // get water height from texture
+    vec2 fft_uv = grid_xz / pc.tile_length;
+    float height = texture(displacement_texture, fft_uv).r;
     vec4 world_pos = grid_world + vec4(0.0, height, 0.0, 0.0);
-
     frag_world_pos = world_pos.xyz;
-    frag_normal = waterNormal(grid_xz, pc.time); // TODO: don't use gerstner thing
+
+    // compute normal via forward difference
+    float epsilon = 0.1;
+    float height_at_x = texture(displacement_texture, (grid_xz + vec2(epsilon, 0.0)) / pc.tile_length).r;
+    float height_at_z = texture(displacement_texture, (grid_xz + vec2(0.0, epsilon)) / pc.tile_length).r;
+    float dhdx = (height_at_x - height) / epsilon;
+    float dhdz = (height_at_z - height) / epsilon;
+    frag_normal = normalize(vec3(-dhdx, 1.0, -dhdz));
 
     gl_Position = pc.proj * pc.view * world_pos;
 }

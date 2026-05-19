@@ -1,7 +1,6 @@
 #version 450
 
 #include "edge-detect.glsl"
-#include "water-height.glsl"
 
 layout(location = 0) in vec3 frag_world_pos;
 layout(location = 1) in vec3 frag_normal;
@@ -40,9 +39,11 @@ const float tint_max = 0.9;
 const float outline_radius_px = 2.0;
 const float max_depth_difference = 0.1;
 
+/*
 // push grid lines by normal
 const float min_normal_y = 0.95;
 const float grid_push_by_normal = 10.0;
+*/
 
 // grid line dimensions
 const float half_grid_line_width = 0.02;
@@ -90,7 +91,6 @@ void main()
     float inner_size = 0.5 - effective_half_width - effective_corner_size;
     vec2 pos_to_inner = distance_to_line - vec2(inner_size);
     float sdf = length(max(pos_to_inner, vec2(0.0))) + min(max(pos_to_inner.x, pos_to_inner.y), 0.0) - effective_corner_size;
-
     if (sdf > 0.0) 
     {
         base_color = mix(base_color, grid_line_tint, effective_opacity);

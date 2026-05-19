@@ -1,7 +1,5 @@
 #version 450
 
-#include "water-height.glsl"
-
 layout(location = 0) in vec3 normal;
 layout(location = 1) in vec3 color;
 layout(location = 2) in vec3 frag_world_pos;
@@ -23,14 +21,6 @@ pc;
 
 void main()
 {
-    /*
-    if (pc.water_base_y > -100.0)
-    {
-        float water_y = pc.water_base_y + waterHeight(frag_world_pos.xyz, pc.time);
-        if (frag_world_pos.y > water_y) discard;
-    }
-    */
-
     float low = 20.0 / 255.0;
     float high = 200.0 / 255.0;
 

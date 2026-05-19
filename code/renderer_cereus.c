@@ -129,6 +129,7 @@ typedef struct
     float time;
     float focal_length;
     float water_plane_y;
+    float tile_length;
 }
 WaterPushConstants;
 
@@ -510,6 +511,7 @@ Camera vulkan_camera = {0};
 ShaderMode shader_mode = SHADER_MODE_DEFAULT;
 
 float water_time = 0.0f;
+const float water_tile_length = 32.0f;
 const float depth_threshold = 5.0f;
 const float normal_threshold = 0.2f;
 
@@ -4194,11 +4196,11 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         FFTSpectrumPushConstants pc = {0};
         pc.texture_size = FFT_SIZE;
-        pc.tile_length = 20.0f;
+        pc.tile_length = water_tile_length;
         pc.wind_direction_x = 1.0f;
         pc.wind_direction_z = 0.5f;
         pc.wind_speed = 15.0f;
-        pc.amplitude = 1e-5f;
+        pc.amplitude = 2e-6f;
         pc.gravity = 9.81f;
         pc.random_seed = 1337;
 
@@ -4411,7 +4413,7 @@ void vulkanDraw(void)
 
         FFTEvolvedPushConstants pc = {0};
         pc.texture_size = FFT_SIZE;
-        pc.tile_length = 10.0f;
+        pc.tile_length = water_tile_length;
         pc.gravity = 9.81f;
         pc.time = water_time;
 
@@ -4851,6 +4853,7 @@ void vulkanDraw(void)
             water_pc.time = water_time;
             water_pc.focal_length = focal_length;
             water_pc.water_plane_y = vulkan_state.water_plane_y;
+            water_pc.tile_length = water_tile_length;
 
             vkCmdPushConstants(command_buffer, vulkan_state.water_depth_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &water_pc);
 
@@ -4905,6 +4908,7 @@ void vulkanDraw(void)
             water_pc.time = water_time;
             water_pc.focal_length = focal_length;
             water_pc.water_plane_y = vulkan_state.water_plane_y;
+            water_pc.tile_length = water_tile_length;
 
             vkCmdPushConstants(command_buffer, vulkan_state.water_distortion_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &water_pc);
 
