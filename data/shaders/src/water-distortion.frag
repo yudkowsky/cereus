@@ -39,11 +39,8 @@ const float tint_max = 0.9;
 const float outline_radius_px = 2.0;
 const float max_depth_difference = 0.1;
 
-/*
 // push grid lines by normal
-const float min_normal_y = 0.95;
-const float grid_push_by_normal = 10.0;
-*/
+const float grid_push_by_normal = 0.5;
 
 // grid line dimensions
 const float half_grid_line_width = 0.02;
@@ -85,8 +82,12 @@ void main()
     float effective_corner_size = corner_size * paint_value;
     float effective_opacity = grid_opacity * paint_value;
 
+    // move around by normals
+    vec2 normal_push = frag_normal.xz * grid_push_by_normal;
+    vec2 pushed_xz = frag_world_pos.xz + normal_push;
+    vec2 grid_pos = pushed_xz - 0.5;
+
     // is this on the grid?
-    vec2 grid_pos = frag_world_pos.xz - 0.5;
     vec2 distance_to_line = abs(fract(grid_pos) - 0.5);
     float inner_size = 0.5 - effective_half_width - effective_corner_size;
     vec2 pos_to_inner = distance_to_line - vec2(inner_size);
