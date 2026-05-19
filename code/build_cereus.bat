@@ -4,8 +4,8 @@ set "VULKAN_SDK=C:\VulkanSDK\1.4.321.1"
 set "VK_SDK_PATH=%VULKAN_SDK%"
 
 pushd ..\data\shaders\src
-glslc tri.vert -g -o ..\spirv\tri.vert.spv
-glslc tri.frag -g -o ..\spirv\tri.frag.spv 
+glslc cube.vert -g -o ..\spirv\cube.vert.spv
+glslc cube.frag -g -o ..\spirv\cube.frag.spv 
 glslc outline-select.vert -g -o ..\spirv\outline-select.vert.spv
 glslc outline-select.frag -g -o ..\spirv\outline-select.frag.spv
 glslc oit-laser.vert -g -o ..\spirv\oit-laser.vert.spv
@@ -19,8 +19,8 @@ glslc model.frag -g -o ..\spirv\model.frag.spv
 glslc outline-post.vert -g -o ..\spirv\outline-post.vert.spv
 glslc outline-post.frag -g -o ..\spirv\outline-post.frag.spv
 glslc water-depth.frag -g -o ..\spirv\water-depth.frag.spv
-glslc water-distortion.vert -g -o ..\spirv\water-distortion.vert.spv
-glslc water-distortion.frag -g -o ..\spirv\water-distortion.frag.spv
+glslc water.vert -g -o ..\spirv\water.vert.spv
+glslc water.frag -g -o ..\spirv\water.frag.spv
 glslc fft-spectrum.comp -g -o ..\spirv\fft-spectrum.comp.spv
 glslc fft-evolved.comp -g -o ..\spirv\fft-evolved.comp.spv
 glslc fft-pass.comp -g -o ..\spirv\fft-pass.comp.spv
