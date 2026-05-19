@@ -263,7 +263,6 @@ typedef struct VulkanState
     VkDeviceMemory h0_image_memory;
     VkImageView h0_image_view;
     VkDescriptorSet h0_descriptor_set;
-    VkDescriptorSet h0_sampled_descriptor_set; // TODO: temp output to visualise
 
     // ping ponging buffers for FFT implementation
     VkImage fft_buffer_a_image;
@@ -288,6 +287,16 @@ typedef struct VulkanState
     // linear sampler which repeats for tileable textures TODO: put samplers together
     VkSampler tiling_linear_sampler;
 
+    // reflections
+    VkImage reflection_color_image;
+    VkDeviceMemory reflection_color_image_memory;
+    VkImageView reflection_color_image_view;
+    VkDescriptorSet reflection_descriptor_set;
+
+    VkImage reflection_depth_image;
+    VkDeviceMemory reflection_depth_image_memory;
+    VkImageView reflection_depth_image_view;
+
     // RENDER PASSES
 
     // scene pass (cubes, models, select outlines)
@@ -309,6 +318,10 @@ typedef struct VulkanState
     // overlay pass (lasers, which color the outlines, and sprites, which go over the outlines)
     VkRenderPass overlay_render_pass;
     VkFramebuffer* overlay_framebuffers;
+
+    // reflected scene render pass
+    VkRenderPass reflection_render_pass;
+    VkFramebuffer reflection_framebuffer; // just 1
 
     float water_plane_y; // set every frame TODO: this is now hardcoded, stop using this?
 
@@ -510,9 +523,12 @@ DisplayInfo vulkan_display = {0};
 Camera vulkan_camera = {0};
 ShaderMode shader_mode = SHADER_MODE_DEFAULT;
 
+// water
 float water_time = 0.0f;
 const float water_tile_length = 10.0f;
 const float water_amplitude = 4e-5f;
+
+// outlines
 const float depth_threshold = 5.0f;
 const float normal_threshold = 0.2f;
 
@@ -1713,6 +1729,97 @@ void createSwapchainResources(void)
         vkBindBufferMemory(vulkan_state.logical_device_handle, vulkan_state.oit_counter_buffer, vulkan_state.oit_counter_memory, 0);
     }
 
+    // reflection color image TODO: currently full res, try with half-res later
+    uint32 reflection_width  = vulkan_state.swapchain_extent.width / 2;
+    uint32 reflection_height = vulkan_state.swapchain_extent.height / 2;
+
+    {
+        VkImageCreateInfo ci = {0};
+        ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        ci.imageType = VK_IMAGE_TYPE_2D;
+        ci.extent.width = reflection_width;
+        ci.extent.height = reflection_height;
+        ci.extent.depth = 1;
+        ci.mipLevels = 1;
+        ci.arrayLayers = 1;
+        ci.format = vulkan_state.swapchain_format;
+        ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        ci.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        vkCreateImage(vulkan_state.logical_device_handle, &ci, 0, &vulkan_state.reflection_color_image);
+
+        VkMemoryRequirements mem_req = {0};
+        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.reflection_color_image, &mem_req);
+
+        VkMemoryAllocateInfo alloc = {0};
+        alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc.allocationSize = mem_req.size;
+        alloc.memoryTypeIndex = findMemoryType(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        vkAllocateMemory(vulkan_state.logical_device_handle, &alloc, 0, &vulkan_state.reflection_color_image_memory);
+        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.reflection_color_image, vulkan_state.reflection_color_image_memory, 0);
+
+        VkImageViewCreateInfo view_ci = {0};
+        view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_ci.image = vulkan_state.reflection_color_image;
+        view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_ci.format = vulkan_state.swapchain_format;
+        view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        view_ci.subresourceRange.baseMipLevel = 0;
+        view_ci.subresourceRange.levelCount = 1;
+        view_ci.subresourceRange.baseArrayLayer = 0;
+        view_ci.subresourceRange.layerCount = 1;
+
+        vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.reflection_color_image_view);
+    }
+
+    // reflection depth image
+    {
+        VkImageCreateInfo ci = {0};
+        ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        ci.imageType = VK_IMAGE_TYPE_2D;
+        ci.extent.width = reflection_width;
+        ci.extent.height = reflection_height;
+        ci.extent.depth = 1;
+        ci.mipLevels = 1;
+        ci.arrayLayers = 1;
+        ci.format = vulkan_state.depth_format;
+        ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        ci.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        vkCreateImage(vulkan_state.logical_device_handle, &ci, 0, &vulkan_state.reflection_depth_image);
+
+        VkMemoryRequirements mem_req = {0};
+        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.reflection_depth_image, &mem_req);
+
+        VkMemoryAllocateInfo alloc = {0};
+        alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc.allocationSize = mem_req.size;
+        alloc.memoryTypeIndex = findMemoryType(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        vkAllocateMemory(vulkan_state.logical_device_handle, &alloc, 0, &vulkan_state.reflection_depth_image_memory);
+        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.reflection_depth_image, vulkan_state.reflection_depth_image_memory, 0);
+
+        VkImageViewCreateInfo view_ci = {0};
+        view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_ci.image = vulkan_state.reflection_depth_image;
+        view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_ci.format = vulkan_state.depth_format;
+        view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        view_ci.subresourceRange.baseMipLevel = 0;
+        view_ci.subresourceRange.levelCount = 1;
+        view_ci.subresourceRange.baseArrayLayer = 0;
+        view_ci.subresourceRange.layerCount = 1;
+
+        vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.reflection_depth_image_view);
+    }
+
     // command buffers
     vulkan_state.swapchain_command_buffers = realloc(vulkan_state.swapchain_command_buffers, sizeof(VkCommandBuffer) * vulkan_state.swapchain_image_count);
 
@@ -1861,6 +1968,22 @@ void createSwapchainResources(void)
         vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
     }
 
+    // reflections
+    VkDescriptorImageInfo reflection_desc_info = {0};
+    reflection_desc_info.sampler = vulkan_state.pixel_art_sampler;
+    reflection_desc_info.imageView = vulkan_state.reflection_color_image_view;
+    reflection_desc_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet reflection_desc_write = {0};
+    reflection_desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    reflection_desc_write.dstSet = vulkan_state.reflection_descriptor_set;
+    reflection_desc_write.dstBinding = 0;
+    reflection_desc_write.descriptorCount = 1;
+    reflection_desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    reflection_desc_write.pImageInfo = &reflection_desc_info;
+
+    vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &reflection_desc_write, 0, 0);
+
     // FRAMEBUFFERS
 
     // main scene framebuffers
@@ -1954,6 +2077,22 @@ void createSwapchainResources(void)
         overlay_fb_ci.layers = 1;
 
         vkCreateFramebuffer(vulkan_state.logical_device_handle, &overlay_fb_ci, 0, &vulkan_state.overlay_framebuffers[i]);
+    }
+
+    // reflection framebuffer
+    {
+        VkImageView reflection_attachments[2] = { vulkan_state.reflection_color_image_view, vulkan_state.reflection_depth_image_view };
+
+        VkFramebufferCreateInfo fb_ci = {0};
+        fb_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fb_ci.renderPass = vulkan_state.reflection_render_pass;
+        fb_ci.attachmentCount = 2;
+        fb_ci.pAttachments = reflection_attachments;
+        fb_ci.width = reflection_width;
+        fb_ci.height = reflection_height;
+        fb_ci.layers = 1;
+
+        vkCreateFramebuffer(vulkan_state.logical_device_handle, &fb_ci, 0, &vulkan_state.reflection_framebuffer);
     }
 }
 
@@ -2510,9 +2649,69 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateRenderPass(vulkan_state.logical_device_handle, &overlay_rp_ci, 0, &vulkan_state.overlay_render_pass);
     }
 
-	// a framebuffer is the binding of the render pass' attachment slots to specific image views, with a fixed size (width/height) and layer count. 
-    // it doesn't allocate memory, it just ties the render pass to the actual image 
-    // one framebuffer per swapchan image view, because each acquired image is a different underlying image view
+    // reflected scene render pass
+    {
+        VkAttachmentDescription reflection_attachments[2] = {0};
+
+        reflection_attachments[0].format = vulkan_state.swapchain_format;
+        reflection_attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+        reflection_attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        reflection_attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        reflection_attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        reflection_attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        reflection_attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        reflection_attachments[0].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+        reflection_attachments[1].format = vulkan_state.depth_format;
+        reflection_attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+        reflection_attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        reflection_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        reflection_attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        reflection_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        reflection_attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        reflection_attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentReference reflection_color_ref = {0};
+        reflection_color_ref.attachment = 0;
+        reflection_color_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentReference reflection_depth_ref = {0};
+        reflection_depth_ref.attachment = 1;
+        reflection_depth_ref.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        VkSubpassDescription reflection_subpass = {0};
+        reflection_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        reflection_subpass.colorAttachmentCount = 1;
+        reflection_subpass.pColorAttachments = &reflection_color_ref;
+        reflection_subpass.pDepthStencilAttachment = &reflection_depth_ref;
+
+        VkSubpassDependency reflection_dependencies[2] = {0};
+
+        reflection_dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+        reflection_dependencies[0].dstSubpass = 0;
+        reflection_dependencies[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        reflection_dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        reflection_dependencies[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        reflection_dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+        reflection_dependencies[1].srcSubpass = 0;
+        reflection_dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+        reflection_dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        reflection_dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        reflection_dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        reflection_dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        VkRenderPassCreateInfo rp_ci = {0};
+        rp_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        rp_ci.attachmentCount = 2;
+        rp_ci.pAttachments = reflection_attachments;
+        rp_ci.subpassCount = 1;
+        rp_ci.pSubpasses = &reflection_subpass;
+        rp_ci.dependencyCount = 2;
+        rp_ci.pDependencies = reflection_dependencies;
+
+        vkCreateRenderPass(vulkan_state.logical_device_handle, &rp_ci, 0, &vulkan_state.reflection_render_pass);
+    }
 
 	VkCommandPoolCreateInfo command_pool_creation_info = {0}; // describes the command pool tied to graphics queue family
 	command_pool_creation_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -2520,22 +2719,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     command_pool_creation_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT; // lets us reset / rerecord command buffers
 
 	vkCreateCommandPool(vulkan_state.logical_device_handle, &command_pool_creation_info, 0, &vulkan_state.graphics_command_pool_handle);
-
-    // a semaphore is a GPU-GPU sync primitive. it has two states, signaled and not.
-    // its signaled by the GPU as part of a queue operation, and waited by the GPU
-    // in another queue operation
-    
-    // a fence is a CPU-GPU sync primitive. it also has two states, signaled and not.
-    // its signaled by the GPU when a submission associated with the fence finishes.
-    // the CPU can wait on it an reset it - they are the way the CPU knows if the GPU is done.
-
-    // for a semaphore, 'signaled' means the GPU operation finished, so another GPU queue that
-    // waits on it may proceed immediately. binary semaphores auto-reset to unsignaled when a
-    // wait consumes them, so no manual reset here
-
-    // for a fence, 'signaled' means the GPU finished the submission tied to that fence.
-    // the CPU can wait on it; if it's signaled, the wait returns immediately.
-    // note that fences stay signaled until manually reset (vkResetFences)
 
     vulkan_state.frames_in_flight = 1;
 	vulkan_state.current_frame = 0;
@@ -2551,10 +2734,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkFenceCreateInfo fence_info = {0};
     fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-	// semaphore and fence count is decided by frames_in_flight - this is because we want one set 
-    // of sync objects per frame slot, and this is because the point of multiple frames_in_flight 
-    // is having multiple acquires / submits, which cannot be handled by a single semaphore / fence.
 
     for (uint32 frames_in_flight_increment = 0; frames_in_flight_increment < vulkan_state.frames_in_flight; frames_in_flight_increment++)
     {
@@ -3134,36 +3313,39 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     water_depth_descriptor_set_alloc.pSetLayouts = &vulkan_state.descriptor_set_layout;
     vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &water_depth_descriptor_set_alloc, &vulkan_state.water_depth_descriptor_set);
 
-    // TODO: cleanup
-    // OIT head image descriptor set (storage image)
-    {
-        VkDescriptorSetAllocateInfo alloc_info = {0};
-        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        alloc_info.descriptorPool = vulkan_state.descriptor_pool;
-        alloc_info.descriptorSetCount = 1;
-        alloc_info.pSetLayouts = &vulkan_state.storage_image_descriptor_set_layout;
-        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.oit_head_storage_descriptor_set);
-    }
+    // reflection descriptor set
+    VkDescriptorSetAllocateInfo reflection_descriptor_set_alloc = {0};
+    reflection_descriptor_set_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    reflection_descriptor_set_alloc.descriptorPool = vulkan_state.descriptor_pool;
+    reflection_descriptor_set_alloc.descriptorSetCount = 1;
+    reflection_descriptor_set_alloc.pSetLayouts = &vulkan_state.descriptor_set_layout;
+    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &reflection_descriptor_set_alloc, &vulkan_state.reflection_descriptor_set);
+
+    // OIT head image descriptor set
+    VkDescriptorSetAllocateInfo oit_head_alloc_info = {0};
+    oit_head_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    oit_head_alloc_info.descriptorPool = vulkan_state.descriptor_pool;
+    oit_head_alloc_info.descriptorSetCount = 1;
+    oit_head_alloc_info.pSetLayouts = &vulkan_state.storage_image_descriptor_set_layout;
+    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &oit_head_alloc_info, &vulkan_state.oit_head_storage_descriptor_set);
 
     // OIT fragment pool descriptor set
-    {
-        VkDescriptorSetAllocateInfo alloc_info = {0};
-        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        alloc_info.descriptorPool = vulkan_state.descriptor_pool;
-        alloc_info.descriptorSetCount = 1;
-        alloc_info.pSetLayouts = &vulkan_state.ssbo_descriptor_set_layout;
-        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.oit_fragment_pool_descriptor_set);
-    }
+    VkDescriptorSetAllocateInfo oit_pool_alloc_info = {0};
+    oit_pool_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    oit_pool_alloc_info.descriptorPool = vulkan_state.descriptor_pool;
+    oit_pool_alloc_info.descriptorSetCount = 1;
+    oit_pool_alloc_info.pSetLayouts = &vulkan_state.ssbo_descriptor_set_layout;
+    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &oit_pool_alloc_info, &vulkan_state.oit_fragment_pool_descriptor_set);
 
     // OIT counter descriptor set
-    {
-        VkDescriptorSetAllocateInfo alloc_info = {0};
-        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        alloc_info.descriptorPool = vulkan_state.descriptor_pool;
-        alloc_info.descriptorSetCount = 1;
-        alloc_info.pSetLayouts = &vulkan_state.ssbo_descriptor_set_layout;
-        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.oit_counter_descriptor_set);
-    }
+    VkDescriptorSetAllocateInfo oit_counter_alloc_info = {0};
+    oit_counter_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    oit_counter_alloc_info.descriptorPool = vulkan_state.descriptor_pool;
+    oit_counter_alloc_info.descriptorSetCount = 1;
+    oit_counter_alloc_info.pSetLayouts = &vulkan_state.ssbo_descriptor_set_layout;
+    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &oit_counter_alloc_info, &vulkan_state.oit_counter_descriptor_set);
+    
+    // below descriptor sets are updated only once, because they don't need to be updated on resize
 
     // h0 storage image descriptor set
     {
@@ -3184,31 +3366,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         write.dstBinding = 0;
         write.descriptorCount = 1;
         write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        write.pImageInfo = &image_info;
-
-        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
-    }
-
-    // TODO: temp for visualisation from storage image
-    {
-        VkDescriptorSetAllocateInfo alloc_info = {0};
-        alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        alloc_info.descriptorPool = vulkan_state.descriptor_pool;
-        alloc_info.descriptorSetCount = 1;
-        alloc_info.pSetLayouts = &vulkan_state.descriptor_set_layout;
-        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &alloc_info, &vulkan_state.h0_sampled_descriptor_set);
-
-        VkDescriptorImageInfo image_info = {0};
-        image_info.sampler = vulkan_state.pixel_art_sampler;
-        image_info.imageView = vulkan_state.h0_image_view;
-        image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-        VkWriteDescriptorSet write = {0};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = vulkan_state.h0_sampled_descriptor_set;
-        write.dstBinding = 0;
-        write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         write.pImageInfo = &image_info;
 
         vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
@@ -3263,7 +3420,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
     }
 
-    // fft_buffer_b storage TODO: smarter way to do this, duplicated code here
+    // fft_buffer_b storage TODO: smarter way to do two below, duplicated code here
     {
         VkDescriptorSetAllocateInfo alloc_info = {0};
         alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -4610,9 +4767,21 @@ void vulkanDraw(void)
     scissor.extent.height = (uint32)viewport_height;
 
     float aspect = target_aspect;
-    float projection_matrix[16], view_matrix[16];
+    float projection_matrix[16];
+    float view_matrix[16];
     mat4BuildPerspective(projection_matrix, vulkan_camera.fov * (6.283185f / 360.0f), aspect, 1.0f, 300.0f);
     mat4BuildViewFromQuat(view_matrix, vulkan_camera.coords, vulkan_camera.rotation);
+
+    // build reflected view matrix
+    float reflected_view_matrix[16];
+    Vec3 reflected_camera_coords = { vulkan_camera.coords.x, 2.0f * vulkan_state.water_plane_y - vulkan_camera.coords.y, vulkan_camera.coords.z, };
+    mat4BuildViewFromQuat(reflected_view_matrix, reflected_camera_coords, vulkan_camera.rotation);
+
+    // flip the up basis to mirror across the water plane
+    reflected_view_matrix[1]  = -reflected_view_matrix[1];
+    reflected_view_matrix[5]  = -reflected_view_matrix[5];
+    reflected_view_matrix[9]  = -reflected_view_matrix[9];
+    reflected_view_matrix[13] = -reflected_view_matrix[13];
 
     VkRenderPassBeginInfo render_pass_begin_info = {0};
     render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -4622,6 +4791,66 @@ void vulkanDraw(void)
     render_pass_begin_info.renderArea.extent = vulkan_state.swapchain_extent;
     render_pass_begin_info.clearValueCount = 3;
     render_pass_begin_info.pClearValues = clear_values;
+
+    // REFLECTION PASS
+    {
+        VkClearValue reflection_clears[2] = {0};
+        reflection_clears[0].color.float32[0] = 0.005f;
+        reflection_clears[0].color.float32[1] = 0.008f;
+        reflection_clears[0].color.float32[2] = 0.02f;
+        reflection_clears[0].color.float32[3] = 1.0f;
+        reflection_clears[1].depthStencil.depth = 1.0f;
+        reflection_clears[1].depthStencil.stencil = 0;
+
+        VkRenderPassBeginInfo rp_begin = {0};
+        rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        rp_begin.renderPass = vulkan_state.reflection_render_pass;
+        rp_begin.framebuffer = vulkan_state.reflection_framebuffer;
+        rp_begin.renderArea.offset = (VkOffset2D){0, 0};
+        rp_begin.renderArea.extent = vulkan_state.swapchain_extent;
+        rp_begin.clearValueCount = 2;
+        rp_begin.pClearValues = reflection_clears;
+
+        vkCmdBeginRenderPass(command_buffer, &rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+
+        // viewport matches reflection framebuffer extent
+        VkViewport reflection_viewport = {0};
+        reflection_viewport.x = 0;
+        reflection_viewport.y = (float)vulkan_state.swapchain_extent.height;
+        reflection_viewport.width = (float)vulkan_state.swapchain_extent.width;
+        reflection_viewport.height = -(float)vulkan_state.swapchain_extent.height;
+        reflection_viewport.minDepth = 0.0f;
+        reflection_viewport.maxDepth = 1.0f;
+
+        VkRect2D reflection_scissor = {0};
+        reflection_scissor.offset = (VkOffset2D){0, 0};
+        reflection_scissor.extent = vulkan_state.swapchain_extent;
+
+        vkCmdSetViewport(command_buffer, 0, 1, &reflection_viewport);
+        vkCmdSetScissor(command_buffer, 0, 1, &reflection_scissor);
+
+        if (cube_instance_count > 0)
+        {
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline);
+
+            VkBuffer cube_buffers[2] = { vulkan_state.cube_vertex_buffer, vulkan_state.cube_instance_buffer };
+            VkDeviceSize cube_offsets[2] = { 0, 0 };
+            vkCmdBindVertexBuffers(command_buffer, 0, 2, cube_buffers, cube_offsets);
+            vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
+
+            InstancedPushConstants cube_pc = {0};
+            memcpy(cube_pc.view, reflected_view_matrix, sizeof(cube_pc.view));
+            memcpy(cube_pc.proj, projection_matrix, sizeof(cube_pc.proj));
+            cube_pc.water_plane_y = -999.0f;
+            cube_pc.time = water_time;
+
+            vkCmdPushConstants(command_buffer, vulkan_state.cube_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(InstancedPushConstants), &cube_pc);
+            vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
+        }
+
+        vkCmdEndRenderPass(command_buffer);
+    }
 
     // FULL SCENE PASS
 
@@ -5187,6 +5416,39 @@ void vulkanDraw(void)
         vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
     }
 
+    // debug
+    {
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline);
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &sprite_vb_offset);
+        vkCmdBindIndexBuffer(command_buffer, vulkan_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+        //vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.paint_descriptor_set, 0, 0);
+        //vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.fft_buffer_a_sampled_descriptor_set, 0, 0);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.reflection_descriptor_set, 0, 0);
+
+        float debug_size = 300.0f;
+        float debug_margin = 10.0f;
+        Vec3 debug_coords;
+        debug_coords.x = (float)vulkan_state.swapchain_extent.width - debug_margin - debug_size * 0.5f;
+        debug_coords.y = (float)vulkan_state.swapchain_extent.height - (debug_margin + debug_size * 0.5f);
+        debug_coords.z = 0.0f;
+        Vec3 debug_scale = { debug_size, debug_size, 1.0f };
+
+        float debug_model[16];
+        Vec4 identity_quaternion = { 0, 0, 0, 1 };
+        mat4BuildTRS(debug_model, debug_coords, identity_quaternion, debug_scale);
+
+        PushConstants debug_pc = {0};
+        memcpy(debug_pc.model, debug_model, sizeof(debug_pc.model));
+        memcpy(debug_pc.view, view2d, sizeof(debug_pc.view));
+        memcpy(debug_pc.proj, ortho, sizeof(debug_pc.proj));
+        debug_pc.uv_rect = (Vec4){ 0.0f, 0.0f, 1.0f, 1.0f };
+        debug_pc.alpha = 1.0f;
+
+        vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &debug_pc);
+        vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
+    }
+
     vkCmdEndRenderPass(command_buffer);
 
     vkEndCommandBuffer(command_buffer);
@@ -5285,6 +5547,17 @@ void vulkanResize(uint32 width, uint32 height)
 
     vkDestroyBuffer(vulkan_state.logical_device_handle, vulkan_state.oit_counter_buffer, 0);
     vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.oit_counter_memory, 0);
+
+    // destroy reflection resources
+    vkDestroyFramebuffer(vulkan_state.logical_device_handle, vulkan_state.reflection_framebuffer, 0);
+
+    vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.reflection_color_image_view, 0);
+    vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.reflection_color_image, 0);
+    vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.reflection_color_image_memory, 0);
+
+    vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.reflection_depth_image_view, 0);
+    vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.reflection_depth_image, 0);
+    vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.reflection_depth_image_memory, 0);
 
     // old swapchain is destroyed inside createSwapchainResources
     createSwapchainResources();
