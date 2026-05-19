@@ -716,6 +716,62 @@ void mat4BuildViewFromQuat(float output_matrix[16], Vec3 coords, Vec4 quaternion
     output_matrix[14]= -(forward_x*coords.x + forward_y*coords.y + forward_z*coords.z);
 }
 
+void mat4BuildReflectedView(float output_matrix[16], Vec3 coords, Vec4 quaternion, float plane_y)
+{
+    Vec3 reflected_coords = { coords.x, 2.0f * plane_y - coords.y, coords.z };
+
+    float length_squared = quaternion.x*quaternion.x + quaternion.y*quaternion.y + quaternion.z*quaternion.z + quaternion.w*quaternion.w;
+    if (length_squared < 1e-8f)
+    {
+        mat4Identity(output_matrix);
+        output_matrix[12] = -reflected_coords.x;
+        output_matrix[13] = -reflected_coords.y;
+        output_matrix[14] = -reflected_coords.z;
+        return;
+    }
+    float inv_length = 1.0f / sqrtf(length_squared);
+    float x = quaternion.x*inv_length, y = quaternion.y*inv_length, z = quaternion.z*inv_length, w = quaternion.w*inv_length;
+
+    float right_x = 1.0f - (2.0f*y*y + 2.0f*z*z);
+    float right_y = 2.0f*x*y + 2.0f*w*z;
+    float right_z = 2.0f*x*z - 2.0f*w*y;
+
+    float up_x = 2.0f*x*y - 2.0f*w*z;
+    float up_y = 1.0f - (2.0f*x*x + 2.0f*z*z);
+    float up_z = 2.0f*y*z + 2.0f*w*x;
+
+    float forward_x = 2.0f*x*z + 2.0f*w*y;
+    float forward_y = 2.0f*y*z - 2.0f*w*x;
+    float forward_z = 1.0f - (2.0f*x*x + 2.0f*y*y);
+
+    // reflect basis across horizontal plane then flip the right vector to preserve handedness
+    right_y    = -right_y;
+    up_y       = -up_y;
+    forward_y  = -forward_y;
+
+    right_x    = -right_x;
+    right_y    = -right_y;
+    right_z    = -right_z;
+
+    mat4Identity(output_matrix);
+
+    output_matrix[0] =  right_x;
+    output_matrix[1] =  up_x;
+    output_matrix[2] =  forward_x;
+
+    output_matrix[4] =  right_y;
+    output_matrix[5] =  up_y;
+    output_matrix[6] =  forward_y;
+
+    output_matrix[8]  = right_z;
+    output_matrix[9]  = up_z;
+    output_matrix[10] = forward_z;
+
+    output_matrix[12] = -(right_x*reflected_coords.x + right_y*reflected_coords.y + right_z*reflected_coords.z);
+    output_matrix[13] = -(up_x*reflected_coords.x    + up_y*reflected_coords.y    + up_z*reflected_coords.z);
+    output_matrix[14] = -(forward_x*reflected_coords.x + forward_y*reflected_coords.y + forward_z*reflected_coords.z);
+}
+
 void mat4BuildOrtho(float output_matrix[16], float left, float right, float bottom, float top, float z_near, float z_far)
 {
     for (int i = 0; i < 16; i++) output_matrix[i] = 0.0f;
@@ -1730,8 +1786,8 @@ void createSwapchainResources(void)
     }
 
     // reflection color image TODO: currently full res, try with half-res later
-    uint32 reflection_width  = vulkan_state.swapchain_extent.width / 2;
-    uint32 reflection_height = vulkan_state.swapchain_extent.height / 2;
+    uint32 reflection_width  = vulkan_state.swapchain_extent.width;
+    uint32 reflection_height = vulkan_state.swapchain_extent.height;
 
     {
         VkImageCreateInfo ci = {0};
@@ -4772,16 +4828,10 @@ void vulkanDraw(void)
     mat4BuildPerspective(projection_matrix, vulkan_camera.fov * (6.283185f / 360.0f), aspect, 1.0f, 300.0f);
     mat4BuildViewFromQuat(view_matrix, vulkan_camera.coords, vulkan_camera.rotation);
 
-    // build reflected view matrix
     float reflected_view_matrix[16];
-    Vec3 reflected_camera_coords = { vulkan_camera.coords.x, 2.0f * vulkan_state.water_plane_y - vulkan_camera.coords.y, vulkan_camera.coords.z, };
-    mat4BuildViewFromQuat(reflected_view_matrix, reflected_camera_coords, vulkan_camera.rotation);
+    mat4BuildReflectedView(reflected_view_matrix, vulkan_camera.coords, vulkan_camera.rotation, vulkan_state.water_plane_y);
 
-    // flip the up basis to mirror across the water plane
-    reflected_view_matrix[1]  = -reflected_view_matrix[1];
-    reflected_view_matrix[5]  = -reflected_view_matrix[5];
-    reflected_view_matrix[9]  = -reflected_view_matrix[9];
-    reflected_view_matrix[13] = -reflected_view_matrix[13];
+    // RENDER PASSES
 
     VkRenderPassBeginInfo render_pass_begin_info = {0};
     render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -4794,6 +4844,9 @@ void vulkanDraw(void)
 
     // REFLECTION PASS
     {
+        uint32 reflection_width  = vulkan_state.swapchain_extent.width;
+        uint32 reflection_height = vulkan_state.swapchain_extent.height;
+
         VkClearValue reflection_clears[2] = {0};
         reflection_clears[0].color.float32[0] = 0.005f;
         reflection_clears[0].color.float32[1] = 0.008f;
@@ -4802,33 +4855,33 @@ void vulkanDraw(void)
         reflection_clears[1].depthStencil.depth = 1.0f;
         reflection_clears[1].depthStencil.stencil = 0;
 
-        VkRenderPassBeginInfo rp_begin = {0};
-        rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        rp_begin.renderPass = vulkan_state.reflection_render_pass;
-        rp_begin.framebuffer = vulkan_state.reflection_framebuffer;
-        rp_begin.renderArea.offset = (VkOffset2D){0, 0};
-        rp_begin.renderArea.extent = vulkan_state.swapchain_extent;
-        rp_begin.clearValueCount = 2;
-        rp_begin.pClearValues = reflection_clears;
+        VkRenderPassBeginInfo reflection_rp_begin = {0};
+        reflection_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        reflection_rp_begin.renderPass = vulkan_state.reflection_render_pass;
+        reflection_rp_begin.framebuffer = vulkan_state.reflection_framebuffer;
+        reflection_rp_begin.renderArea.offset = (VkOffset2D){ 0, 0 };
+        reflection_rp_begin.renderArea.extent = (VkExtent2D){ reflection_width, reflection_height };
+        reflection_rp_begin.clearValueCount = 2;
+        reflection_rp_begin.pClearValues = reflection_clears;
 
-        vkCmdBeginRenderPass(command_buffer, &rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBeginRenderPass(command_buffer, &reflection_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
 
-        // viewport matches reflection framebuffer extent
         VkViewport reflection_viewport = {0};
-        reflection_viewport.x = 0;
-        reflection_viewport.y = (float)vulkan_state.swapchain_extent.height;
-        reflection_viewport.width = (float)vulkan_state.swapchain_extent.width;
-        reflection_viewport.height = -(float)vulkan_state.swapchain_extent.height;
+        reflection_viewport.x = 0.0f;
+        reflection_viewport.y = (float)reflection_height;
+        reflection_viewport.width  =  (float)reflection_width;
+        reflection_viewport.height = -(float)reflection_height;
         reflection_viewport.minDepth = 0.0f;
         reflection_viewport.maxDepth = 1.0f;
 
         VkRect2D reflection_scissor = {0};
-        reflection_scissor.offset = (VkOffset2D){0, 0};
-        reflection_scissor.extent = vulkan_state.swapchain_extent;
+        reflection_scissor.offset = (VkOffset2D){ 0, 0 };
+        reflection_scissor.extent = (VkExtent2D){ reflection_width, reflection_height };
 
         vkCmdSetViewport(command_buffer, 0, 1, &reflection_viewport);
         vkCmdSetScissor(command_buffer, 0, 1, &reflection_scissor);
 
+        // cubes
         if (cube_instance_count > 0)
         {
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline);
@@ -4849,9 +4902,39 @@ void vulkanDraw(void)
             vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
         }
 
+        // models
+        if (model_instance_count > 0)
+        {
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
+
+            for (uint32 i = 0; i < model_instance_count; i++)
+            {
+                Model* model = &model_instances[i];
+                LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
+                if (model_data->index_count == 0) continue;
+
+                VkDeviceSize offset = 0;
+                float model_matrix[16];
+                mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
+
+                PushConstants model_pc = {0};
+                memcpy(model_pc.model, model_matrix, sizeof(model_pc.model));
+                memcpy(model_pc.view,  reflected_view_matrix, sizeof(model_pc.view));
+                memcpy(model_pc.proj,  projection_matrix, sizeof(model_pc.proj));
+                model_pc.uv_rect = (Vec4){0, 0, 1, 1};
+                model_pc.water_plane_y = -999.0f;
+                model_pc.time = water_time;
+
+                vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
+                vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &model_pc);
+                vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
+            }
+        }
+
         vkCmdEndRenderPass(command_buffer);
     }
-
     // FULL SCENE PASS
 
     vkCmdBeginRenderPass(command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
