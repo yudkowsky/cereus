@@ -4955,7 +4955,7 @@ bool gameFrame(double delta_time, Input* input)
             else
             {
                 if (getCube3DId(draw_tile) == CUBE_3D_WATER) drawAsset(MODEL_3D_WATER, WATER_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
-                drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
+                else drawAsset(getCube3DId(draw_tile), CUBE_3D, intCoordsToNorm(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
             }
         }
 

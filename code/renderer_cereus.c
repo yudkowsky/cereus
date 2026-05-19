@@ -130,6 +130,7 @@ typedef struct
     float focal_length;
     float water_plane_y;
     float tile_length;
+    Vec3 camera_position;
 }
 WaterPushConstants;
 
@@ -526,7 +527,8 @@ ShaderMode shader_mode = SHADER_MODE_DEFAULT;
 // water
 float water_time = 0.0f;
 const float water_tile_length = 10.0f;
-const float water_amplitude = 4e-5f;
+//const float water_amplitude = 4e-5f;
+const float water_amplitude = 1e-7f;
 
 // outlines
 const float depth_threshold = 5.0f;
@@ -718,59 +720,16 @@ void mat4BuildViewFromQuat(float output_matrix[16], Vec3 coords, Vec4 quaternion
 
 void mat4BuildReflectedView(float output_matrix[16], Vec3 coords, Vec4 quaternion, float plane_y)
 {
-    Vec3 reflected_coords = { coords.x, 2.0f * plane_y - coords.y, coords.z };
+    // TODO: just do inline
+    float view[16];
+    mat4BuildViewFromQuat(view, coords, quaternion);
 
-    float length_squared = quaternion.x*quaternion.x + quaternion.y*quaternion.y + quaternion.z*quaternion.z + quaternion.w*quaternion.w;
-    if (length_squared < 1e-8f)
-    {
-        mat4Identity(output_matrix);
-        output_matrix[12] = -reflected_coords.x;
-        output_matrix[13] = -reflected_coords.y;
-        output_matrix[14] = -reflected_coords.z;
-        return;
-    }
-    float inv_length = 1.0f / sqrtf(length_squared);
-    float x = quaternion.x*inv_length, y = quaternion.y*inv_length, z = quaternion.z*inv_length, w = quaternion.w*inv_length;
+    float mirror[16];
+    mat4Identity(mirror);
+    mirror[5]  = -1.0f;
+    mirror[13] = 2.0f * plane_y;
 
-    float right_x = 1.0f - (2.0f*y*y + 2.0f*z*z);
-    float right_y = 2.0f*x*y + 2.0f*w*z;
-    float right_z = 2.0f*x*z - 2.0f*w*y;
-
-    float up_x = 2.0f*x*y - 2.0f*w*z;
-    float up_y = 1.0f - (2.0f*x*x + 2.0f*z*z);
-    float up_z = 2.0f*y*z + 2.0f*w*x;
-
-    float forward_x = 2.0f*x*z + 2.0f*w*y;
-    float forward_y = 2.0f*y*z - 2.0f*w*x;
-    float forward_z = 1.0f - (2.0f*x*x + 2.0f*y*y);
-
-    // reflect basis across horizontal plane then flip the right vector to preserve handedness
-    right_y    = -right_y;
-    up_y       = -up_y;
-    forward_y  = -forward_y;
-
-    right_x    = -right_x;
-    right_y    = -right_y;
-    right_z    = -right_z;
-
-    mat4Identity(output_matrix);
-
-    output_matrix[0] =  right_x;
-    output_matrix[1] =  up_x;
-    output_matrix[2] =  forward_x;
-
-    output_matrix[4] =  right_y;
-    output_matrix[5] =  up_y;
-    output_matrix[6] =  forward_y;
-
-    output_matrix[8]  = right_z;
-    output_matrix[9]  = up_z;
-    output_matrix[10] = forward_z;
-
-    output_matrix[12] = -(right_x*reflected_coords.x + right_y*reflected_coords.y + right_z*reflected_coords.z);
-    output_matrix[13] = -(up_x*reflected_coords.x    + up_y*reflected_coords.y    + up_z*reflected_coords.z);
-    output_matrix[14] = -(forward_x*reflected_coords.x + forward_y*reflected_coords.y + forward_z*reflected_coords.z);
-}
+    mat4Multiply(output_matrix, view, mirror);}
 
 void mat4BuildOrtho(float output_matrix[16], float left, float right, float bottom, float top, float z_near, float z_far)
 {
@@ -3663,18 +3622,19 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         push_constant_range.offset = 0;
         push_constant_range.size = (uint32)sizeof(WaterPushConstants);
 
-        VkDescriptorSetLayout water_set_layouts[5] =
+        VkDescriptorSetLayout water_set_layouts[6] =
         { 
             vulkan_state.descriptor_set_layout, 	// underwater scene copy
             vulkan_state.descriptor_set_layout,		// scene depth 
             vulkan_state.descriptor_set_layout,     // water depth
             vulkan_state.descriptor_set_layout,     // paint texture
             vulkan_state.descriptor_set_layout,     // displacement texture
+            vulkan_state.descriptor_set_layout,     // reflection texture
         };
 
         VkPipelineLayoutCreateInfo water_distortion_pipeline_layout_ci = {0};
         water_distortion_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        water_distortion_pipeline_layout_ci.setLayoutCount = 5;
+        water_distortion_pipeline_layout_ci.setLayoutCount = 6;
         water_distortion_pipeline_layout_ci.pSetLayouts = water_set_layouts;
         water_distortion_pipeline_layout_ci.pushConstantRangeCount = 1;
         water_distortion_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
@@ -4866,20 +4826,8 @@ void vulkanDraw(void)
 
         vkCmdBeginRenderPass(command_buffer, &reflection_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
 
-        VkViewport reflection_viewport = {0};
-        reflection_viewport.x = 0.0f;
-        reflection_viewport.y = (float)reflection_height;
-        reflection_viewport.width  =  (float)reflection_width;
-        reflection_viewport.height = -(float)reflection_height;
-        reflection_viewport.minDepth = 0.0f;
-        reflection_viewport.maxDepth = 1.0f;
-
-        VkRect2D reflection_scissor = {0};
-        reflection_scissor.offset = (VkOffset2D){ 0, 0 };
-        reflection_scissor.extent = (VkExtent2D){ reflection_width, reflection_height };
-
-        vkCmdSetViewport(command_buffer, 0, 1, &reflection_viewport);
-        vkCmdSetScissor(command_buffer, 0, 1, &reflection_scissor);
+        vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+        vkCmdSetScissor(command_buffer, 0, 1, &scissor);
 
         // cubes
         if (cube_instance_count > 0)
@@ -5167,6 +5115,7 @@ void vulkanDraw(void)
             water_pc.focal_length = focal_length;
             water_pc.water_plane_y = vulkan_state.water_plane_y;
             water_pc.tile_length = water_tile_length;
+            water_pc.camera_position = vulkan_camera.coords;
 
             vkCmdPushConstants(command_buffer, vulkan_state.water_depth_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &water_pc);
 
@@ -5197,15 +5146,16 @@ void vulkanDraw(void)
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline);
 
-            VkDescriptorSet water_sets[5] = 
+            VkDescriptorSet water_sets[6] = 
             {
                 vulkan_state.scene_copy_descriptor_set,
                 vulkan_state.depth_descriptor_set,
                 vulkan_state.water_depth_descriptor_set,
                 vulkan_state.paint_descriptor_set,
                 vulkan_state.displacement_sampled_descriptor_set,
+                vulkan_state.reflection_descriptor_set,
             };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline_layout, 0, 5, water_sets, 0, 0);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_distortion_pipeline_layout, 0, 6, water_sets, 0, 0);
 
             VkBuffer water_buffers[2] = { water_data->vertex_buffer, vulkan_state.water_instance_buffer };
             VkDeviceSize water_offsets[2] = { 0, 0 };
@@ -5222,6 +5172,7 @@ void vulkanDraw(void)
             water_pc.focal_length = focal_length;
             water_pc.water_plane_y = vulkan_state.water_plane_y;
             water_pc.tile_length = water_tile_length;
+            water_pc.camera_position = vulkan_camera.coords;
 
             vkCmdPushConstants(command_buffer, vulkan_state.water_distortion_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &water_pc);
 

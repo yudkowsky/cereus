@@ -11,6 +11,7 @@ layout(set = 0, binding = 0) uniform sampler2D scene_texture;
 layout(set = 1, binding = 0) uniform sampler2D depth_texture;
 layout(set = 2, binding = 0) uniform sampler2D water_depth_texture;
 layout(set = 3, binding = 0) uniform sampler2D paint_texture;
+layout(set = 5, binding = 0) uniform sampler2D reflection_texture;
 
 layout(push_constant) uniform PushConstants 
 {
@@ -20,6 +21,7 @@ layout(push_constant) uniform PushConstants
     float time;
     float focal_length;
     float water_base_y;
+    vec3 camera_position;
 }
 pc;
 
@@ -49,6 +51,8 @@ const float corner_size = 0.025;
 // grid line graphics
 const vec3 grid_line_tint = { 0.2, 0.4, 0.6 };
 const float grid_opacity = 0.1;
+
+const float min_fresnel = 0.02;
 
 // used for detecting shoreline in 8 directions
 const vec2 offsets[8] = vec2[]
@@ -96,6 +100,17 @@ void main()
     {
         base_color = mix(base_color, grid_line_tint, effective_opacity);
     }
+
+    // fresnel based reflection
+    vec3 view_dir = normalize(pc.camera_position.xyz - frag_world_pos);
+    vec3 normal = normalize(frag_normal);
+    float cos_theta = max(dot(view_dir, normal), 0.0);
+    float fresnel = min_fresnel + (1.0 - min_fresnel) * pow(1.0 - cos_theta, 5.0);
+
+    vec2 reflection_uv = screen_uv;
+    vec3 reflection_color = texture(reflection_texture, reflection_uv).rgb;
+
+    base_color = mix(base_color, reflection_color, fresnel);
 
     // waterline detection
     bool this_is_outline = false;
