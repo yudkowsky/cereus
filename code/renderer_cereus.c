@@ -511,7 +511,8 @@ Camera vulkan_camera = {0};
 ShaderMode shader_mode = SHADER_MODE_DEFAULT;
 
 float water_time = 0.0f;
-const float water_tile_length = 32.0f;
+const float water_tile_length = 10.0f;
+const float water_amplitude = 4e-5f;
 const float depth_threshold = 5.0f;
 const float normal_threshold = 0.2f;
 
@@ -4200,7 +4201,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         pc.wind_direction_x = 1.0f;
         pc.wind_direction_z = 0.5f;
         pc.wind_speed = 15.0f;
-        pc.amplitude = 2e-6f;
+        pc.amplitude = water_amplitude;
         pc.gravity = 9.81f;
         pc.random_seed = 1337;
 
@@ -5183,37 +5184,6 @@ void vulkanDraw(void)
 
         vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &push_constants);
 
-        vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
-    }
-
-    // debug: draw paint texture in corner
-    {
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline);
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &sprite_vb_offset);
-        vkCmdBindIndexBuffer(command_buffer, vulkan_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.paint_descriptor_set, 0, 0);
-        //vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.fft_buffer_a_sampled_descriptor_set, 0, 0);
-
-        float debug_size = 300.0f;
-        float debug_margin = 10.0f;
-        Vec3 debug_coords;
-        debug_coords.x = (float)vulkan_state.swapchain_extent.width - debug_margin - debug_size * 0.5f;
-        debug_coords.y = (float)vulkan_state.swapchain_extent.height - (debug_margin + debug_size * 0.5f);
-        debug_coords.z = 0.0f;
-        Vec3 debug_scale = { debug_size, debug_size, 1.0f };
-
-        float debug_model[16];
-        Vec4 identity_quaternion = { 0, 0, 0, 1 };
-        mat4BuildTRS(debug_model, debug_coords, identity_quaternion, debug_scale);
-
-        PushConstants debug_pc = {0};
-        memcpy(debug_pc.model, debug_model, sizeof(debug_pc.model));
-        memcpy(debug_pc.view, view2d, sizeof(debug_pc.view));
-        memcpy(debug_pc.proj, ortho, sizeof(debug_pc.proj));
-        debug_pc.uv_rect = (Vec4){ 0.0f, 0.0f, 1.0f, 1.0f };
-        debug_pc.alpha = 1.0f;
-
-        vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &debug_pc);
         vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
     }
 
