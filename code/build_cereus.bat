@@ -16,8 +16,6 @@ glslc sprite.vert -g -o ..\spirv\sprite.vert.spv
 glslc sprite.frag -g -o ..\spirv\sprite.frag.spv
 glslc model.vert -g -o ..\spirv\model.vert.spv
 glslc model.frag -g -o ..\spirv\model.frag.spv
-glslc model-blackline.vert -g -o ..\spirv\model-blackline.vert.spv
-glslc model-blackline.frag -g -o ..\spirv\model-blackline.frag.spv
 glslc outline-post.vert -g -o ..\spirv\outline-post.vert.spv
 glslc outline-post.frag -g -o ..\spirv\outline-post.frag.spv
 glslc water-depth.frag -g -o ..\spirv\water-depth.frag.spv

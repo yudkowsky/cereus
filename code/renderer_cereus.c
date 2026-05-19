@@ -96,6 +96,7 @@ typedef struct
     float alpha;
     float water_plane_y;
     float time;
+    float tile_length;
 }
 PushConstants; // TODO: rename. also don't use for sprites - they don't need the time / water_plane_y fields.
 
@@ -118,6 +119,7 @@ typedef struct
     float proj[16];
     float water_plane_y;
     float time;
+    float tile_length;
 }
 InstancedPushConstants;
 
@@ -3542,10 +3544,16 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         push_constant_range.offset = 0;
         push_constant_range.size = (uint32)sizeof(InstancedPushConstants);
 
+        VkDescriptorSetLayout cube_set_layouts[2] =
+        {
+            vulkan_state.descriptor_set_layout, // atlas
+            vulkan_state.descriptor_set_layout, // water displacement
+        };
+
         VkPipelineLayoutCreateInfo layout_info = {0};
         layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layout_info.setLayoutCount = 1;
-        layout_info.pSetLayouts = &vulkan_state.descriptor_set_layout;
+        layout_info.setLayoutCount = 2;
+        layout_info.pSetLayouts = cube_set_layouts;
         layout_info.pushConstantRangeCount = 1;
         layout_info.pPushConstantRanges = &push_constant_range;
 
@@ -3559,10 +3567,16 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         push_constant_range.offset = 0;
         push_constant_range.size = (uint32)sizeof(PushConstants);
 
+        VkDescriptorSetLayout model_set_layouts[2] =
+        {
+            vulkan_state.descriptor_set_layout, // TODO: wait, why did i have a texture here..? shouldn't need an atlas
+            vulkan_state.descriptor_set_layout, // water displacement
+        };
+
         VkPipelineLayoutCreateInfo model_pipeline_layout_ci = {0};
         model_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        model_pipeline_layout_ci.setLayoutCount = 1;
-        model_pipeline_layout_ci.pSetLayouts = &vulkan_state.descriptor_set_layout;
+        model_pipeline_layout_ci.setLayoutCount = 2;
+        model_pipeline_layout_ci.pSetLayouts = model_set_layouts;
         model_pipeline_layout_ci.pushConstantRangeCount = 1;
         model_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
 
@@ -3576,7 +3590,11 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         push_constant_range.offset = 0;
         push_constant_range.size = sizeof(float) * 6; // texel_size, depth threshold, normal_threshold, experimental shaders
 
-        VkDescriptorSetLayout post_layouts[2] = { vulkan_state.descriptor_set_layout, vulkan_state.descriptor_set_layout };
+        VkDescriptorSetLayout post_layouts[2] = 
+        {
+            vulkan_state.descriptor_set_layout, 
+            vulkan_state.descriptor_set_layout,
+        };
 
         VkPipelineLayoutCreateInfo layout_ci = {0};
         layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -3595,7 +3613,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         push_constant_range.offset = 0;
         push_constant_range.size = (uint32)sizeof(WaterPushConstants);
 
-        // Need displacement texture for the vertex shader
         VkDescriptorSetLayout water_depth_set_layouts[5] =
         {
             vulkan_state.descriptor_set_layout,  // unused
@@ -3905,7 +3922,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         depth_stencil_state_creation_info.front.reference = 2;
         depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
 
-        rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
         rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
         VkGraphicsPipelineCreateInfo model_ci = base_graphics_pipeline_creation_info;
@@ -4838,13 +4855,20 @@ void vulkanDraw(void)
             VkDeviceSize cube_offsets[2] = { 0, 0 };
             vkCmdBindVertexBuffers(command_buffer, 0, 2, cube_buffers, cube_offsets);
             vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
+
+            VkDescriptorSet cube_sets[2] = 
+            {
+                vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index],
+                vulkan_state.displacement_sampled_descriptor_set,
+            };
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 2, cube_sets, 0, 0);
 
             InstancedPushConstants cube_pc = {0};
             memcpy(cube_pc.view, reflected_view_matrix, sizeof(cube_pc.view));
             memcpy(cube_pc.proj, projection_matrix, sizeof(cube_pc.proj));
-            cube_pc.water_plane_y = -999.0f;
+            cube_pc.water_plane_y = vulkan_state.water_plane_y;
             cube_pc.time = water_time;
+            cube_pc.tile_length = water_tile_length;
 
             vkCmdPushConstants(command_buffer, vulkan_state.cube_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(InstancedPushConstants), &cube_pc);
             vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
@@ -4854,7 +4878,13 @@ void vulkanDraw(void)
         if (model_instance_count > 0)
         {
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline);
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
+
+            VkDescriptorSet model_sets[2] = 
+            {
+                vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], // TODO: unused
+                vulkan_state.displacement_sampled_descriptor_set,
+            };
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 2, model_sets, 0, 0);
 
             for (uint32 i = 0; i < model_instance_count; i++)
             {
@@ -4871,8 +4901,9 @@ void vulkanDraw(void)
                 memcpy(model_pc.view,  reflected_view_matrix, sizeof(model_pc.view));
                 memcpy(model_pc.proj,  projection_matrix, sizeof(model_pc.proj));
                 model_pc.uv_rect = (Vec4){0, 0, 1, 1};
-                model_pc.water_plane_y = -999.0f;
+                model_pc.water_plane_y = vulkan_state.water_plane_y;
                 model_pc.time = water_time;
+                model_pc.tile_length = water_tile_length;
 
                 vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
                 vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
@@ -4883,6 +4914,7 @@ void vulkanDraw(void)
 
         vkCmdEndRenderPass(command_buffer);
     }
+
     // FULL SCENE PASS
 
     vkCmdBeginRenderPass(command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
@@ -4898,13 +4930,20 @@ void vulkanDraw(void)
         VkDeviceSize cube_offsets[2] = { 0, 0 };
         vkCmdBindVertexBuffers(command_buffer, 0, 2, cube_buffers, cube_offsets);
         vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
+
+        VkDescriptorSet cube_sets[2] = 
+        {
+            vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index],
+            vulkan_state.displacement_sampled_descriptor_set,
+        };
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 2, cube_sets, 0, 0);
 
         InstancedPushConstants cube_pc = {0};
         memcpy(cube_pc.view, view_matrix, sizeof(cube_pc.view));
         memcpy(cube_pc.proj, projection_matrix, sizeof(cube_pc.proj));
         cube_pc.water_plane_y = -999.0f;
         cube_pc.time = water_time;
+        cube_pc.tile_length = water_tile_length;
 
         vkCmdPushConstants(command_buffer, vulkan_state.cube_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(InstancedPushConstants), &cube_pc);
         vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
@@ -4914,7 +4953,13 @@ void vulkanDraw(void)
     if (model_instance_count > 0)
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline);
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], 0, 0);
+
+        VkDescriptorSet model_sets[2] = 
+        {
+            vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], // TODO: unused
+            vulkan_state.displacement_sampled_descriptor_set,
+        };
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 2, model_sets, 0, 0);
 
         for (uint32 model_instance_index = 0; model_instance_index < model_instance_count; model_instance_index++)
         {
@@ -4933,6 +4978,7 @@ void vulkanDraw(void)
             model_pc.uv_rect = (Vec4){0, 0, 1, 1};
             model_pc.water_plane_y = -999.0f;
             model_pc.time = water_time;
+            model_pc.tile_length = water_tile_length;
 
             vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
             vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
@@ -4943,7 +4989,7 @@ void vulkanDraw(void)
 
     vkCmdEndRenderPass(command_buffer);
 
-    // OUTLINE POST PASS (above-water only)
+    // OUTLINE PASS
 
     VkImageMemoryBarrier depth_to_read = {0};
     depth_to_read.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
