@@ -52,7 +52,8 @@ const float corner_size = 0.025;
 const vec3 grid_line_tint = { 0.2, 0.4, 0.6 };
 const float grid_opacity = 0.1;
 
-const float min_fresnel = 0.02;
+const float min_reflection = 0.02;
+const float fresnel_exponent = 4.0;
 
 // used for detecting shoreline in 8 directions
 const vec2 offsets[8] = vec2[]
@@ -105,7 +106,7 @@ void main()
     vec3 view_dir = normalize(pc.camera_position.xyz - frag_world_pos);
     vec3 normal = normalize(frag_normal);
     float cos_theta = max(dot(view_dir, normal), 0.0);
-    float fresnel = min_fresnel + (1.0 - min_fresnel) * pow(1.0 - cos_theta, 5.0);
+    float fresnel = min_reflection + (1.0 - min_reflection) * pow(1.0 - cos_theta, fresnel_exponent);
 
     vec2 reflection_uv = screen_uv;
     vec3 reflection_color = texture(reflection_texture, reflection_uv).rgb;

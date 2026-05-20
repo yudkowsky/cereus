@@ -1,5 +1,7 @@
 #version 450
 
+layout(set = 1, binding = 0) uniform sampler2D water_displacement_texture;
+
 layout(location = 0) in vec3 normal;
 layout(location = 1) in vec3 color;
 layout(location = 2) in vec3 frag_world_pos;
@@ -23,7 +25,10 @@ pc;
 void main()
 {
     // discard if relevant
-    if (frag_world_pos.y < pc.water_plane_y) discard;
+    vec2 displacement_uv = frag_world_pos.xz / pc.tile_length;
+    float wave_displacement = texture(water_displacement_texture, displacement_uv).r;
+    float water_surface_y = pc.water_plane_y - wave_displacement;
+    if (frag_world_pos.y < water_surface_y) discard;
 
     // basic shader
     vec3 N = normalize(normal);

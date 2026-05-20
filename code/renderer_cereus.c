@@ -4825,9 +4825,9 @@ void vulkanDraw(void)
         uint32 reflection_height = vulkan_state.swapchain_extent.height;
 
         VkClearValue reflection_clears[2] = {0};
-        reflection_clears[0].color.float32[0] = 0.05f; // much brighter clear values
-        reflection_clears[0].color.float32[1] = 0.08f;
-        reflection_clears[0].color.float32[2] = 0.2f;
+        reflection_clears[0].color.float32[0] = 0.4f; // much brighter clear values
+        reflection_clears[0].color.float32[1] = 0.2f;
+        reflection_clears[0].color.float32[2] = 0.1f;
         reflection_clears[0].color.float32[3] = 1.0f;
         reflection_clears[1].depthStencil.depth = 1.0f;
         reflection_clears[1].depthStencil.stencil = 0;
@@ -4856,11 +4856,12 @@ void vulkanDraw(void)
             vkCmdBindVertexBuffers(command_buffer, 0, 2, cube_buffers, cube_offsets);
             vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-            VkDescriptorSet cube_sets[1] = 
+            VkDescriptorSet cube_sets[2] = 
             {
                 vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index],
+                vulkan_state.displacement_sampled_descriptor_set,
             };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 1, cube_sets, 0, 0);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 2, cube_sets, 0, 0);
 
             InstancedPushConstants cube_pc = {0};
             memcpy(cube_pc.view, reflected_view_matrix, sizeof(cube_pc.view));
@@ -4878,11 +4879,12 @@ void vulkanDraw(void)
         {
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline);
 
-            VkDescriptorSet model_sets[1] = 
+            VkDescriptorSet model_sets[2] = 
             {
                 vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], // TODO: unused
+                vulkan_state.displacement_sampled_descriptor_set,
             };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, model_sets, 0, 0);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 2, model_sets, 0, 0);
 
             for (uint32 i = 0; i < model_instance_count; i++)
             {
@@ -4929,11 +4931,12 @@ void vulkanDraw(void)
         vkCmdBindVertexBuffers(command_buffer, 0, 2, cube_buffers, cube_offsets);
         vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-        VkDescriptorSet cube_sets[1] = 
+        VkDescriptorSet cube_sets[2] = 
         {
             vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index],
+            vulkan_state.displacement_sampled_descriptor_set,
         };
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 1, cube_sets, 0, 0);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 2, cube_sets, 0, 0);
 
         InstancedPushConstants cube_pc = {0};
         memcpy(cube_pc.view, view_matrix, sizeof(cube_pc.view));
@@ -4951,11 +4954,12 @@ void vulkanDraw(void)
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline);
 
-        VkDescriptorSet model_sets[1] = 
+        VkDescriptorSet model_sets[2] = 
         {
             vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], // TODO: unused
+            vulkan_state.displacement_sampled_descriptor_set,
         };
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 1, model_sets, 0, 0);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 2, model_sets, 0, 0);
 
         for (uint32 model_instance_index = 0; model_instance_index < model_instance_count; model_instance_index++)
         {
@@ -5155,7 +5159,7 @@ void vulkanDraw(void)
             mat4Inverse(water_pc.inv_view_proj, proj_view);
             water_pc.time = water_time;
             water_pc.focal_length = focal_length;
-            water_pc.water_plane_y = vulkan_state.water_plane_y;
+            water_pc.water_plane_y = -999.0f;
             water_pc.tile_length = water_tile_length;
             water_pc.camera_position = vulkan_camera.coords;
 
@@ -5212,7 +5216,7 @@ void vulkanDraw(void)
             mat4Inverse(water_pc.inv_view_proj, proj_view);
             water_pc.time = water_time;
             water_pc.focal_length = focal_length;
-            water_pc.water_plane_y = vulkan_state.water_plane_y;
+            water_pc.water_plane_y = -999.0f;
             water_pc.tile_length = water_tile_length;
             water_pc.camera_position = vulkan_camera.coords;
 
