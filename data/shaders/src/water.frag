@@ -53,7 +53,7 @@ const vec3 grid_line_tint = { 0.2, 0.4, 0.6 };
 const float grid_opacity = 0.1;
 
 // reflections
-const float reflection_distortion_strength = 0.04;
+const float reflection_distortion_strength = 0.0001;
 const float min_reflection = 0.02;
 const float fresnel_exponent = 4.0;
 
@@ -110,8 +110,11 @@ void main()
     float cos_theta = max(dot(view_dir, normal), 0.0);
     float fresnel = min_reflection + (1.0 - min_reflection) * pow(1.0 - cos_theta, fresnel_exponent);
 
-    // reflection distortion based on normals
-    vec2 reflection_uv_offset = normal.xz * reflection_distortion_strength;
+    // reflection distortion based on normals and distance to camera
+    float dist_to_camera = distance(pc.camera_position, frag_world_pos);
+    float pixel_world_size = dist_to_camera / pc.focal_length;
+    float distortion_strength = reflection_distortion_strength / pixel_world_size;
+    vec2 reflection_uv_offset = normal.xz * distortion_strength;
     vec2 reflection_uv = screen_uv + reflection_uv_offset;
     vec3 reflection_color = texture(reflection_texture, reflection_uv).rgb;
 
