@@ -142,7 +142,9 @@ typedef struct
     float tile_length;
     float wind_direction_x;
     float wind_direction_z;
-    float wind_speed;
+    float peak_frequency;
+    float peak_enhancement;
+    float depth;
     float amplitude;
     float gravity;
     uint32 random_seed;
@@ -4390,7 +4392,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         pc.tile_length = water_tile_length;
         pc.wind_direction_x = 1.0f;
         pc.wind_direction_z = 0.5f;
-        pc.wind_speed = 15.0f;
+        pc.peak_frequency = 5.0f;
+        pc.peak_enhancement = 5.0f;
+        pc.depth = 2.0f; // TODO: should i actually put this it 1m or whatever my actual depth is? maybe a paint input for depth, even if the depth is the same everywhere?
         pc.amplitude = water_amplitude;
         pc.gravity = 9.81f;
         pc.random_seed = 1337;

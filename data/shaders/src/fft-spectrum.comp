@@ -10,7 +10,9 @@ layout(push_constant) uniform PushConstants
     float tile_length;
     float wind_direction_x;
     float wind_direction_z;
-    float wind_speed;
+    float peak_frequency;
+    float peak_enhancement;
+    float depth;
     float amplitude;
     float gravity;
     uint random_seed;
@@ -55,7 +57,7 @@ void main()
     float gaussian_angle = TAU * uniform_b;
     vec2 gaussian_complex = vec2(gaussian_radius * cos(gaussian_angle), gaussian_radius * sin(gaussian_angle));
 
-    // evaluate Phillips spectrum at this wave vector, outputs expected energy of wave travelling along wave_vector given wind direction and speed
+    // JONSWAP + TMA spectrum
     float spectrum_energy;
     if (wave_number < 1e-6)
     {
@@ -63,24 +65,47 @@ void main()
     }
     else
     {
-        float wave_number_squared = wave_number * wave_number;
-        float wave_number_quartic = wave_number_squared * wave_number_squared;
-
-        // largest wave the wind can sustain is v^2 / g
-        float max_wave_size_from_wind = pc.wind_speed * pc.wind_speed / pc.gravity;
-
-        // waves along the wind direction get more energy
+        float omega = sqrt(pc.gravity * wave_number);
+        float omega_peak = pc.peak_frequency;
+        
+        // JONSWAP base
+        float omega_5 = omega * omega * omega * omega * omega;
+        float pm_base = pc.amplitude * pc.gravity * pc.gravity / omega_5;
+        float pm_decay = exp(-1.25 * pow(omega_peak / omega, 4.0));
+        
+        // peak enhancement
+        float sigma = (omega <= omega_peak) ? 0.07 : 0.09;
+        float r = exp(-(omega - omega_peak) * (omega - omega_peak) / (2.0 * sigma * sigma * omega_peak * omega_peak));
+        float peak_enhancement = pow(pc.peak_enhancement, r);
+        
+        // TMA supresses long wavelengths in shallow water
+        float omega_h = omega * sqrt(pc.depth / pc.gravity);
+        float tma_correction;
+        if (omega_h < 1.0)
+        {
+            tma_correction = 0.5 * omega_h * omega_h;
+        }
+        else if (omega_h < 2.0)
+        {
+            float term = 2.0 - omega_h;
+            tma_correction = 1.0 - 0.5 * term * term;
+        }
+        else
+        {
+            tma_correction = 1.0;
+        }
+        
+        // combine 
+        float spectrum_omega = pm_base * pm_decay * peak_enhancement * tma_correction;
+        
+        float jacobian = pc.gravity / (2.0 * omega);
+        spectrum_energy = spectrum_omega * jacobian;
+        
+        // wind alignment
         vec2 wave_direction = wave_vector / wave_number;
         vec2 wind_direction = normalize(vec2(pc.wind_direction_x, pc.wind_direction_z));
         float wave_alignment_with_wind = dot(wave_direction, wind_direction);
-
-        // main Phillips formula
-        spectrum_energy = pc.amplitude * exp(-1.0 / (wave_number_squared * max_wave_size_from_wind * max_wave_size_from_wind)) / wave_number_quartic * wave_alignment_with_wind * wave_alignment_with_wind;
-
-        // smoothly suppress very small waves
-        float small_wave_dampening = 0.001;
-        float damping_wavelength = max_wave_size_from_wind * small_wave_dampening;
-        spectrum_energy *= exp(-wave_number_squared * damping_wavelength * damping_wavelength);
+        spectrum_energy *= wave_alignment_with_wind * wave_alignment_with_wind;
     }
 
     // each gaussian has variance 1, so want to /2
