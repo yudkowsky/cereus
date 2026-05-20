@@ -253,7 +253,7 @@ typedef enum ShaderMode
 }
 ShaderMode;
 
-#define WATER_PLANE_Y 2.2f
+#define WATER_PLANE_Y 1.2f
 
 #define WATER_PAINT_TILE_COUNT 64
 #define WATER_PAINT_RESOLUTION 16

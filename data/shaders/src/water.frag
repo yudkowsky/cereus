@@ -52,6 +52,8 @@ const float corner_size = 0.025;
 const vec3 grid_line_tint = { 0.2, 0.4, 0.6 };
 const float grid_opacity = 0.1;
 
+// reflections
+const float reflection_distortion_strength = 0.04;
 const float min_reflection = 0.02;
 const float fresnel_exponent = 4.0;
 
@@ -102,13 +104,15 @@ void main()
         base_color = mix(base_color, grid_line_tint, effective_opacity);
     }
 
-    // fresnel based reflection
+    // reflection based on fresnel strength
     vec3 view_dir = normalize(pc.camera_position.xyz - frag_world_pos);
     vec3 normal = normalize(frag_normal);
     float cos_theta = max(dot(view_dir, normal), 0.0);
     float fresnel = min_reflection + (1.0 - min_reflection) * pow(1.0 - cos_theta, fresnel_exponent);
 
-    vec2 reflection_uv = screen_uv;
+    // reflection distortion based on normals
+    vec2 reflection_uv_offset = normal.xz * reflection_distortion_strength;
+    vec2 reflection_uv = screen_uv + reflection_uv_offset;
     vec3 reflection_color = texture(reflection_texture, reflection_uv).rgb;
 
     base_color = mix(base_color, reflection_color, fresnel);
