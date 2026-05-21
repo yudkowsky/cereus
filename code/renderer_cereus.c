@@ -7,6 +7,9 @@
 #include "cgltf.h"
 #include "everything.h"
 
+// TODO: temp for profiling
+#include <windows.h>
+
 typedef struct 
 {
     float x, y, z;
@@ -423,14 +426,14 @@ typedef struct VulkanState
     uint32 cube_index_count;
 
     // instanced buffers
-    VkBuffer cube_instance_buffer;
-	VkDeviceMemory cube_instance_memory;
-    void* cube_instance_mapped;
+    VkBuffer cube_instance_buffers[2];
+	VkDeviceMemory cube_instance_memories[2];
+    void* cube_instance_mappeds[2];
     uint32 cube_instance_capacity;
 
-    VkBuffer water_instance_buffer;
-    VkDeviceMemory water_instance_memory;
-    void* water_instance_mapped;
+    VkBuffer water_instance_buffers[2];
+    VkDeviceMemory water_instance_memories[2];
+    void* water_instance_mappeds[2];
     uint32 water_instance_capacity;
 
     // models
@@ -1421,7 +1424,7 @@ void createSwapchainResources(void)
     vulkan_state.swapchain_extent = chosen_extent;
 
     // swapchain
-    uint32 min_image_count = surface_capabilities.minImageCount + 1;
+    uint32 min_image_count = 3; // almost certainly fine, might not work on some devices later?
     if (surface_capabilities.maxImageCount != 0 && min_image_count > surface_capabilities.maxImageCount) min_image_count = surface_capabilities.maxImageCount;
 
     uint32 queue_family_indices[2] = { vulkan_state.graphics_family_index, vulkan_state.present_family_index };
@@ -2697,7 +2700,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
 	vkCreateCommandPool(vulkan_state.logical_device_handle, &command_pool_creation_info, 0, &vulkan_state.graphics_command_pool_handle);
 
-    vulkan_state.frames_in_flight = 1;
+    vulkan_state.frames_in_flight = 2;
 	vulkan_state.current_frame = 0;
 	vulkan_state.image_available_semaphores = malloc(sizeof(VkSemaphore) * vulkan_state.frames_in_flight);
     vulkan_state.render_finished_semaphores = malloc(sizeof(VkSemaphore) * vulkan_state.frames_in_flight);
@@ -4121,8 +4124,17 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateComputePipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &pipeline_ci, 0, &vulkan_state.fft_finalize_pipeline);
     }
 
-    createInstanceBuffer(&vulkan_state.cube_instance_buffer, sizeof(CubeInstanceData) * CUBE_INSTANCE_CAPACITY, &vulkan_state.cube_instance_memory, &vulkan_state.cube_instance_mapped);
-    createInstanceBuffer(&vulkan_state.water_instance_buffer, sizeof(WaterInstanceData) * WATER_INSTANCE_CAPACITY, &vulkan_state.water_instance_memory, &vulkan_state.water_instance_mapped);
+    for (int in_flight_index = 0; in_flight_index < 2; in_flight_index++)
+    {
+        createInstanceBuffer(&vulkan_state.cube_instance_buffers[in_flight_index], 
+            sizeof(CubeInstanceData) * CUBE_INSTANCE_CAPACITY, 
+            &vulkan_state.cube_instance_memories[in_flight_index], 
+            &vulkan_state.cube_instance_mappeds[in_flight_index]);
+        createInstanceBuffer(&vulkan_state.water_instance_buffers[in_flight_index], 
+            sizeof(WaterInstanceData) * WATER_INSTANCE_CAPACITY, 
+            &vulkan_state.water_instance_memories[in_flight_index], 
+            &vulkan_state.water_instance_mappeds[in_flight_index]);
+    }
 
     loadAllEntities();
 
@@ -4423,7 +4435,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     }
 
     // fill cube instance buffer
-    CubeInstanceData* cube_gpu_instances = (CubeInstanceData*)vulkan_state.cube_instance_mapped;
+    CubeInstanceData* cube_gpu_instances = (CubeInstanceData*)vulkan_state.cube_instance_mappeds[vulkan_state.current_frame];
 
     for (uint32 instance_index = 0; instance_index < cube_instance_count; instance_index++)
     {
@@ -4434,13 +4446,13 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
 
     VkMappedMemoryRange cube_flush_range = {0};
     cube_flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    cube_flush_range.memory = vulkan_state.cube_instance_memory;
+    cube_flush_range.memory = vulkan_state.cube_instance_memories[vulkan_state.current_frame];
     cube_flush_range.offset = 0;
     cube_flush_range.size = VK_WHOLE_SIZE;
     vkFlushMappedMemoryRanges(vulkan_state.logical_device_handle, 1, &cube_flush_range);
 
     // fill water instance buffer
-    WaterInstanceData* water_gpu_instances = (WaterInstanceData*)vulkan_state.water_instance_mapped;
+    WaterInstanceData* water_gpu_instances = (WaterInstanceData*)vulkan_state.water_instance_mappeds[vulkan_state.current_frame];
     for (uint32 i = 0; i < water_instance_count; i++)
     {
         Water* water = &water_instances[i];
@@ -4450,7 +4462,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     }
     VkMappedMemoryRange water_flush_range = {0};
     water_flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    water_flush_range.memory = vulkan_state.water_instance_memory;
+    water_flush_range.memory = vulkan_state.water_instance_memories[vulkan_state.current_frame];
     water_flush_range.offset = 0;
     water_flush_range.size = VK_WHOLE_SIZE;
     vkFlushMappedMemoryRanges(vulkan_state.logical_device_handle, 1, &water_flush_range);
@@ -4725,7 +4737,7 @@ void vulkanDraw(void)
         {
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline);
 
-            VkBuffer cube_buffers[2] = { vulkan_state.cube_vertex_buffer, vulkan_state.cube_instance_buffer };
+            VkBuffer cube_buffers[2] = { vulkan_state.cube_vertex_buffer, vulkan_state.cube_instance_buffers[vulkan_state.current_frame] };
             VkDeviceSize cube_offsets[2] = { 0, 0 };
             vkCmdBindVertexBuffers(command_buffer, 0, 2, cube_buffers, cube_offsets);
             vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
@@ -4803,7 +4815,7 @@ void vulkanDraw(void)
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline);
 
-        VkBuffer cube_buffers[2] = { vulkan_state.cube_vertex_buffer, vulkan_state.cube_instance_buffer };
+        VkBuffer cube_buffers[2] = { vulkan_state.cube_vertex_buffer, vulkan_state.cube_instance_buffers[vulkan_state.current_frame] };
         VkDeviceSize cube_offsets[2] = { 0, 0 };
         vkCmdBindVertexBuffers(command_buffer, 0, 2, cube_buffers, cube_offsets);
         vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
@@ -5005,7 +5017,7 @@ void vulkanDraw(void)
             };
             vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_layout, 0, 5, water_sets, 0, 0);
 
-            VkBuffer water_buffers[2] = { water_data->vertex_buffer, vulkan_state.water_instance_buffer };
+            VkBuffer water_buffers[2] = { water_data->vertex_buffer, vulkan_state.water_instance_buffers[vulkan_state.current_frame] };
             VkDeviceSize water_offsets[2] = { 0, 0 };
             vkCmdBindVertexBuffers(command_buffer, 0, 2, water_buffers, water_offsets);
             vkCmdBindIndexBuffer(command_buffer, water_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
@@ -5359,6 +5371,7 @@ void vulkanDraw(void)
     vulkan_state.current_frame = (vulkan_state.current_frame + 1) % vulkan_state.frames_in_flight;
 
     // profiling read out TODO: bad
+    /*
     uint32 read_pool_index = (vulkan_state.timestamp_frame_index + 1) % 3;
     if (vulkan_state.timestamp_pool_valid[read_pool_index])
     {
@@ -5378,6 +5391,7 @@ void vulkanDraw(void)
             printf("%s: %.3f ms\n", region_names[i/2], ms);
         }
     }
+    */
 
     vulkan_state.timestamp_frame_index++;
 }

@@ -4,6 +4,11 @@
 
 // GLOBAL STATE
 
+// TODO: temp for profiling
+__declspec(dllimport) int __stdcall QueryPerformanceCounter(long long* lpPerformanceCount);
+__declspec(dllimport) int __stdcall QueryPerformanceFrequency(long long* lpFrequency);
+__declspec(dllimport) void __stdcall OutputDebugStringA(const char* lpOutputString);
+
 typedef enum
 {
     NO_DIRECTION = -1,
@@ -3514,6 +3519,11 @@ void doPhysicsTick()
 
 bool gameFrame(double delta_time, Input* input)
 {   
+    // TODO: temp for profiling
+    long long frequency, t0, t1, t2, t3;
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&t0);
+
     if (delta_time > 0.1) delta_time = 0.1;
     physics_accumulator += delta_time;
 
@@ -4940,17 +4950,14 @@ bool gameFrame(double delta_time, Input* input)
             if (isEntity(draw_tile))
             {
                 Entity* e = getEntityAtCoords(bufferIndexToCoords(tile_index));
-                if (e) // TODO: guard is here while i translate over some levels, since i offset all of the enums, but the level files are still the same
+                if (e->locked) draw_tile = LOCKED_BLOCK;
+                if (draw_tile == WIN_BLOCK)
                 {
-                    if (e->locked) draw_tile = LOCKED_BLOCK;
-                    if (draw_tile == WIN_BLOCK)
-                    {
-                        if (in_overworld && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
-                        else if (!in_overworld && findInSolvedLevels(world_state.level_name) != -1) draw_tile = WON_BLOCK;
-                    }
-
-                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                    if (in_overworld && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
+                    else if (!in_overworld && findInSolvedLevels(world_state.level_name) != -1) draw_tile = WON_BLOCK;
                 }
+
+                drawAsset(getModelId(draw_tile), MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
             }
             else
             {
@@ -5111,8 +5118,24 @@ bool gameFrame(double delta_time, Input* input)
         }
     }
 
+    QueryPerformanceCounter(&t1);
     vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, camera_with_ow_offset, game_shader_mode, &water_paint_texture);
+    QueryPerformanceCounter(&t2);
     vulkanDraw();
+    QueryPerformanceCounter(&t3);
+
+    double game_logic_ms = 1000.0 * (double)(t1 - t0) / (double)frequency;
+    double submit_ms     = 1000.0 * (double)(t2 - t1) / (double)frequency;
+    double draw_ms       = 1000.0 * (double)(t3 - t2) / (double)frequency;
+
+    static int frame_counter = 0; // local persist
+    if (frame_counter++ >= 60)
+    {
+        char buffer[256];
+        snprintf(buffer, sizeof(buffer), "game: %.2f ms; submit: %.2f ms; draw: %.2f ms; total: %.2f ms\n", game_logic_ms, submit_ms, draw_ms, game_logic_ms + submit_ms + draw_ms);
+        OutputDebugStringA(buffer);
+        frame_counter = 0;
+    }
 
     return false;
 }
