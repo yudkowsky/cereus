@@ -202,6 +202,15 @@ typedef struct VulkanState
     VkSurfaceKHR surface_handle;
 	VkPhysicalDevice physical_device_handle;
 
+    // profiling
+    VkQueryPool timestamp_query_pools[3]; // will add more in-flight frames soon, maybe
+    uint32 timestamp_query_count;
+    uint32 timestamp_query_counts[3];
+    float timestamp_period;
+    uint64 timestamp_results[3][32];
+    bool timestamp_pool_valid[3];
+    uint32 timestamp_frame_index;
+
     // device and queues
     uint32 graphics_family_index;
     uint32 present_family_index;
@@ -2363,9 +2372,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         queue_family_infos[1] = present_queue_info;
     }
 
-    // logical device = opened session on a chosen GPU. need to pick queue families
-    // + queues, device extensions, and device features.
-
     // we will need to pass the device extensions we want the logical device to use
     const char* device_extensions[] = { "VK_KHR_swapchain" };
 
@@ -2383,6 +2389,22 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     device_info.pEnabledFeatures = &device_features;
 
     vkCreateDevice(vulkan_state.physical_device_handle, &device_info, 0, &vulkan_state.logical_device_handle);
+
+    // profiling
+    VkPhysicalDeviceProperties device_properties = {0};
+    vkGetPhysicalDeviceProperties(vulkan_state.physical_device_handle, &device_properties);
+    vulkan_state.timestamp_period = device_properties.limits.timestampPeriod;
+
+    vulkan_state.timestamp_query_count = 32;
+    for (int frame_index = 0; frame_index < 3; frame_index++)
+    {
+        VkQueryPoolCreateInfo qp_ci = {0};
+        qp_ci.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+        qp_ci.queryType = VK_QUERY_TYPE_TIMESTAMP;
+        qp_ci.queryCount = vulkan_state.timestamp_query_count;
+        vkCreateQueryPool(vulkan_state.logical_device_handle, &qp_ci, 0, &vulkan_state.timestamp_query_pools[frame_index]);
+        vulkan_state.timestamp_pool_valid[frame_index] = false;
+    }
 
     vulkan_state.depth_format = VK_FORMAT_D32_SFLOAT_S8_UINT;
 
@@ -4561,6 +4583,11 @@ void vulkanDraw(void)
     uint32 swapchain_image_index = 0;
     VkResult acquire_result = vkAcquireNextImageKHR(vulkan_state.logical_device_handle, vulkan_state.swapchain_handle, UINT64_MAX, vulkan_state.image_available_semaphores[vulkan_state.current_frame], VK_NULL_HANDLE, &swapchain_image_index);
 
+    // profiling
+    uint32 pool_index = vulkan_state.timestamp_frame_index % 3;
+    VkQueryPool current_pool = vulkan_state.timestamp_query_pools[pool_index];
+    uint32 query_index = 0;
+
     switch (acquire_result)
     {
         case VK_SUCCESS: break;
@@ -4587,6 +4614,11 @@ void vulkanDraw(void)
     command_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     command_buffer_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
+
+    // profiling
+    vkCmdResetQueryPool(command_buffer, current_pool, 0, vulkan_state.timestamp_query_count);
+
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, current_pool, query_index++);
 
     // FFT TIME EVOLUTION DISPATCH
     {
@@ -4674,6 +4706,9 @@ void vulkanDraw(void)
             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
             VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
     }
+
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, current_pool, query_index++);
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, current_pool, query_index++);
 
     // upload paint texture if dirty
     if (vulkan_state.water_paint_texture && vulkan_state.water_paint_texture->dirty)
@@ -4875,6 +4910,9 @@ void vulkanDraw(void)
         vkCmdEndRenderPass(command_buffer);
     }
 
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, current_pool, query_index++);
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, current_pool, query_index++);
+
     // FULL SCENE PASS
 
     vkCmdBeginRenderPass(command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
@@ -4949,6 +4987,9 @@ void vulkanDraw(void)
 
     vkCmdEndRenderPass(command_buffer);
 
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, current_pool, query_index++);
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, current_pool, query_index++);
+
     // OUTLINE PASS
 
     imageBarrier(command_buffer, vulkan_state.depth_image,
@@ -5002,6 +5043,9 @@ void vulkanDraw(void)
     vkCmdDraw(command_buffer, 3, 1, 0, 0);
     vkCmdEndRenderPass(command_buffer);
 
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, current_pool, query_index++);
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, current_pool, query_index++);
+
     // COPY UNDERWATER SCENE TO scene_copy_image
 
     imageBarrier(command_buffer, vulkan_state.swapchain_images[swapchain_image_index],
@@ -5041,6 +5085,9 @@ void vulkanDraw(void)
         VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT);
+
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, current_pool, query_index++);
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, current_pool, query_index++);
 
     // WATER DEPTH PASS 
 
@@ -5092,6 +5139,9 @@ void vulkanDraw(void)
             vkCmdEndRenderPass(command_buffer);
         }
     }
+
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, current_pool, query_index++);
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, current_pool, query_index++);
 
     // WATER PASS
 
@@ -5149,6 +5199,9 @@ void vulkanDraw(void)
             vkCmdEndRenderPass(command_buffer);
         }
     }
+
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, current_pool, query_index++);
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, current_pool, query_index++);
 
     // OVERLAY PASS (editor outlines + lasers + sprites)
 
@@ -5421,6 +5474,12 @@ void vulkanDraw(void)
 
     vkCmdEndRenderPass(command_buffer);
 
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, current_pool, query_index++);
+
+    // profiling end
+    vulkan_state.timestamp_query_counts[pool_index] = query_index;
+    vulkan_state.timestamp_pool_valid[pool_index] = true;
+
     vkEndCommandBuffer(command_buffer);
 
     // SUBMIT
@@ -5469,6 +5528,29 @@ void vulkanDraw(void)
     }
 
     vulkan_state.current_frame = (vulkan_state.current_frame + 1) % vulkan_state.frames_in_flight;
+
+    // profiling read out TODO: bad
+    uint32 read_pool_index = (vulkan_state.timestamp_frame_index + 1) % 3;
+    if (vulkan_state.timestamp_pool_valid[read_pool_index])
+    {
+        uint32 count = vulkan_state.timestamp_query_counts[read_pool_index];
+        vkGetQueryPoolResults(vulkan_state.logical_device_handle, vulkan_state.timestamp_query_pools[read_pool_index], 0, count, sizeof(uint64) * count, vulkan_state.timestamp_results[read_pool_index], sizeof(uint64), VK_QUERY_RESULT_64_BIT);
+
+        uint64* t = vulkan_state.timestamp_results[read_pool_index];
+        const char* region_names[] = 
+        {
+            "fft", "reflection", "scene", "outline", "scene copy",
+            "water depth", "water", "overlay"
+        };
+        for (uint32 i = 0; i + 1 < count; i += 2)
+        {
+            double ns = (double)(t[i+1] - t[i]) * vulkan_state.timestamp_period;
+            double ms = ns / 1e6;
+            printf("%s: %.3f ms\n", region_names[i/2], ms);
+        }
+    }
+
+    vulkan_state.timestamp_frame_index++;
 }
 
 void vulkanResize(uint32 width, uint32 height)
