@@ -1,7 +1,7 @@
 #version 450
 
 layout(set = 0, binding = 0) uniform sampler2D input_texture;
-layout(set = 1, binding = 0) uniform sampler2D water_displacement_texture;
+layout(set = 1, binding = 0) uniform sampler2D water_texture;
 
 layout(location = 0) in vec2 uv;
 layout(location = 1) in vec3 normal;
@@ -26,9 +26,9 @@ void main()
 {
     // discard if relevant
     vec2 displacement_uv = frag_world_pos.xz / pc.tile_length;
-    float wave_displacement = texture(water_displacement_texture, displacement_uv).r;
+    float wave_displacement = texture(water_texture, displacement_uv).w;
     float water_surface_y = pc.water_plane_y - wave_displacement;
-    if (frag_world_pos.y < water_surface_y) discard;
+    if (frag_world_pos.y < water_surface_y - 0.01) discard; // source of 0.01 offset is unclear... barely noticeable if not at super slow speed, right at water surface
 
     // basic shader
     vec4 tex = texture(input_texture, uv);

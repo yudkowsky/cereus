@@ -171,6 +171,7 @@ FFTPassPushConstants;
 typedef struct
 {
     int32 texture_size;
+    float tile_length;
 }
 FFTFinalizePushConstants;
 
@@ -2909,7 +2910,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         image_ci.extent.depth = 1;
         image_ci.mipLevels = 1;
         image_ci.arrayLayers = 1;
-        image_ci.format = VK_FORMAT_R32_SFLOAT;
+        image_ci.format = VK_FORMAT_R16G16B16A16_SFLOAT;
         image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
         image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         image_ci.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -2933,7 +2934,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         view_ci.image = vulkan_state.displacement_image;
         view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view_ci.format = VK_FORMAT_R32_SFLOAT;
+        view_ci.format = VK_FORMAT_R16G16B16A16_SFLOAT;
         view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         view_ci.subresourceRange.baseMipLevel = 0;
         view_ci.subresourceRange.levelCount = 1;
@@ -4696,6 +4697,7 @@ void vulkanDraw(void)
         
         FFTFinalizePushConstants pc = {0};
         pc.texture_size = FFT_SIZE;
+        pc.tile_length = water_tile_length;
         
         vkCmdPushConstants(command_buffer, vulkan_state.fft_finalize_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(FFTFinalizePushConstants), &pc);
         

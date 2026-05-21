@@ -1,13 +1,13 @@
 #version 450
-
 layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
 
-layout(set = 0, binding = 0, rg32f) uniform readonly  image2D fft_buffer_a_image; // IFFT output
-layout(set = 1, binding = 0, r32f)  uniform writeonly image2D displacement_image; // heightfield
+layout(set = 0, binding = 0, rg32f)   uniform readonly  image2D fft_buffer_a_image;
+layout(set = 1, binding = 0, rgba16f) uniform writeonly image2D water_image; // normal rgb, height a
 
 layout(push_constant) uniform PushConstants
 {
     int texture_size;
+    float tile_length;
 }
 pc;
 
@@ -15,11 +15,27 @@ void main()
 {
     ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
     if (texel.x >= pc.texture_size || texel.y >= pc.texture_size) return;
-    
-    float real_part = imageLoad(fft_buffer_a_image, texel).x;
-    
-    float N = float(pc.texture_size);
-    float height = real_part;
-    
-    imageStore(displacement_image, texel, vec4(height, 0.0, 0.0, 0.0));
+
+    int N = pc.texture_size;
+
+    // wrap around sampling
+    ivec2 texel_left  = ivec2((texel.x - 1 + N) % N, texel.y);
+    ivec2 texel_right = ivec2((texel.x + 1) % N,     texel.y);
+    ivec2 texel_down  = ivec2(texel.x, (texel.y - 1 + N) % N);
+    ivec2 texel_up    = ivec2(texel.x, (texel.y + 1) % N);
+
+    float height        = imageLoad(fft_buffer_a_image, texel).x;
+    float height_left   = imageLoad(fft_buffer_a_image, texel_left).x;
+    float height_right  = imageLoad(fft_buffer_a_image, texel_right).x;
+    float height_down   = imageLoad(fft_buffer_a_image, texel_down).x;
+    float height_up     = imageLoad(fft_buffer_a_image, texel_up).x;
+
+    float texel_world_size = pc.tile_length / float(N);
+
+    float dhdx = (height_right - height_left) / (2.0 * texel_world_size);
+    float dhdz = (height_up    - height_down) / (2.0 * texel_world_size);
+
+    vec3 normal = normalize(vec3(-dhdx, 1.0, -dhdz));
+
+    imageStore(water_image, texel, vec4(normal, height));
 }

@@ -3,7 +3,6 @@
 #include "edge-detect.glsl"
 
 layout(location = 0) in vec3 frag_world_pos;
-layout(location = 1) in vec3 frag_normal;
 
 layout(location = 0) out vec4 out_color;
 
@@ -11,6 +10,7 @@ layout(set = 0, binding = 0) uniform sampler2D scene_texture;
 layout(set = 1, binding = 0) uniform sampler2D depth_texture;
 layout(set = 2, binding = 0) uniform sampler2D water_depth_texture;
 layout(set = 3, binding = 0) uniform sampler2D paint_texture;
+layout(set = 4, binding = 0) uniform sampler2D water_texture;
 layout(set = 5, binding = 0) uniform sampler2D reflection_texture;
 
 layout(push_constant) uniform PushConstants 
@@ -21,6 +21,7 @@ layout(push_constant) uniform PushConstants
     float time;
     float focal_length;
     float water_base_y;
+    float tile_length;
     vec3 camera_position;
 }
 pc;
@@ -39,7 +40,7 @@ const float tint_max = 0.9;
 
 // outlines
 const float outline_radius_px = 2.0;
-const float max_depth_difference = 0.1;
+const float max_depth_difference = 0.02;
 
 // push grid lines by normal
 const float grid_push_by_normal = 0.5;
@@ -90,7 +91,10 @@ void main()
     float effective_opacity = grid_opacity * paint_value;
 
     // move around by normals
-    vec2 normal_push = frag_normal.xz * grid_push_by_normal;
+    vec2 fft_uv = frag_world_pos.xz / pc.tile_length;
+    vec3 normal = normalize(texture(water_texture, fft_uv).xyz);
+
+    vec2 normal_push = normal.xz * grid_push_by_normal;
     vec2 pushed_xz = frag_world_pos.xz + normal_push;
     vec2 grid_pos = pushed_xz - 0.5;
 
@@ -106,7 +110,6 @@ void main()
 
     // reflection based on fresnel strength
     vec3 view_dir = normalize(pc.camera_position.xyz - frag_world_pos);
-    vec3 normal = normalize(frag_normal);
     float cos_theta = max(dot(view_dir, normal), 0.0);
     float fresnel = min_reflection + (1.0 - min_reflection) * pow(1.0 - cos_theta, fresnel_exponent);
 
@@ -132,23 +135,32 @@ void main()
 
     // waterline detection
     bool this_is_outline = false;
-    for (int offset_index = 0; offset_index < 8; offset_index++) 
+    float center_water_depth = texture(water_depth_texture, screen_uv).r;
+    float center_scene_depth = texture(depth_texture, screen_uv).r;
+    float center_water_lin = linearizeDepth(center_water_depth);
+    float center_scene_lin = linearizeDepth(center_scene_depth);
+    float depth_gap = center_scene_lin - center_water_lin;
+
+    if (depth_gap < max_depth_difference) // only do expensive checking if water depth is low enough
     {
-        vec2 sample_uv = screen_uv + offsets[offset_index] * outline_radius_px * texel;
-
-        float scene_raw_depth = texture(depth_texture, sample_uv).r;
-        float water_raw_depth = texture(water_depth_texture, sample_uv).r;
-
-        if (scene_raw_depth >= 1.0) continue;
-        if (water_raw_depth >= 1.0) continue;
-    
-        float scene_linear_depth = linearizeDepth(scene_raw_depth);
-        float water_linear_depth = linearizeDepth(water_raw_depth);
-
-        if (scene_linear_depth < water_linear_depth && water_linear_depth - scene_linear_depth < max_depth_difference)
+        for (int offset_index = 0; offset_index < 8; offset_index++) 
         {
-            this_is_outline = true;
-            break;
+            vec2 sample_uv = screen_uv + offsets[offset_index] * outline_radius_px * texel;
+
+            float scene_raw_depth = texture(depth_texture, sample_uv).r;
+            float water_raw_depth = texture(water_depth_texture, sample_uv).r;
+
+            if (scene_raw_depth >= 1.0) continue;
+            if (water_raw_depth >= 1.0) continue;
+        
+            float scene_linear_depth = linearizeDepth(scene_raw_depth);
+            float water_linear_depth = linearizeDepth(water_raw_depth);
+
+            if (scene_linear_depth < water_linear_depth && water_linear_depth - scene_linear_depth < max_depth_difference)
+            {
+                this_is_outline = true;
+                break;
+            }
         }
     }
 
