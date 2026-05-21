@@ -352,11 +352,14 @@ typedef struct VulkanState
     VkPipeline editor_outline_pipeline;
     VkPipelineLayout editor_outline_pipeline_layout;
 
+    VkPipeline laser_reflection_pipeline;
+    VkPipelineLayout laser_reflection_pipeline_layout;
+
+    VkPipeline laser_pipeline;
+    VkPipelineLayout laser_pipeline_layout;
+
     VkPipeline oit_resolve_pipeline;
     VkPipelineLayout oit_resolve_pipeline_layout;
-
-    VkPipeline oit_laser_pipeline;
-    VkPipelineLayout oit_laser_pipeline_layout;
 
     VkPipeline sprite_pipeline;
     VkPipelineLayout sprite_pipeline_layout;
@@ -818,11 +821,11 @@ void memoryBarrier(VkCommandBuffer command_buffer,
 
 bool readEntireFile(char* path, void** out_data, size_t* out_size)
 {
-	FILE* file = fopen(path, "rb"); // read binary
+	FILE* file = fopen(path, "rb");
     if (!file) return false;
-    fseek(file, 0, SEEK_END); // move stream's file position to 0 bytes from the end (i.e. just past the last byte)
-   	long end_position = ftell(file); // return current file position, i.e. size of the file in bytes
-    fseek(file, 0, SEEK_SET); // seeks back to the start, so the file can be read from byte 0
+    fseek(file, 0, SEEK_END);
+   	long end_position = ftell(file);
+    fseek(file, 0, SEEK_SET);
 	size_t file_size_bytes = (size_t)end_position;
 	void* file_bytes = malloc(file_size_bytes);
 	if (!file_bytes)
@@ -852,14 +855,8 @@ int32 spriteIndexInAtlas(SpriteId id, AssetType type)
 {
     if (type == SPRITE_2D)
     {
-        if (spriteIsFont(id))
-        {
-            return (int32)id - (int32)SPRITE_2D_FONT_SPACE;
-        }
-        else
-        {
-            return (int32)id;
-        }
+        if (spriteIsFont(id)) return (int32)id - (int32)SPRITE_2D_FONT_SPACE;
+        else return (int32)id;
     }
     else
     {
@@ -916,7 +913,7 @@ int32 loadAsset(char* path)
     uint8* pixels = (uint8*)stbi_load(path, &width, &height, &channels, STBI_rgb_alpha);
     if (!pixels) return -1;
 
-    VkDeviceSize image_size_bytes = width * height * 4; // 4 bytes per pixel
+    VkDeviceSize image_size_bytes = width * height * 4;
     VkBuffer staging_buffer;
     VkDeviceMemory staging_buffer_memory;
 
@@ -2939,8 +2936,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkShaderModule water_depth_frag_smh = {0};
     VkShaderModule water_vert_smh = {0};
     VkShaderModule water_frag_smh = {0};
-    VkShaderModule oit_laser_vert_smh = {0};
-    VkShaderModule oit_laser_frag_smh = {0};
+    VkShaderModule laser_vert_smh = {0};
+    VkShaderModule laser_frag_smh = {0};
+    VkShaderModule laser_reflection_frag_smh = {0};
     VkShaderModule oit_resolve_vert_smh = {0};
     VkShaderModule oit_resolve_frag_smh = {0};
     VkShaderModule fft_spectrum_smh = {0};
@@ -2948,37 +2946,39 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkShaderModule fft_pass_smh = {0};
     VkShaderModule fft_finalize_smh = {0};
 
-    VkPipelineShaderStageCreateInfo cube_vert_stage_ci 	 	       = loadShaderStage("data/shaders/spirv/cube.vert.spv", 	  	  	 &cube_vert_smh, 	  		 VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo cube_frag_stage_ci 	 	       = loadShaderStage("data/shaders/spirv/cube.frag.spv", 	  	  	 &cube_frag_smh, 	  		 VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo outline_select_vert_stage_ci   = loadShaderStage("data/shaders/spirv/outline-select.vert.spv", 	 &outline_select_vert_smh, 	 VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo outline_select_frag_stage_ci   = loadShaderStage("data/shaders/spirv/outline-select.frag.spv", 	 &outline_select_frag_smh, 	 VK_SHADER_STAGE_FRAGMENT_BIT);
-	VkPipelineShaderStageCreateInfo sprite_vert_stage_ci  	       = loadShaderStage("data/shaders/spirv/sprite.vert.spv",  	  	 &sprite_vert_smh,  		 VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo sprite_frag_stage_ci  	       = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  	 &sprite_frag_smh,  		 VK_SHADER_STAGE_FRAGMENT_BIT);
-	VkPipelineShaderStageCreateInfo model_vert_stage_ci 	 	   = loadShaderStage("data/shaders/spirv/model.vert.spv",   	  	 &model_vert_smh,   		 VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo model_frag_stage_ci 	 	   = loadShaderStage("data/shaders/spirv/model.frag.spv",   	  	 &model_frag_smh,   		 VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo outline_post_vert_stage_ci     = loadShaderStage("data/shaders/spirv/outline-post.vert.spv",     &outline_post_vert_smh,     VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo outline_post_frag_stage_ci     = loadShaderStage("data/shaders/spirv/outline-post.frag.spv",     &outline_post_frag_smh,     VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo water_depth_frag_stage_ci      = loadShaderStage("data/shaders/spirv/water-depth.frag.spv",      &water_depth_frag_smh,      VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo water_vert_stage_ci            = loadShaderStage("data/shaders/spirv/water.vert.spv",            &water_vert_smh,            VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo water_frag_stage_ci            = loadShaderStage("data/shaders/spirv/water.frag.spv",            &water_frag_smh,            VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo oit_laser_vert_stage_ci        = loadShaderStage("data/shaders/spirv/oit-laser.vert.spv",        &oit_laser_vert_smh,        VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo oit_laser_frag_stage_ci        = loadShaderStage("data/shaders/spirv/oit-laser.frag.spv",        &oit_laser_frag_smh,        VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo oit_resolve_vert_stage_ci      = loadShaderStage("data/shaders/spirv/oit-resolve.vert.spv",      &oit_resolve_vert_smh,      VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo oit_resolve_frag_stage_ci      = loadShaderStage("data/shaders/spirv/oit-resolve.frag.spv",      &oit_resolve_frag_smh,      VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo fft_spectrum_stage_ci          = loadShaderStage("data/shaders/spirv/fft-spectrum.comp.spv",     &fft_spectrum_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
-    VkPipelineShaderStageCreateInfo fft_evolved_stage_ci           = loadShaderStage("data/shaders/spirv/fft-evolved.comp.spv",      &fft_evolved_smh,           VK_SHADER_STAGE_COMPUTE_BIT);
-    VkPipelineShaderStageCreateInfo fft_pass_stage_ci              = loadShaderStage("data/shaders/spirv/fft-pass.comp.spv",         &fft_pass_smh,              VK_SHADER_STAGE_COMPUTE_BIT);
-    VkPipelineShaderStageCreateInfo fft_finalize_stage_ci          = loadShaderStage("data/shaders/spirv/fft-finalize.comp.spv",     &fft_finalize_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo cube_vert_stage_ci 	 	        = loadShaderStage("data/shaders/spirv/cube.vert.spv", 	  	  	    &cube_vert_smh, 	  	    VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo cube_frag_stage_ci 	 	        = loadShaderStage("data/shaders/spirv/cube.frag.spv", 	  	  	    &cube_frag_smh, 	  		VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo outline_select_vert_stage_ci    = loadShaderStage("data/shaders/spirv/outline-select.vert.spv",     &outline_select_vert_smh, 	VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo outline_select_frag_stage_ci    = loadShaderStage("data/shaders/spirv/outline-select.frag.spv",     &outline_select_frag_smh, 	VK_SHADER_STAGE_FRAGMENT_BIT);
+	VkPipelineShaderStageCreateInfo sprite_vert_stage_ci  	        = loadShaderStage("data/shaders/spirv/sprite.vert.spv",  	  	    &sprite_vert_smh,  		    VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo sprite_frag_stage_ci  	        = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  	    &sprite_frag_smh,  		    VK_SHADER_STAGE_FRAGMENT_BIT);
+	VkPipelineShaderStageCreateInfo model_vert_stage_ci 	 	    = loadShaderStage("data/shaders/spirv/model.vert.spv",   	  	    &model_vert_smh,   		    VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo model_frag_stage_ci 	 	    = loadShaderStage("data/shaders/spirv/model.frag.spv",   	  	    &model_frag_smh,   		    VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo outline_post_vert_stage_ci      = loadShaderStage("data/shaders/spirv/outline-post.vert.spv",       &outline_post_vert_smh,     VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo outline_post_frag_stage_ci      = loadShaderStage("data/shaders/spirv/outline-post.frag.spv",       &outline_post_frag_smh,     VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo water_depth_frag_stage_ci       = loadShaderStage("data/shaders/spirv/water-depth.frag.spv",        &water_depth_frag_smh,      VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo water_vert_stage_ci             = loadShaderStage("data/shaders/spirv/water.vert.spv",              &water_vert_smh,            VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo water_frag_stage_ci             = loadShaderStage("data/shaders/spirv/water.frag.spv",              &water_frag_smh,            VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo laser_vert_stage_ci             = loadShaderStage("data/shaders/spirv/laser.vert.spv",              &laser_vert_smh,            VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo laser_frag_stage_ci             = loadShaderStage("data/shaders/spirv/laser.frag.spv",              &laser_frag_smh,            VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo laser_reflection_frag_stage_ci  = loadShaderStage("data/shaders/spirv/laser-reflection.frag.spv",   &laser_reflection_frag_smh, VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo oit_resolve_vert_stage_ci       = loadShaderStage("data/shaders/spirv/oit-resolve.vert.spv",        &oit_resolve_vert_smh,      VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo oit_resolve_frag_stage_ci       = loadShaderStage("data/shaders/spirv/oit-resolve.frag.spv",        &oit_resolve_frag_smh,      VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo fft_spectrum_stage_ci           = loadShaderStage("data/shaders/spirv/fft-spectrum.comp.spv",       &fft_spectrum_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo fft_evolved_stage_ci            = loadShaderStage("data/shaders/spirv/fft-evolved.comp.spv",        &fft_evolved_smh,           VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo fft_pass_stage_ci               = loadShaderStage("data/shaders/spirv/fft-pass.comp.spv",           &fft_pass_smh,              VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo fft_finalize_stage_ci           = loadShaderStage("data/shaders/spirv/fft-finalize.comp.spv",       &fft_finalize_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
 
-    VkPipelineShaderStageCreateInfo cube_shader_stages[2]  	 	      = { cube_vert_stage_ci,    	      cube_frag_stage_ci }; 
-    VkPipelineShaderStageCreateInfo outline_select_shader_stages[2]   = { outline_select_vert_stage_ci,   outline_select_frag_stage_ci }; 
-    VkPipelineShaderStageCreateInfo sprite_shader_stages[2]  	      = { sprite_vert_stage_ci,  	      sprite_frag_stage_ci };
-   	VkPipelineShaderStageCreateInfo model_shader_stages[2]   	      = { model_vert_stage_ci,   	      model_frag_stage_ci };
-    VkPipelineShaderStageCreateInfo outline_post_shader_stages[2]     = { outline_post_vert_stage_ci,     outline_post_frag_stage_ci };
-    VkPipelineShaderStageCreateInfo water_depth_shader_stages[2]      = { water_vert_stage_ci,            water_depth_frag_stage_ci };
-    VkPipelineShaderStageCreateInfo water_shader_stages[2]            = { water_vert_stage_ci,            water_frag_stage_ci };
-    VkPipelineShaderStageCreateInfo oit_laser_shader_stages[2]        = { oit_laser_vert_stage_ci,        oit_laser_frag_stage_ci };
-    VkPipelineShaderStageCreateInfo oit_resolve_shader_stages[2]      = { oit_resolve_vert_stage_ci,      oit_resolve_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo cube_shader_stages[2]  	 	        = { cube_vert_stage_ci,    	        cube_frag_stage_ci }; 
+    VkPipelineShaderStageCreateInfo outline_select_shader_stages[2]     = { outline_select_vert_stage_ci,   outline_select_frag_stage_ci }; 
+    VkPipelineShaderStageCreateInfo sprite_shader_stages[2]  	        = { sprite_vert_stage_ci,  	        sprite_frag_stage_ci };
+   	VkPipelineShaderStageCreateInfo model_shader_stages[2]   	        = { model_vert_stage_ci,   	        model_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo outline_post_shader_stages[2]       = { outline_post_vert_stage_ci,     outline_post_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo water_depth_shader_stages[2]        = { water_vert_stage_ci,            water_depth_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo water_shader_stages[2]              = { water_vert_stage_ci,            water_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo laser_shader_stages[2]              = { laser_vert_stage_ci,            laser_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo laser_reflection_shader_stages[2]   = { laser_vert_stage_ci,            laser_reflection_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo oit_resolve_shader_stages[2]        = { oit_resolve_vert_stage_ci,      oit_resolve_frag_stage_ci };
 
     // vertex input
     // per-vertex data: used for individually drawn meshes (sprites, models (currently), lasers, etc.)
@@ -3684,9 +3684,26 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.editor_outline_pipeline_layout);
     }
 
+    // LASER REFLECTION PIPELINE LAYOUT
+    {
+        VkPushConstantRange push_constant_range = {0};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = (uint32)sizeof(LaserPushConstants);
+
+        VkPipelineLayoutCreateInfo layout_ci = {0};
+        layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layout_ci.setLayoutCount = 0;
+        layout_ci.pSetLayouts = 0;
+        layout_ci.pushConstantRangeCount = 1;
+        layout_ci.pPushConstantRanges = &push_constant_range;
+
+        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.laser_reflection_pipeline_layout);
+    }
+
     // OIT LASER WRITE PIPELINE LAYOUT
     {
-        VkDescriptorSetLayout oit_laser_set_layouts[3] = 
+        VkDescriptorSetLayout laser_set_layouts[3] = 
         {
             vulkan_state.storage_image_descriptor_set_layout,  // head image
             vulkan_state.ssbo_descriptor_set_layout,           // fragment pool
@@ -3701,11 +3718,11 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         VkPipelineLayoutCreateInfo layout_ci = {0};
         layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         layout_ci.setLayoutCount = 3;
-        layout_ci.pSetLayouts = oit_laser_set_layouts;
+        layout_ci.pSetLayouts = laser_set_layouts;
         layout_ci.pushConstantRangeCount = 1;
         layout_ci.pPushConstantRanges = &push_constant_range;
 
-        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.oit_laser_pipeline_layout);
+        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.laser_pipeline_layout);
     }
 
     // OIT RESOLVE PIPELINE LAYOUT
@@ -4071,7 +4088,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &post_graphics_pipeline_ci, 0, &vulkan_state.outline_post_pipeline);
     }
 
-    // define OIT laser write pipeline
+    // define laser pipeline
     {
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
@@ -4090,13 +4107,48 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         oit_blend_ci.attachmentCount = 1;
         oit_blend_ci.pAttachments = &oit_blend;
 
-        VkGraphicsPipelineCreateInfo oit_laser_ci = base_graphics_pipeline_creation_info;
-        oit_laser_ci.pStages = oit_laser_shader_stages;
-        oit_laser_ci.layout = vulkan_state.oit_laser_pipeline_layout;
-        oit_laser_ci.renderPass = vulkan_state.overlay_render_pass;
-        oit_laser_ci.pColorBlendState = &oit_blend_ci;
+        VkGraphicsPipelineCreateInfo laser_ci = base_graphics_pipeline_creation_info;
+        laser_ci.pStages = laser_shader_stages;
+        laser_ci.layout = vulkan_state.laser_pipeline_layout;
+        laser_ci.renderPass = vulkan_state.overlay_render_pass;
+        laser_ci.pColorBlendState = &oit_blend_ci;
 
-        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &oit_laser_ci, 0, &vulkan_state.oit_laser_pipeline);
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &laser_ci, 0, &vulkan_state.laser_pipeline);
+    }
+
+    // define laser reflection pipeline (alpha-blended, into reflection render pass)
+    {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
+        // standard alpha blending
+        color_blend_attachment_state.blendEnable = VK_TRUE;
+        color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
+        color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
+
+        VkPipelineColorBlendStateCreateInfo laser_reflection_blend_ci = {0};
+        laser_reflection_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        laser_reflection_blend_ci.attachmentCount = 1;
+        laser_reflection_blend_ci.pAttachments = &color_blend_attachment_state;
+
+        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
+        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
+        depth_stencil_state_creation_info.stencilTestEnable = VK_FALSE;
+
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
+        rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+        VkGraphicsPipelineCreateInfo laser_reflection_ci = base_graphics_pipeline_creation_info;
+        laser_reflection_ci.pStages = laser_reflection_shader_stages;
+        laser_reflection_ci.layout = vulkan_state.laser_reflection_pipeline_layout;
+        laser_reflection_ci.renderPass = vulkan_state.reflection_render_pass;
+        laser_reflection_ci.pColorBlendState = &laser_reflection_blend_ci;
+
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &laser_reflection_ci, 0, &vulkan_state.laser_reflection_pipeline);
     }
 
     // define OIT resolve pipeline
@@ -4875,6 +4927,74 @@ void vulkanDraw(void)
             }
         }
 
+        // lasers in reflection (alpha blended)
+        LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
+        if (laser_mesh->index_count > 0 && laser_instance_count > 0 && shader_mode != SHADER_MODE_OUTLINE_TEST)
+        {
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_reflection_pipeline);
+
+            VkDeviceSize laser_vb_offset = 0;
+            vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_vb_offset);
+            vkCmdBindIndexBuffer(command_buffer, laser_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+            float reflected_proj_view[16] = {0};
+            mat4Multiply(reflected_proj_view, projection_matrix, reflected_view_matrix);
+
+            for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
+            {
+                Laser* laser = &laser_instances[laser_index];
+
+                float width = 2.0f;
+                Vec3 laser_scale = { width, width, laser->length };
+
+                float model_matrix[16];
+                mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
+
+                LaserPushConstants laser_pc = {0};
+                memcpy(laser_pc.model, model_matrix, sizeof(laser_pc.model));
+
+                float intersection_matrix[16];
+                Vec3 unit_scale = { 1.0f, 1.0f, 1.0f };
+                mat4BuildTRS(intersection_matrix, laser->center, laser->rotation, unit_scale);
+                float inverse_intersection_matrix[16];
+                mat4Inverse(inverse_intersection_matrix, intersection_matrix);
+                memcpy(laser_pc.inverse_intersection, inverse_intersection_matrix, sizeof(inverse_intersection_matrix));
+
+                memcpy(laser_pc.proj_view_matrix, reflected_proj_view, sizeof(reflected_proj_view));
+
+                laser_pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 0.1f };
+
+                float* m = intersection_matrix;
+                Vec4 ws = laser->start_clip_plane;
+                laser_pc.start_clip_plane = (Vec4)
+                {
+                    m[0]*ws.x  + m[1]*ws.y  + m[2]*ws.z  + m[3]*ws.w,
+                    m[4]*ws.x  + m[5]*ws.y  + m[6]*ws.z  + m[7]*ws.w,
+                    m[8]*ws.x  + m[9]*ws.y  + m[10]*ws.z + m[11]*ws.w,
+                    m[12]*ws.x + m[13]*ws.y + m[14]*ws.z + m[15]*ws.w,
+                };
+
+                ws = laser->end_clip_plane;
+                laser_pc.end_clip_plane = (Vec4)
+                {
+                    m[0]*ws.x  + m[1]*ws.y  + m[2]*ws.z  + m[3]*ws.w,
+                    m[4]*ws.x  + m[5]*ws.y  + m[6]*ws.z  + m[7]*ws.w,
+                    m[8]*ws.x  + m[9]*ws.y  + m[10]*ws.z + m[11]*ws.w,
+                    m[12]*ws.x + m[13]*ws.y + m[14]*ws.z + m[15]*ws.w,
+                };
+
+                // reflected camera position for the ray-march math
+                Vec3 reflected_camera_position = vulkan_camera.coords;
+                reflected_camera_position.y = 2.0f * vulkan_state.water_plane_y - vulkan_camera.coords.y;
+                laser_pc.camera_position = reflected_camera_position;
+
+                laser_pc.half_length = (laser->length) * 0.5f;
+
+                vkCmdPushConstants(command_buffer, vulkan_state.laser_reflection_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &laser_pc);
+                vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
+            }
+        }
+
         vkCmdEndRenderPass(command_buffer);
     }
 
@@ -5096,7 +5216,7 @@ void vulkanDraw(void)
         }
     }
 
-    // WATER DISTORTION + TINT + OUTLINE PASS
+    // WATER PASS
 
     if (water_instance_count > 0)
     {
@@ -5255,11 +5375,11 @@ void vulkanDraw(void)
         vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
     }
 
-    // OIT laser pass
+    // LASER PASS
     LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
     if (laser_mesh->index_count > 0 && laser_instance_count > 0 && shader_mode != SHADER_MODE_OUTLINE_TEST)
     {
-        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.oit_laser_pipeline);
+        vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_pipeline);
 
         VkDescriptorSet oit_sets[3] = 
         {
@@ -5267,7 +5387,7 @@ void vulkanDraw(void)
             vulkan_state.oit_fragment_pool_descriptor_set,
             vulkan_state.oit_counter_descriptor_set,
         };
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.oit_laser_pipeline_layout, 0, 3, oit_sets, 0, 0);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_pipeline_layout, 0, 3, oit_sets, 0, 0);
 
         VkDeviceSize laser_vb_offset = 0;
         vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_vb_offset);
@@ -5322,7 +5442,7 @@ void vulkanDraw(void)
             laser_pc.camera_position = vulkan_camera.coords;
             laser_pc.half_length = (laser->length) * 0.5f;
 
-            vkCmdPushConstants(command_buffer, vulkan_state.oit_laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &laser_pc);
+            vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &laser_pc);
             vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
         }
     }

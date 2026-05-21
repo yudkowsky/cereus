@@ -8,8 +8,9 @@ glslc cube.vert -g -o ..\spirv\cube.vert.spv
 glslc cube.frag -g -o ..\spirv\cube.frag.spv 
 glslc outline-select.vert -g -o ..\spirv\outline-select.vert.spv
 glslc outline-select.frag -g -o ..\spirv\outline-select.frag.spv
-glslc oit-laser.vert -g -o ..\spirv\oit-laser.vert.spv
-glslc oit-laser.frag -g -o ..\spirv\oit-laser.frag.spv 
+glslc laser.vert -g -o ..\spirv\laser.vert.spv
+glslc laser.frag -g -o ..\spirv\laser.frag.spv 
+glslc laser-reflection.frag -g -o ..\spirv\laser-reflection.frag.spv
 glslc oit-resolve.vert -g -o ..\spirv\oit-resolve.vert.spv
 glslc oit-resolve.frag -g -o ..\spirv\oit-resolve.frag.spv
 glslc sprite.vert -g -o ..\spirv\sprite.vert.spv
