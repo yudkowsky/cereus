@@ -2938,7 +2938,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkShaderModule water_frag_smh = {0};
     VkShaderModule laser_vert_smh = {0};
     VkShaderModule laser_frag_smh = {0};
-    VkShaderModule laser_reflection_frag_smh = {0};
     VkShaderModule oit_resolve_vert_smh = {0};
     VkShaderModule oit_resolve_frag_smh = {0};
     VkShaderModule fft_spectrum_smh = {0};
@@ -2961,7 +2960,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkPipelineShaderStageCreateInfo water_frag_stage_ci             = loadShaderStage("data/shaders/spirv/water.frag.spv",              &water_frag_smh,            VK_SHADER_STAGE_FRAGMENT_BIT);
     VkPipelineShaderStageCreateInfo laser_vert_stage_ci             = loadShaderStage("data/shaders/spirv/laser.vert.spv",              &laser_vert_smh,            VK_SHADER_STAGE_VERTEX_BIT);
     VkPipelineShaderStageCreateInfo laser_frag_stage_ci             = loadShaderStage("data/shaders/spirv/laser.frag.spv",              &laser_frag_smh,            VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo laser_reflection_frag_stage_ci  = loadShaderStage("data/shaders/spirv/laser-reflection.frag.spv",   &laser_reflection_frag_smh, VK_SHADER_STAGE_FRAGMENT_BIT);
     VkPipelineShaderStageCreateInfo oit_resolve_vert_stage_ci       = loadShaderStage("data/shaders/spirv/oit-resolve.vert.spv",        &oit_resolve_vert_smh,      VK_SHADER_STAGE_VERTEX_BIT);
     VkPipelineShaderStageCreateInfo oit_resolve_frag_stage_ci       = loadShaderStage("data/shaders/spirv/oit-resolve.frag.spv",        &oit_resolve_frag_smh,      VK_SHADER_STAGE_FRAGMENT_BIT);
     VkPipelineShaderStageCreateInfo fft_spectrum_stage_ci           = loadShaderStage("data/shaders/spirv/fft-spectrum.comp.spv",       &fft_spectrum_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
@@ -2977,7 +2975,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkPipelineShaderStageCreateInfo water_depth_shader_stages[2]        = { water_vert_stage_ci,            water_depth_frag_stage_ci };
     VkPipelineShaderStageCreateInfo water_shader_stages[2]              = { water_vert_stage_ci,            water_frag_stage_ci };
     VkPipelineShaderStageCreateInfo laser_shader_stages[2]              = { laser_vert_stage_ci,            laser_frag_stage_ci };
-    VkPipelineShaderStageCreateInfo laser_reflection_shader_stages[2]   = { laser_vert_stage_ci,            laser_reflection_frag_stage_ci };
     VkPipelineShaderStageCreateInfo oit_resolve_shader_stages[2]        = { oit_resolve_vert_stage_ci,      oit_resolve_frag_stage_ci };
 
     // vertex input
@@ -3684,23 +3681,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.editor_outline_pipeline_layout);
     }
 
-    // LASER REFLECTION PIPELINE LAYOUT
-    {
-        VkPushConstantRange push_constant_range = {0};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        push_constant_range.offset = 0;
-        push_constant_range.size = (uint32)sizeof(LaserPushConstants);
-
-        VkPipelineLayoutCreateInfo layout_ci = {0};
-        layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layout_ci.setLayoutCount = 0;
-        layout_ci.pSetLayouts = 0;
-        layout_ci.pushConstantRangeCount = 1;
-        layout_ci.pPushConstantRanges = &push_constant_range;
-
-        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.laser_reflection_pipeline_layout);
-    }
-
     // OIT LASER WRITE PIPELINE LAYOUT
     {
         VkDescriptorSetLayout laser_set_layouts[3] = 
@@ -4114,41 +4094,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         laser_ci.pColorBlendState = &oit_blend_ci;
 
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &laser_ci, 0, &vulkan_state.laser_pipeline);
-    }
-
-    // define laser reflection pipeline (alpha-blended, into reflection render pass)
-    {
-        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
-
-        // standard alpha blending
-        color_blend_attachment_state.blendEnable = VK_TRUE;
-        color_blend_attachment_state.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-        color_blend_attachment_state.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        color_blend_attachment_state.colorBlendOp = VK_BLEND_OP_ADD;
-        color_blend_attachment_state.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment_state.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-        color_blend_attachment_state.alphaBlendOp = VK_BLEND_OP_ADD;
-
-        VkPipelineColorBlendStateCreateInfo laser_reflection_blend_ci = {0};
-        laser_reflection_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-        laser_reflection_blend_ci.attachmentCount = 1;
-        laser_reflection_blend_ci.pAttachments = &color_blend_attachment_state;
-
-        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
-        depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
-        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
-        depth_stencil_state_creation_info.stencilTestEnable = VK_FALSE;
-
-        rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
-        rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-
-        VkGraphicsPipelineCreateInfo laser_reflection_ci = base_graphics_pipeline_creation_info;
-        laser_reflection_ci.pStages = laser_reflection_shader_stages;
-        laser_reflection_ci.layout = vulkan_state.laser_reflection_pipeline_layout;
-        laser_reflection_ci.renderPass = vulkan_state.reflection_render_pass;
-        laser_reflection_ci.pColorBlendState = &laser_reflection_blend_ci;
-
-        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &laser_reflection_ci, 0, &vulkan_state.laser_reflection_pipeline);
     }
 
     // define OIT resolve pipeline
@@ -4924,74 +4869,6 @@ void vulkanDraw(void)
                 vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
                 vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &model_pc);
                 vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
-            }
-        }
-
-        // lasers in reflection (alpha blended)
-        LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
-        if (laser_mesh->index_count > 0 && laser_instance_count > 0 && shader_mode != SHADER_MODE_OUTLINE_TEST)
-        {
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_reflection_pipeline);
-
-            VkDeviceSize laser_vb_offset = 0;
-            vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_vb_offset);
-            vkCmdBindIndexBuffer(command_buffer, laser_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-
-            float reflected_proj_view[16] = {0};
-            mat4Multiply(reflected_proj_view, projection_matrix, reflected_view_matrix);
-
-            for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
-            {
-                Laser* laser = &laser_instances[laser_index];
-
-                float width = 2.0f;
-                Vec3 laser_scale = { width, width, laser->length };
-
-                float model_matrix[16];
-                mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
-
-                LaserPushConstants laser_pc = {0};
-                memcpy(laser_pc.model, model_matrix, sizeof(laser_pc.model));
-
-                float intersection_matrix[16];
-                Vec3 unit_scale = { 1.0f, 1.0f, 1.0f };
-                mat4BuildTRS(intersection_matrix, laser->center, laser->rotation, unit_scale);
-                float inverse_intersection_matrix[16];
-                mat4Inverse(inverse_intersection_matrix, intersection_matrix);
-                memcpy(laser_pc.inverse_intersection, inverse_intersection_matrix, sizeof(inverse_intersection_matrix));
-
-                memcpy(laser_pc.proj_view_matrix, reflected_proj_view, sizeof(reflected_proj_view));
-
-                laser_pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 0.1f };
-
-                float* m = intersection_matrix;
-                Vec4 ws = laser->start_clip_plane;
-                laser_pc.start_clip_plane = (Vec4)
-                {
-                    m[0]*ws.x  + m[1]*ws.y  + m[2]*ws.z  + m[3]*ws.w,
-                    m[4]*ws.x  + m[5]*ws.y  + m[6]*ws.z  + m[7]*ws.w,
-                    m[8]*ws.x  + m[9]*ws.y  + m[10]*ws.z + m[11]*ws.w,
-                    m[12]*ws.x + m[13]*ws.y + m[14]*ws.z + m[15]*ws.w,
-                };
-
-                ws = laser->end_clip_plane;
-                laser_pc.end_clip_plane = (Vec4)
-                {
-                    m[0]*ws.x  + m[1]*ws.y  + m[2]*ws.z  + m[3]*ws.w,
-                    m[4]*ws.x  + m[5]*ws.y  + m[6]*ws.z  + m[7]*ws.w,
-                    m[8]*ws.x  + m[9]*ws.y  + m[10]*ws.z + m[11]*ws.w,
-                    m[12]*ws.x + m[13]*ws.y + m[14]*ws.z + m[15]*ws.w,
-                };
-
-                // reflected camera position for the ray-march math
-                Vec3 reflected_camera_position = vulkan_camera.coords;
-                reflected_camera_position.y = 2.0f * vulkan_state.water_plane_y - vulkan_camera.coords.y;
-                laser_pc.camera_position = reflected_camera_position;
-
-                laser_pc.half_length = (laser->length) * 0.5f;
-
-                vkCmdPushConstants(command_buffer, vulkan_state.laser_reflection_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &laser_pc);
-                vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
             }
         }
 
