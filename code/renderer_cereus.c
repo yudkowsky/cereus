@@ -780,12 +780,11 @@ uint32 findMemoryType(uint32 type_bits, VkMemoryPropertyFlags property_flags)
     return UINT32_MAX;
 }
 
-void imageBarrier(VkCommandBuffer command_buffer,
-                  VkImage image,
-                  VkImageLayout old_layout, VkImageLayout new_layout,
-                  VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage,
-                  VkAccessFlags src_access, VkAccessFlags dst_access,
-                  VkImageAspectFlags aspect_mask)
+void imageBarrier(VkCommandBuffer command_buffer, VkImage image,
+    VkImageLayout old_layout, VkImageLayout new_layout,
+    VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage,
+    VkAccessFlags src_access, VkAccessFlags dst_access,
+    VkImageAspectFlags aspect_mask)
 {
     VkImageMemoryBarrier barrier = {0};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -803,6 +802,18 @@ void imageBarrier(VkCommandBuffer command_buffer,
     barrier.dstAccessMask = dst_access;
 
     vkCmdPipelineBarrier(command_buffer, src_stage, dst_stage, 0, 0, 0, 0, 0, 1, &barrier);
+}
+
+void memoryBarrier(VkCommandBuffer command_buffer,
+    VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage,
+    VkAccessFlags src_access, VkAccessFlags dst_access)
+{
+    VkMemoryBarrier barrier = {0};
+    barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    barrier.srcAccessMask = src_access;
+    barrier.dstAccessMask = dst_access;
+
+    vkCmdPipelineBarrier(command_buffer, src_stage, dst_stage, 0, 1, &barrier, 0, 0, 0, 0);
 }
 
 bool readEntireFile(char* path, void** out_data, size_t* out_size)
@@ -982,12 +993,11 @@ int32 loadAsset(char* path)
     vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
 
     // transition image to transfer
-    imageBarrier(command_buffer,
-                 texture_image,
-                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                 0, VK_ACCESS_TRANSFER_WRITE_BIT,
-                 VK_IMAGE_ASPECT_COLOR_BIT);
+    imageBarrier(command_buffer, texture_image,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, VK_ACCESS_TRANSFER_WRITE_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT);
 
     // copy from staging buffer to image
     VkBufferImageCopy copy_region = {0};
@@ -1003,12 +1013,11 @@ int32 loadAsset(char* path)
 
     vkCmdCopyBufferToImage(command_buffer, staging_buffer, texture_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
 
-    imageBarrier(command_buffer,
-                 texture_image,
-                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                 VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                 VK_IMAGE_ASPECT_COLOR_BIT);
+    imageBarrier(command_buffer, texture_image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT);
 
     vkEndCommandBuffer(command_buffer);
 
@@ -4355,31 +4364,21 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         cb_begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(command_buffer, &cb_begin);
 
-        VkImageMemoryBarrier to_general[4] = {0};
-        to_general[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        to_general[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        to_general[0].newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        to_general[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        to_general[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        to_general[0].image = vulkan_state.h0_image;
-        to_general[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        to_general[0].subresourceRange.baseMipLevel = 0;
-        to_general[0].subresourceRange.levelCount = 1;
-        to_general[0].subresourceRange.baseArrayLayer = 0;
-        to_general[0].subresourceRange.layerCount = 1;
-        to_general[0].srcAccessMask = 0;
-        to_general[0].dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-
-        to_general[1] = to_general[0];
-        to_general[1].image = vulkan_state.fft_buffer_a_image;
-
-        to_general[2] = to_general[0];
-        to_general[2].image = vulkan_state.fft_buffer_b_image;
-
-        to_general[3] = to_general[0];
-        to_general[3].image = vulkan_state.displacement_image;
-
-        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0, 4, to_general);
+        VkImage images_to_transition[4] =
+        {
+            vulkan_state.h0_image,
+            vulkan_state.fft_buffer_a_image,
+            vulkan_state.fft_buffer_b_image,
+            vulkan_state.displacement_image,
+        };
+        for (int image_index = 0; image_index < 4; image_index++)
+        {
+            imageBarrier(command_buffer, images_to_transition[image_index],
+                VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+                VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                0, VK_ACCESS_SHADER_WRITE_BIT,
+                VK_IMAGE_ASPECT_COLOR_BIT);
+        }
 
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.fft_spectrum_pipeline);
         vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, vulkan_state.fft_spectrum_pipeline_layout, 0, 1, &vulkan_state.h0_descriptor_set, 0, 0);
@@ -4612,12 +4611,9 @@ void vulkanDraw(void)
         vkCmdPushConstants(command_buffer, vulkan_state.fft_evolved_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(FFTEvolvedPushConstants), &pc);
         vkCmdDispatch(command_buffer, FFT_SIZE / 16, FFT_SIZE / 16, 1);
 
-        VkMemoryBarrier evolved_barrier = {0};
-        evolved_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        evolved_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        evolved_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &evolved_barrier, 0, 0, 0, 0);
+        memoryBarrier(command_buffer, 
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
     }
 
     // FFT PASSES (8 horizontal, then 8 vertical)
@@ -4651,15 +4647,9 @@ void vulkanDraw(void)
 
             vkCmdDispatch(command_buffer, (FFT_SIZE / 2) / 16, FFT_SIZE / 16, 1);
 
-            // barrier so next pass sees the writes
-            VkMemoryBarrier pass_barrier = {0};
-            pass_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-            pass_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            pass_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-
-            vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &pass_barrier, 0, 0, 0, 0);
-
-            // ping pong
+            memoryBarrier(command_buffer,
+                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
             source_is_a = !source_is_a;
         }
     }
@@ -4683,13 +4673,9 @@ void vulkanDraw(void)
         // dispatch one thread per texel
         vkCmdDispatch(command_buffer, FFT_SIZE / 16, FFT_SIZE / 16, 1);
         
-        // make displacement writes visible to subsequent vertex shader reads
-        VkMemoryBarrier finalize_barrier = {0};
-        finalize_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        finalize_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        finalize_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        
-        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT, 0, 1, &finalize_barrier, 0, 0, 0, 0);
+        memoryBarrier(command_buffer,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT,
+            VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
     }
 
     // upload paint texture if dirty
@@ -4698,12 +4684,11 @@ void vulkanDraw(void)
         // TODO: slow... will want to either expose this mapped memory to game, and handle like that, or only write affected pixels on any given frame
         memcpy(vulkan_state.paint_staging_mapped, vulkan_state.water_paint_texture->values, sizeof(Vec4) * WATER_PAINT_SIDE * WATER_PAINT_SIDE);
 
-        imageBarrier(command_buffer,
-                     vulkan_state.paint_image,
-                     vulkan_state.paint_image_first_upload ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                     vulkan_state.paint_image_first_upload ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                     vulkan_state.paint_image_first_upload ? 0 : VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
-                     VK_IMAGE_ASPECT_COLOR_BIT);
+        imageBarrier(command_buffer, vulkan_state.paint_image,
+            vulkan_state.paint_image_first_upload ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            vulkan_state.paint_image_first_upload ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            vulkan_state.paint_image_first_upload ? 0 : VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT);
 
         // copy staging to image
         VkBufferImageCopy paint_copy = {0};
@@ -4719,12 +4704,11 @@ void vulkanDraw(void)
 
         vkCmdCopyBufferToImage(command_buffer, vulkan_state.paint_staging_buffer, vulkan_state.paint_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &paint_copy);
 
-        imageBarrier(command_buffer,
-                     vulkan_state.paint_image,
-                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                     VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                     VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                     VK_IMAGE_ASPECT_COLOR_BIT);
+        imageBarrier(command_buffer, vulkan_state.paint_image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT);
 
         vulkan_state.paint_image_first_upload = false;
         vulkan_state.water_paint_texture->dirty = false;
@@ -4970,12 +4954,11 @@ void vulkanDraw(void)
 
     // OUTLINE PASS
 
-    imageBarrier(command_buffer,
-                 vulkan_state.depth_image,
-                 VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, // TODO: is this still right? not stenciling for this anymore
-                 VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                 VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                 VK_IMAGE_ASPECT_DEPTH_BIT);
+    imageBarrier(command_buffer, vulkan_state.depth_image,
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, // TODO: is this still right? not stenciling for this anymore
+        VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+        VK_IMAGE_ASPECT_DEPTH_BIT);
 
     VkRenderPassBeginInfo post_rp_begin = {0};
     post_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -5024,39 +5007,17 @@ void vulkanDraw(void)
 
     // COPY UNDERWATER SCENE TO scene_copy_image
 
-    VkImageMemoryBarrier swap_to_src = {0};
-    swap_to_src.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    swap_to_src.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    swap_to_src.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    swap_to_src.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    swap_to_src.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    swap_to_src.image = vulkan_state.swapchain_images[swapchain_image_index];
-    swap_to_src.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    swap_to_src.subresourceRange.baseMipLevel = 0;
-    swap_to_src.subresourceRange.levelCount = 1;
-    swap_to_src.subresourceRange.baseArrayLayer = 0;
-    swap_to_src.subresourceRange.layerCount = 1;
-    swap_to_src.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    swap_to_src.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+    imageBarrier(command_buffer, vulkan_state.swapchain_images[swapchain_image_index],
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT);
 
-    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, &swap_to_src);
-
-    VkImageMemoryBarrier copy_to_dst = {0};
-    copy_to_dst.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    copy_to_dst.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    copy_to_dst.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    copy_to_dst.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    copy_to_dst.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    copy_to_dst.image = vulkan_state.scene_copy_image;
-    copy_to_dst.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    copy_to_dst.subresourceRange.baseMipLevel = 0;
-    copy_to_dst.subresourceRange.levelCount = 1;
-    copy_to_dst.subresourceRange.baseArrayLayer = 0;
-    copy_to_dst.subresourceRange.layerCount = 1;
-    copy_to_dst.srcAccessMask = 0;
-    copy_to_dst.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, &copy_to_dst);
+    imageBarrier(command_buffer, vulkan_state.scene_copy_image,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, VK_ACCESS_TRANSFER_WRITE_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT);
 
     VkImageCopy copy_region = {0};
     copy_region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -5072,21 +5033,17 @@ void vulkanDraw(void)
         vulkan_state.scene_copy_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
         1, &copy_region);
 
-    VkImageMemoryBarrier swap_back = swap_to_src;
-    swap_back.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-    swap_back.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    swap_back.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-    swap_back.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    imageBarrier(command_buffer, vulkan_state.swapchain_images[swapchain_image_index],
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT);
 
-    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, 0, 0, 0, 1, &swap_back);
-
-    VkImageMemoryBarrier copy_to_read = copy_to_dst;
-    copy_to_read.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    copy_to_read.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    copy_to_read.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    copy_to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, 0, 0, 0, 1, &copy_to_read);
+    imageBarrier(command_buffer, vulkan_state.scene_copy_image,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+        VK_IMAGE_ASPECT_COLOR_BIT);
 
     // WATER DEPTH PASS 
 
@@ -5200,23 +5157,11 @@ void vulkanDraw(void)
 
     // clear oit resources 
     {
-        // transition head image to TRANSFER_DST for clearing
-        VkImageMemoryBarrier head_to_clear = {0};
-        head_to_clear.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        head_to_clear.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        head_to_clear.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        head_to_clear.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        head_to_clear.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        head_to_clear.image = vulkan_state.oit_head_image;
-        head_to_clear.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        head_to_clear.subresourceRange.baseMipLevel = 0;
-        head_to_clear.subresourceRange.levelCount = 1;
-        head_to_clear.subresourceRange.baseArrayLayer = 0;
-        head_to_clear.subresourceRange.layerCount = 1;
-        head_to_clear.srcAccessMask = 0;
-        head_to_clear.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, &head_to_clear);
+        imageBarrier(command_buffer, vulkan_state.oit_head_image,
+            VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT);
 
         VkClearColorValue clear_val = {0};
         clear_val.uint32[0] = 0xFFFFFFFF;
@@ -5228,33 +5173,18 @@ void vulkanDraw(void)
         clear_range.layerCount = 1;
         vkCmdClearColorImage(command_buffer, vulkan_state.oit_head_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &clear_val, 1, &clear_range);
 
-        // transition head image to GENERAL for shader access
-        VkImageMemoryBarrier head_to_general = {0};
-        head_to_general.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        head_to_general.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        head_to_general.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        head_to_general.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        head_to_general.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        head_to_general.image = vulkan_state.oit_head_image;
-        head_to_general.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        head_to_general.subresourceRange.baseMipLevel = 0;
-        head_to_general.subresourceRange.levelCount = 1;
-        head_to_general.subresourceRange.baseArrayLayer = 0;
-        head_to_general.subresourceRange.layerCount = 1;
-        head_to_general.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        head_to_general.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-
-        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &head_to_general);
+        imageBarrier(command_buffer, vulkan_state.oit_head_image,
+            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            VK_IMAGE_ASPECT_COLOR_BIT);
 
         // clear counter to 0
         vkCmdFillBuffer(command_buffer, vulkan_state.oit_counter_buffer, 0, 4, 0);
 
-        VkMemoryBarrier counter_barrier = {0};
-        counter_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        counter_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        counter_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-
-        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 1, &counter_barrier, 0, 0, 0, 0);
+        memoryBarrier(command_buffer,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
     }
 
     VkRenderPassBeginInfo overlay_rp_begin = {0};
@@ -5397,15 +5327,9 @@ void vulkanDraw(void)
         }
     }
 
-    // barrier between OIT write and resolve
-    {
-        VkMemoryBarrier oit_barrier = {0};
-        oit_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        oit_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        oit_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_DEPENDENCY_BY_REGION_BIT, 1, &oit_barrier, 0, 0, 0, 0);
-    }
+    memoryBarrier(command_buffer,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
 
     // OIT resolve pass
     {
