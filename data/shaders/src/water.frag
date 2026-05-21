@@ -5,13 +5,13 @@
 layout(location = 0) in vec3 frag_world_pos;
 
 layout(location = 0) out vec4 out_color;
+layout(location = 1) out float out_water_depth;
 
 layout(set = 0, binding = 0) uniform sampler2D scene_texture;
 layout(set = 1, binding = 0) uniform sampler2D depth_texture;
-layout(set = 2, binding = 0) uniform sampler2D water_depth_texture;
-layout(set = 3, binding = 0) uniform sampler2D paint_texture;
-layout(set = 4, binding = 0) uniform sampler2D water_texture;
-layout(set = 5, binding = 0) uniform sampler2D reflection_texture;
+layout(set = 2, binding = 0) uniform sampler2D paint_texture;
+layout(set = 3, binding = 0) uniform sampler2D water_texture;
+layout(set = 4, binding = 0) uniform sampler2D reflection_texture;
 
 layout(push_constant) uniform PushConstants 
 {
@@ -69,6 +69,18 @@ const vec2 offsets[8] = vec2[]
 
 void main() 
 {
+    // write water depth for use in waterline detection
+    out_water_depth = gl_FragCoord.z;
+
+    // idea here is to only do water.vert once, so all vertices get to fragment shader here (unlike before, which would be depth tested)
+    // so now i instead blend out all geometry we don't want to actually render; can't discard because that would not output the water depth to texture. TODO: check if no better solution here
+    float scene_depth = texture(depth_texture, gl_FragCoord.xy * (1.0/vec2(textureSize(depth_texture, 0)))).r;
+    if (gl_FragCoord.z >= scene_depth)
+    {
+        out_color = vec4(0.0); // water is behind scene geometry: blend out
+        return;
+    }
+
     vec2 texel = 1.0 / vec2(textureSize(depth_texture, 0));
     vec2 screen_uv = gl_FragCoord.xy * texel;
     vec3 scene = texture(scene_texture, screen_uv).rgb;
@@ -133,6 +145,7 @@ void main()
 
     base_color = mix(base_color, reflection_color, fresnel);
 
+    /*
     // waterline detection
     bool this_is_outline = false;
     float center_water_depth = texture(water_depth_texture, screen_uv).r;
@@ -163,7 +176,7 @@ void main()
             }
         }
     }
+    */
 
-    vec3 final_color = this_is_outline ? vec3(0.0) : base_color;
-    out_color = vec4(final_color, 1.0);
+    out_color = vec4(base_color, 1.0);
 }

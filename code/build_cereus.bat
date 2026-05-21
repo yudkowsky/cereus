@@ -18,7 +18,6 @@ glslc model.vert -g -o ..\spirv\model.vert.spv
 glslc model.frag -g -o ..\spirv\model.frag.spv
 glslc outline-post.vert -g -o ..\spirv\outline-post.vert.spv
 glslc outline-post.frag -g -o ..\spirv\outline-post.frag.spv
-glslc water-depth.frag -g -o ..\spirv\water-depth.frag.spv
 glslc water.vert -g -o ..\spirv\water.vert.spv
 glslc water.frag -g -o ..\spirv\water.frag.spv
 glslc fft-spectrum.comp -g -o ..\spirv\fft-spectrum.comp.spv

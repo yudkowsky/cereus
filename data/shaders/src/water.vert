@@ -6,7 +6,7 @@ layout(location = 2) in vec3 in_normal;
 layout(location = 3) in vec3 in_color;
 layout(location = 4) in mat4 instance_model;
 
-layout(set = 4, binding = 0) uniform sampler2D water_texture;
+layout(set = 3, binding = 0) uniform sampler2D water_texture;
 
 layout(location = 0) out vec3 frag_world_pos;
 layout(location = 1) out vec3 frag_normal;
