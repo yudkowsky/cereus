@@ -54,7 +54,7 @@ const float grid_opacity = 0.1;
 
 // reflections
 const float reflection_distortion_strength = 0.0001;
-const float min_reflection = 0.02;
+const float min_reflection = 0.1;
 const float fresnel_exponent = 4.0;
 
 // used for detecting shoreline in 8 directions
@@ -117,6 +117,16 @@ void main()
     vec2 reflection_uv_offset = normal.xz * distortion_strength;
     vec2 reflection_uv = screen_uv + reflection_uv_offset;
     vec3 reflection_color = texture(reflection_texture, reflection_uv).rgb;
+
+    // specular reflection
+    /*
+    vec3 light_dir = normalize(vec3(0.3, 1.0, 0.2)); // TODO: establish canonical 'sun direction'
+    vec3 halfway = normalize(view_dir + light_dir);
+    float spec_dot = max(dot(normal, halfway), 0.0);
+    float specular = step(0.95, pow(spec_dot, 400.0));
+    vec3 sun_color = vec3(1.0, 0.95, 0.8);
+    base_color += specular * sun_color;
+    */
 
     base_color = mix(base_color, reflection_color, fresnel);
 

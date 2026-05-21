@@ -100,12 +100,21 @@ void main()
         
         float jacobian = pc.gravity / (2.0 * omega);
         spectrum_energy = spectrum_omega * jacobian;
+
+        // kill short waves
+        float min_wave_length = 0.5;
+        float k_max = 6.2831853 / min_wave_length;
+        if (wave_number > k_max) spectrum_energy = 0.0;
         
         // wind alignment
         vec2 wave_direction = wave_vector / wave_number;
         vec2 wind_direction = normalize(vec2(pc.wind_direction_x, pc.wind_direction_z));
         float wave_alignment_with_wind = dot(wave_direction, wind_direction);
-        spectrum_energy *= wave_alignment_with_wind * wave_alignment_with_wind;
+        float aligned = max(wave_alignment_with_wind, 0.0);
+
+        float k_pivot = 6.2831853 / 2.0;
+        float spread_exponent = mix(1.5, 8.0, clamp(wave_number / k_pivot, 0.0, 1.0));
+        spectrum_energy *= pow(aligned, spread_exponent);
     }
 
     // each gaussian has variance 1, so want to /2

@@ -531,8 +531,7 @@ ShaderMode shader_mode = SHADER_MODE_DEFAULT;
 // water
 float water_time = 0.0f;
 const float water_tile_length = 10.0f;
-const float water_amplitude = 4e-5f;
-//const float water_amplitude = 1e-7f;
+const float water_amplitude = 2e-4f;
 
 // outlines
 const float depth_threshold = 5.0f;
@@ -781,6 +780,31 @@ uint32 findMemoryType(uint32 type_bits, VkMemoryPropertyFlags property_flags)
     return UINT32_MAX;
 }
 
+void imageBarrier(VkCommandBuffer command_buffer,
+                  VkImage image,
+                  VkImageLayout old_layout, VkImageLayout new_layout,
+                  VkPipelineStageFlags src_stage, VkPipelineStageFlags dst_stage,
+                  VkAccessFlags src_access, VkAccessFlags dst_access,
+                  VkImageAspectFlags aspect_mask)
+{
+    VkImageMemoryBarrier barrier = {0};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = old_layout;
+    barrier.newLayout = new_layout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange.aspectMask = aspect_mask;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = src_access;
+    barrier.dstAccessMask = dst_access;
+
+    vkCmdPipelineBarrier(command_buffer, src_stage, dst_stage, 0, 0, 0, 0, 0, 1, &barrier);
+}
+
 bool readEntireFile(char* path, void** out_data, size_t* out_size)
 {
 	FILE* file = fopen(path, "rb"); // read binary
@@ -958,25 +982,12 @@ int32 loadAsset(char* path)
     vkBeginCommandBuffer(command_buffer, &command_buffer_begin_info);
 
     // transition image to transfer
-    VkImageMemoryBarrier to_transfer_barrier = {0}; // synchronization point - wait until image is written to transfer
-    to_transfer_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    to_transfer_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    to_transfer_barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL; // arranged for fast writing
-	to_transfer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	to_transfer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	to_transfer_barrier.image = texture_image;
-	to_transfer_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	to_transfer_barrier.subresourceRange.baseMipLevel = 0;
-	to_transfer_barrier.subresourceRange.levelCount = 1;
-	to_transfer_barrier.subresourceRange.baseArrayLayer = 0;
-	to_transfer_barrier.subresourceRange.layerCount = 1;
-	to_transfer_barrier.srcAccessMask = 0; // no memory operations need to complete (we don't care about previous data here)
-	to_transfer_barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-    VkPipelineStageFlags to_transfer_source_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    VkPipelineStageFlags to_transfer_destination_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    
-    vkCmdPipelineBarrier(command_buffer, to_transfer_source_stage, to_transfer_destination_stage, 0, 0, 0, 0, 0, 1, &to_transfer_barrier);
+    imageBarrier(command_buffer,
+                 texture_image,
+                 VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                 0, VK_ACCESS_TRANSFER_WRITE_BIT,
+                 VK_IMAGE_ASPECT_COLOR_BIT);
 
     // copy from staging buffer to image
     VkBufferImageCopy copy_region = {0};
@@ -992,26 +1003,12 @@ int32 loadAsset(char* path)
 
     vkCmdCopyBufferToImage(command_buffer, staging_buffer, texture_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
 
-    // transition image to shader reading
-	VkImageMemoryBarrier to_shader_barrier = {0};
-    to_shader_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    to_shader_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-    to_shader_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL; // optimised for fragment shader reading (probably not entirely sequential)
-    to_shader_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    to_shader_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    to_shader_barrier.image = texture_image;
-	to_shader_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	to_shader_barrier.subresourceRange.baseMipLevel = 0;
-	to_shader_barrier.subresourceRange.levelCount = 1;
-	to_shader_barrier.subresourceRange.baseArrayLayer = 0;
-    to_shader_barrier.subresourceRange.layerCount = 1;
-    to_shader_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; // wait for transfer writes to complete
-    to_shader_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT; // make memory available for shader reads
-
-    VkPipelineStageFlags to_shader_source_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    VkPipelineStageFlags to_shader_destination_stage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-
-    vkCmdPipelineBarrier(command_buffer, to_shader_source_stage, to_shader_destination_stage, 0, 0, 0, 0, 0, 1, &to_shader_barrier);
+    imageBarrier(command_buffer,
+                 texture_image,
+                 VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                 VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                 VK_IMAGE_ASPECT_COLOR_BIT);
 
     vkEndCommandBuffer(command_buffer);
 
@@ -4390,10 +4387,10 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         FFTSpectrumPushConstants pc = {0};
         pc.texture_size = FFT_SIZE;
         pc.tile_length = water_tile_length;
-        pc.wind_direction_x = 1.0f;
-        pc.wind_direction_z = 0.5f;
-        pc.peak_frequency = 5.0f;
-        pc.peak_enhancement = 5.0f;
+        pc.wind_direction_x = -0.5f;
+        pc.wind_direction_z = -1.0f;
+        pc.peak_frequency = 2.0f;
+        pc.peak_enhancement = 10.0f;
         pc.depth = 2.0f; // TODO: should i actually put this it 1m or whatever my actual depth is? maybe a paint input for depth, even if the depth is the same everywhere?
         pc.amplitude = water_amplitude;
         pc.gravity = 9.81f;
@@ -4701,24 +4698,12 @@ void vulkanDraw(void)
         // TODO: slow... will want to either expose this mapped memory to game, and handle like that, or only write affected pixels on any given frame
         memcpy(vulkan_state.paint_staging_mapped, vulkan_state.water_paint_texture->values, sizeof(Vec4) * WATER_PAINT_SIDE * WATER_PAINT_SIDE);
 
-        VkImageMemoryBarrier paint_to_transfer = {0};
-        paint_to_transfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        paint_to_transfer.oldLayout = vulkan_state.paint_image_first_upload ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        paint_to_transfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        paint_to_transfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        paint_to_transfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        paint_to_transfer.image = vulkan_state.paint_image;
-        paint_to_transfer.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        paint_to_transfer.subresourceRange.baseMipLevel = 0;
-        paint_to_transfer.subresourceRange.levelCount = 1;
-        paint_to_transfer.subresourceRange.baseArrayLayer = 0;
-        paint_to_transfer.subresourceRange.layerCount = 1;
-        paint_to_transfer.srcAccessMask = vulkan_state.paint_image_first_upload ? 0 : VK_ACCESS_SHADER_READ_BIT;
-        paint_to_transfer.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-        VkPipelineStageFlags paint_src_stage = vulkan_state.paint_image_first_upload ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-
-        vkCmdPipelineBarrier(command_buffer, paint_src_stage, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, &paint_to_transfer);
+        imageBarrier(command_buffer,
+                     vulkan_state.paint_image,
+                     vulkan_state.paint_image_first_upload ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                     vulkan_state.paint_image_first_upload ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                     vulkan_state.paint_image_first_upload ? 0 : VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+                     VK_IMAGE_ASPECT_COLOR_BIT);
 
         // copy staging to image
         VkBufferImageCopy paint_copy = {0};
@@ -4734,22 +4719,12 @@ void vulkanDraw(void)
 
         vkCmdCopyBufferToImage(command_buffer, vulkan_state.paint_staging_buffer, vulkan_state.paint_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &paint_copy);
 
-        VkImageMemoryBarrier paint_to_shader = {0};
-        paint_to_shader.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        paint_to_shader.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        paint_to_shader.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        paint_to_shader.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        paint_to_shader.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        paint_to_shader.image = vulkan_state.paint_image;
-        paint_to_shader.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        paint_to_shader.subresourceRange.baseMipLevel = 0;
-        paint_to_shader.subresourceRange.levelCount = 1;
-        paint_to_shader.subresourceRange.baseArrayLayer = 0;
-        paint_to_shader.subresourceRange.layerCount = 1;
-        paint_to_shader.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        paint_to_shader.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-        vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &paint_to_shader);
+        imageBarrier(command_buffer,
+                     vulkan_state.paint_image,
+                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                     VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                     VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                     VK_IMAGE_ASPECT_COLOR_BIT);
 
         vulkan_state.paint_image_first_upload = false;
         vulkan_state.water_paint_texture->dirty = false;
@@ -4995,22 +4970,12 @@ void vulkanDraw(void)
 
     // OUTLINE PASS
 
-    VkImageMemoryBarrier depth_to_read = {0};
-    depth_to_read.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    depth_to_read.oldLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-    depth_to_read.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-    depth_to_read.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    depth_to_read.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    depth_to_read.image = vulkan_state.depth_image;
-    depth_to_read.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
-    depth_to_read.subresourceRange.baseMipLevel = 0;
-    depth_to_read.subresourceRange.levelCount = 1;
-    depth_to_read.subresourceRange.baseArrayLayer = 0;
-    depth_to_read.subresourceRange.layerCount = 1;
-    depth_to_read.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    depth_to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &depth_to_read);
+    imageBarrier(command_buffer,
+                 vulkan_state.depth_image,
+                 VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, // TODO: is this still right? not stenciling for this anymore
+                 VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                 VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
+                 VK_IMAGE_ASPECT_DEPTH_BIT);
 
     VkRenderPassBeginInfo post_rp_begin = {0};
     post_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
