@@ -4456,32 +4456,16 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
 
         // assumption that all cubes aren't rotated and are at unit scale
         mat4BuildBasicTRS(cube_gpu_instances[instance_index].model, cube->coords);
-
         cube_gpu_instances[instance_index].uv_rect = cube->uv;
     }
 
-    VkMappedMemoryRange cube_flush_range = {0};
-    cube_flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    cube_flush_range.memory = vulkan_state.cube_instance_memories[vulkan_state.current_frame];
-    cube_flush_range.offset = 0;
-    cube_flush_range.size = VK_WHOLE_SIZE;
-    vkFlushMappedMemoryRanges(vulkan_state.logical_device_handle, 1, &cube_flush_range);
-
     // fill water instance buffer
     WaterInstanceData* water_gpu_instances = (WaterInstanceData*)vulkan_state.water_instance_mappeds[vulkan_state.current_frame];
-    for (uint32 i = 0; i < water_instance_count; i++)
+    for (uint32 instance_index = 0; instance_index < water_instance_count; instance_index++)
     {
-        Water* water = &water_instances[i];
-        Vec4 rotation = { 0, 0, 0, 1 };
-        Vec3 scale = { 1, 1, 1 };
-        mat4BuildTRS(water_gpu_instances[i].model, water->coords, rotation, scale);
+        Water* water = &water_instances[instance_index];
+        mat4BuildBasicTRS(water_gpu_instances[instance_index].model, water->coords);
     }
-    VkMappedMemoryRange water_flush_range = {0};
-    water_flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    water_flush_range.memory = vulkan_state.water_instance_memories[vulkan_state.current_frame];
-    water_flush_range.offset = 0;
-    water_flush_range.size = VK_WHOLE_SIZE;
-    vkFlushMappedMemoryRanges(vulkan_state.logical_device_handle, 1, &water_flush_range);
 }
 
 void vulkanDraw(void)
