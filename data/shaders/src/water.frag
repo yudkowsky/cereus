@@ -92,16 +92,6 @@ void main()
     float tint_amount = clamp(underwater_distance / max_tint_depth, tint_min, tint_max);
     vec3 base_color = mix(scene, water_depth_tint, tint_amount);
 
-    // sample paint texture at this world position
-    vec2 paint_uv = (frag_world_pos.xz + 0.5) / WATER_PAINT_TILE_COUNT;
-    vec2 snapped = (floor(paint_uv * WATER_PAINT_SIDE) + 0.5) / WATER_PAINT_SIDE;
-    float paint_value = texture(paint_texture, snapped).r;
-
-    // grid line width and opacity scale with paint
-    float effective_half_width = half_grid_line_width * paint_value;
-    float effective_corner_size = corner_size * paint_value;
-    float effective_opacity = grid_opacity * paint_value;
-
     // move around by normals
     vec2 fft_uv = frag_world_pos.xz / pc.tile_length;
     vec3 normal = normalize(texture(water_texture, fft_uv).xyz);
@@ -109,6 +99,16 @@ void main()
     vec2 normal_push = normal.xz * grid_push_by_normal;
     vec2 pushed_xz = frag_world_pos.xz + normal_push;
     vec2 grid_pos = pushed_xz - 0.5;
+
+    // sample paint texture at this world position
+    vec2 paint_uv = (pushed_xz + 0.5) / WATER_PAINT_TILE_COUNT;
+    vec2 snapped = (floor(paint_uv * WATER_PAINT_SIDE) + 0.5) / WATER_PAINT_SIDE;
+    float paint_value = texture(paint_texture, snapped).r;
+
+    // grid line width and opacity scale with paint
+    float effective_half_width = half_grid_line_width * paint_value;
+    float effective_corner_size = corner_size * paint_value;
+    float effective_opacity = grid_opacity * paint_value;
 
     // is this on the grid?
     vec2 distance_to_line = abs(fract(grid_pos) - 0.5);
