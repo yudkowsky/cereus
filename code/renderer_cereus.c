@@ -685,6 +685,19 @@ void mat4BuildTRS(float output_matrix[16], Vec3 translation, Vec4 quaternion, Ve
     mat4Multiply(output_matrix, translation_rotation_matrix, scale_matrix);
 }
 
+// assumes identity rotation, no scaling
+void mat4BuildBasicTRS(float output_matrix[16], Vec3 translation)
+{
+    memset(output_matrix, 0, 64);
+    output_matrix[0] = 1.0f;
+    output_matrix[5] = 1.0f;
+    output_matrix[10] = 1.0f;
+    output_matrix[15] = 1.0f;
+    output_matrix[12] = translation.x;
+    output_matrix[13] = translation.y;
+    output_matrix[14] = translation.z;
+}
+
 void mat4BuildViewFromQuat(float output_matrix[16], Vec3 coords, Vec4 quaternion)
 {
     mat4Identity(output_matrix);
@@ -4440,7 +4453,10 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     for (uint32 instance_index = 0; instance_index < cube_instance_count; instance_index++)
     {
         Cube* cube = &cube_instances[instance_index];
-        mat4BuildTRS(cube_gpu_instances[instance_index].model, cube->coords, cube->rotation, cube->scale);
+
+        // assumption that all cubes aren't rotated and are at unit scale
+        mat4BuildBasicTRS(cube_gpu_instances[instance_index].model, cube->coords);
+
         cube_gpu_instances[instance_index].uv_rect = cube->uv;
     }
 
