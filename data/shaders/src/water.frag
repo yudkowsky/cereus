@@ -1,6 +1,6 @@
 #version 450
 
-#include "edge-detect.glsl"
+#include "linearize-depth.glsl"
 
 layout(location = 0) in vec3 frag_world_pos;
 
@@ -144,39 +144,6 @@ void main()
     */
 
     base_color = mix(base_color, reflection_color, fresnel);
-
-    /*
-    // waterline detection
-    bool this_is_outline = false;
-    float center_water_depth = texture(water_depth_texture, screen_uv).r;
-    float center_scene_depth = texture(depth_texture, screen_uv).r;
-    float center_water_lin = linearizeDepth(center_water_depth);
-    float center_scene_lin = linearizeDepth(center_scene_depth);
-    float depth_gap = center_scene_lin - center_water_lin;
-
-    if (depth_gap < max_depth_difference) // only do expensive checking if water depth is low enough
-    {
-        for (int offset_index = 0; offset_index < 8; offset_index++) 
-        {
-            vec2 sample_uv = screen_uv + offsets[offset_index] * outline_radius_px * texel;
-
-            float scene_raw_depth = texture(depth_texture, sample_uv).r;
-            float water_raw_depth = texture(water_depth_texture, sample_uv).r;
-
-            if (scene_raw_depth >= 1.0) continue;
-            if (water_raw_depth >= 1.0) continue;
-        
-            float scene_linear_depth = linearizeDepth(scene_raw_depth);
-            float water_linear_depth = linearizeDepth(water_raw_depth);
-
-            if (scene_linear_depth < water_linear_depth && water_linear_depth - scene_linear_depth < max_depth_difference)
-            {
-                this_is_outline = true;
-                break;
-            }
-        }
-    }
-    */
 
     out_color = vec4(base_color, 1.0);
 }

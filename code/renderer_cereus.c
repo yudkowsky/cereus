@@ -139,6 +139,16 @@ typedef struct
 }
 WaterPushConstants;
 
+
+typedef struct
+{
+    float texel_width;
+    float texel_height;
+    float max_depth_difference;
+    float outline_radius_px;
+} 
+WaterlinePushConstants;
+
 typedef struct
 {
     int32 texture_size;
@@ -325,13 +335,17 @@ typedef struct VulkanState
     VkRenderPass outline_post_render_pass;
     VkFramebuffer* outline_post_framebuffers;
  
-    // render pass to sample depth for water buffer
-    VkRenderPass water_render_pass;
-    VkFramebuffer* water_framebuffers;
-
     // overlay pass (lasers, which color the outlines, and sprites, which go over the outlines)
     VkRenderPass overlay_render_pass;
     VkFramebuffer* overlay_framebuffers;
+
+    // water pass (also writes depth to a buffer)
+    VkRenderPass water_render_pass;
+    VkFramebuffer* water_framebuffers;
+
+    // waterline outline
+    VkRenderPass waterline_render_pass;
+    VkFramebuffer* waterline_framebuffers;
 
     // reflected scene render pass
     VkRenderPass reflection_render_pass;
@@ -354,6 +368,9 @@ typedef struct VulkanState
 
     VkPipeline water_pipeline;
     VkPipelineLayout water_pipeline_layout;
+
+    VkPipeline waterline_pipeline;
+    VkPipelineLayout waterline_pipeline_layout;
 
     VkPipeline editor_outline_pipeline;
     VkPipelineLayout editor_outline_pipeline_layout;
@@ -2065,6 +2082,25 @@ void createSwapchainResources(void)
         vkCreateFramebuffer(vulkan_state.logical_device_handle, &fb_ci, 0, &vulkan_state.outline_post_framebuffers[i]);
     }
 
+    // overlay framebuffers
+    vulkan_state.overlay_framebuffers = realloc(vulkan_state.overlay_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
+
+    for (uint32 i = 0; i < vulkan_state.swapchain_image_count; i++)
+    {
+        VkImageView overlay_fb_attachments[2] = { vulkan_state.swapchain_image_views[i], vulkan_state.depth_image_view };
+
+        VkFramebufferCreateInfo overlay_fb_ci = {0};
+        overlay_fb_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        overlay_fb_ci.renderPass = vulkan_state.overlay_render_pass;
+        overlay_fb_ci.attachmentCount = 2;
+        overlay_fb_ci.pAttachments = overlay_fb_attachments;
+        overlay_fb_ci.width = vulkan_state.swapchain_extent.width;
+        overlay_fb_ci.height = vulkan_state.swapchain_extent.height;
+        overlay_fb_ci.layers = 1;
+
+        vkCreateFramebuffer(vulkan_state.logical_device_handle, &overlay_fb_ci, 0, &vulkan_state.overlay_framebuffers[i]);
+    }
+
     // water framebuffers
 	vulkan_state.water_framebuffers = realloc(vulkan_state.water_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
 
@@ -2088,23 +2124,22 @@ void createSwapchainResources(void)
         vkCreateFramebuffer(vulkan_state.logical_device_handle, &water_fb_ci, 0, &vulkan_state.water_framebuffers[i]);
     }
 
-    // overlay framebuffers
-    vulkan_state.overlay_framebuffers = realloc(vulkan_state.overlay_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
-
+    // waterline framebuffers
+    vulkan_state.waterline_framebuffers = malloc(sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
     for (uint32 i = 0; i < vulkan_state.swapchain_image_count; i++)
     {
-        VkImageView overlay_fb_attachments[2] = { vulkan_state.swapchain_image_views[i], vulkan_state.depth_image_view };
+        VkImageView attachments[1] = { vulkan_state.swapchain_image_views[i] };
 
-        VkFramebufferCreateInfo overlay_fb_ci = {0};
-        overlay_fb_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        overlay_fb_ci.renderPass = vulkan_state.overlay_render_pass;
-        overlay_fb_ci.attachmentCount = 2;
-        overlay_fb_ci.pAttachments = overlay_fb_attachments;
-        overlay_fb_ci.width = vulkan_state.swapchain_extent.width;
-        overlay_fb_ci.height = vulkan_state.swapchain_extent.height;
-        overlay_fb_ci.layers = 1;
+        VkFramebufferCreateInfo fb_ci = {0};
+        fb_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fb_ci.renderPass = vulkan_state.waterline_render_pass;
+        fb_ci.attachmentCount = 1;
+        fb_ci.pAttachments = attachments;
+        fb_ci.width = vulkan_state.swapchain_extent.width;
+        fb_ci.height = vulkan_state.swapchain_extent.height;
+        fb_ci.layers = 1;
 
-        vkCreateFramebuffer(vulkan_state.logical_device_handle, &overlay_fb_ci, 0, &vulkan_state.overlay_framebuffers[i]);
+        vkCreateFramebuffer(vulkan_state.logical_device_handle, &fb_ci, 0, &vulkan_state.waterline_framebuffers[i]);
     }
 
     // reflection framebuffer
@@ -2524,6 +2559,62 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateRenderPass(vulkan_state.logical_device_handle, &post_render_pass_ci, 0, &vulkan_state.outline_post_render_pass);
     }
 
+    // overlay render pass for lasers and sprites
+    {
+        VkAttachmentDescription overlay_attachments[2] = {0};
+
+        overlay_attachments[0].format = vulkan_state.swapchain_format;
+        overlay_attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+        overlay_attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        overlay_attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        overlay_attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        overlay_attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        overlay_attachments[0].initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        overlay_attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+        overlay_attachments[1].format = vulkan_state.depth_format;
+        overlay_attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+        overlay_attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        overlay_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        overlay_attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        overlay_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        overlay_attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        overlay_attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+        VkAttachmentReference overlay_color_reference = {0};
+        overlay_color_reference.attachment = 0;
+        overlay_color_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentReference overlay_depth_reference = {0};
+        overlay_depth_reference.attachment = 1;
+        overlay_depth_reference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+        VkSubpassDescription overlay_subpass = {0};
+        overlay_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        overlay_subpass.colorAttachmentCount = 1;
+        overlay_subpass.pColorAttachments = &overlay_color_reference;
+        overlay_subpass.pDepthStencilAttachment = &overlay_depth_reference;
+
+        VkSubpassDependency overlay_dependency = {0};
+        overlay_dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+        overlay_dependency.dstSubpass = 0;
+        overlay_dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        overlay_dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        overlay_dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        overlay_dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+        VkRenderPassCreateInfo overlay_rp_ci = {0};
+        overlay_rp_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        overlay_rp_ci.attachmentCount = 2;
+        overlay_rp_ci.pAttachments = overlay_attachments;
+        overlay_rp_ci.subpassCount = 1;
+        overlay_rp_ci.pSubpasses = &overlay_subpass;
+        overlay_rp_ci.dependencyCount = 1;
+        overlay_rp_ci.pDependencies = &overlay_dependency;
+
+        vkCreateRenderPass(vulkan_state.logical_device_handle, &overlay_rp_ci, 0, &vulkan_state.overlay_render_pass);
+    }
+
     // water render pass
     {
         VkAttachmentDescription water_attachments[2] = {0};
@@ -2586,60 +2677,45 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateRenderPass(vulkan_state.logical_device_handle, &water_rp_ci, 0, &vulkan_state.water_render_pass);
     }
 
-    // overlay render pass for lasers and sprites
+    // waterline render pass
     {
-        VkAttachmentDescription overlay_attachments[2] = {0};
+        VkAttachmentDescription color_attachment = {0};
+        color_attachment.format = vulkan_state.swapchain_format;
+        color_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        color_attachment.initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-        overlay_attachments[0].format = vulkan_state.swapchain_format;
-        overlay_attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-        overlay_attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        overlay_attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        overlay_attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        overlay_attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        overlay_attachments[0].initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-        overlay_attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        VkAttachmentReference color_ref = {0};
+        color_ref.attachment = 0;
+        color_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-        overlay_attachments[1].format = vulkan_state.depth_format;
-        overlay_attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
-        overlay_attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        overlay_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        overlay_attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        overlay_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        overlay_attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-        overlay_attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        VkSubpassDescription subpass = {0};
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass.colorAttachmentCount = 1;
+        subpass.pColorAttachments = &color_ref;
 
-        VkAttachmentReference overlay_color_reference = {0};
-        overlay_color_reference.attachment = 0;
-        overlay_color_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        VkSubpassDependency dep = {0};
+        dep.srcSubpass = VK_SUBPASS_EXTERNAL;
+        dep.dstSubpass = 0;
+        dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dep.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
-        VkAttachmentReference overlay_depth_reference = {0};
-        overlay_depth_reference.attachment = 1;
-        overlay_depth_reference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+        VkRenderPassCreateInfo rp_ci = {0};
+        rp_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        rp_ci.attachmentCount = 1;
+        rp_ci.pAttachments = &color_attachment;
+        rp_ci.subpassCount = 1;
+        rp_ci.pSubpasses = &subpass;
+        rp_ci.dependencyCount = 1;
+        rp_ci.pDependencies = &dep;
 
-        VkSubpassDescription overlay_subpass = {0};
-        overlay_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        overlay_subpass.colorAttachmentCount = 1;
-        overlay_subpass.pColorAttachments = &overlay_color_reference;
-        overlay_subpass.pDepthStencilAttachment = &overlay_depth_reference;
-
-        VkSubpassDependency overlay_dependency = {0};
-        overlay_dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-        overlay_dependency.dstSubpass = 0;
-        overlay_dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-        overlay_dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-        overlay_dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        overlay_dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-
-        VkRenderPassCreateInfo overlay_rp_ci = {0};
-        overlay_rp_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        overlay_rp_ci.attachmentCount = 2;
-        overlay_rp_ci.pAttachments = overlay_attachments;
-        overlay_rp_ci.subpassCount = 1;
-        overlay_rp_ci.pSubpasses = &overlay_subpass;
-        overlay_rp_ci.dependencyCount = 1;
-        overlay_rp_ci.pDependencies = &overlay_dependency;
-
-        vkCreateRenderPass(vulkan_state.logical_device_handle, &overlay_rp_ci, 0, &vulkan_state.overlay_render_pass);
+        vkCreateRenderPass(vulkan_state.logical_device_handle, &rp_ci, 0, &vulkan_state.waterline_render_pass);
     }
 
     // reflected scene render pass
@@ -2894,56 +2970,59 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     // LOADING SHADER MODULES
 
+    VkShaderModule fft_spectrum_smh = {0};
+    VkShaderModule fft_evolved_smh = {0};
+    VkShaderModule fft_pass_smh = {0};
+    VkShaderModule fft_finalize_smh = {0};
     VkShaderModule cube_vert_smh = {0};
     VkShaderModule cube_frag_smh = {0};
-    VkShaderModule outline_select_vert_smh = {0};
-    VkShaderModule outline_select_frag_smh = {0};
-    VkShaderModule sprite_vert_smh = {0};
-    VkShaderModule sprite_frag_smh = {0};
     VkShaderModule model_vert_smh = {0};
     VkShaderModule model_frag_smh = {0};
     VkShaderModule outline_post_vert_smh = {0};
     VkShaderModule outline_post_frag_smh = {0};
     VkShaderModule water_vert_smh = {0};
     VkShaderModule water_frag_smh = {0};
+    VkShaderModule waterline_frag_smh = {0};
     VkShaderModule laser_vert_smh = {0};
     VkShaderModule laser_frag_smh = {0};
     VkShaderModule oit_resolve_vert_smh = {0};
     VkShaderModule oit_resolve_frag_smh = {0};
-    VkShaderModule fft_spectrum_smh = {0};
-    VkShaderModule fft_evolved_smh = {0};
-    VkShaderModule fft_pass_smh = {0};
-    VkShaderModule fft_finalize_smh = {0};
+    VkShaderModule outline_select_vert_smh = {0};
+    VkShaderModule outline_select_frag_smh = {0};
+    VkShaderModule sprite_vert_smh = {0};
+    VkShaderModule sprite_frag_smh = {0};
 
+    VkPipelineShaderStageCreateInfo fft_spectrum_stage_ci           = loadShaderStage("data/shaders/spirv/fft-spectrum.comp.spv",       &fft_spectrum_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo fft_evolved_stage_ci            = loadShaderStage("data/shaders/spirv/fft-evolved.comp.spv",        &fft_evolved_smh,           VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo fft_pass_stage_ci               = loadShaderStage("data/shaders/spirv/fft-pass.comp.spv",           &fft_pass_smh,              VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo fft_finalize_stage_ci           = loadShaderStage("data/shaders/spirv/fft-finalize.comp.spv",       &fft_finalize_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
     VkPipelineShaderStageCreateInfo cube_vert_stage_ci 	 	        = loadShaderStage("data/shaders/spirv/cube.vert.spv", 	  	  	    &cube_vert_smh, 	  	    VK_SHADER_STAGE_VERTEX_BIT);
 	VkPipelineShaderStageCreateInfo cube_frag_stage_ci 	 	        = loadShaderStage("data/shaders/spirv/cube.frag.spv", 	  	  	    &cube_frag_smh, 	  		VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo outline_select_vert_stage_ci    = loadShaderStage("data/shaders/spirv/outline-select.vert.spv",     &outline_select_vert_smh, 	VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo outline_select_frag_stage_ci    = loadShaderStage("data/shaders/spirv/outline-select.frag.spv",     &outline_select_frag_smh, 	VK_SHADER_STAGE_FRAGMENT_BIT);
-	VkPipelineShaderStageCreateInfo sprite_vert_stage_ci  	        = loadShaderStage("data/shaders/spirv/sprite.vert.spv",  	  	    &sprite_vert_smh,  		    VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo sprite_frag_stage_ci  	        = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  	    &sprite_frag_smh,  		    VK_SHADER_STAGE_FRAGMENT_BIT);
 	VkPipelineShaderStageCreateInfo model_vert_stage_ci 	 	    = loadShaderStage("data/shaders/spirv/model.vert.spv",   	  	    &model_vert_smh,   		    VK_SHADER_STAGE_VERTEX_BIT);
 	VkPipelineShaderStageCreateInfo model_frag_stage_ci 	 	    = loadShaderStage("data/shaders/spirv/model.frag.spv",   	  	    &model_frag_smh,   		    VK_SHADER_STAGE_FRAGMENT_BIT);
     VkPipelineShaderStageCreateInfo outline_post_vert_stage_ci      = loadShaderStage("data/shaders/spirv/outline-post.vert.spv",       &outline_post_vert_smh,     VK_SHADER_STAGE_VERTEX_BIT);
     VkPipelineShaderStageCreateInfo outline_post_frag_stage_ci      = loadShaderStage("data/shaders/spirv/outline-post.frag.spv",       &outline_post_frag_smh,     VK_SHADER_STAGE_FRAGMENT_BIT);
     VkPipelineShaderStageCreateInfo water_vert_stage_ci             = loadShaderStage("data/shaders/spirv/water.vert.spv",              &water_vert_smh,            VK_SHADER_STAGE_VERTEX_BIT);
     VkPipelineShaderStageCreateInfo water_frag_stage_ci             = loadShaderStage("data/shaders/spirv/water.frag.spv",              &water_frag_smh,            VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo waterline_frag_stage_ci         = loadShaderStage("data/shaders/spirv/waterline.frag.spv",          &waterline_frag_smh,        VK_SHADER_STAGE_FRAGMENT_BIT);
     VkPipelineShaderStageCreateInfo laser_vert_stage_ci             = loadShaderStage("data/shaders/spirv/laser.vert.spv",              &laser_vert_smh,            VK_SHADER_STAGE_VERTEX_BIT);
     VkPipelineShaderStageCreateInfo laser_frag_stage_ci             = loadShaderStage("data/shaders/spirv/laser.frag.spv",              &laser_frag_smh,            VK_SHADER_STAGE_FRAGMENT_BIT);
     VkPipelineShaderStageCreateInfo oit_resolve_vert_stage_ci       = loadShaderStage("data/shaders/spirv/oit-resolve.vert.spv",        &oit_resolve_vert_smh,      VK_SHADER_STAGE_VERTEX_BIT);
     VkPipelineShaderStageCreateInfo oit_resolve_frag_stage_ci       = loadShaderStage("data/shaders/spirv/oit-resolve.frag.spv",        &oit_resolve_frag_smh,      VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo fft_spectrum_stage_ci           = loadShaderStage("data/shaders/spirv/fft-spectrum.comp.spv",       &fft_spectrum_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
-    VkPipelineShaderStageCreateInfo fft_evolved_stage_ci            = loadShaderStage("data/shaders/spirv/fft-evolved.comp.spv",        &fft_evolved_smh,           VK_SHADER_STAGE_COMPUTE_BIT);
-    VkPipelineShaderStageCreateInfo fft_pass_stage_ci               = loadShaderStage("data/shaders/spirv/fft-pass.comp.spv",           &fft_pass_smh,              VK_SHADER_STAGE_COMPUTE_BIT);
-    VkPipelineShaderStageCreateInfo fft_finalize_stage_ci           = loadShaderStage("data/shaders/spirv/fft-finalize.comp.spv",       &fft_finalize_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo outline_select_vert_stage_ci    = loadShaderStage("data/shaders/spirv/outline-select.vert.spv",     &outline_select_vert_smh, 	VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo outline_select_frag_stage_ci    = loadShaderStage("data/shaders/spirv/outline-select.frag.spv",     &outline_select_frag_smh, 	VK_SHADER_STAGE_FRAGMENT_BIT);
+	VkPipelineShaderStageCreateInfo sprite_vert_stage_ci  	        = loadShaderStage("data/shaders/spirv/sprite.vert.spv",  	  	    &sprite_vert_smh,  		    VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo sprite_frag_stage_ci  	        = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  	    &sprite_frag_smh,  		    VK_SHADER_STAGE_FRAGMENT_BIT);
 
     VkPipelineShaderStageCreateInfo cube_shader_stages[2]  	 	        = { cube_vert_stage_ci,    	        cube_frag_stage_ci }; 
-    VkPipelineShaderStageCreateInfo outline_select_shader_stages[2]     = { outline_select_vert_stage_ci,   outline_select_frag_stage_ci }; 
-    VkPipelineShaderStageCreateInfo sprite_shader_stages[2]  	        = { sprite_vert_stage_ci,  	        sprite_frag_stage_ci };
    	VkPipelineShaderStageCreateInfo model_shader_stages[2]   	        = { model_vert_stage_ci,   	        model_frag_stage_ci };
     VkPipelineShaderStageCreateInfo outline_post_shader_stages[2]       = { outline_post_vert_stage_ci,     outline_post_frag_stage_ci };
     VkPipelineShaderStageCreateInfo water_shader_stages[2]              = { water_vert_stage_ci,            water_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo waterline_shader_stages[2]          = { outline_post_vert_stage_ci,        waterline_frag_stage_ci };
     VkPipelineShaderStageCreateInfo laser_shader_stages[2]              = { laser_vert_stage_ci,            laser_frag_stage_ci };
     VkPipelineShaderStageCreateInfo oit_resolve_shader_stages[2]        = { oit_resolve_vert_stage_ci,      oit_resolve_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo outline_select_shader_stages[2]     = { outline_select_vert_stage_ci,   outline_select_frag_stage_ci }; 
+    VkPipelineShaderStageCreateInfo sprite_shader_stages[2]  	        = { sprite_vert_stage_ci,  	        sprite_frag_stage_ci };
 
     // vertex input
     // per-vertex data: used for individually drawn meshes (sprites, models (currently), lasers, etc.)
@@ -3588,12 +3667,12 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         VkDescriptorSetLayout water_set_layouts[6] =
         { 
-            vulkan_state.descriptor_set_layout, 	// underwater scene copy
-            vulkan_state.descriptor_set_layout,		// scene depth 
-            vulkan_state.descriptor_set_layout,     // water depth
-            vulkan_state.descriptor_set_layout,     // paint texture
-            vulkan_state.descriptor_set_layout,     // displacement texture
-            vulkan_state.descriptor_set_layout,     // reflection texture
+            vulkan_state.descriptor_set_layout, // underwater scene copy
+            vulkan_state.descriptor_set_layout,	// scene depth 
+            vulkan_state.descriptor_set_layout, // water depth
+            vulkan_state.descriptor_set_layout, // paint texture
+            vulkan_state.descriptor_set_layout, // displacement texture
+            vulkan_state.descriptor_set_layout, // reflection texture
         };
 
         VkPipelineLayoutCreateInfo water_pipeline_layout_ci = {0};
@@ -3604,6 +3683,28 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         water_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
 
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &water_pipeline_layout_ci, 0, &vulkan_state.water_pipeline_layout);
+    }
+
+    // WATERLINE PIPELINE LAYOUT
+    {
+        VkPushConstantRange push_constant_range = {0};
+        push_constant_range.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        push_constant_range.offset = 0;
+        push_constant_range.size = sizeof(float) * 4;
+
+        VkDescriptorSetLayout waterline_set_layouts[2] = 
+        {
+            vulkan_state.descriptor_set_layout, // scene depth
+            vulkan_state.descriptor_set_layout, // water depth
+        };
+
+        VkPipelineLayoutCreateInfo layout_ci = {0};
+        layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layout_ci.setLayoutCount = 2;
+        layout_ci.pSetLayouts = waterline_set_layouts;
+        layout_ci.pushConstantRangeCount = 1;
+        layout_ci.pPushConstantRanges = &push_constant_range;
+        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.waterline_pipeline_layout);
     }
 
     // EDITOR OUTLINE PIPELINE LAYOUT
@@ -3917,6 +4018,28 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         water_pipeline_ci.pColorBlendState = &water_blend_ci;
 
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &water_pipeline_ci, 0, &vulkan_state.water_pipeline);
+    }
+
+    // define waterline pipeline
+    {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
+        depth_stencil_state_creation_info.depthTestEnable = VK_FALSE;
+        depth_stencil_state_creation_info.depthWriteEnable = VK_FALSE;
+        depth_stencil_state_creation_info.stencilTestEnable = VK_FALSE;
+
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
+
+        VkPipelineVertexInputStateCreateInfo waterline_vertex_input = {0};
+        waterline_vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+        VkGraphicsPipelineCreateInfo waterline_pipeline_ci = base_graphics_pipeline_creation_info;
+        waterline_pipeline_ci.pVertexInputState = &waterline_vertex_input;
+        waterline_pipeline_ci.pStages = waterline_shader_stages;
+        waterline_pipeline_ci.layout = vulkan_state.waterline_pipeline_layout;
+        waterline_pipeline_ci.renderPass = vulkan_state.waterline_render_pass;
+
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &waterline_pipeline_ci, 0, &vulkan_state.waterline_pipeline);
     }
 
     // define outline post pipeline. different enough that we might as well set up an entirely new creation info. sets up state first, then assigns
@@ -4449,7 +4572,6 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
 
     // fill cube instance buffer
     CubeInstanceData* cube_gpu_instances = (CubeInstanceData*)vulkan_state.cube_instance_mappeds[vulkan_state.current_frame];
-
     for (uint32 instance_index = 0; instance_index < cube_instance_count; instance_index++)
     {
         Cube* cube = &cube_instances[instance_index];
@@ -4899,6 +5021,7 @@ void vulkanDraw(void)
 
     vkCmdBeginRenderPass(command_buffer, &post_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
 
+    // TODO: clean this up, together with waterline pass
     VkViewport post_viewport = {0};
     post_viewport.x = 0;
     post_viewport.y = 0;
@@ -5037,6 +5160,65 @@ void vulkanDraw(void)
             vkCmdPushConstants(command_buffer, vulkan_state.water_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &water_pc);
 
             vkCmdDrawIndexed(command_buffer, water_data->index_count, water_instance_count, 0, 0, 0);
+            vkCmdEndRenderPass(command_buffer);
+        }
+    }
+
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, current_pool, query_index++);
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, current_pool, query_index++);
+
+    // WATERLINE PASS
+
+    if (water_instance_count > 0)
+    {
+        LoadedModel* water_data = &vulkan_state.loaded_models[MODEL_3D_WATER - MODEL_3D_VOID];
+        if (water_data->index_count > 0)
+        {
+            VkRenderPassBeginInfo waterline_pass_begin = {0};
+            waterline_pass_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            waterline_pass_begin.renderPass = vulkan_state.waterline_render_pass;
+            waterline_pass_begin.framebuffer = vulkan_state.waterline_framebuffers[swapchain_image_index];
+            waterline_pass_begin.renderArea.offset.x = 0;
+            waterline_pass_begin.renderArea.offset.y = 0;
+            waterline_pass_begin.renderArea.extent = vulkan_state.swapchain_extent;
+            waterline_pass_begin.clearValueCount = 0;
+
+            vkCmdBeginRenderPass(command_buffer, &waterline_pass_begin, VK_SUBPASS_CONTENTS_INLINE);
+
+            // TODO: clean this up, together with outline pass
+            VkViewport waterline_viewport = {0};
+            waterline_viewport.x = 0;
+            waterline_viewport.y = 0;
+            waterline_viewport.width = (float)vulkan_state.swapchain_extent.width;
+            waterline_viewport.height = (float)vulkan_state.swapchain_extent.height;
+            waterline_viewport.minDepth = 0.0f;
+            waterline_viewport.maxDepth = 1.0f;
+
+            VkRect2D waterline_scissor = {0};
+            waterline_scissor.extent.width = vulkan_state.swapchain_extent.width;
+            waterline_scissor.extent.height = vulkan_state.swapchain_extent.height;
+
+            vkCmdSetViewport(command_buffer, 0, 1, &waterline_viewport);
+            vkCmdSetScissor(command_buffer, 0, 1, &waterline_scissor);
+
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.waterline_pipeline);
+
+            VkDescriptorSet waterline_sets[2] =
+            {
+                vulkan_state.depth_descriptor_set,
+                vulkan_state.water_depth_descriptor_set,
+            };
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.waterline_pipeline_layout, 0, 2, waterline_sets, 0, 0);
+
+            WaterlinePushConstants waterline_pc = {0};
+            waterline_pc.texel_width = 1.0f / (float)vulkan_state.swapchain_extent.width;
+            waterline_pc.texel_height = 1.0f / (float)vulkan_state.swapchain_extent.height;
+            waterline_pc.max_depth_difference = 0.02f;
+            waterline_pc.outline_radius_px = 2.0f;
+
+            vkCmdPushConstants(command_buffer, vulkan_state.waterline_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(waterline_pc), &waterline_pc);
+
+            vkCmdDraw(command_buffer, 3, 1, 0, 0);
             vkCmdEndRenderPass(command_buffer);
         }
     }
@@ -5280,7 +5462,7 @@ void vulkanDraw(void)
         vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
     }
 
-    // debug
+    // debug window
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline);
         vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &sprite_vb_offset);
@@ -5379,10 +5561,10 @@ void vulkanDraw(void)
         vkGetQueryPoolResults(vulkan_state.logical_device_handle, vulkan_state.timestamp_query_pools[read_pool_index], 0, count, sizeof(uint64) * count, vulkan_state.timestamp_results[read_pool_index], sizeof(uint64), VK_QUERY_RESULT_64_BIT);
 
         uint64* t = vulkan_state.timestamp_results[read_pool_index];
-        const char* region_names[] = 
+        char* region_names[] = 
         {
             "fft", "reflection", "scene", "outline", "scene copy",
-            "water depth", "water", "overlay"
+            "water depth", "water", "waterline", "overlay"
         };
         for (uint32 i = 0; i + 1 < count; i += 2)
         {
@@ -5412,6 +5594,7 @@ void vulkanResize(uint32 width, uint32 height)
         vkDestroyFramebuffer(vulkan_state.logical_device_handle, vulkan_state.outline_post_framebuffers[image_index], 0);
         vkDestroyFramebuffer(vulkan_state.logical_device_handle, vulkan_state.water_framebuffers[image_index], 0);
         vkDestroyFramebuffer(vulkan_state.logical_device_handle, vulkan_state.overlay_framebuffers[image_index], 0);
+        vkDestroyFramebuffer(vulkan_state.logical_device_handle, vulkan_state.waterline_framebuffers[image_index], 0);
         vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.swapchain_image_views[image_index], 0);
     }
 
