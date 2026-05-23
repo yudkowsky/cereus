@@ -12,6 +12,7 @@ layout(set = 1, binding = 0) uniform sampler2D depth_texture;
 layout(set = 2, binding = 0) uniform sampler2D paint_texture;
 layout(set = 3, binding = 0) uniform sampler2D water_texture;
 layout(set = 4, binding = 0) uniform sampler2D reflection_texture;
+layout(set = 5, binding = 0) uniform sampler2D grid_texture;
 
 layout(push_constant) uniform PushConstants 
 {
@@ -50,7 +51,7 @@ const float half_grid_line_width = 0.02;
 const float corner_size = 0.025;
 
 // grid line graphics
-const vec3 grid_line_tint = { 0.2, 0.4, 0.6 };
+//const vec3 grid_line_tint = { 0.2, 0.4, 0.6 };
 const float grid_opacity = 0.1;
 
 // reflections
@@ -105,6 +106,12 @@ void main()
     vec2 snapped = (floor(paint_uv * WATER_PAINT_SIDE) + 0.5) / WATER_PAINT_SIDE;
     float paint_value = texture(paint_texture, snapped).r;
 
+    // grid lines
+    vec2 grid_uv = fract(grid_pos / 4.0);
+    vec4 grid_color = texture(grid_texture, grid_uv).rgba;
+    base_color += grid_color.rgb * grid_color.a * grid_opacity;
+
+    /*
     // grid line width and opacity scale with paint
     float effective_half_width = half_grid_line_width * paint_value;
     float effective_corner_size = corner_size * paint_value;
@@ -119,6 +126,7 @@ void main()
     {
         base_color = mix(base_color, grid_line_tint, effective_opacity);
     }
+    */
 
     // reflection based on fresnel strength
     vec3 view_dir = normalize(pc.camera_position.xyz - frag_world_pos);

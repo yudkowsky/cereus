@@ -413,6 +413,7 @@ typedef struct VulkanState
     int32 atlas_2d_asset_index;
 	int32 atlas_font_asset_index;
     int32 atlas_3d_asset_index;
+    int32 water_grid_asset_index;
 
     // water paint texture
     WaterPaintTexture* water_paint_texture;
@@ -548,6 +549,7 @@ const int32 ATLAS_3D_HEIGHT = 320;
 const char* ATLAS_2D_PATH 	= "data/assets/sprites/atlas-2d.png";
 const char* ATLAS_FONT_PATH = "data/assets/sprites/atlas-font.png";
 const char* ATLAS_3D_PATH 	= "data/assets/sprites/atlas-3d.png";
+const char* WATER_GRID_PATH = "data/assets/maps/water-grid.png";
 
 VulkanState vulkan_state;
 DisplayInfo vulkan_display = {0};
@@ -3669,10 +3671,10 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         { 
             vulkan_state.descriptor_set_layout, // underwater scene copy
             vulkan_state.descriptor_set_layout,	// scene depth 
-            vulkan_state.descriptor_set_layout, // water depth
             vulkan_state.descriptor_set_layout, // paint texture
             vulkan_state.descriptor_set_layout, // displacement texture
             vulkan_state.descriptor_set_layout, // reflection texture
+            vulkan_state.descriptor_set_layout, // water grid texture
         };
 
         VkPipelineLayoutCreateInfo water_pipeline_layout_ci = {0};
@@ -3900,6 +3902,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     vulkan_state.atlas_2d_asset_index   = getOrLoadAsset((char*)ATLAS_2D_PATH);
     vulkan_state.atlas_font_asset_index = getOrLoadAsset((char*)ATLAS_FONT_PATH);
     vulkan_state.atlas_3d_asset_index   = getOrLoadAsset((char*)ATLAS_3D_PATH);
+    vulkan_state.water_grid_asset_index = getOrLoadAsset((char*)WATER_GRID_PATH);
 
 	// define instanced cube pipeline: depth on, blending off
     {
@@ -5130,15 +5133,16 @@ void vulkanDraw(void)
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline);
 
-            VkDescriptorSet water_sets[5] = 
+            VkDescriptorSet water_sets[6] =
             {
                 vulkan_state.scene_copy_descriptor_set,
                 vulkan_state.depth_descriptor_set,
                 vulkan_state.paint_descriptor_set,
                 vulkan_state.displacement_sampled_descriptor_set,
                 vulkan_state.reflection_descriptor_set,
+                vulkan_state.descriptor_sets[vulkan_state.water_grid_asset_index],
             };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_layout, 0, 5, water_sets, 0, 0);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_layout, 0, 6, water_sets, 0, 0);
 
             VkBuffer water_buffers[2] = { water_data->vertex_buffer, vulkan_state.water_instance_buffers[vulkan_state.current_frame] };
             VkDeviceSize water_offsets[2] = { 0, 0 };
@@ -5214,7 +5218,7 @@ void vulkanDraw(void)
             waterline_pc.texel_width = 1.0f / (float)vulkan_state.swapchain_extent.width;
             waterline_pc.texel_height = 1.0f / (float)vulkan_state.swapchain_extent.height;
             waterline_pc.max_depth_difference = 0.02f;
-            waterline_pc.outline_radius_px = 2.0f;
+            waterline_pc.outline_radius_px = 1.0f;
 
             vkCmdPushConstants(command_buffer, vulkan_state.waterline_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(waterline_pc), &waterline_pc);
 
