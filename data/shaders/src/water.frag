@@ -51,8 +51,7 @@ const float half_grid_line_width = 0.02;
 const float corner_size = 0.025;
 
 // grid line graphics
-//const vec3 grid_line_tint = { 0.2, 0.4, 0.6 };
-const float grid_opacity = 0.1;
+const float grid_opacity = 0.05;
 
 // reflections
 const float reflection_distortion_strength = 0.0001;
@@ -109,7 +108,10 @@ void main()
     // grid lines
     vec2 grid_uv = fract(grid_pos / 4.0);
     vec4 grid_color = texture(grid_texture, grid_uv).rgba;
-    base_color += grid_color.rgb * grid_color.a * grid_opacity;
+    base_color += grid_color.rgb * grid_color.a * grid_opacity * paint_value;
+
+    // TODO: paint multiplier should also lower opacity. check if need to try to make thinner at lower paint, 
+    // or if lowering opacity does the same. can also subtract from opacity maybe?
 
     /*
     // grid line width and opacity scale with paint

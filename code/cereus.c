@@ -2,12 +2,12 @@
 
 #define FOR(i, n) for (int i = 0; i < n; i++)
 
-// GLOBAL STATE
-
 // TODO: temp for profiling
 __declspec(dllimport) int __stdcall QueryPerformanceCounter(long long* lpPerformanceCount);
 __declspec(dllimport) int __stdcall QueryPerformanceFrequency(long long* lpFrequency);
 __declspec(dllimport) void __stdcall OutputDebugStringA(const char* lpOutputString);
+
+// GLOBAL STATE
 
 typedef enum
 {

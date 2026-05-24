@@ -4578,9 +4578,12 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     for (uint32 instance_index = 0; instance_index < cube_instance_count; instance_index++)
     {
         Cube* cube = &cube_instances[instance_index];
+        mat4BuildTRS(cube_gpu_instances[instance_index].model, cube->coords, cube->rotation, cube->scale);
+        cube_gpu_instances[instance_index].uv_rect = cube->uv;
 
-        // assumption that all cubes aren't rotated and are at unit scale
-        mat4BuildBasicTRS(cube_gpu_instances[instance_index].model, cube->coords);
+        // assumption that all cubes aren't rotated and are at unit scale TODO: temp disabled because no player models
+        //mat4BuildBasicTRS(cube_gpu_instances[instance_index].model, cube->coords);
+
         cube_gpu_instances[instance_index].uv_rect = cube->uv;
     }
 
@@ -5467,6 +5470,7 @@ void vulkanDraw(void)
     }
 
     // debug window
+    /*
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline);
         vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &sprite_vb_offset);
@@ -5498,6 +5502,7 @@ void vulkanDraw(void)
         vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &debug_pc);
         vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
     }
+    */
 
     vkCmdEndRenderPass(command_buffer);
 
