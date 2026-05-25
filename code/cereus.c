@@ -62,8 +62,6 @@ typedef enum
 }
 MirrorOrientation;
 
-// coords are integer coordinates of the entity, position is the floating point coords in world space.
-// likewise direction is one of 6 orientations, rotation is the actual rotation passed to renderer.
 typedef struct
 {
     int32 id;
@@ -2239,8 +2237,11 @@ bool canFall(Entity* e)
     if (getTileType(next_coords) != NONE && getTileType(next_coords) != VOID) return false;
 
     // don't allow fall if trailing hitbox occupies tile below. this might not be the final version of how this code should look
-    TrailingHitbox _;
-    if (trailingHitboxAtCoords(next_coords, &_)) return false;
+    TrailingHitbox th;
+    if (trailingHitboxAtCoords(next_coords, &th))
+    {
+        if (!getEntityFromId(th.id)->falling) return false;
+    }
 
     return true;
 }
@@ -4738,36 +4739,36 @@ bool gameFrame(double delta_time, Input* input)
                     if (e)
                     {
                         char selected_id_text[256] = {0};
-                        snprintf(selected_id_text, sizeof(selected_id_text), "selected id: %d, coords: %d, %d, %d, direction: %i, mirror_orientation: %i", editor_state.selected_id, e->coords.x, e->coords.y, e->coords.z, e->direction, e->mirror_orientation);
+                        snprintf(selected_id_text, sizeof(selected_id_text), "    selected id: %d, coords: %d, %d, %d, direction: %i, mirror_orientation: %i", editor_state.selected_id, e->coords.x, e->coords.y, e->coords.z, e->direction, e->mirror_orientation);
                         createDebugText(selected_id_text);
 
-                        char writing_field_text[256] = {0};
-                        char writing_field_state[256] = {0};
+                        char more_info_text[256] = {0};
+                        snprintf(more_info_text, sizeof(more_info_text), "    falling: %i, velocity: %f, %f, %f", e->falling, e->velocity.x, e->velocity.y, e->velocity.z);
+                        createDebugText(more_info_text);
+
                         switch (editor_state.writing_field)
                         {
-                            case NO_WRITING_FIELD:          memcpy(writing_field_state, "none",         sizeof(writing_field_state)); break;
-                            case WRITING_FIELD_NEXT_LEVEL:  memcpy(writing_field_state, "next level",   sizeof(writing_field_state)); break;
-                            case WRITING_FIELD_UNLOCKED_BY: memcpy(writing_field_state, "unlocked by",  sizeof(writing_field_state)); break;
+                            case NO_WRITING_FIELD:          createDebugText("    writing field: no writing field"); break;
+                            case WRITING_FIELD_NEXT_LEVEL:  createDebugText("    writing field: next level");       break;
+                            case WRITING_FIELD_UNLOCKED_BY: createDebugText("    writing field: unlocked by");      break;
                         }
-                        snprintf(writing_field_text, sizeof(writing_field_text), "writing_field: %s", writing_field_state); 
-                        createDebugText(writing_field_text);
 
                         char next_level_text[256] = {0};
-                        snprintf(next_level_text, sizeof(next_level_text), "next_level: %s", e->next_level);
+                        snprintf(next_level_text, sizeof(next_level_text), "    next_level: %s", e->next_level);
                         createDebugText(next_level_text);
 
                         char unlocked_by_text[256] = {0};
-                        snprintf(unlocked_by_text, sizeof(unlocked_by_text), "unlocked_by: %s", e->unlocked_by);
+                        snprintf(unlocked_by_text, sizeof(unlocked_by_text), "    unlocked_by: %s", e->unlocked_by);
                         createDebugText(unlocked_by_text);
                     }
                     else
                     {
-                        createDebugText("selected entity deleted");
+                        createDebugText("    selected entity does not exist");
                     }
                 }
                 else
                 {
-                    createDebugText("no entity selected");
+                    createDebugText("    no entity selected");
                 }
             }
         }
