@@ -405,7 +405,7 @@ const char undo_meta_path[64] = "data/meta/undo-buffer.meta";
 const char overworld_zero_name[64] = "overworld-zero";
 
 // camera
-const float CAMERA_SENSITIVITY = 0.0003f;
+const float CAMERA_SENSITIVITY = 0.005f;
 const float CAMERA_MOVE_STEP = 0.2f;
 const float CAMERA_FOV = 15.0f;
 
@@ -1795,8 +1795,11 @@ bool canPush(Int3 coords, Direction direction)
         current_coords = getNextCoords(current_coords, direction);
         if (!intCoordsWithinLevelBounds(current_coords)) return false;
 
+        // TODO: figure out if need this, and if so fix bug with objects on head falling off when pushing stack higher than 1
+        /*
         TrailingHitbox th;
-        if (trailingHitboxAtCoords(current_coords, &th)) return false;
+        if (trailingHitboxAtCoords(current_coords, &th)) false;
+        */
 
         current_tile = getTileType(current_coords);
         if (current_tile == NONE) return true;
@@ -3422,7 +3425,7 @@ void doPhysicsTick()
 
         if (tied_entity_info->direction == NO_DIRECTION)
         {
-            // rotation: find rotation from target to current of player, and apply the same rotation to target direction of the entity.
+            // this is a rotation: find rotation from target to current of player, and apply the same rotation to target direction of the entity.
             mimicRotationalOffset(player, e);
             if (vec4IsEqual(e->rotation, directionToQuaternion(e->direction)))
             {
@@ -3430,9 +3433,13 @@ void doPhysicsTick()
             }
 
             // follow along with player coords still. this is for the case where player is still moving when this rotation happens.
-            // TODO: only allow this if no block in way when player does this
-            e->position.x = player->position.x;
-            e->position.z = player->position.z;
+            // TODO: only allow this if no block in way when player does this. for now disabled
+            /*
+            {
+                e->position.x = player->position.x;
+                e->position.z = player->position.z;
+            }
+            */
         }
         else
         {
@@ -3807,7 +3814,9 @@ bool gameFrame(double delta_time, Input* input)
         // paint onto water texture
         if (editor_state.editor_mode == WATER_PAINT)
         {
-            if ((input->keys_held & KEY_LEFT_MOUSE || input->keys_held & KEY_RIGHT_MOUSE || input->mouse_scroll_this_frame != 0) && camera.pitch < 0)
+            if ((input->keys_held & KEY_LEFT_MOUSE || input->keys_held & KEY_F ||
+                input->keys_held & KEY_RIGHT_MOUSE || input->keys_held & KEY_H || 
+                input->mouse_scroll_this_frame != 0) && camera.pitch < 0)
             {
                 editor_state.brush_radius_modifier += input->mouse_scroll_this_frame; // does nothing on most frames
                 int32 paint_radius = (int32)(16.0f + editor_state.brush_radius_modifier);
@@ -3819,13 +3828,13 @@ bool gameFrame(double delta_time, Input* input)
                     createDebugPopup(paint_text, PAINT_BRUSH_RADIUS_CHANGE);
                 }
 
-                float paint_magnitude = 0.2f;
+                float paint_magnitude = 0.1f;
                 int32 brush_radius = 0;
-                if (input->keys_held & KEY_LEFT_MOUSE)  
+                if (input->keys_held & KEY_LEFT_MOUSE || input->keys_held & KEY_F)
                 {
                     brush_radius = paint_radius;
                 }
-                else if (input->keys_held & KEY_RIGHT_MOUSE) 
+                else if (input->keys_held & KEY_RIGHT_MOUSE || input->keys_held & KEY_H) 
                 {
                     paint_magnitude = -paint_magnitude;
                     brush_radius = erase_radius;
@@ -5059,15 +5068,18 @@ bool gameFrame(double delta_time, Input* input)
 
     {
         Vec4 color_with_alpha = { 0, 0, 0, 1 }; // using alpha as first channel. 2d assets just use sprite atlas, so not using color.
-        
+
+        // crosshair
         if (editor_state.editor_mode != NO_MODE)
         {
-            // crosshair
             Vec3 crosshair_scale = { 35.0f, 35.0f, 0.0f };
             Vec3 center_screen = { ((float)game_display.client_width / 2), ((float)game_display.client_height / 2), 0.0f };
             drawAsset(SPRITE_2D_CROSSHAIR, SPRITE_2D, center_screen, crosshair_scale, IDENTITY_QUATERNION, color_with_alpha, (Vec4){0}, (Vec4){0});
+        }
 
-            // picked block
+        // picked block
+        if (editor_state.editor_mode == PLACE_BREAK)
+        {
             Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
             Vec3 picked_block_coords = { game_display.client_width - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
             drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, color_with_alpha, (Vec4){0}, (Vec4){0});
@@ -5088,7 +5100,7 @@ bool gameFrame(double delta_time, Input* input)
         {
             FOR(popup_index, MAX_DEBUG_POPUP_COUNT) if (debug_popups[popup_index].frames_left > 0) debug_popups[popup_index].frames_left--;
             if (time_until_allow_meta_input > 0) time_until_allow_meta_input--;
-            if (time_until_allow_undo_or_restart_input > 0) time_until_allow_undo_or_restart_input--; // doesn't really need to be consistent across timesteps, but it won't really matter
+            if (time_until_allow_undo_or_restart_input > 0) time_until_allow_undo_or_restart_input--; // doesn't really need to be consistent across timesteps; could be above
 
             timer_accumulator -= 1.0/60.0;
         }
