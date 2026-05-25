@@ -3410,6 +3410,7 @@ void doPhysicsTick()
     FOR(tied_entity_index, MAX_ENTITIES_TIED_TO_MOVEMENT)
     {
         TiedEntity* tied_entity_info = &temp_state.entities_tied_to_movement[tied_entity_index];
+        Entity* root_e = tied_entity_info->root_entity;
         if (tied_entity_info->id <= 0) continue;
 
         Entity* e = getEntityFromId(tied_entity_info->id);
@@ -3423,15 +3424,19 @@ void doPhysicsTick()
         {
             // rotation: find rotation from target to current of player, and apply the same rotation to target direction of the entity.
             mimicRotationalOffset(player, e);
+            if (vec4IsEqual(e->rotation, directionToQuaternion(e->direction)))
+            {
+                tied_entity_info->id = 0;
+            }
 
             // follow along with player coords still. this is for the case where player is still moving when this rotation happens.
+            // TODO: only allow this if no block in way when player does this
             e->position.x = player->position.x;
             e->position.z = player->position.z;
         }
         else
         {
             // push
-            Entity* root_e = tied_entity_info->root_entity;
             Vec3 difference_in_root_position = vec3Subtract(root_e->position, intCoordsToNorm(root_e->coords));
             float difference_in_root_position_along_direction = getComponentAlongDirection(tied_entity_info->direction, difference_in_root_position);
 
@@ -3500,6 +3505,7 @@ void doPhysicsTick()
             {
                 e->position = intCoordsToNorm(e->coords);
                 e->velocity = (Vec3){0};
+                tied_entity_info->id = 0;
             }
 
             bool clear_entity_from_tied_to_movement = false;
