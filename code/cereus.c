@@ -405,7 +405,7 @@ const char undo_meta_path[64] = "data/meta/undo-buffer.meta";
 const char overworld_zero_name[64] = "overworld-zero";
 
 // camera
-const float CAMERA_SENSITIVITY = 0.005f;
+const float CAMERA_SENSITIVITY = 0.0005f;
 const float CAMERA_MOVE_STEP = 0.2f;
 const float CAMERA_FOV = 15.0f;
 
@@ -490,6 +490,7 @@ int32 intAbs(int32 num)
     return num > 0 ? num : -num;
 }
 
+// TODO: rename below 2 functions
 Vec3 intCoordsToNorm(Int3 int_coords)
 {
     return (Vec3){ (float)int_coords.x, (float)int_coords.y, (float)int_coords.z };
@@ -3433,13 +3434,15 @@ void doPhysicsTick()
             }
 
             // follow along with player coords still. this is for the case where player is still moving when this rotation happens.
-            // TODO: only allow this if no block in way when player does this. for now disabled
-            /*
+            // check that player isn't moving into a position where the object can't go before applying this movement
+            Int3 previous_player_coords = getNextCoords(player->coords, oppositeDirection(player->direction));
+            Int3 previous_player_coords_with_tied_entity_y = roundNormCoordsToInt(vec3SetComponentAlongDirection(UP, intCoordsToNorm(previous_player_coords), (float)e->coords.y));
+            Entity* e_exists_if_no_push = getEntityAtCoords(previous_player_coords_with_tied_entity_y); // if this entity exists, that means push hasn't been allowed to happen
+            if (!(e_exists_if_no_push && e_exists_if_no_push->id == e->id)) // probably don't need the second check, how would there be a different entity in this position?
             {
                 e->position.x = player->position.x;
                 e->position.z = player->position.z;
             }
-            */
         }
         else
         {
