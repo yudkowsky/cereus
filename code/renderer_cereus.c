@@ -2415,6 +2415,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     device_features.fillModeNonSolid = VK_TRUE;
     device_features.wideLines = VK_TRUE;
     device_features.fragmentStoresAndAtomics = VK_TRUE;
+    device_features.independentBlend = VK_TRUE;
 
     VkDeviceCreateInfo device_info = {0}; // struct that bundles everthing the driver needs to create the logical device
     device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -2599,13 +2600,22 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         overlay_subpass.pColorAttachments = &overlay_color_reference;
         overlay_subpass.pDepthStencilAttachment = &overlay_depth_reference;
 
-        VkSubpassDependency overlay_dependency = {0};
-        overlay_dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-        overlay_dependency.dstSubpass = 0;
-        overlay_dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-        overlay_dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-        overlay_dependency.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        overlay_dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        VkSubpassDependency overlay_dependencies[2] = {0};
+
+        overlay_dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+        overlay_dependencies[0].dstSubpass = 0;
+        overlay_dependencies[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        overlay_dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        overlay_dependencies[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        overlay_dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+        overlay_dependencies[1].srcSubpass = 0;
+        overlay_dependencies[1].dstSubpass = 0;
+        overlay_dependencies[1].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        overlay_dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        overlay_dependencies[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        overlay_dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        overlay_dependencies[1].dependencyFlags = 0;
 
         VkRenderPassCreateInfo overlay_rp_ci = {0};
         overlay_rp_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -2613,8 +2623,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         overlay_rp_ci.pAttachments = overlay_attachments;
         overlay_rp_ci.subpassCount = 1;
         overlay_rp_ci.pSubpasses = &overlay_subpass;
-        overlay_rp_ci.dependencyCount = 1;
-        overlay_rp_ci.pDependencies = &overlay_dependency;
+        overlay_rp_ci.dependencyCount = 2;
+        overlay_rp_ci.pDependencies = overlay_dependencies;
 
         vkCreateRenderPass(vulkan_state.logical_device_handle, &overlay_rp_ci, 0, &vulkan_state.overlay_render_pass);
     }
@@ -4038,11 +4048,21 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         VkPipelineVertexInputStateCreateInfo waterline_vertex_input = {0};
         waterline_vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
+        VkPipelineColorBlendAttachmentState waterline_blend = {0};
+        waterline_blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        waterline_blend.blendEnable = VK_FALSE;
+
+        VkPipelineColorBlendStateCreateInfo waterline_blend_ci = {0};
+        waterline_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        waterline_blend_ci.attachmentCount = 1;
+        waterline_blend_ci.pAttachments = &waterline_blend;
+
         VkGraphicsPipelineCreateInfo waterline_pipeline_ci = base_graphics_pipeline_creation_info;
         waterline_pipeline_ci.pVertexInputState = &waterline_vertex_input;
         waterline_pipeline_ci.pStages = waterline_shader_stages;
         waterline_pipeline_ci.layout = vulkan_state.waterline_pipeline_layout;
         waterline_pipeline_ci.renderPass = vulkan_state.waterline_render_pass;
+        waterline_pipeline_ci.pColorBlendState = &waterline_blend_ci;
 
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &waterline_pipeline_ci, 0, &vulkan_state.waterline_pipeline);
     }
@@ -4656,7 +4676,7 @@ void vulkanDraw(void)
         vkCmdPushConstants(command_buffer, vulkan_state.fft_evolved_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(FFTEvolvedPushConstants), &pc);
         vkCmdDispatch(command_buffer, FFT_SIZE / 16, FFT_SIZE / 16, 1);
 
-        memoryBarrier(command_buffer, 
+        memoryBarrier(command_buffer,
             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
             VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
     }
@@ -5015,7 +5035,7 @@ void vulkanDraw(void)
         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, // TODO: is this still right? not stenciling for this anymore
         VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-        VK_IMAGE_ASPECT_DEPTH_BIT);
+        VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
 
     VkRenderPassBeginInfo post_rp_begin = {0};
     post_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -5121,13 +5141,18 @@ void vulkanDraw(void)
         LoadedModel* water_data = &vulkan_state.loaded_models[MODEL_3D_WATER - MODEL_3D_VOID];
         if (water_data->index_count > 0)
         {
+            VkClearValue water_clears[2] = {0};
+            // [0] is color, ignored, but exists for indexing
+            water_clears[1].color.float32[0] = 1.0f;
+
             VkRenderPassBeginInfo water_rp_begin = {0};
             water_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
             water_rp_begin.renderPass = vulkan_state.water_render_pass;
             water_rp_begin.framebuffer = vulkan_state.water_framebuffers[swapchain_image_index];
             water_rp_begin.renderArea.offset = (VkOffset2D){0, 0};
             water_rp_begin.renderArea.extent = vulkan_state.swapchain_extent;
-            water_rp_begin.clearValueCount = 0;
+            water_rp_begin.clearValueCount = 2;
+            water_rp_begin.pClearValues = water_clears;
 
             vkCmdBeginRenderPass(command_buffer, &water_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
 
