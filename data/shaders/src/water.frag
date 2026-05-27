@@ -12,6 +12,7 @@ layout(set = 1, binding = 0) uniform sampler2D depth_texture;
 layout(set = 2, binding = 0) uniform sampler2D paint_texture;
 layout(set = 3, binding = 0) uniform sampler2D water_texture;
 layout(set = 4, binding = 0) uniform sampler2D reflection_texture;
+layout(set = 5, binding = 0) uniform sampler2D grid_texture;
 
 layout(push_constant) uniform PushConstants 
 {
@@ -51,21 +52,12 @@ const float corner_size = 0.025;
 
 // grid line graphics
 const vec3 grid_line_tint = { 0.2, 0.4, 0.6 };
-const float grid_opacity = 0.1;
+const float grid_opacity = 0.08;
 
 // reflections
 const float reflection_distortion_strength = 0.0001;
 const float min_reflection = 0.1;
 const float fresnel_exponent = 4.0;
-
-// used for detecting shoreline in 8 directions
-const vec2 offsets[8] = vec2[]
-(
-    vec2( 1.0,  0.0), vec2(-1.0,  0.0),
-    vec2( 0.0,  1.0), vec2( 0.0, -1.0),
-    vec2( 0.7071,  0.7071), vec2( 0.7071, -0.7071),
-    vec2(-0.7071,  0.7071), vec2(-0.7071, -0.7071)
-);
 
 void main() 
 {
@@ -92,15 +84,15 @@ void main()
     float tint_amount = clamp(underwater_distance / max_tint_depth, tint_min, tint_max);
     vec3 base_color = mix(scene, water_depth_tint, tint_amount);
 
-    // move around by normals
+    // sample unmodified normal in order to figure out if should be grid here
     vec2 fft_uv = frag_world_pos.xz / pc.tile_length;
-    vec3 normal = normalize(texture(water_texture, fft_uv).xyz);
+    vec3 unmodified_normal = normalize(texture(water_texture, fft_uv).xyz);
 
-    vec2 normal_push = normal.xz * grid_push_by_normal;
+    // get grid pos given movement by unmodified normals
+    vec2 normal_push = unmodified_normal.xz * grid_push_by_normal;
     vec2 pushed_xz = frag_world_pos.xz + normal_push;
-    vec2 grid_pos = pushed_xz - 0.5;
 
-    // sample paint texture at this world position
+    // sample paint texture given movement by unmodified normals
     vec2 paint_uv = (pushed_xz + 0.5) / WATER_PAINT_TILE_COUNT;
     vec2 snapped = (floor(paint_uv * WATER_PAINT_SIDE) + 0.5) / WATER_PAINT_SIDE;
     float paint_value = texture(paint_texture, snapped).r;
@@ -110,8 +102,8 @@ void main()
     float effective_corner_size = corner_size * paint_value;
     float effective_opacity = grid_opacity * paint_value;
 
-    // is this on the grid?
-    vec2 distance_to_line = abs(fract(grid_pos) - 0.5);
+    // is this on the grid? using unmodified normals
+    vec2 distance_to_line = abs(fract(pushed_xz - 0.5) - 0.5); // shenanigans to get alignment with (0,0) in corner
     float inner_size = 0.5 - effective_half_width - effective_corner_size;
     vec2 pos_to_inner = distance_to_line - vec2(inner_size);
     float sdf = length(max(pos_to_inner, vec2(0.0))) + min(max(pos_to_inner.x, pos_to_inner.y), 0.0) - effective_corner_size;
@@ -119,6 +111,19 @@ void main()
     {
         base_color = mix(base_color, grid_line_tint, effective_opacity);
     }
+
+    // TODO: change normals based on paint normal map
+    vec3 normal = unmodified_normal;
+
+    // TODO: grid lines texture sampling
+    /*
+    vec2 grid_uv = fract(grid_pos / 4.0);
+    vec4 grid_color = texture(grid_texture, grid_uv).rgba;
+    base_color += grid_color.rgb * grid_color.a * grid_opacity * paint_value;
+
+    // TODO: paint multiplier should also lower opacity. check if need to try to make thinner at lower paint, 
+    // (maybe by subtracting from opacity?) or if lowering opacity does the same
+    */
 
     // reflection based on fresnel strength
     vec3 view_dir = normalize(pc.camera_position.xyz - frag_world_pos);

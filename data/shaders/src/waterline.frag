@@ -10,7 +10,8 @@ layout(set = 1, binding = 0) uniform sampler2D water_depth_texture;
 
 layout(push_constant) uniform PushConstants
 {
-    vec2 texel_size;
+    float texel_width;
+    float texel_height;
     float max_depth_difference;
     float outline_radius_px;
 }
@@ -50,7 +51,7 @@ void main()
     
     for (int i = 0; i < 8; i++)
     {
-        vec2 sample_uv = frag_uv + offsets[i] * pc.outline_radius_px * pc.texel_size;
+        vec2 sample_uv = frag_uv + offsets[i] * (pc.outline_radius_px * 0.7) * vec2(pc.texel_width, pc.texel_height);
         
         float neighbor_water_raw = texture(water_depth_texture, sample_uv).r;
         float neighbor_scene_raw = texture(depth_texture, sample_uv).r;
