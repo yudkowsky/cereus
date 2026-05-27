@@ -62,7 +62,7 @@ typedef enum
 }
 MirrorOrientation;
 
-typedef struct
+typedef struct Entity
 {
     int32 id;
     Int3 coords;
@@ -75,8 +75,12 @@ typedef struct
     MirrorOrientation mirror_orientation;
 
     // movement state
-    Vec3 velocity;
+    Vec3 velocity; // not reliably used except for player
+    Direction moving_direction; // could be encoded in velocity, i guess? but used for different things...
     bool falling;
+    bool moving_on_head;
+    int32 root_entity_id;
+    bool tied_to_pack_and_decoupled;
 
     // for sources/lasers
     Color color;
@@ -120,16 +124,6 @@ typedef struct
 }
 TrailingHitbox;
 
-typedef struct
-{   
-    int32 id;
-    Direction direction;
-    bool on_head;
-    Entity* root_entity;
-    bool tied_to_pack_and_decoupled; // should interpolate towards end point, but still handle with rest of enities
-}
-TiedEntity;
-
 // a bunch of state to do with handling what gets pushed when during when the player is turning
 typedef struct
 {
@@ -167,7 +161,6 @@ typedef struct TemporaryState
     bool pack_attached;
     Direction climbing_direction;
 
-    TiedEntity entities_tied_to_movement[32];
     int32 player_hit_by_red;
     int32 player_hit_by_blue;
     PackTurnState pack_turn_state;
@@ -845,7 +838,7 @@ Entity* getEntityAtCoords(Int3 coords)
 
 Entity* getEntityFromId(int32 id)
 {
-    if (id < 0) return 0;
+    if (id <= 0) return 0;
     if (id == PLAYER_ID) return &world_state.player;
     else if (id == PACK_ID) return &world_state.pack;
     else 
@@ -1806,20 +1799,8 @@ bool canPushUp(Int3 coords)
     else return false;
 }
 
-// pass in entity id, finds next free in entites_tied_to_movement if not already tracked; returns write id for that entity if already tracked
-int32 getWriteIndexInTiedEntities(int32 entity_id)
-{
-    FOR(tied_entity_index, MAX_ENTITIES_TIED_TO_MOVEMENT)
-    {
-        if (temp_state.entities_tied_to_movement[tied_entity_index].id == entity_id) return tied_entity_index;
-        if (temp_state.entities_tied_to_movement[tied_entity_index].id > 0) continue;
-        return tied_entity_index;
-    }
-    return -1;
-}
-
 // assumes at least the bottom of the stack is able to be pushed 
-void pushAll(Int3 coords, Direction direction, bool on_head, Entity* root_entity)
+void pushAll(Int3 coords, Direction direction, bool on_head, int32 root_entity_id)
 {
     Int3 current_coords = coords;
     int32 push_count = 0;
@@ -1846,14 +1827,10 @@ void pushAll(Int3 coords, Direction direction, bool on_head, Entity* root_entity
             createTrailingHitbox(e->id, e->coords, TRAILING_HITBOX_TIME);
             moveEntityInBufferAndState(e, next_coords, e->direction);
 
-            int32 write_index = getWriteIndexInTiedEntities(e->id);
-            if (write_index == -1) continue;
-
-            temp_state.entities_tied_to_movement[write_index].id = e->id;
-            temp_state.entities_tied_to_movement[write_index].direction = direction;
-            temp_state.entities_tied_to_movement[write_index].on_head = on_head;
-            temp_state.entities_tied_to_movement[write_index].root_entity = root_entity;
-            temp_state.entities_tied_to_movement[write_index].tied_to_pack_and_decoupled = false;
+            e->moving_direction = direction;
+            e->moving_on_head = on_head;
+            e->root_entity_id = root_entity_id;
+            e->tied_to_pack_and_decoupled = false;
 
             current_stack_coords = getNextCoords(current_stack_coords, UP);
         }
@@ -1862,7 +1839,7 @@ void pushAll(Int3 coords, Direction direction, bool on_head, Entity* root_entity
 }
 
 // assumes able to be pushed
-void pushUp(Int3 coords, Entity* root_entity)
+void pushUp(Int3 coords, int32 root_entity_id)
 {
     int32 stack_size = getPushableStackSize(coords);
     Int3 current_coords = coords;
@@ -1877,14 +1854,10 @@ void pushUp(Int3 coords, Entity* root_entity)
         createTrailingHitbox(e->id, e->coords, TRAILING_HITBOX_TIME);
         moveEntityInBufferAndState(e, next_coords, e->direction);
 
-        int32 write_index = getWriteIndexInTiedEntities(e->id);
-        if (write_index == -1) continue;
-
-        temp_state.entities_tied_to_movement[write_index].id = e->id;
-        temp_state.entities_tied_to_movement[write_index].direction = UP;
-        temp_state.entities_tied_to_movement[write_index].on_head = false; // is this important for anything in this context?
-        temp_state.entities_tied_to_movement[write_index].root_entity = root_entity;
-        temp_state.entities_tied_to_movement[write_index].tied_to_pack_and_decoupled = false;
+        e->moving_direction = UP;
+        e->moving_on_head = false; // is this important for anything in this context?
+        e->root_entity_id = root_entity_id;
+        e->tied_to_pack_and_decoupled = false;
 
         current_coords = getNextCoords(current_coords, DOWN);
     }
@@ -2859,7 +2832,7 @@ void doStandardMovement(Direction direction, Int3 next_player_coords)
     bool do_on_head_movement = false;
     if (isPushable(getTileType(coords_above_player)) && canPush(coords_above_player, direction)) do_on_head_movement = true;
     if (temp_state.player_hit_by_blue) do_on_head_movement = false;
-    if (do_on_head_movement) pushAll(coords_above_player, direction, true, player);
+    if (do_on_head_movement) pushAll(coords_above_player, direction, true, PLAYER_ID);
 
     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
     moveEntityInBufferAndState(player, next_player_coords, player->direction);
@@ -2967,7 +2940,7 @@ void doPhysicsTick()
             }
             if (allow_diagonal)
             {
-                if (do_push) pushAll(diagonal_coords, diagonal_push_direction, false, pack);
+                if (do_push) pushAll(diagonal_coords, diagonal_push_direction, false, PACK_ID);
                 createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
                 moveEntityInBufferAndState(pack, diagonal_coords, player->direction);
             }
@@ -2994,7 +2967,7 @@ void doPhysicsTick()
             }
             if (allow_orthogonal)
             {
-                if (do_push) pushAll(orthogonal_coords, orthogonal_push_direction, false, pack);
+                if (do_push) pushAll(orthogonal_coords, orthogonal_push_direction, false, PACK_ID);
                 createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
                 moveEntityInBufferAndState(pack, orthogonal_coords, player->direction);
             }
@@ -3009,10 +2982,11 @@ void doPhysicsTick()
                 popLastUndoAction();
 
                 temp_state.allow_movement_timer = 6; // TODO: i probably want to allow all movement except this same turn again, not just disable all movement for a few frames
+                // could i check moving direction, and only allow if moving direction isn't opposite direction here, maybe? idea is that only way to be moving away from a failed animation case is if failed animation case just happened
             }
         }
+        temp_state.pack_turn_state.pack_intermediate_states_timer--;
     }
-    if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0) temp_state.pack_turn_state.pack_intermediate_states_timer--;
 
     // TODO: this updating of pack every frame means that the pack snaps to where it would be if it were attached. e.g. player turns s.t. pack is behind player direction,
     // but player hasn't gotten that rotation yet, and this causes snap of just less than 90deg to behind where player is currently looking.
@@ -3240,7 +3214,7 @@ void doPhysicsTick()
                 if (climb_more)
                 {
                     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
-                    if (push_up) pushUp(coords_above_player, player);
+                    if (push_up) pushUp(coords_above_player, PLAYER_ID);
                     moveEntityInBufferAndState(player, coords_above_player, player->direction);
                     player->position.y += CLIMBING_SPEED;
                     player->velocity.y = CLIMBING_SPEED;
@@ -3266,7 +3240,7 @@ void doPhysicsTick()
                         if (pack_stays_with_player)
                         {
                             createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
-                            if (pack_pushes) pushUp(coords_above_pack, pack);
+                            if (pack_pushes) pushUp(coords_above_pack, PACK_ID);
                             moveEntityInBufferAndState(pack, coords_above_pack, player->direction);
 
                             pack->position.y += CLIMBING_SPEED;
@@ -3291,7 +3265,7 @@ void doPhysicsTick()
                 player->position = int3ToVec3(player->coords); // normalise y coord
                 player->velocity = (Vec3){0};
                 temp_state.climbing_direction = NO_DIRECTION;
-                if (do_push_forwards) pushAll(coords_ahead, player->direction, false, player);
+                if (do_push_forwards) pushAll(coords_ahead, player->direction, false, PLAYER_ID);
                 doStandardMovement(player->direction, coords_ahead);
             }
 
@@ -3439,118 +3413,119 @@ void doPhysicsTick()
         }
     }
 
-    // handle entities tied to movement
-    FOR(tied_entity_index, MAX_ENTITIES_TIED_TO_MOVEMENT)
+    // handle moving entities
+    Entity* pushed_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
+    FOR(group_index, 3)
     {
-        TiedEntity* tied_entity_info = &temp_state.entities_tied_to_movement[tied_entity_index];
-        Entity* root_e = tied_entity_info->root_entity;
-        if (tied_entity_info->id <= 0) continue;
-
-        Entity* e = getEntityFromId(tied_entity_info->id);
-        if (e->falling) 
+        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            tied_entity_info->id = 0;
-            continue;
-        }
+            Entity* e = &pushed_entity_group[group_index][entity_index];
+            if ((e->moving_direction == NO_DIRECTION || e->moving_direction == DOWN || e->moving_direction == UP) && !e->moving_on_head) continue; // TODO: maybe better check here, but these cover the cases I'm handling right now
+            Entity* root_e = getEntityFromId(e->root_entity_id);
+            if (!root_e) continue;
 
-        if (tied_entity_info->direction == NO_DIRECTION)
-        {
-            // this is a rotation: find rotation from target to current of player, and apply the same rotation to target direction of the entity.
-            mimicRotationalOffset(player, e);
-            if (vec4IsEqual(e->rotation, directionToQuaternion(e->direction)))
+            // NOTE: there used to be a e->falling check here, is it necessary?
+
+            if (e->moving_direction == NO_DIRECTION)
             {
-                tied_entity_info->id = 0;
-            }
-
-            // follow along with player coords still. this is for the case where player is still moving when this rotation happens.
-            // check that player isn't moving into a position where the object can't go before applying this movement
-            Int3 previous_player_coords = getNextCoords(player->coords, oppositeDirection(player->direction));
-            Int3 previous_player_coords_with_tied_entity_y = vec3ToInt3(vec3SetComponentAlongDirection(UP, int3ToVec3(previous_player_coords), (float)e->coords.y));
-            Entity* e_exists_if_no_push = getEntityAtCoords(previous_player_coords_with_tied_entity_y); // if this entity exists, that means push hasn't been allowed to happen
-            if (!(e_exists_if_no_push && e_exists_if_no_push->id == e->id)) // probably don't need the second check, how would there be a different entity in this position?
-            {
-                e->position.x = player->position.x;
-                e->position.z = player->position.z;
-            }
-        }
-        else
-        {
-            // push
-            Vec3 difference_in_root_position = vec3Subtract(root_e->position, int3ToVec3(root_e->coords));
-            float difference_in_root_position_along_direction = getComponentAlongDirection(tied_entity_info->direction, difference_in_root_position);
-
-            if (difference_in_root_position_along_direction != 0)
-            {
-                Vec3 test_position = vec3AddFloatAlongDirection(tied_entity_info->direction, difference_in_root_position_along_direction, int3ToVec3(e->coords));
-                float test_movement_towards_direction = getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, e->position));
-
-                bool do_standard_entity_move = false;
-                if (test_movement_towards_direction > 0) do_standard_entity_move = true; // prevents negative snapping of an object-to-be-pushed towards player
-                if (test_movement_towards_direction > 0.5) do_standard_entity_move = false; // prevents too large a jump (happens if pack rotation not done before root_e moves by one tile)
-                if (tied_entity_info->tied_to_pack_and_decoupled) do_standard_entity_move = false;
-
-                if (do_standard_entity_move)
+                // only here if moving_on_head, this is a rotation: find rotation from target to current of player, and apply the same rotation to target direction of the entity.
+                mimicRotationalOffset(player, e);
+                if (vec4IsEqual(e->rotation, directionToQuaternion(e->direction))) 
                 {
-                    e->position = test_position;
-                    e->velocity = vec3AddFloatAlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), (Vec3){0});
-
-                    if (tied_entity_info->on_head)
-                    {
-                        // apply player rotation too, in case player isn't done rotating when this move happens.
-                        mimicRotationalOffset(player, e);
-                    }
+                    e->moving_on_head = false;
+                    continue;
                 }
-                else if (root_e == pack)
+
+                // follow along with player coords still. this is for the case where player is still moving when this rotation happens.
+                // check that player isn't moving into a position where the object can't go before applying this movement
+                Int3 previous_player_coords = getNextCoords(player->coords, oppositeDirection(player->direction));
+                Int3 previous_player_coords_with_moving_entity_y = vec3ToInt3(vec3SetComponentAlongDirection(UP, int3ToVec3(previous_player_coords), (float)e->coords.y));
+                Entity* e_exists_if_no_push = getEntityAtCoords(previous_player_coords_with_moving_entity_y); // if this entity exists, that means push hasn't been allowed to happen
+                if (!(e_exists_if_no_push && e_exists_if_no_push->id == e->id)) // probably don't need the second check, how would there be a different entity in this position?
                 {
-                    // here if pack would overshoot, or otherwise misbehave
-                    bool close_to_target = fabs(getComponentAlongDirection(tied_entity_info->direction, vec3Subtract(e->position, int3ToVec3(e->coords)))) < 0.1;
-                    if (test_movement_towards_direction > 0.0 || close_to_target)
+                    e->position.x = player->position.x;
+                    e->position.z = player->position.z;
+                }
+            }
+            else
+            {
+                // push
+                Vec3 difference_in_root_position = vec3Subtract(root_e->position, int3ToVec3(root_e->coords));
+                float difference_in_root_position_along_direction = getComponentAlongDirection(e->moving_direction, difference_in_root_position);
+
+                if (difference_in_root_position_along_direction != 0)
+                {
+                    Vec3 test_position = vec3AddFloatAlongDirection(e->moving_direction, difference_in_root_position_along_direction, int3ToVec3(e->coords));
+                    float test_movement_towards_direction = getSignedComponentAlongDirection(e->moving_direction, vec3Subtract(test_position, e->position));
+
+                    bool do_standard_entity_move = false;
+                    if (test_movement_towards_direction > 0) do_standard_entity_move = true; // prevents negative snapping of an object-to-be-pushed towards player
+                    if (test_movement_towards_direction > 0.5) do_standard_entity_move = false; // prevents too large a jump (happens if pack rotation not done before root_e moves by one tile)
+                    if (e->tied_to_pack_and_decoupled) do_standard_entity_move = false;
+
+                    if (do_standard_entity_move)
                     {
-                        tied_entity_info->tied_to_pack_and_decoupled = true;
-                        float interpolation_distance_per_frame = 0.1f;
-                        float difference = getSignedComponentAlongDirection(tied_entity_info->direction, vec3Subtract(int3ToVec3(e->coords), e->position));
-                        if (difference < interpolation_distance_per_frame)
+                        e->position = test_position;
+                        e->velocity = vec3AddFloatAlongDirection(e->moving_direction, getComponentAlongDirection(e->moving_direction, root_e->velocity), (Vec3){0});
+
+                        if (e->moving_on_head)
                         {
-                            e->position = int3ToVec3(e->coords);
-                            e->velocity = (Vec3){0};
-                            tied_entity_info->id = 0;
+                            // apply player rotation too, in case player isn't done rotating when this move happens.
+                            mimicRotationalOffset(player, e);
+                        }
+                    }
+                    else if (root_e == pack)
+                    {
+                        // here if pack would overshoot, or otherwise misbehave
+                        bool close_to_target = fabs(getComponentAlongDirection(e->moving_direction, vec3Subtract(e->position, int3ToVec3(e->coords)))) < 0.1;
+                        if (test_movement_towards_direction > 0.0 || close_to_target)
+                        {
+                            e->tied_to_pack_and_decoupled = true;
+                            float interpolation_distance_per_frame = 0.1f;
+                            float difference = getSignedComponentAlongDirection(e->moving_direction, vec3Subtract(int3ToVec3(e->coords), e->position));
+                            if (difference < interpolation_distance_per_frame)
+                            {
+                                e->position = int3ToVec3(e->coords);
+                                e->velocity = (Vec3){0};
+                                e->moving_direction = NO_DIRECTION;
+                            }
+                            else
+                            {
+                                float sign = (e->moving_direction == NORTH || e->moving_direction == WEST) ? -1.0f : 1.0f;
+                                e->position = vec3AddFloatAlongDirection(e->moving_direction, sign * interpolation_distance_per_frame, e->position);
+                                e->velocity = vec3AddFloatAlongDirection(e->moving_direction, sign * interpolation_distance_per_frame, (Vec3){0});
+                            }
+                        }
+                    }
+                    else if (test_movement_towards_direction < -0.5)
+                    {
+                        // case where object should keep moving, but is offset by one unit because root entity has changed coords, but object on head / on stack will stop here, so isn't pushed by pushAll, but should still continue to end coords
+                        test_position = vec3AddFloatAlongDirection(e->moving_direction, 1.0f, test_position);
+                        if (getComponentAlongDirection(e->moving_direction, vec3Subtract(test_position, int3ToVec3(e->coords))) < 0.0f)
+                        {
+                            e->position = test_position;
+                            e->velocity = vec3AddFloatAlongDirection(e->moving_direction, getComponentAlongDirection(e->moving_direction, root_e->velocity), (Vec3){0});
                         }
                         else
                         {
-                            float sign = (tied_entity_info->direction == NORTH || tied_entity_info->direction == WEST) ? -1.0f : 1.0f;
-                            e->position = vec3AddFloatAlongDirection(tied_entity_info->direction, sign * interpolation_distance_per_frame, e->position);
-                            e->velocity = vec3AddFloatAlongDirection(tied_entity_info->direction, sign * interpolation_distance_per_frame, (Vec3){0});
+                            e->position = int3ToVec3(e->coords);
+                            e->velocity = (Vec3){0};
+                            e->moving_direction = NO_DIRECTION;
                         }
                     }
                 }
-                else if (test_movement_towards_direction < -0.5)
+                else 
                 {
-                    // case where object should keep moving, but is offset by one unit because root entity has changed coords, but object on head / on stack will stop here, so isn't pushed by pushAll, but should still continue to end coords
-                    test_position = vec3AddFloatAlongDirection(tied_entity_info->direction, 1, test_position);
-                    if (getComponentAlongDirection(tied_entity_info->direction, vec3Subtract(test_position, int3ToVec3(e->coords))) < 0.0)
-                    {
-                        e->position = test_position;
-                        e->velocity = vec3AddFloatAlongDirection(tied_entity_info->direction, getComponentAlongDirection(tied_entity_info->direction, root_e->velocity), (Vec3){0});
-                    }
-                    else
-                    {
-                        e->position = int3ToVec3(e->coords);
-                        e->velocity = (Vec3){0};
-                        tied_entity_info->id = 0;
-                    }
+                    e->position = int3ToVec3(e->coords);
+                    e->velocity = (Vec3){0};
+                    e->moving_direction = NO_DIRECTION;
                 }
-            }
-            else 
-            {
-                e->position = int3ToVec3(e->coords);
-                e->velocity = (Vec3){0};
-                tied_entity_info->id = 0;
-            }
 
-            bool clear_entity_from_tied_to_movement = false;
-            if (vec3IsEqual(e->position, int3ToVec3(e->coords))) clear_entity_from_tied_to_movement = true;
-            if (tied_entity_info->on_head) clear_entity_from_tied_to_movement = false; // case already handled above
-            if (clear_entity_from_tied_to_movement) tied_entity_info->id = 0;
+                bool clear_entity_from_moving = false;
+                if (vec3IsEqual(e->position, int3ToVec3(e->coords))) clear_entity_from_moving = true;
+                //if (e->moving_on_head) clear_entity_from_moving = false; // case already handled above
+                if (clear_entity_from_moving) e->moving_direction = NO_DIRECTION;
+            }
         }
     }
 
@@ -4285,7 +4260,7 @@ bool gameFrame(double delta_time, Input* input)
                             if (allow_walk || cheating)
                             {
                                 recordActionForUndo(&world_state);
-                                if (do_push) pushAll(next_player_coords, input_direction, false, player);
+                                if (do_push) pushAll(next_player_coords, input_direction, false, PLAYER_ID);
                                 doStandardMovement(input_direction, next_player_coords);
                             }
                             else
@@ -4298,7 +4273,7 @@ bool gameFrame(double delta_time, Input* input)
                                 Input input_snapshot = *input;
 
                                 // commit tentative move
-                                if (do_push) pushAll(next_player_coords, input_direction, false, player);
+                                if (do_push) pushAll(next_player_coords, input_direction, false, PLAYER_ID);
                                 doStandardMovement(input_direction, next_player_coords);
 
                                 memset(input, 0, sizeof(Input));
@@ -4325,7 +4300,7 @@ bool gameFrame(double delta_time, Input* input)
                                 if (would_be_red)
                                 {
                                     recordActionForUndo(&world_state);
-                                    if (do_push) pushAll(next_player_coords, input_direction, false, player);
+                                    if (do_push) pushAll(next_player_coords, input_direction, false, PLAYER_ID);
                                     doStandardMovement(input_direction, next_player_coords);
                                 }
                             }
@@ -4395,12 +4370,10 @@ bool gameFrame(double delta_time, Input* input)
 
                                     e->direction = (e->direction + direction_add) % 4;
 
-                                    int32 write_index = getWriteIndexInTiedEntities(e->id);
-                                    temp_state.entities_tied_to_movement[write_index].id = e->id;
-                                    temp_state.entities_tied_to_movement[write_index].direction = NO_DIRECTION;
-                                    temp_state.entities_tied_to_movement[write_index].on_head = true;
-                                    temp_state.entities_tied_to_movement[write_index].root_entity = player;
-                                    temp_state.entities_tied_to_movement[write_index].tied_to_pack_and_decoupled = false;
+                                    e->moving_direction = NO_DIRECTION;
+                                    e->moving_on_head = true;
+                                    e->root_entity_id = PLAYER_ID;
+                                    e->tied_to_pack_and_decoupled = false;
 
                                     current_coords = getNextCoords(current_coords, UP);
                                 }
@@ -4454,18 +4427,18 @@ bool gameFrame(double delta_time, Input* input)
                             if (temp_state.pack_attached)
                             {
                                 createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
-                                if (do_push) pushAll(next_pack_coords, move_direction, false, pack);
+                                if (do_push) pushAll(next_pack_coords, move_direction, false, PACK_ID);
                                 moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
                             }
                             else
                             {
-                                if (do_push) pushAll(next_player_coords, move_direction, false, player);
+                                if (do_push) pushAll(next_player_coords, move_direction, false, PLAYER_ID);
                             }
 
                             // move stuff on head
                             Int3 coords_on_head = getNextCoords(player->coords, UP);
                             TileType type_on_head = getTileType(coords_on_head);
-                            if (isPushable(type_on_head) && canPush(coords_on_head, move_direction)) pushAll(coords_on_head, move_direction, true, player);
+                            if (isPushable(type_on_head) && canPush(coords_on_head, move_direction)) pushAll(coords_on_head, move_direction, true, PLAYER_ID);
 
                             createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
                             moveEntityInBufferAndState(player, next_player_coords, player->direction);
@@ -4679,18 +4652,20 @@ bool gameFrame(double delta_time, Input* input)
             createDebugText(mirror_text);
             */
 
-            // entities tied to player movement
-            char tied_text[256] = {0};
-            TiedEntity te_1 = temp_state.entities_tied_to_movement[0];
-            TiedEntity te_2 = temp_state.entities_tied_to_movement[1];
-            snprintf(tied_text, sizeof(tied_text), "tied entity 1: id: %i, dir: %i, on_head: %i, tied entity 2: id: %i, dir: %i, on_head: %i", te_1.id, te_1.direction, te_1.on_head, te_2.id, te_2.direction, te_2.on_head);
-            createDebugText(tied_text);
+            // boxes
+            char box_text[256] = {0};
+            Entity box1 = world_state.boxes[0];
+            Entity box2 = world_state.boxes[1];
+            snprintf(box_text, sizeof(box_text), "box 1: moving dir: %i, on_head: %i, moving dir: %i, on_head: %i", box1.moving_direction, box1.moving_on_head, box2.moving_direction, box2.moving_on_head);
+            createDebugText(box_text);
 
-            char tied_count_text[256] = {0};
-            int32 tied_entity_count = 0;
-            FOR(te_index, MAX_ENTITIES_TIED_TO_MOVEMENT) if (temp_state.entities_tied_to_movement[te_index].id != 0) tied_entity_count++;
-            snprintf(tied_count_text, sizeof(tied_count_text), "tied_entity_count: %i", tied_entity_count);
-            createDebugText(tied_count_text);
+            /*
+            char moving_count_text[256] = {0};
+            int32 moving_entity_count = 0;
+            FOR(me_index, MAX_ENTITIES_TIED_TO_MOVEMENT) if (temp_state.moving_entities[me_index].id != 0) moving_entity_count++;
+            snprintf(moving_count_text, sizeof(moving_count_text), "moving_entity_count: %i", moving_entity_count);
+            createDebugText(moving_count_text);
+            */
 
             // pack attached
             char attached_text[256] = {0};
