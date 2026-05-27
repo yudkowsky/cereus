@@ -1783,6 +1783,10 @@ bool canPush(Int3 coords, Direction direction)
         current_coords = getNextCoords(current_coords, direction);
         if (!intCoordsWithinLevelBounds(current_coords)) return false;
 
+        // NOTE: there might be some reason i got rid of this check before? or did i just never have this check
+        TrailingHitbox th;
+        if (trailingHitboxAtCoords(current_coords, &th)) return false;
+
         current_tile = getTileType(current_coords);
         if (current_tile == NONE) return true;
         if (current_tile == GRID || current_tile == WALL || current_tile == LADDER ) return false;
@@ -2861,6 +2865,14 @@ void updatePackDetached()
     else temp_state.pack_attached = false;
 }
 
+void clearMovementState(Entity* e)
+{
+    e->moving_direction = NO_DIRECTION;
+    e->moving_on_head = false;
+    e->root_entity_id = 0;
+    e->tied_to_pack_and_decoupled = false;
+}
+
 // expects positive value for deceleration
 float oneDimensionalDecelerationSimulation(float initial_velocity, float deceleration)
 {
@@ -3432,7 +3444,7 @@ void doPhysicsTick()
                 mimicRotationalOffset(player, e);
                 if (vec4IsEqual(e->rotation, directionToQuaternion(e->direction))) 
                 {
-                    e->moving_on_head = false;
+                    clearMovementState(e);
                     continue;
                 }
 
@@ -3487,7 +3499,7 @@ void doPhysicsTick()
                             {
                                 e->position = int3ToVec3(e->coords);
                                 e->velocity = (Vec3){0};
-                                e->moving_direction = NO_DIRECTION;
+                                clearMovementState(e);
                             }
                             else
                             {
@@ -3510,7 +3522,7 @@ void doPhysicsTick()
                         {
                             e->position = int3ToVec3(e->coords);
                             e->velocity = (Vec3){0};
-                            e->moving_direction = NO_DIRECTION;
+                            clearMovementState(e);
                         }
                     }
                 }
@@ -3518,13 +3530,13 @@ void doPhysicsTick()
                 {
                     e->position = int3ToVec3(e->coords);
                     e->velocity = (Vec3){0};
-                    e->moving_direction = NO_DIRECTION;
+                    clearMovementState(e);
                 }
 
                 bool clear_entity_from_moving = false;
                 if (vec3IsEqual(e->position, int3ToVec3(e->coords))) clear_entity_from_moving = true;
                 //if (e->moving_on_head) clear_entity_from_moving = false; // case already handled above
-                if (clear_entity_from_moving) e->moving_direction = NO_DIRECTION;
+                if (clear_entity_from_moving) clearMovementState(e);
             }
         }
     }
