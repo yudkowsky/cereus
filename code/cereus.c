@@ -3644,6 +3644,7 @@ bool gameFrame(double delta_time, Input* input)
             editor_state.editor_mode = SELECT;
             editor_state.selected_id = 0;
             editor_state.writing_field = NO_WRITING_FIELD;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
 
         updateTextInput(input);
@@ -4075,7 +4076,7 @@ bool gameFrame(double delta_time, Input* input)
 
     // MISC STUFF BEFORE PHYSICS LOOP
 
-    if (time_until_allow_meta_input == 0 && input->keys_held & KEY_ESCAPE)
+    if (time_until_allow_meta_input == 0 && input->keys_held & KEY_ESCAPE && editor_state.editor_mode != SELECT_WRITE)
     {
         if (in_overworld)
         {
@@ -4573,11 +4574,11 @@ bool gameFrame(double delta_time, Input* input)
         // update restart coords based on current coords of the player, and also update game progress if this is relevant
         if (player->coords.z > 204) 
         {
-            restart_position = (Int3){ 58, 2, 225 };
+            restart_position = (Int3){ 37, 2, 225 };
         }
         else if (player->coords.z > 189)
         {
-            restart_position = (Int3){ 58, 2, 200 };
+            restart_position = (Int3){ 58, 2, 197 };
             if (game_progress < WORLD_1) game_progress = WORLD_1;
         }
         else if (player->coords.z > 174) 
