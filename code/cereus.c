@@ -429,6 +429,8 @@ int32 camera_target_plane = 0; // y level of xz plane which calculates targeted 
 
 // general state
 WorldState world_state = {0};
+Entity* player = &world_state.player;
+Entity* pack = &world_state.pack;
 TemporaryState temp_state = {0};
 LaserBuffer laser_buffer[512] = {0}; // 512 = 64 max sources * 16 max laser turns
 GameProgress game_progress = WORLD_0;
@@ -1872,8 +1874,6 @@ Vec3 getNormCoordsWithEntityCoordAlongAxis(Direction direction, Vec3 current_nor
 
 void updateLaserBuffer()
 {
-    Entity* player = &world_state.player;
-
     FOR(laser_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED) laser_buffer[laser_index].color = NO_COLOR;
     temp_state.player_hit_by_red   = false;
 
@@ -2311,9 +2311,6 @@ void gameInitializeState(char* level_name)
 
     memset(laser_buffer, 0, sizeof(laser_buffer));
 
-    Entity* player = &world_state.player;
-    Entity* pack = &world_state.pack;
-
     // memset worldstate to 0 (with persistant level_name, and solved levels)
     char persist_level_name[256] = {0};
     char persist_solved_levels[64][64] = {0};
@@ -2691,8 +2688,6 @@ void zeroAnimations()
         }
     }
 
-    Entity* player = &world_state.player;
-    Entity* pack = &world_state.pack;
     player->rotation = directionToQuaternion(player->direction);
     player->velocity = (Vec3){0};
     pack->rotation = directionToQuaternion(pack->direction);
@@ -2808,9 +2803,6 @@ void levelChangePrep(char next_level[64])
 
 void doStandardMovement(Direction direction, Int3 next_player_coords)
 {
-    Entity* player = &world_state.player;
-    Entity* pack = &world_state.pack;
-
     // maybe move stack above the player's head
     Int3 coords_above_player = getNextCoords(player->coords, UP);
     bool do_on_head_movement = false;
@@ -2832,9 +2824,6 @@ void doStandardMovement(Direction direction, Int3 next_player_coords)
 
 void updatePackDetached()
 {
-    Entity* player = &world_state.player;
-    Entity* pack = &world_state.pack;
-
     TileType tile_behind_player = getTileType(getNextCoords(world_state.player.coords, oppositeDirection(world_state.player.direction)));
     if (tile_behind_player == PACK || temp_state.pack_turn_state.pack_intermediate_states_timer > 0) 
     {
@@ -2869,8 +2858,6 @@ float oneDimensionalDecelerationSimulation(float initial_velocity, float deceler
 
 float calculateSpeculativeVelocityAlongDirection(Direction direction, float sign)
 {
-    Entity* player = &world_state.player;
-
     // get velocity of case where we fully accelerate on this frame. clamp velocity to max speed
     Vec3 velocity_to_add = vec3ScalarMultiply(directionToVector(direction), PLAYER_ACCELERATION); // may be negative, if direction is N or W
     Vec3 unclamped_speculative_velocity = vec3Add(player->velocity, velocity_to_add);             // in that case, velocity is also negative, so add works correctly.
@@ -2909,11 +2896,26 @@ void mimicRotationalOffset(Entity* copied_e, Entity* e)
     e->rotation = quaternionMultiply(transform, base_rotation);
 }
 
+void interpolateDecoupledTowardsCoords(Entity* e)
+{
+    float interpolation_distance_per_frame = 0.1f;
+    float difference = getSignedComponentAlongDirection(e->moving_direction, vec3Subtract(int3ToVec3(e->coords), e->position));
+    if (difference < interpolation_distance_per_frame)
+    {
+        e->position = int3ToVec3(e->coords);
+        e->velocity = (Vec3){0};
+        clearMovementState(e);
+    }
+    else
+    {
+        float sign = (e->moving_direction == NORTH || e->moving_direction == WEST) ? -1.0f : 1.0f;
+        e->position = vec3AddFloatAlongDirection(e->moving_direction, sign * interpolation_distance_per_frame, e->position);
+        e->velocity = vec3AddFloatAlongDirection(e->moving_direction, sign * interpolation_distance_per_frame, (Vec3){0});
+    }
+}
+
 void doPhysicsTick()
 {
-    Entity* player = &world_state.player;
-    Entity* pack = &world_state.pack;
-
     // pack turn sequence
     if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0)
     {
@@ -2976,7 +2978,6 @@ void doPhysicsTick()
                 player->direction = temp_state.pack_turn_state.initial_player_direction;
                 temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
                 if (!temp_state.pack_turn_state.diagonal_push_happened_this_turn) popLastUndoAction();
-
                 temp_state.pack_turn_state.half_failed_turn_timer = HALF_FAILED_PACK_TURN_COOLDOWN;
             }
             temp_state.pack_turn_state.diagonal_push_happened_this_turn = false;
@@ -3157,12 +3158,6 @@ void doPhysicsTick()
         }
         else
         {
-            // movement crosses tile boundary so will require a check against what's above and infront:
-            // maybe continue climbing
-            // maybe pack should detach but otherwise keep climbing
-            // maybe end climb and start moving forwards
-            // maybe reverse direction if path is occupied either above or infront
-
             bool try_climb_more = false;
             bool move_forwards = false;
             bool do_push_forwards = false;
@@ -3477,20 +3472,7 @@ void doPhysicsTick()
                         if (test_movement_towards_direction > 0.0 || close_to_target)
                         {
                             e->tied_to_pack_and_decoupled = true;
-                            float interpolation_distance_per_frame = 0.1f;
-                            float difference = getSignedComponentAlongDirection(e->moving_direction, vec3Subtract(int3ToVec3(e->coords), e->position));
-                            if (difference < interpolation_distance_per_frame)
-                            {
-                                e->position = int3ToVec3(e->coords);
-                                e->velocity = (Vec3){0};
-                                clearMovementState(e);
-                            }
-                            else
-                            {
-                                float sign = (e->moving_direction == NORTH || e->moving_direction == WEST) ? -1.0f : 1.0f;
-                                e->position = vec3AddFloatAlongDirection(e->moving_direction, sign * interpolation_distance_per_frame, e->position);
-                                e->velocity = vec3AddFloatAlongDirection(e->moving_direction, sign * interpolation_distance_per_frame, (Vec3){0});
-                            }
+                            interpolateDecoupledTowardsCoords(e);
                         }
                     }
                     else if (test_movement_towards_direction < -0.5)
@@ -3512,9 +3494,18 @@ void doPhysicsTick()
                 }
                 else 
                 {
-                    e->position = int3ToVec3(e->coords);
-                    e->velocity = (Vec3){0};
-                    clearMovementState(e);
+                    if (!vec3IsEqual(e->position, int3ToVec3(e->coords)) && root_e == pack)
+                    {
+                        // this is pack at rest but entity not, which means this is half-failed turn case: entity should interpolate towards target
+                        e->tied_to_pack_and_decoupled = true;
+                        interpolateDecoupledTowardsCoords(e);
+                    }
+                    else
+                    {
+                        e->position = int3ToVec3(e->coords);
+                        e->velocity = (Vec3){0};
+                        clearMovementState(e);
+                    }
                 }
 
                 bool clear_entity_from_moving = false;
@@ -3549,9 +3540,6 @@ bool gameFrame(double delta_time, Input* input)
     // generate keys_pressed from prev_input and input
     input->keys_pressed = input->keys_held & ~prev_input.keys_held;
     prev_input = *input; // note that prev_input is almost always the same as input, it just persists over the frame
-
-    Entity* player = &world_state.player;
-    Entity* pack = &world_state.pack;
 
     //////////////////
     // CAMERA INPUT //
