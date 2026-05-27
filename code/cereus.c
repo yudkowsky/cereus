@@ -130,6 +130,7 @@ typedef struct
     int32 pack_intermediate_states_timer;
     Int3 pack_intermediate_coords;
     Direction initial_player_direction;
+    int32 half_failed_turn_timer;
 }
 PackTurnState;
 
@@ -331,6 +332,7 @@ const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
 const int32 TRAILING_HITBOX_TIME = 7;
 const int32 FALL_TRAILING_HITBOX_TIME = 10;
 const int32 TIME_AFTER_UNDO_UNTIL_PHYSICS_START = 4;
+const int32 HALF_FAILED_PACK_TURN_COOLDOWN = 6;
 
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
 const int32 MAX_ENTITIES_TIED_TO_MOVEMENT = 32;
@@ -2968,7 +2970,7 @@ void doPhysicsTick()
             }
             else
             {
-                // failed animation, but still do that push
+                // failed animation (push above still happens)
                 // TODO: fix issue with snapping of failed animation push case; somewhat unclear why this happens, maybe because pack returns to correct position, and somehow animations are cancelled?
                 Int3 start_pack_coords = getNextCoords(player->coords, oppositeDirection(temp_state.pack_turn_state.initial_player_direction));
                 moveEntityInBufferAndState(pack, start_pack_coords, player->direction);
@@ -2976,8 +2978,7 @@ void doPhysicsTick()
                 temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
                 popLastUndoAction();
 
-                temp_state.allow_movement_timer = 6; // TODO: i probably want to allow all movement except this same turn again, not just disable all movement for a few frames
-                // could i check moving direction, and only allow if moving direction isn't opposite direction here, maybe? idea is that only way to be moving away from a failed animation case is if failed animation case just happened
+                temp_state.pack_turn_state.half_failed_turn_timer = HALF_FAILED_PACK_TURN_COOLDOWN;
             }
         }
         temp_state.pack_turn_state.pack_intermediate_states_timer--;
@@ -4346,13 +4347,23 @@ bool gameFrame(double delta_time, Input* input)
                     if (player->falling) allow_turn = false;
                     if (temp_state.climbing_direction != NO_DIRECTION) allow_turn = false;
                     
-                    Int3 diagonal_coords = getNextCoords(pack->coords, oppositeDirection(input_direction));
-                    TrailingHitbox th;
-                    if (trailingHitboxAtCoords(diagonal_coords, &th)) allow_turn = false;
-
                     // get difference in position along axis of travel, and gate on some threshold to target
                     float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, int3ToVec3(player->coords)));
                     if (fabs(difference_in_player_position_along_direction) > 0.2) allow_turn = false;
+
+                    if (temp_state.pack_attached)
+                    {
+                        Int3 diagonal_coords = getNextCoords(pack->coords, oppositeDirection(input_direction));
+                        TrailingHitbox th;
+                        if (trailingHitboxAtCoords(diagonal_coords, &th)) allow_turn = false;
+
+                        // check if would cause failed case, and if so check if we already had one of those, and if so disallow turn
+                        // NOTE: this defeats half the point of how i handle failed case later... but need to know now!
+                        Int3 orthogonal_coords = getNextCoords(player->coords, oppositeDirection(input_direction));
+                        TileType orthogonal_type = getTileType(orthogonal_coords);
+                        bool pack_would_cause_failed_case = orthogonal_type != NONE && (!isEntity(orthogonal_type) || canPush(orthogonal_coords, player->direction));
+                        if (pack_would_cause_failed_case && temp_state.pack_turn_state.half_failed_turn_timer != 0) allow_turn = false;
+                    }
 
                     if (allow_turn)
                     {
@@ -4542,11 +4553,10 @@ bool gameFrame(double delta_time, Input* input)
         // reset undos performed if no longer holding z undos
         if (undos_performed > 0 && !(input->keys_held & KEY_Z)) undos_performed = 0;
 
-        // decrement undo timer if > 0. the timer value means that even a few frames after releasing undo, gravity isn't applied.
+        // decrement various timers
         if (undo_press_timer > 0) undo_press_timer--;
-
-        // decrement allow movement timer, if movement should be disabled for a few frames
         if (temp_state.allow_movement_timer > 0) temp_state.allow_movement_timer--;
+        if (temp_state.pack_turn_state.half_failed_turn_timer > 0) temp_state.pack_turn_state.half_failed_turn_timer--;
 
         // all mirrors with direction >=UP are moved to the next orientation with direction NORTH.
         FOR(mirror_index, MAX_ENTITY_INSTANCE_COUNT)
