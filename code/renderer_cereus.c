@@ -1396,12 +1396,13 @@ LoadedModel loadModel(char* path)
 void loadAllEntities()
 {
     vulkan_state.loaded_models[MODEL_3D_BOX - MODEL_3D_VOID] = loadModel("data/assets/models/rock.glb");
+    vulkan_state.loaded_models[MODEL_3D_PLAYER - MODEL_3D_VOID] = loadModel("data/assets/models/player.glb");
 	vulkan_state.loaded_models[MODEL_3D_MIRROR 	- MODEL_3D_VOID] = loadModel("data/assets/models/mirror.glb");
-    vulkan_state.loaded_models[MODEL_3D_GLASS - MODEL_3D_VOID] = loadModel("data/assets/models/glass.glb");
+    //vulkan_state.loaded_models[MODEL_3D_GLASS - MODEL_3D_VOID] = loadModel("data/assets/models/glass.glb");
+    vulkan_state.loaded_models[MODEL_3D_PACK - MODEL_3D_VOID] = loadModel("data/assets/models/pack.glb");
     vulkan_state.loaded_models[MODEL_3D_WIN_BLOCK - MODEL_3D_VOID] = loadModel("data/assets/models/flower.glb");
 
     vulkan_state.loaded_models[MODEL_3D_WATER - MODEL_3D_VOID] = loadModel("data/assets/models/water.glb");
-    vulkan_state.loaded_models[MODEL_3D_WATER_BOTTOM - MODEL_3D_VOID] = loadModel("data/assets/models/water-bottom.glb");
 
     vulkan_state.loaded_models[MODEL_3D_SOURCE_RED     - MODEL_3D_VOID] = loadModel("data/assets/models/red-source.glb");
     vulkan_state.loaded_models[MODEL_3D_SOURCE_BLUE    - MODEL_3D_VOID] = loadModel("data/assets/models/blue-source.glb");

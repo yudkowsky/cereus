@@ -871,18 +871,6 @@ Direction oppositeDirection(Direction direction)
     }
 }
 
-// gets count of currently active (not id == -1 or removed)
-int32 getEntityCount(Entity *entity_group)
-{
-    int32 count = 0;
-    for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
-    {
-        if (entity_group[entity_index].id == -1 || entity_group[entity_index].removed) continue;
-        count++;
-    }
-    return count;
-}
-
 int32 sourceColorIdOffset(Color color)
 {
     switch (color)
@@ -1771,7 +1759,7 @@ bool canPush(Int3 coords, Direction direction)
     {
         Entity* e = getEntityAtCoords(current_coords);
         if (isEntity(current_tile) && e->locked) return false;
-        //if (!vec3IsZero(vec3SetComponentAlongDirection(direction, e->velocity, 0))) return false; // e moving in some direction not in the push direction
+
         if (e->falling) return false;
 
         // if will fall, don't allow push.
@@ -2109,7 +2097,6 @@ void updateLaserBuffer()
                         }
                         */
 
-
                         // get difference along next_laser_direction of current_norm_coords vs mirror->position.
                         // this will be relevantly signed because getSignedComponentAlongDirection gives signed output.
                         // add that difference to norm_coords along current_direction. again signs are accounted for because directionToVector gives signed output.
@@ -2258,22 +2245,7 @@ void setFalling(Entity* e)
     return;
 }
 
-// TEXT HELPERS FOR EDIT_BUFFER
-
-void editAppendChar(char character)
-{
-    EditBuffer* buffer = &editor_state.edit_buffer; 
-    if (buffer->length >= 256) return;
-    buffer->string[buffer->length++] = character;
-}
-
-void editBackspace()
-{
-    EditBuffer* buffer = &editor_state.edit_buffer;
-    if (buffer->length == 0) return;
-    buffer->length--;
-    buffer->string[buffer->length] = 0;
-}
+// TEXT INPUT
 
 void updateTextInput(Input *input)
 {
@@ -2281,8 +2253,16 @@ void updateTextInput(Input *input)
     {
         uint32 codepoint = input->text.codepoints[chars_typed_index];
         char character = (char)codepoint;
-        if (character == '\b') editBackspace();
-        else editAppendChar(character);
+        EditBuffer* buffer = &editor_state.edit_buffer;
+        if (character == '\b')
+        {
+            if (buffer->length > 0) buffer->length--;
+            buffer->string[buffer->length] = 0;
+        }
+        else 
+        {
+            if (buffer->length < 256) buffer->string[buffer->length++] = character;
+        }
     }
 }
 
@@ -2384,9 +2364,12 @@ void gameInitializeState(char* level_name)
         else if (buffer_contents == WIN_BLOCK)    entity_group = world_state.win_blocks;
         else if (buffer_contents == LOCKED_BLOCK) entity_group = world_state.locked_blocks;
         else if (isSource(buffer_contents))       entity_group = world_state.sources;
+
         if (entity_group != 0)
         {
-            int32 count = getEntityCount(entity_group);
+            int32 count = 0;
+            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) if (entity_group[entity_index].id != -1 && !entity_group[entity_index].removed) count++;
+
             Entity* e = &entity_group[count];
             e->coords = bufferIndexToCoords(buffer_index);
             e->position = int3ToVec3(e->coords);
@@ -2403,7 +2386,7 @@ void gameInitializeState(char* level_name)
                 e->rotation = directionToQuaternion(e->direction);
             }
             e->color = getEntityColor(e->coords);
-            e->id = getEntityCount(entity_group) + entityIdOffset(entity_group, e->color);
+            e->id = count + entityIdOffset(entity_group, e->color);
             e->removed = false;
             entity_group = 0;
         }
@@ -4090,6 +4073,26 @@ bool gameFrame(double delta_time, Input* input)
         }
     }
 
+    // MISC STUFF BEFORE PHYSICS LOOP
+
+    if (time_until_allow_meta_input == 0 && input->keys_held & KEY_ESCAPE)
+    {
+        if (in_overworld)
+        {
+            // exit game
+            return true;
+        }
+        else
+        {
+            // NOTE: used to persist solved levels over level change and game init, but appears unnecessary
+            levelChangePrep("overworld");
+            gameInitializeState("overworld");
+            writeSolvedLevelsToFile();
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            temp_state.allow_movement_timer = 0;
+        }
+    }
+
     ///////////////////////
     // MAIN PHYSICS LOOP //
     ///////////////////////
@@ -4341,6 +4344,10 @@ bool gameFrame(double delta_time, Input* input)
                     bool allow_turn = true;
                     if (player->falling) allow_turn = false;
                     if (temp_state.climbing_direction != NO_DIRECTION) allow_turn = false;
+                    
+                    Int3 diagonal_coords = getNextCoords(pack->coords, oppositeDirection(input_direction));
+                    TrailingHitbox th;
+                    if (trailingHitboxAtCoords(diagonal_coords, &th)) allow_turn = false;
 
                     // get difference in position along axis of travel, and gate on some threshold to target
                     float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, int3ToVec3(player->coords)));
@@ -4553,28 +4560,6 @@ bool gameFrame(double delta_time, Input* input)
             }
         }
 
-        // handle esc press TODO: this should be before the physics loop, because all that physics work is useless. figure out what other stuff should also be before the physics, / if anything has to be after.
-        if (time_until_allow_meta_input == 0 && input->keys_held & KEY_ESCAPE)
-        {
-            if (in_overworld)
-            {
-                // exit game
-                return true;
-            }
-            else
-            {
-                // leave current level if not in overworld. TODO: why is saving solved levels required here?
-                char save_solved_levels[64][64] = {0};
-                memcpy(save_solved_levels, world_state.solved_levels, sizeof(save_solved_levels));
-                levelChangePrep("overworld");
-                gameInitializeState("overworld");
-                memcpy(world_state.solved_levels, save_solved_levels, sizeof(save_solved_levels));
-                writeSolvedLevelsToFile();
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-                temp_state.allow_movement_timer = 0;
-            }
-        }
-
         // update overworld player coords for camera offset if player not removed
         if (in_overworld)
         {
@@ -4639,13 +4624,6 @@ bool gameFrame(double delta_time, Input* input)
             // display level name
             createDebugText(world_state.level_name);
 
-            /*
-            // game progress info
-            char game_text[256] = {0};
-            snprintf(game_text, sizeof(game_text), "game progress: %d", game_progress);
-            createDebugText(game_text);
-            */
-
             // player info
             char player_text[256] = {0};
             snprintf(player_text, sizeof(player_text), "player info: coords: %i, %i, %i, pos norm: %.2f, %.2f, %.2f, velocity: %.2f, %.2f, %.2f", player->coords.x, player->coords.y, player->coords.z, player->position.x, player->position.y, player->position.z, player->velocity.x, player->velocity.y, player->velocity.z);
@@ -4656,14 +4634,6 @@ bool gameFrame(double delta_time, Input* input)
             snprintf(pack_text, sizeof(pack_text), "pack info: coords: %i, %i, %i, pos norm: %.2f, %.2f, %.2f, velocity: %.2f, %.2f, %.2f, attached: %i", pack->coords.x, pack->coords.y, pack->coords.z, pack->position.x, pack->position.y, pack->position.z, pack->velocity.x, pack->velocity.y, pack->velocity.z, temp_state.pack_attached);
             createDebugText(pack_text);
 
-            // mirror info
-            /*
-            char mirror_text[256] = {0};
-            Entity m = world_state.mirrors[0];
-            snprintf(mirror_text, sizeof(mirror_text), "mirror: coords: %i, %i, %i; direction: %i; orientation: %i", m.coords.x, m.coords.y, m.coords.z, m.direction, m.mirror_orientation);
-            createDebugText(mirror_text);
-            */
-
             // boxes
             char box_text[256] = {0};
             Entity box1 = world_state.boxes[0];
@@ -4671,25 +4641,10 @@ bool gameFrame(double delta_time, Input* input)
             snprintf(box_text, sizeof(box_text), "box 1: moving dir: %i, on_head: %i, moving dir: %i, on_head: %i", box1.moving_direction, box1.moving_on_head, box2.moving_direction, box2.moving_on_head);
             createDebugText(box_text);
 
-            /*
-            char moving_count_text[256] = {0};
-            int32 moving_entity_count = 0;
-            FOR(me_index, MAX_ENTITIES_TIED_TO_MOVEMENT) if (temp_state.moving_entities[me_index].id != 0) moving_entity_count++;
-            snprintf(moving_count_text, sizeof(moving_count_text), "moving_entity_count: %i", moving_entity_count);
-            createDebugText(moving_count_text);
-            */
-
             // pack attached
             char attached_text[256] = {0};
             snprintf(attached_text, sizeof(attached_text), "pack attached: %i", temp_state.pack_attached);
             createDebugText(attached_text);
-
-            /*
-            // timer info
-            char timer_info[256] = {0};
-            snprintf(timer_info, sizeof(timer_info), "meta: %i, undo/restart: %i", time_until_allow_meta_input, time_until_allow_undo_or_restart_input);
-            createDebugText(timer_info);
-            */
 
             /*
             // show undo deltas in buffer
@@ -4698,8 +4653,8 @@ bool gameFrame(double delta_time, Input* input)
             createDebugText(undo_buffer_text);
             */
 
+            // trailing hitbox info
             /*
-            // trailing hitbox info // TODO: so what's going on here? did this old issue ever get figured out?
             char th_text[256] = {0};
             int32 th_count = 0;
             FOR(th_index, MAX_TRAILING_HITBOX_COUNT) if (temp_state.trailing_hitboxes[th_index].id != 0) th_count++;
@@ -4710,9 +4665,11 @@ bool gameFrame(double delta_time, Input* input)
             createDebugText(th_text);
             */
 
+            /*
             char climb_text[256] = {0};
             snprintf(climb_text, sizeof(climb_text), "climbing direction: %i", temp_state.climbing_direction);
             createDebugText(climb_text);
+            */
 
             /*
             // debug lasers
@@ -4939,11 +4896,11 @@ bool gameFrame(double delta_time, Input* input)
             drawAsset(0, LASER, center, scale, rotation, color_with_alpha, lb.start_clip_plane, lb.end_clip_plane); // the model doesnt matter
         }
 
-        // draw most things (not player or pack) TODO: after models can include pack here because can be DEFAULT_SCALE. after actual shaders for the color of the player can also include player here
+        // draw models
         for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
         {
             TileType draw_tile = world_state.buffer[tile_index];
-            if (draw_tile == NONE || draw_tile == PLAYER || draw_tile == PACK) continue;
+            if (draw_tile == NONE) continue;
             if (isEntity(draw_tile))
             {
                 Entity* e = getEntityAtCoords(bufferIndexToCoords(tile_index));
@@ -4953,27 +4910,21 @@ bool gameFrame(double delta_time, Input* input)
                     if (in_overworld && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
                     else if (!in_overworld && findInSolvedLevels(world_state.level_name) != -1) draw_tile = WON_BLOCK;
                 }
-
-                drawAsset(getModelId(draw_tile), MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                if (draw_tile == PLAYER)
+                {
+                    Vec4 player_color = { (float)temp_state.player_hit_by_red, 0.0f, (float)temp_state.player_hit_by_blue };
+                    drawAsset(MODEL_3D_PLAYER, MODEL_3D, player->position, DEFAULT_SCALE, player->rotation, player_color, (Vec4){0}, (Vec4){0});
+                }
+                else
+                {
+                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                }
             }
             else
             {
                 if (getCube3DId(draw_tile) == CUBE_3D_WATER) drawAsset(MODEL_3D_WATER, WATER_3D, int3ToVec3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
                 drawAsset(getCube3DId(draw_tile), CUBE_3D, int3ToVec3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
             }
-        }
-
-        if (!world_state.player.removed)
-        {
-            // TODO: this is terrible (fix with shaders)
-            if (temp_state.player_hit_by_red && temp_state.player_hit_by_blue) drawAsset(CUBE_3D_PLAYER_MAGENTA, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
-            else if (temp_state.player_hit_by_red)                             drawAsset(CUBE_3D_PLAYER_RED,     CUBE_3D, player->position, PLAYER_SCALE, player->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
-            else if (temp_state.player_hit_by_blue)                            drawAsset(CUBE_3D_PLAYER_BLUE,    CUBE_3D, player->position, PLAYER_SCALE, player->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
-            else drawAsset(CUBE_3D_PLAYER, CUBE_3D, player->position, PLAYER_SCALE, player->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
-        }
-        if (!world_state.pack.removed) 
-        {
-            drawAsset(CUBE_3D_PACK, CUBE_3D, world_state.pack.position, PLAYER_SCALE, world_state.pack.rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
         }
 
         // draw camera boundary lines
