@@ -45,6 +45,7 @@ typedef struct
     Vec3 coords;
     Vec3 scale;
     Vec4 rotation;
+    Vec4 color; // used for player color when hit by laser
 }
 Model;
 
@@ -96,7 +97,7 @@ typedef struct
     float view[16];
     float proj[16];
     Vec4 uv_rect;
-    float alpha;
+    Vec4 color;
     float water_plane_y;
     float time;
     float tile_length;
@@ -4529,6 +4530,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
             model->coords   = command->coords;
             model->scale    = command->scale;
             model->rotation = command->rotation;
+            model->color    = command->color;
         }
         else if (type == WATER_3D)
 		{
@@ -4579,12 +4581,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     for (uint32 instance_index = 0; instance_index < cube_instance_count; instance_index++)
     {
         Cube* cube = &cube_instances[instance_index];
-        mat4BuildTRS(cube_gpu_instances[instance_index].model, cube->coords, cube->rotation, cube->scale);
-        cube_gpu_instances[instance_index].uv_rect = cube->uv;
-
-        // assumption that all cubes aren't rotated and are at unit scale TODO: temp disabled because no player models
-        //mat4BuildBasicTRS(cube_gpu_instances[instance_index].model, cube->coords);
-
+        mat4BuildBasicTRS(cube_gpu_instances[instance_index].model, cube->coords); // assumption that all cubes aren't rotated and are at unit scale
         cube_gpu_instances[instance_index].uv_rect = cube->uv;
     }
 
@@ -4916,6 +4913,7 @@ void vulkanDraw(void)
                 memcpy(model_pc.view,  reflected_view_matrix, sizeof(model_pc.view));
                 memcpy(model_pc.proj,  projection_matrix, sizeof(model_pc.proj));
                 model_pc.uv_rect = (Vec4){0, 0, 1, 1};
+                model_pc.color = model->color;
                 model_pc.water_plane_y = vulkan_state.water_plane_y;
                 model_pc.time = water_time;
                 model_pc.tile_length = water_tile_length;
@@ -4994,6 +4992,7 @@ void vulkanDraw(void)
             memcpy(model_pc.view, view_matrix, sizeof(model_pc.view));
             memcpy(model_pc.proj, projection_matrix, sizeof(model_pc.proj));
             model_pc.uv_rect = (Vec4){0, 0, 1, 1};
+            model_pc.color = model->color;
             model_pc.water_plane_y = -999.0f;
             model_pc.time = water_time;
             model_pc.tile_length = water_tile_length;
@@ -5463,7 +5462,7 @@ void vulkanDraw(void)
         memcpy(push_constants.view, view2d, sizeof(push_constants.view));
         memcpy(push_constants.proj, ortho, sizeof(push_constants.proj));
         push_constants.uv_rect = sprite->uv;
-        push_constants.alpha = sprite->alpha;
+        push_constants.color = (Vec4){ 0, 0, 0, sprite->alpha};
 
         vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &push_constants);
 

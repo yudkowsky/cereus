@@ -10,7 +10,7 @@ layout(push_constant) uniform PC
     mat4 view;
     mat4 proj;
     vec4 uv_rect;
-    float alpha;
+    vec4 tint;
 }
 pc;
 
@@ -19,6 +19,6 @@ layout(set = 0, binding = 0) uniform sampler2D tex;
 void main()
 {
     vec4 color = texture(tex, uv);
-    color.a *= pc.alpha;
+    color.a *= pc.tint.w;
     out_color = color;
 }

@@ -15,7 +15,7 @@ layout(push_constant) uniform PushConstants
     mat4 view;
     mat4 proj;
     vec4 uv_rect;
-    float alpha;
+    vec4 tint;
     float water_plane_y;
     float time;
     float tile_length;
@@ -34,6 +34,7 @@ void main()
     vec3 N = normalize(normal);
     vec3 light_direction = normalize(vec3(0.3, 1.0, 0.5));
     float lighting = dot(N, light_direction) * 0.5 + 0.5;
-    out_color = vec4(color * lighting, 1.0);
+    float tint_amount = 0.3;
+    out_color = vec4(color * lighting + (pc.tint.xyz * tint_amount), 1.0);
     out_normal = vec4(N, 0.0);
 }
