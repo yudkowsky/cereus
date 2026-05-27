@@ -95,8 +95,9 @@ typedef struct Entity
 Entity;
 
 #define MAX_ENTITY_INSTANCE_COUNT 64
+#define ENTITY_ARRAY_COUNT 6
 
-// the 2MB buffer is dense representation of the level encoded by coords
+// the approx. 2MB buffer is dense representation of the level encoded by coords
 typedef struct
 {
     uint8 buffer[2000000]; // 2 bytes info per tile 
@@ -131,6 +132,7 @@ typedef struct
     Int3 pack_intermediate_coords;
     Direction initial_player_direction;
     int32 half_failed_turn_timer;
+    bool diagonal_push_happened_this_turn; // used for deciding whether or not to pop undo if half-fails
 }
 PackTurnState;
 
@@ -332,6 +334,7 @@ const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
 const int32 TRAILING_HITBOX_TIME = 7;
 const int32 FALL_TRAILING_HITBOX_TIME = 10;
 const int32 TIME_AFTER_UNDO_UNTIL_PHYSICS_START = 4;
+const int32 SIMULATE_FORWARD_TICK_COUNT = 8;
 const int32 HALF_FAILED_PACK_TURN_COOLDOWN = 6;
 const int32 HIT_BY_BLUE_TIME = 3;
 
@@ -433,7 +436,7 @@ Int3 level_dim = {0};
 Int3 restart_position = {0};
 bool in_overworld = true;
 
-WorldState leap_of_faith_world_state_snapshot = {0}; // TODO: only need to copy entities. figure out smart way to do this without adding Entities struct that has all the entities in it - maybe some union?
+WorldState leap_of_faith_world_state_snapshot = {0};
 TemporaryState leap_of_faith_temp_state_snapshot = {0};
 WorldState overworld_zero_state = {0};
 
@@ -2086,15 +2089,9 @@ void updateLaserBuffer()
                             break;
                         }
 
-                        /*
-                        TODO: think about this more; i do want this functionality, but this will mean that when pushing as in blue-business-i, the laser will 
-                              hit neither mirror nor player for approx. 2 frames, which means that the object will fall. could encode a special case, or just
-                              have a fall timer, so that objects take a few frames to start falling after being blue, or ... something
-                        */
                         if (distance_from_mirror_along_axes > 0.35)
                         {
-                            // between 0.5 and 0.35, so this hits the 'edge' of the mirror: break the laser
-                            // still want to do later calculations to calculate exact coords to end
+                            // between 0.5 and 0.35, so this hits the 'edge' of the mirror: break the laser; still want to do later calculations to calculate exact coords to end
                             end_here = true;
                         }
 
@@ -2292,7 +2289,6 @@ void writeUndoBufferToFile()
 }
 void loadUndoBufferFromFile()
 {
-
     if (!file)
     {
         initUndoBuffer();
@@ -2936,7 +2932,11 @@ void doPhysicsTick()
             }
             if (allow_diagonal)
             {
-                if (do_push) pushAll(diagonal_coords, diagonal_push_direction, false, PACK_ID);
+                if (do_push) 
+                {
+                    pushAll(diagonal_coords, diagonal_push_direction, false, PACK_ID);
+                    temp_state.pack_turn_state.diagonal_push_happened_this_turn = true;
+                }
                 createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
                 moveEntityInBufferAndState(pack, diagonal_coords, player->direction);
             }
@@ -2975,10 +2975,11 @@ void doPhysicsTick()
                 moveEntityInBufferAndState(pack, start_pack_coords, player->direction);
                 player->direction = temp_state.pack_turn_state.initial_player_direction;
                 temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
-                popLastUndoAction();
+                if (!temp_state.pack_turn_state.diagonal_push_happened_this_turn) popLastUndoAction();
 
                 temp_state.pack_turn_state.half_failed_turn_timer = HALF_FAILED_PACK_TURN_COOLDOWN;
             }
+            temp_state.pack_turn_state.diagonal_push_happened_this_turn = false;
         }
         temp_state.pack_turn_state.pack_intermediate_states_timer--;
     }
@@ -4282,7 +4283,7 @@ bool gameFrame(double delta_time, Input* input)
                             else
                             {
                                 // leap of faith logic
-                                
+
                                 // create snapshot of current world state
                                 memcpy(&leap_of_faith_world_state_snapshot, &world_state, sizeof(WorldState));
                                 memcpy(&leap_of_faith_temp_state_snapshot,  &temp_state,  sizeof(TemporaryState));
@@ -4296,7 +4297,7 @@ bool gameFrame(double delta_time, Input* input)
 
                                 // simulate forward, and check if red
                                 bool would_be_red = false;
-                                FOR(_, 8)
+                                FOR(_, SIMULATE_FORWARD_TICK_COUNT)
                                 {
                                     doPhysicsTick();
                                     updateLaserBuffer();
