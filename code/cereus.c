@@ -4905,11 +4905,13 @@ bool gameFrame(double delta_time, Input* input)
             {
                 Entity* e = getEntityAtCoords(bufferIndexToCoords(tile_index));
                 if (e->locked) draw_tile = LOCKED_BLOCK;
+                /*
                 if (draw_tile == WIN_BLOCK)
                 {
                     if (in_overworld && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
                     else if (!in_overworld && findInSolvedLevels(world_state.level_name) != -1) draw_tile = WON_BLOCK;
                 }
+                */
                 if (draw_tile == PLAYER)
                 {
                     Vec4 player_color = { (float)temp_state.player_hit_by_red, 0.0f, (float)temp_state.player_hit_by_blue };
