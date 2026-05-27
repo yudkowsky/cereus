@@ -2,7 +2,7 @@
 
 #define FOR(i, n) for (int i = 0; i < n; i++)
 
-// TODO: temp for profiling
+// TEMP: for profiling
 __declspec(dllimport) int __stdcall QueryPerformanceCounter(long long* lpPerformanceCount);
 __declspec(dllimport) int __stdcall QueryPerformanceFrequency(long long* lpFrequency);
 __declspec(dllimport) void __stdcall OutputDebugStringA(const char* lpOutputString);
@@ -163,7 +163,7 @@ typedef struct TemporaryState
     Direction climbing_direction;
 
     int32 player_hit_by_red;
-    int32 player_hit_by_blue;
+    int32 player_hit_by_blue_timer;
     PackTurnState pack_turn_state;
 }
 TemporaryState;
@@ -333,6 +333,7 @@ const int32 TRAILING_HITBOX_TIME = 7;
 const int32 FALL_TRAILING_HITBOX_TIME = 10;
 const int32 TIME_AFTER_UNDO_UNTIL_PHYSICS_START = 4;
 const int32 HALF_FAILED_PACK_TURN_COOLDOWN = 6;
+const int32 HIT_BY_BLUE_TIME = 3;
 
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
 const int32 MAX_ENTITIES_TIED_TO_MOVEMENT = 32;
@@ -1767,7 +1768,7 @@ bool canPush(Int3 coords, Direction direction)
         // if will fall, don't allow push.
         Int3 coords_below = getNextCoords(current_coords, DOWN);
         TileType type_below = getTileType(coords_below);
-        if (type_below == NONE && !temp_state.player_hit_by_blue) return false;
+        if (type_below == NONE && temp_state.player_hit_by_blue_timer == 0) return false;
 
         // check within bounds
         current_coords = getNextCoords(current_coords, direction);
@@ -1872,10 +1873,8 @@ void updateLaserBuffer()
 
     FOR(laser_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED) laser_buffer[laser_index].color = NO_COLOR;
     temp_state.player_hit_by_red   = false;
-    temp_state.player_hit_by_blue  = false;
 
     // if a source is magenta, create entry in sources as primary of it as both red and blue
-    // TODO: probably shouldn't rebuild this buffer every time function is called, could just update when sources are moved / on level rebuild
     Entity sources_as_primary[256] = {0};
     int32 primary_index = 0;
     FOR(source_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -1981,7 +1980,7 @@ void updateLaserBuffer()
 
                         // set player color
                         if (source->color == RED)  temp_state.player_hit_by_red = true;
-                        if (source->color == BLUE) temp_state.player_hit_by_blue = true;
+                        if (source->color == BLUE) temp_state.player_hit_by_blue_timer = HIT_BY_BLUE_TIME;
 
                         advance_tile = false;
                         break;
@@ -2087,17 +2086,17 @@ void updateLaserBuffer()
                             break;
                         }
 
-                        /* 
+                        /*
                         TODO: think about this more; i do want this functionality, but this will mean that when pushing as in blue-business-i, the laser will 
                               hit neither mirror nor player for approx. 2 frames, which means that the object will fall. could encode a special case, or just
                               have a fall timer, so that objects take a few frames to start falling after being blue, or ... something
+                        */
                         if (distance_from_mirror_along_axes > 0.35)
                         {
                             // between 0.5 and 0.35, so this hits the 'edge' of the mirror: break the laser
                             // still want to do later calculations to calculate exact coords to end
                             end_here = true;
                         }
-                        */
 
                         // get difference along next_laser_direction of current_norm_coords vs mirror->position.
                         // this will be relevantly signed because getSignedComponentAlongDirection gives signed output.
@@ -2820,7 +2819,7 @@ void doStandardMovement(Direction direction, Int3 next_player_coords)
     Int3 coords_above_player = getNextCoords(player->coords, UP);
     bool do_on_head_movement = false;
     if (isPushable(getTileType(coords_above_player)) && canPush(coords_above_player, direction)) do_on_head_movement = true;
-    if (temp_state.player_hit_by_blue) do_on_head_movement = false;
+    if (temp_state.player_hit_by_blue_timer > 0) do_on_head_movement = false;
     if (do_on_head_movement) pushAll(coords_above_player, direction, true, PLAYER_ID);
 
     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
@@ -3018,7 +3017,7 @@ void doPhysicsTick()
             if (undo_press_timer > 0) want_to_fall = false;
             if (cheating) want_to_fall = false;
             if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(e->position, int3ToVec3(e->coords)), 0))) want_to_fall = false; // not stationary. not using e->velocity because it gets set after, so wouldn't work when pushing stationary object
-            if (temp_state.player_hit_by_blue) want_to_fall = false;
+            if (temp_state.player_hit_by_blue_timer > 0) want_to_fall = false;
 
             if (want_to_fall) setFalling(e); // only updates false -> true
 
@@ -3416,7 +3415,7 @@ void doPhysicsTick()
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
             Entity* e = &pushed_entity_group[group_index][entity_index];
-            if ((e->moving_direction == NO_DIRECTION || e->moving_direction == DOWN || e->moving_direction == UP) && !e->moving_on_head) continue; // TODO: maybe better check here, but these cover the cases I'm handling right now
+            if (e->moving_direction == NO_DIRECTION && !e->moving_on_head) continue;
             Entity* root_e = getEntityFromId(e->root_entity_id);
             if (!root_e) continue;
 
@@ -3536,7 +3535,7 @@ void doPhysicsTick()
 
 bool gameFrame(double delta_time, Input* input)
 {   
-    // TODO: temp for profiling
+    // TEMP: for profiling
     long long frequency, t0, t1, t2, t3;
     QueryPerformanceFrequency(&frequency);
     QueryPerformanceCounter(&t0);
@@ -4381,7 +4380,7 @@ bool gameFrame(double delta_time, Input* input)
                         }
 
                         // if not blue, rotate objects stacked above the player
-                        if (!temp_state.player_hit_by_blue)
+                        if (temp_state.player_hit_by_blue_timer == 0)
                         {
                             Int3 coords_above = getNextCoords(player->coords, UP);
                             TileType type_above = getTileType(coords_above);
@@ -4557,6 +4556,7 @@ bool gameFrame(double delta_time, Input* input)
         if (undo_press_timer > 0) undo_press_timer--;
         if (temp_state.allow_movement_timer > 0) temp_state.allow_movement_timer--;
         if (temp_state.pack_turn_state.half_failed_turn_timer > 0) temp_state.pack_turn_state.half_failed_turn_timer--;
+        if (temp_state.player_hit_by_blue_timer > 0) temp_state.player_hit_by_blue_timer--;
 
         // all mirrors with direction >=UP are moved to the next orientation with direction NORTH.
         FOR(mirror_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -4908,6 +4908,8 @@ bool gameFrame(double delta_time, Input* input)
         }
 
         // draw models
+        // TODO: level_dim should be the actual size of the level, which changes whenever i save the level. otherwise this loop will be slow, especially in overworld (easily 2/3s of game time)
+        //       there would also then be a start coord for this box, since it won't be at 0,0 necessarily...
         for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
         {
             TileType draw_tile = world_state.buffer[tile_index];
@@ -4925,7 +4927,7 @@ bool gameFrame(double delta_time, Input* input)
                 */
                 if (draw_tile == PLAYER)
                 {
-                    Vec4 player_color = { (float)temp_state.player_hit_by_red, 0.0f, (float)temp_state.player_hit_by_blue };
+                    Vec4 player_color = { (float)temp_state.player_hit_by_red, 0.0f, (float)(temp_state.player_hit_by_blue_timer > 0) };
                     drawAsset(MODEL_3D_PLAYER, MODEL_3D, player->position, DEFAULT_SCALE, player->rotation, player_color, (Vec4){0}, (Vec4){0});
                 }
                 else
