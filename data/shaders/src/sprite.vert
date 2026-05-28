@@ -6,6 +6,7 @@ layout(set = 0, binding = 0) uniform ViewConstants
     mat4 proj;
     mat4 view_proj;
     mat4 inv_view_proj;
+    mat4 light_view_proj;
     vec4 camera_position;
     float water_plane_y;
     float time;

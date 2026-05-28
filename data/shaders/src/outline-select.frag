@@ -16,7 +16,6 @@ layout(set = 0, binding = 0) uniform ViewConstants
 view_constants;
 
 layout(location = 0) out vec4 out_color;
-layout(location = 1) out vec4 out_normal;
 
 layout(push_constant) uniform PC 
 {
@@ -27,5 +26,4 @@ pc;
 void main()
 {
     out_color = vec4(1.0, 0.0, 1.0, 1.0);
-    out_normal = vec4(0.0);
 }

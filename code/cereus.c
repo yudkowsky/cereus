@@ -312,8 +312,6 @@ typedef struct UndoBuffer
 UndoBuffer;
 
 // CONSTS AND GLOBALS
-#define TAU 6.2831853071f
-
 const Vec3 DEFAULT_SCALE = { 1.0f,  1.0f,  1.0f  };
 const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 
@@ -4923,6 +4921,15 @@ bool gameFrame(double delta_time, Input* input)
             }
         }
 
+        // draw selected entity
+        if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
+        {
+            SpriteId selected_id = getModelId(getTileTypeFromId(editor_state.selected_id));
+            Entity* selected_e = 0;
+            if (editor_state.selected_id > 0) selected_e = getEntityFromId(editor_state.selected_id);
+            if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position, DEFAULT_SCALE, selected_e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
+        }
+
         // draw camera boundary lines
         if (draw_level_boundary)
         {
@@ -5011,14 +5018,6 @@ bool gameFrame(double delta_time, Input* input)
             Vec3 picked_block_scale = { 200.0f, 200.0f, 0.0f };
             Vec3 picked_block_coords = { game_display.client_width - (picked_block_scale.x / 2) - 20, (picked_block_scale.y / 2) + 50, 0.0f };
             drawAsset(getSprite2DId(editor_state.picked_tile), SPRITE_2D, picked_block_coords, picked_block_scale, IDENTITY_QUATERNION, color_with_alpha, (Vec4){0}, (Vec4){0});
-
-            if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
-            {
-                SpriteId selected_id = getModelId(getTileTypeFromId(editor_state.selected_id));
-                Entity* selected_e = 0;
-                if (editor_state.selected_id > 0) selected_e = getEntityFromId(editor_state.selected_id);
-                if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position, DEFAULT_SCALE, selected_e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
-            }
         }
 
         // handle decrementing timers which should be consistent across physics timesteps

@@ -4999,8 +4999,9 @@ void vulkanDraw(void)
 
         // sprite camera: identity view, ortho projection
         *sprite_view_constants = *main_view_constants;
-        memcpy(sprite_view_constants->view, identity_matrix,     sizeof(float) * 16);
-        memcpy(sprite_view_constants->proj, orthographic_matrix, sizeof(float) * 16);
+        memcpy(sprite_view_constants->view,      identity_matrix,     sizeof(float) * 16);
+        memcpy(sprite_view_constants->proj,      orthographic_matrix, sizeof(float) * 16);
+        memcpy(sprite_view_constants->view_proj, orthographic_matrix, sizeof(float) * 16);
     }
 
     // RENDER PASSES
@@ -5467,6 +5468,7 @@ void vulkanDraw(void)
     for (uint32 model_outline_index = 0; model_outline_index < model_editor_outline_instance_count; model_outline_index++)
     {
         Model* model = &model_editor_outline_instances[model_outline_index];
+
         LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
         if (model_data->index_count == 0) continue;
 
