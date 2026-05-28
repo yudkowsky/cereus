@@ -1,9 +1,7 @@
 #include <windows.h>
 #include "everything.h"
 
-// temp for sleep TODO: fix up this whole system
-typedef MMRESULT (WINAPI *timeBeginPeriod_t)(UINT);
-typedef MMRESULT (WINAPI *timeEndPeriod_t)(UINT);
+// TODO: set up some more serious sleep code
 
 HWND global_window_handle = 0;
 Input input = {0};
@@ -281,16 +279,6 @@ int CALLBACK WinMain(
 
 	LARGE_INTEGER work_start, work_end;
 
-    // sleep code
-    {
-        HMODULE random_ass_library = LoadLibraryA("winmm.dll");
-        if (random_ass_library)
-        {
-            timeBeginPeriod_t begin_time_period = (timeBeginPeriod_t)GetProcAddress(random_ass_library, "timeBeginPeriod");
-            if (begin_time_period) begin_time_period(1);
-        }
-    }
-
     while (running)
     {
 		QueryPerformanceCounter(&work_start);
@@ -324,19 +312,6 @@ int CALLBACK WinMain(
         centerCursorInWindow();
 
         QueryPerformanceCounter(&work_end);
-
-        // sleep code
-        /*
-        {
-            double work_ms = (work_end.QuadPart - work_start.QuadPart) * seconds_per_tick * 1000.0;
-            double target_ms = 1000.0 / 120.0;
-            double sleep_ms = target_ms - work_ms;
-            if (sleep_ms > 1.5)
-            {
-                Sleep((DWORD)(sleep_ms - 1.5));
-            }
-        }
-        */
 
         LARGE_INTEGER frame_end;
         QueryPerformanceCounter(&frame_end);

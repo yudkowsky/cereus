@@ -2972,7 +2972,6 @@ void doPhysicsTick()
             else
             {
                 // failed animation (push above still happens)
-                // TODO: fix issue with snapping of failed animation push case; somewhat unclear why this happens, maybe because pack returns to correct position, and somehow animations are cancelled?
                 Int3 start_pack_coords = getNextCoords(player->coords, oppositeDirection(temp_state.pack_turn_state.initial_player_direction));
                 moveEntityInBufferAndState(pack, start_pack_coords, player->direction);
                 player->direction = temp_state.pack_turn_state.initial_player_direction;

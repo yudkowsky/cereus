@@ -7,7 +7,7 @@
 #include "cgltf.h"
 #include "everything.h"
 
-// TODO: temp for profiling
+// TEMP: for profiling
 #include <windows.h>
 
 typedef struct 
@@ -102,7 +102,7 @@ typedef struct
     float time;
     float tile_length;
 }
-PushConstants; // TODO: rename. also don't use for sprites - they don't need the time / water_plane_y fields.
+PushConstants; // TODO: rename. also split off sprites and models
 
 typedef struct 
 {
@@ -313,9 +313,6 @@ typedef struct VulkanState
     VkDescriptorSet displacement_descriptor_set;
     VkDescriptorSet displacement_sampled_descriptor_set;
 
-    // linear sampler which repeats for tileable textures TODO: put samplers together
-    VkSampler tiling_linear_sampler;
-
     // reflections
     VkImage reflection_color_image;
     VkDeviceMemory reflection_color_image_memory;
@@ -359,9 +356,11 @@ typedef struct VulkanState
     VkPipelineLayout default_graphics_pipeline_layout;
 
     VkPipeline cube_pipeline;
+    VkPipeline cube_reflection_pipeline;
     VkPipelineLayout cube_pipeline_layout; 
 
     VkPipeline model_pipeline;
+    VkPipeline model_reflection_pipeline;
     VkPipelineLayout model_pipeline_layout;
 
     VkPipeline outline_post_pipeline;
@@ -397,8 +396,6 @@ typedef struct VulkanState
     VkPipeline fft_pass_pipeline;
     VkPipelineLayout fft_pass_pipeline_layout;
 
-     // TODO: think about if i want this extra compute pass for the sake of cleanliness, or if i'd prefer to sample fft_buffer_a in water vertex shader.
-     // downside would be if i wanted multiple inputs and outputs affecting / consuming water displacement.
     VkPipeline fft_finalize_pipeline;             
     VkPipelineLayout fft_finalize_pipeline_layout;
 
@@ -407,6 +404,9 @@ typedef struct VulkanState
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
     VkDescriptorSet descriptor_sets[1024];
+
+    // linear sampler which repeats for tileable textures
+    VkSampler tiling_linear_sampler;
 
     // asset cache
     CachedAsset asset_cache[256];
@@ -1560,7 +1560,7 @@ void createSwapchainResources(void)
         depth_view_ci.image = vulkan_state.depth_image;
         depth_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
         depth_view_ci.format = vulkan_state.depth_format;
-        depth_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        depth_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
         depth_view_ci.subresourceRange.baseMipLevel = 0;
         depth_view_ci.subresourceRange.levelCount = 1;
         depth_view_ci.subresourceRange.baseArrayLayer = 0;
@@ -1873,7 +1873,7 @@ void createSwapchainResources(void)
         view_ci.image = vulkan_state.reflection_depth_image;
         view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
         view_ci.format = vulkan_state.depth_format;
-        view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+        view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
         view_ci.subresourceRange.baseMipLevel = 0;
         view_ci.subresourceRange.levelCount = 1;
         view_ci.subresourceRange.baseArrayLayer = 0;
@@ -2443,17 +2443,17 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vulkan_state.timestamp_pool_valid[frame_index] = false;
     }
 
-    vulkan_state.depth_format = VK_FORMAT_D32_SFLOAT_S8_UINT;
+    vulkan_state.depth_format = VK_FORMAT_D32_SFLOAT;
 
     // TODO: organise this better. the normal attachment is under 'first render pass' here.
-    // first render pass
+    // scene render pass
     {
         VkAttachmentDescription color_attachment = {0};
         color_attachment.format = chosen_surface_format.format;
         color_attachment.samples = VK_SAMPLE_COUNT_1_BIT; // no multi-sampling anti-aliasing, so only one color sample
         color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; // start each frame by clearing the swapchain image to a solid color
         color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; // we want the image to be read by the present engine after the render pass
-        color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; // don't care about previous layout of swapchain image
         color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
@@ -2467,7 +2467,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         depth_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
         depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; // store for second render pass
-        depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; 
         depth_attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -2749,7 +2749,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         reflection_attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
         reflection_attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         reflection_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        reflection_attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        reflection_attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         reflection_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         reflection_attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         reflection_attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -2809,11 +2809,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     vulkan_state.render_finished_semaphores = malloc(sizeof(VkSemaphore) * vulkan_state.frames_in_flight);
     vulkan_state.in_flight_fences = malloc(sizeof(VkFence) * vulkan_state.frames_in_flight);
 											
-    // struct that tells vulkan what kind of semaphore you want (binary)
     VkSemaphoreCreateInfo semaphore_info = {0};
     semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-    // struct that defines the kind of fence you want (default)
     VkFenceCreateInfo fence_info = {0};
     fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
@@ -3924,15 +3922,68 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         blend_attachments[0] = color_blend_attachment_state;
         blend_attachments[1] = color_blend_attachment_state;
-        
-        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
-        depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
-        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
 
         VkGraphicsPipelineCreateInfo cube_ci = base_graphics_pipeline_creation_info;
         cube_ci.pVertexInputState = &vertex_input_instanced;
         cube_ci.layout = vulkan_state.cube_pipeline_layout;
+
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &cube_ci, 0, &vulkan_state.cube_pipeline);
+    }
+
+    // define cube pipeline for reflection
+    {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
+        color_blend_attachment_state.blendEnable = VK_FALSE;
+
+        VkPipelineColorBlendStateCreateInfo refl_blend_ci = {0};
+        refl_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        refl_blend_ci.attachmentCount = 1;
+        refl_blend_ci.pAttachments = &color_blend_attachment_state;
+
+        VkGraphicsPipelineCreateInfo ci = base_graphics_pipeline_creation_info;
+        ci.pVertexInputState = &vertex_input_instanced;
+        ci.layout = vulkan_state.cube_pipeline_layout;
+        ci.renderPass = vulkan_state.reflection_render_pass;
+        ci.pColorBlendState = &refl_blend_ci;
+
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &ci, 0, &vulkan_state.cube_reflection_pipeline);
+    }
+
+    // define model pipeline: depth on, write to stencil 2.
+    {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
+        color_blend_attachment_state.blendEnable = VK_FALSE;
+
+        blend_attachments[0] = color_blend_attachment_state;
+        blend_attachments[1] = color_blend_attachment_state;
+
+        VkGraphicsPipelineCreateInfo model_ci = base_graphics_pipeline_creation_info;
+        model_ci.pStages = model_shader_stages;
+        model_ci.layout = vulkan_state.model_pipeline_layout;
+
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &model_ci, 0, &vulkan_state.model_pipeline);
+    }
+
+    // define model pipeline for reflection
+    {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
+        color_blend_attachment_state.blendEnable = VK_FALSE;
+
+        VkPipelineColorBlendStateCreateInfo refl_blend_ci = {0};
+        refl_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        refl_blend_ci.attachmentCount = 1;
+        refl_blend_ci.pAttachments = &color_blend_attachment_state;
+
+        VkGraphicsPipelineCreateInfo model_ci = base_graphics_pipeline_creation_info;
+        model_ci.pStages = model_shader_stages;
+        model_ci.layout = vulkan_state.model_pipeline_layout;
+        model_ci.renderPass = vulkan_state.reflection_render_pass;
+        model_ci.pColorBlendState = &refl_blend_ci;
+
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &model_ci, 0, &vulkan_state.model_reflection_pipeline);
     }
 
     // define overlay outline pipeline (for drawing selection outlines on top of everything)
@@ -3960,39 +4011,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         overlay_outline_ci.pColorBlendState = &overlay_outline_blend_ci;
 
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &overlay_outline_ci, 0, &vulkan_state.editor_outline_pipeline);
-    }
-
-    // define model pipeline: depth on, write to stencil 2.
-    {
-        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
-
-        color_blend_attachment_state.blendEnable = VK_FALSE;
-
-        blend_attachments[0] = color_blend_attachment_state;
-        blend_attachments[1] = color_blend_attachment_state;
-
-        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
-        depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
-        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
-
-        depth_stencil_state_creation_info.stencilTestEnable = VK_TRUE;
-        depth_stencil_state_creation_info.front.failOp = VK_STENCIL_OP_KEEP;
-        depth_stencil_state_creation_info.front.passOp = VK_STENCIL_OP_REPLACE;
-        depth_stencil_state_creation_info.front.depthFailOp = VK_STENCIL_OP_KEEP;
-        depth_stencil_state_creation_info.front.compareOp = VK_COMPARE_OP_ALWAYS;
-        depth_stencil_state_creation_info.front.compareMask = 0xFF;
-        depth_stencil_state_creation_info.front.writeMask = 0xFF;
-        depth_stencil_state_creation_info.front.reference = 2;
-        depth_stencil_state_creation_info.back = depth_stencil_state_creation_info.front;
-
-        rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
-        rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-
-        VkGraphicsPipelineCreateInfo model_ci = base_graphics_pipeline_creation_info;
-        model_ci.pStages = model_shader_stages;
-        model_ci.layout = vulkan_state.model_pipeline_layout;
-
-        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &model_ci, 0, &vulkan_state.model_pipeline);
     }
 
     // define water pipeline (merged depth and real water pass)
@@ -4881,7 +4899,7 @@ void vulkanDraw(void)
         // cubes
         if (cube_instance_count > 0)
         {
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline);
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_reflection_pipeline);
 
             VkBuffer cube_buffers[2] = { vulkan_state.cube_vertex_buffer, vulkan_state.cube_instance_buffers[vulkan_state.current_frame] };
             VkDeviceSize cube_offsets[2] = { 0, 0 };
@@ -4909,7 +4927,7 @@ void vulkanDraw(void)
         // models
         if (model_instance_count > 0)
         {
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline);
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_reflection_pipeline);
 
             VkDescriptorSet model_sets[2] = 
             {
@@ -5035,7 +5053,7 @@ void vulkanDraw(void)
         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL, // TODO: is this still right? not stenciling for this anymore
         VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-        VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT);
+        VK_IMAGE_ASPECT_DEPTH_BIT);
 
     VkRenderPassBeginInfo post_rp_begin = {0};
     post_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
