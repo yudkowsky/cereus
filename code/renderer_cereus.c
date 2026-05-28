@@ -55,6 +55,17 @@ typedef struct
 }
 Water;
 
+typedef struct 
+{
+    Vec3 center;
+    float length;
+    Vec4 rotation;
+    Vec4 color;
+    Vec4 start_clip_plane;
+    Vec4 end_clip_plane;
+}
+Laser;
+
 // for instancing of cubes. not required in main build
 typedef struct 
 {
@@ -71,7 +82,7 @@ typedef struct
 }
 WaterInstanceData;
 
-typedef struct 
+typedef struct LaserInstanceData
 {
     Vec3 center;
     float length;
@@ -80,7 +91,7 @@ typedef struct
     Vec4 start_clip_plane;
     Vec4 end_clip_plane;
 }
-Laser;
+LaserInstanceData;
 
 typedef struct 
 {
@@ -132,19 +143,6 @@ typedef struct OutlinePushConstants
     float model[16];
 }
 OutlinePushConstants;
-
-typedef struct 
-{
-    float model[16];
-    float inverse_intersection[16];
-    float proj_view_matrix[16];
-    Vec4 color;
-    Vec4 start_clip_plane;
-    Vec4 end_clip_plane;
-    Vec3 camera_position;
-    float half_length;
-}
-LaserPushConstants; // TODO: instance this
 
 typedef struct
 {
@@ -483,6 +481,11 @@ typedef struct VulkanState
     void* water_instance_mappeds[2];
     uint32 water_instance_capacity;
 
+    VkBuffer laser_instance_buffers[2];
+    VkDeviceMemory laser_instance_memories[2];
+    void* laser_instance_mappeds[2];
+    uint32 laser_instance_capacity;
+
     // models
     LoadedModel loaded_models[64];
     LoadedModel laser_cylinder_model; // TODO: probably index everything into loaded models; figure out what order i want to put stuff in, if can't just take their id
@@ -566,6 +569,7 @@ static const uint32 SPRITE_INDICES[6] =
 
 const uint32 CUBE_INSTANCE_CAPACITY = 8192;
 const uint32 WATER_INSTANCE_CAPACITY = 8192;
+const uint32 LASER_INSTANCE_CAPACITY = 1024;
 
 // TODO: set these in loadAsset where stb_image gives me width / height. store in CachedAsset.
 const int32 ATLAS_2D_WIDTH = 128;
@@ -3201,6 +3205,54 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     water_vertex_input.vertexAttributeDescriptionCount = 8;
     water_vertex_input.pVertexAttributeDescriptions = water_attrs;
 
+    // laser instancing
+    VkVertexInputBindingDescription laser_bindings[2] = {0};
+    laser_bindings[0].binding = 0;
+    laser_bindings[0].stride = sizeof(Vertex);
+    laser_bindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    laser_bindings[1].binding = 1;
+    laser_bindings[1].stride = sizeof(LaserInstanceData);
+    laser_bindings[1].inputRate = VK_VERTEX_INPUT_RATE_INSTANCE;
+
+    VkVertexInputAttributeDescription laser_attributes[6] = {0};
+
+    laser_attributes[0].binding = 0;
+    laser_attributes[0].location = 0;
+    laser_attributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+    laser_attributes[0].offset = offsetof(Vertex, x);
+
+    laser_attributes[1].binding = 1; // center.xyz + length.w
+    laser_attributes[1].location = 4;
+    laser_attributes[1].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    laser_attributes[1].offset = 0;
+
+    laser_attributes[2].binding = 1; // rotation quaternion
+    laser_attributes[2].location = 5;
+    laser_attributes[2].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    laser_attributes[2].offset = 16;
+
+    laser_attributes[3].binding = 1; // color
+    laser_attributes[3].location = 6;
+    laser_attributes[3].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    laser_attributes[3].offset = 32;
+
+    laser_attributes[4].binding = 1; // start clip plane
+    laser_attributes[4].location = 7;
+    laser_attributes[4].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    laser_attributes[4].offset = 48;
+
+    laser_attributes[5].binding = 1; // end clip plane
+    laser_attributes[5].location = 8;
+    laser_attributes[5].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    laser_attributes[5].offset = 64;
+
+    VkPipelineVertexInputStateCreateInfo laser_vertex_input = {0};
+    laser_vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    laser_vertex_input.vertexBindingDescriptionCount = 2;
+    laser_vertex_input.pVertexBindingDescriptions = laser_bindings;
+    laser_vertex_input.vertexAttributeDescriptionCount = 6;
+    laser_vertex_input.pVertexAttributeDescriptions = laser_attributes;
+
     // empty vertex input for outline post render
     VkPipelineVertexInputStateCreateInfo empty_vertex_input = {0};
     empty_vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -3824,24 +3876,20 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     // OIT LASER WRITE PIPELINE LAYOUT
     {
-        VkDescriptorSetLayout laser_set_layouts[3] = 
+        VkDescriptorSetLayout laser_set_layouts[4] = 
         {
+            vulkan_state.view_constants_set_layout,            // view constants
             vulkan_state.storage_image_descriptor_set_layout,  // head image
             vulkan_state.ssbo_descriptor_set_layout,           // fragment pool
             vulkan_state.ssbo_descriptor_set_layout,           // counter
         };
 
-        VkPushConstantRange push_constant_range = {0};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        push_constant_range.offset = 0;
-        push_constant_range.size = (uint32)sizeof(LaserPushConstants);
-
         VkPipelineLayoutCreateInfo layout_ci = {0};
         layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layout_ci.setLayoutCount = 3;
+        layout_ci.setLayoutCount = 4;
         layout_ci.pSetLayouts = laser_set_layouts;
-        layout_ci.pushConstantRangeCount = 1;
-        layout_ci.pPushConstantRanges = &push_constant_range;
+        layout_ci.pushConstantRangeCount = 0;
+        layout_ci.pPushConstantRanges = 0;
 
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.laser_pipeline_layout);
     }
@@ -4263,6 +4311,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         VkGraphicsPipelineCreateInfo laser_ci = base_graphics_pipeline_creation_info;
         laser_ci.pStages = laser_shader_stages;
+        laser_ci.pVertexInputState = &laser_vertex_input;
         laser_ci.layout = vulkan_state.laser_pipeline_layout;
         laser_ci.renderPass = vulkan_state.overlay_render_pass;
         laser_ci.pColorBlendState = &oit_blend_ci;
@@ -4405,6 +4454,10 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
             sizeof(WaterInstanceData) * WATER_INSTANCE_CAPACITY, 
             &vulkan_state.water_instance_memories[in_flight_index], 
             &vulkan_state.water_instance_mappeds[in_flight_index]);
+        createInstanceBuffer(&vulkan_state.laser_instance_buffers[in_flight_index],
+            sizeof(LaserInstanceData) * LASER_INSTANCE_CAPACITY,
+            &vulkan_state.laser_instance_memories[in_flight_index],
+            &vulkan_state.laser_instance_mappeds[in_flight_index]);
     }
 
     loadAllEntities();
@@ -4619,39 +4672,16 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
         SpriteId sprite_id = command->sprite_id;
         AssetType type = command->type;
 
-        if (type == OUTLINE_3D)
+        if (type == CUBE_3D)
         {
-            bool render_model = false;
-            if (sprite_id >= MODEL_3D_VOID && sprite_id <= MODEL_3D_SOURCE_MAGENTA) render_model = true;
-            if (vulkan_state.loaded_models[sprite_id - MODEL_3D_VOID].index_count <= 0) render_model = false;
-            if (render_model)
-            {
-                Model* model = &model_editor_outline_instances[model_editor_outline_instance_count++];
-                model->model_id = (uint32)sprite_id;
-                model->coords   = command->coords;
-                model->scale    = command->scale;
-                model->rotation = command->rotation;
-            }
-            else
-            {
-                // outline 3d called with cube id, so render cube
-                Cube* cube = &cube_editor_outline_instances[cube_editor_outline_instance_count++];
-                cube->coords      = command->coords;
-                cube->scale       = command->scale;
-                cube->rotation    = command->rotation;
-                cube->uv          = (Vec4){ 0, 0, 1, 1 };
-                cube->asset_index = 0;
-            }
-        }
-        else if (type == LASER)
-        {
-            Laser* laser = &laser_instances[laser_instance_count++];
-            laser->center   = command->coords;
-            laser->length   = command->scale.z;
-            laser->rotation = command->rotation;
-            laser->color    = command->color;
-            laser->start_clip_plane = command->start_clip_plane;
-            laser->end_clip_plane = command->end_clip_plane;
+            Vec4 uv_rect = spriteUV(sprite_id, type, ATLAS_3D_WIDTH, ATLAS_3D_HEIGHT);
+
+            Cube* cube = &cube_instances[cube_instance_count++];
+            cube->asset_index = (uint32)vulkan_state.atlas_3d_asset_index;
+            cube->coords      = command->coords;
+            cube->scale       = command->scale;
+            cube->rotation    = command->rotation;
+            cube->uv          = uv_rect;
         }
         else if (type == MODEL_3D)
         {
@@ -4666,6 +4696,24 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
 		{
             Water* water = &water_instances[water_instance_count++];
             water->coords = command->coords;
+        }
+        else if (type == LASER)
+        {
+            Laser* laser = &laser_instances[laser_instance_count++];
+            laser->center   = command->coords;
+            laser->length   = command->scale.z;
+            laser->rotation = command->rotation;
+            laser->color    = command->color;
+            laser->start_clip_plane = command->start_clip_plane;
+            laser->end_clip_plane = command->end_clip_plane;
+        }
+        else if (type == OUTLINE_3D)
+        {
+            Model* model = &model_editor_outline_instances[model_editor_outline_instance_count++];
+            model->model_id = (uint32)sprite_id;
+            model->coords   = command->coords;
+            model->scale    = command->scale;
+            model->rotation = command->rotation;
         }
         else if (type == SPRITE_2D)
         {
@@ -4693,17 +4741,6 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
             sprite->alpha       = command->color.w;
             sprite->uv          = spriteUV(sprite_id, type, atlas_width, atlas_height);
         }
-        else if (type == CUBE_3D)
-        {
-            Vec4 uv_rect = spriteUV(sprite_id, type, ATLAS_3D_WIDTH, ATLAS_3D_HEIGHT);
-
-            Cube* cube = &cube_instances[cube_instance_count++];
-            cube->asset_index = (uint32)vulkan_state.atlas_3d_asset_index;
-            cube->coords      = command->coords;
-            cube->scale       = command->scale;
-            cube->rotation    = command->rotation;
-            cube->uv          = uv_rect;
-        }
     }
 
     // fill cube instance buffer
@@ -4721,6 +4758,21 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     {
         Water* water = &water_instances[instance_index];
         mat4BuildBasicTRS(water_gpu_instances[instance_index].model, water->coords);
+    }
+
+    // fill laser instance buffer
+    LaserInstanceData* laser_gpu_instances = (LaserInstanceData*)vulkan_state.laser_instance_mappeds[vulkan_state.current_frame];
+    for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
+    {
+        Laser* laser = &laser_instances[laser_index];
+        LaserInstanceData* instance = &laser_gpu_instances[laser_index];
+
+        instance->center = laser->center;
+        instance->length = laser->length;
+        instance->rotation = laser->rotation;
+        instance->color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 0.1f };
+        instance->start_clip_plane = laser->start_clip_plane;
+        instance->end_clip_plane = laser->end_clip_plane;
     }
 }
 
@@ -5492,70 +5544,22 @@ void vulkanDraw(void)
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_pipeline);
 
-        VkDescriptorSet oit_sets[3] = 
+        VkDescriptorSet laser_descriptor_sets[4] =
         {
+            vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame],
             vulkan_state.oit_head_storage_descriptor_set,
             vulkan_state.oit_fragment_pool_descriptor_set,
             vulkan_state.oit_counter_descriptor_set,
         };
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_pipeline_layout, 0, 3, oit_sets, 0, 0);
+        uint32 laser_view_constants_offset = VIEW_MAIN * vulkan_state.view_constants_stride;
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_pipeline_layout, 0, 4, laser_descriptor_sets, 1, &laser_view_constants_offset);
 
-        VkDeviceSize laser_vb_offset = 0;
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &laser_mesh->vertex_buffer, &laser_vb_offset);
+        VkBuffer laser_vertex_buffers[2] = { laser_mesh->vertex_buffer, vulkan_state.laser_instance_buffers[vulkan_state.current_frame] };
+        VkDeviceSize laser_vertex_offsets[2] = { 0, 0 };
+        vkCmdBindVertexBuffers(command_buffer, 0, 2, laser_vertex_buffers, laser_vertex_offsets);
         vkCmdBindIndexBuffer(command_buffer, laser_mesh->index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-        float proj_view_matrix[16] = {0};
-        mat4Multiply(proj_view_matrix, projection_matrix, view_matrix);
-
-        for (uint32 laser_index = 0; laser_index < laser_instance_count; laser_index++)
-        {
-            Laser* laser = &laser_instances[laser_index];
-
-            float width = 2.0f;
-            Vec3 laser_scale = { width, width, laser->length };
-
-            float model_matrix[16];
-            mat4BuildTRS(model_matrix, laser->center, laser->rotation, laser_scale);
-
-            LaserPushConstants laser_pc = {0};
-            memcpy(laser_pc.model, model_matrix, sizeof(laser_pc.model));
-
-            float intersection_matrix[16];
-            Vec3 unit_scale = { 1.0f, 1.0f, 1.0f };
-            mat4BuildTRS(intersection_matrix, laser->center, laser->rotation, unit_scale);
-            float inverse_intersection_matrix[16];
-            mat4Inverse(inverse_intersection_matrix, intersection_matrix);
-            memcpy(laser_pc.inverse_intersection, inverse_intersection_matrix, sizeof(inverse_intersection_matrix));
-
-            memcpy(laser_pc.proj_view_matrix, proj_view_matrix, sizeof(proj_view_matrix));
-
-            laser_pc.color = (Vec4){ laser->color.x, laser->color.y, laser->color.z, 0.1f };
-
-            float* m = intersection_matrix;
-            Vec4 ws = laser->start_clip_plane;
-            laser_pc.start_clip_plane = (Vec4)
-            {
-                m[0]*ws.x  + m[1]*ws.y  + m[2]*ws.z  + m[3]*ws.w,
-                m[4]*ws.x  + m[5]*ws.y  + m[6]*ws.z  + m[7]*ws.w,
-                m[8]*ws.x  + m[9]*ws.y  + m[10]*ws.z + m[11]*ws.w,
-                m[12]*ws.x + m[13]*ws.y + m[14]*ws.z + m[15]*ws.w,
-            };
-
-            ws = laser->end_clip_plane;
-            laser_pc.end_clip_plane = (Vec4)
-            {
-                m[0]*ws.x  + m[1]*ws.y  + m[2]*ws.z  + m[3]*ws.w,
-                m[4]*ws.x  + m[5]*ws.y  + m[6]*ws.z  + m[7]*ws.w,
-                m[8]*ws.x  + m[9]*ws.y  + m[10]*ws.z + m[11]*ws.w,
-                m[12]*ws.x + m[13]*ws.y + m[14]*ws.z + m[15]*ws.w,
-            };
-
-            laser_pc.camera_position = vulkan_camera.coords;
-            laser_pc.half_length = (laser->length) * 0.5f;
-
-            vkCmdPushConstants(command_buffer, vulkan_state.laser_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(LaserPushConstants), &laser_pc);
-            vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, 1, 0, 0, 0);
-        }
+        vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, laser_instance_count, 0, 0, 0);
     }
 
     memoryBarrier(command_buffer,
