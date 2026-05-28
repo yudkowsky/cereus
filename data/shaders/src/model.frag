@@ -1,5 +1,20 @@
 #version 450
 
+layout(set = 0, binding = 0) uniform ViewConstants 
+{
+    mat4 view;
+    mat4 proj;
+    mat4 view_proj;
+    mat4 inv_view_proj;
+    mat4 light_view_proj;
+    vec4 camera_position;
+    float water_plane_y;
+    float time;
+    float water_tile_length;
+    float focal_length;
+}
+view_constants;
+
 layout(set = 1, binding = 0) uniform sampler2D water_texture;
 
 layout(location = 0) in vec3 normal;
@@ -12,22 +27,16 @@ layout(location = 1) out vec4 out_normal;
 layout(push_constant) uniform PushConstants
 {
     mat4 model;
-    mat4 view;
-    mat4 proj;
-    vec4 uv_rect;
-    vec4 tint;
-    float water_plane_y;
-    float time;
-    float tile_length;
+    vec4 tint; // used for player when hit by laser
 } 
 pc;
 
 void main()
 {
     // discard if relevant
-    vec2 displacement_uv = frag_world_pos.xz / pc.tile_length;
+    vec2 displacement_uv = frag_world_pos.xz / view_constants.water_tile_length;
     float wave_displacement = texture(water_texture, displacement_uv).w;
-    float water_surface_y = pc.water_plane_y - wave_displacement;
+    float water_surface_y = view_constants.water_plane_y - wave_displacement;
     if (frag_world_pos.y < water_surface_y) discard;
 
     // basic shader

@@ -8,7 +8,7 @@ layout(set = 1, binding = 0, rg32f) uniform writeonly image2D h_evolved_image;
 layout(push_constant) uniform PushConstants
 {
     int texture_size;
-    float tile_length;
+    float water_tile_length;
     float gravity;
     float time;
 }
@@ -36,7 +36,7 @@ void main()
     ivec2 frequency = ivec2(frequency_x, frequency_z);
 
     // wave vector and dispersion frequency
-    vec2 wave_vector = TAU * vec2(frequency) / pc.tile_length;
+    vec2 wave_vector = TAU * vec2(frequency) / pc.water_tile_length;
     float wave_number = length(wave_vector);
     float dispersion_frequency = sqrt(pc.gravity * wave_number);
 

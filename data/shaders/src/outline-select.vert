@@ -1,30 +1,29 @@
 #version 450
 
-layout(location = 0) in vec3 position;
-layout(location = 1) in vec2 input_uv;
-layout(location = 2) in vec3 input_normal;
+layout(set = 0, binding = 0) uniform ViewConstants 
+{
+    mat4 view;
+    mat4 proj;
+    mat4 view_proj;
+    mat4 inv_view_proj;
+    mat4 light_view_proj;
+    vec4 camera_position;
+    float water_plane_y;
+    float time;
+    float water_tile_length;
+    float focal_length;
+}
+view_constants;
 
-layout(location = 0) out vec2 uv;
-layout(location = 1) out vec3 normal;
-layout(location = 2) out vec3 frag_world_pos;
+layout(location = 0) in vec3 position;
 
 layout(push_constant) uniform PC 
 {
     mat4 model;
-    mat4 view;
-    mat4 projection;
-    vec4 uv_rect;
-    float alpha;
-    float water_base_y;
-    float time;
 }
 pc;
 
 void main()
 {
-    vec4 world_pos = pc.model * vec4(position, 1.0);
-    gl_Position = pc.projection * pc.view * world_pos;
-    uv = pc.uv_rect.xy + input_uv * (pc.uv_rect.zw - pc.uv_rect.xy);
-    normal = vec3(pc.model * vec4(input_normal, 0.0));
-    frag_world_pos = world_pos.xyz;
+    gl_Position = view_constants.view_proj * pc.model * vec4(position, 1.0);
 }

@@ -7,7 +7,7 @@ layout(set = 0, binding = 0, rg32f) uniform image2D h0_image;
 layout(push_constant) uniform PushConstants
 {
     int texture_size;
-    float tile_length;
+    float water_tile_length;
     float wind_direction_x;
     float wind_direction_z;
     float peak_frequency;
@@ -47,7 +47,7 @@ void main()
     int frequency_z = (int(texel.y) <= pc.texture_size / 2) ? int(texel.y) : int(texel.y) - pc.texture_size;
 
     // wave vector in world space
-    vec2 wave_vector = vec2(TAU * float(frequency_x), TAU * float(frequency_z)) / pc.tile_length;
+    vec2 wave_vector = vec2(TAU * float(frequency_x), TAU * float(frequency_z)) / pc.water_tile_length;
     float wave_number = length(wave_vector);
 
     // sample two well-behaved random numbers

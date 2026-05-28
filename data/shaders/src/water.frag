@@ -7,25 +7,27 @@ layout(location = 0) in vec3 frag_world_pos;
 layout(location = 0) out vec4 out_color;
 layout(location = 1) out float out_water_depth;
 
-layout(set = 0, binding = 0) uniform sampler2D scene_texture;
-layout(set = 1, binding = 0) uniform sampler2D depth_texture;
-layout(set = 2, binding = 0) uniform sampler2D paint_texture;
-layout(set = 3, binding = 0) uniform sampler2D water_texture;
-layout(set = 4, binding = 0) uniform sampler2D reflection_texture;
-layout(set = 5, binding = 0) uniform sampler2D grid_texture;
-
-layout(push_constant) uniform PushConstants 
+layout(set = 0, binding = 0) uniform ViewConstants 
 {
     mat4 view;
     mat4 proj;
+    mat4 view_proj;
     mat4 inv_view_proj;
+    mat4 light_view_proj;
+    vec4 camera_position;
+    float water_plane_y;
     float time;
+    float water_tile_length;
     float focal_length;
-    float water_base_y;
-    float tile_length;
-    vec3 camera_position;
 }
-pc;
+view_constants;
+
+layout(set = 1, binding = 0) uniform sampler2D scene_texture;
+layout(set = 2, binding = 0) uniform sampler2D depth_texture;
+layout(set = 3, binding = 0) uniform sampler2D paint_texture;
+layout(set = 4, binding = 0) uniform sampler2D water_texture;
+layout(set = 5, binding = 0) uniform sampler2D reflection_texture;
+layout(set = 6, binding = 0) uniform sampler2D grid_texture;
 
 // paint texture definitions
 // TODO: these are same as in everything.h, but can't include that file... a bit messy
@@ -85,7 +87,7 @@ void main()
     vec3 base_color = mix(scene, water_depth_tint, tint_amount);
 
     // sample unmodified normal in order to figure out if should be grid here
-    vec2 fft_uv = frag_world_pos.xz / pc.tile_length;
+    vec2 fft_uv = frag_world_pos.xz / view_constants.water_tile_length;
     vec3 unmodified_normal = normalize(texture(water_texture, fft_uv).xyz);
 
     // get grid pos given movement by unmodified normals
@@ -126,13 +128,13 @@ void main()
     */
 
     // reflection based on fresnel strength
-    vec3 view_dir = normalize(pc.camera_position.xyz - frag_world_pos);
+    vec3 view_dir = normalize(view_constants.camera_position.xyz - frag_world_pos);
     float cos_theta = max(dot(view_dir, normal), 0.0);
     float fresnel = min_reflection + (1.0 - min_reflection) * pow(1.0 - cos_theta, fresnel_exponent);
 
     // reflection distortion based on normals and distance to camera
-    float dist_to_camera = distance(pc.camera_position, frag_world_pos);
-    float pixel_world_size = dist_to_camera / pc.focal_length;
+    float dist_to_camera = distance(view_constants.camera_position.xyz, frag_world_pos);
+    float pixel_world_size = dist_to_camera / view_constants.focal_length;
     float distortion_strength = reflection_distortion_strength / pixel_world_size;
     vec2 reflection_uv_offset = normal.xz * distortion_strength;
     vec2 reflection_uv = screen_uv + reflection_uv_offset;

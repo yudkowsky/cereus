@@ -91,18 +91,47 @@ typedef struct
 }
 CachedAsset;
 
-typedef struct
+// constant across one view
+typedef struct ViewConstants
 {
-    float model[16];
     float view[16];
     float proj[16];
-    Vec4 uv_rect;
-    Vec4 color;
+    float view_proj[16];
+    float inv_view_proj[16];
+    float light_view_proj[16];
+    Vec4 camera_position;
     float water_plane_y;
     float time;
-    float tile_length;
+    float water_tile_length;
+    float focal_length;
 }
-PushConstants; // TODO: rename. also split off sprites and models
+ViewConstants;
+
+#define VIEW_MAIN 0
+#define VIEW_REFLECTION 1
+#define VIEW_SPRITE 2
+#define VIEW_BLOCK_COUNT 3
+
+typedef struct SpritePushConstants
+{
+    float model[16];
+    Vec4 uv_rect;
+    Vec4 color;
+}
+SpritePushConstants;
+
+typedef struct ModelPushConstants
+{
+    float model[16];
+    Vec4 color;
+}
+ModelPushConstants;
+
+typedef struct OutlinePushConstants
+{
+    float model[16];
+}
+OutlinePushConstants;
 
 typedef struct 
 {
@@ -115,31 +144,7 @@ typedef struct
     Vec3 camera_position;
     float half_length;
 }
-LaserPushConstants;
-
-typedef struct 
-{
-    float view[16];
-    float proj[16];
-    float water_plane_y;
-    float time;
-    float tile_length;
-}
-InstancedPushConstants;
-
-typedef struct
-{
-    float view[16];
-    float proj[16];
-    float inv_view_proj[16];
-    float time;
-    float focal_length;
-    float water_plane_y;
-    float tile_length;
-    Vec3 camera_position;
-}
-WaterPushConstants;
-
+LaserPushConstants; // TODO: instance this
 
 typedef struct
 {
@@ -153,7 +158,7 @@ WaterlinePushConstants;
 typedef struct
 {
     int32 texture_size;
-    float tile_length;
+    float water_tile_length;
     float wind_direction_x;
     float wind_direction_z;
     float peak_frequency;
@@ -168,7 +173,7 @@ FFTSpectrumPushConstants;
 typedef struct
 {
     int32 texture_size;
-    float tile_length;
+    float water_tile_length;
     float gravity;
     float time;
 }
@@ -185,7 +190,7 @@ FFTPassPushConstants;
 typedef struct
 {
     int32 texture_size;
-    float tile_length;
+    float water_tile_length;
 }
 FFTFinalizePushConstants;
 
@@ -323,7 +328,18 @@ typedef struct VulkanState
     VkDeviceMemory reflection_depth_image_memory;
     VkImageView reflection_depth_image_view;
 
+    // shadow map for directional light
+    VkImage shadow_map_image;
+    VkDeviceMemory shadow_map_image_memory;
+    VkImageView shadow_map_image_view;
+    VkSampler shadow_sampler;
+    VkDescriptorSet shadow_map_descriptor_set;
+
     // RENDER PASSES
+
+    // shadow map pass
+    VkRenderPass shadow_render_pass;
+    VkFramebuffer shadow_framebuffer;
 
     // scene pass (cubes, models, select outlines)
     VkRenderPass render_pass_handle;
@@ -399,6 +415,10 @@ typedef struct VulkanState
     VkPipeline fft_finalize_pipeline;             
     VkPipelineLayout fft_finalize_pipeline_layout;
 
+    VkPipeline shadow_cube_pipeline;
+    VkPipeline shadow_model_pipeline;
+    VkPipelineLayout shadow_pipeline_layout;
+
     // shared resources
     VkSampler pixel_art_sampler;
     VkDescriptorSetLayout descriptor_set_layout;
@@ -415,6 +435,14 @@ typedef struct VulkanState
 	int32 atlas_font_asset_index;
     int32 atlas_3d_asset_index;
     int32 water_grid_asset_index;
+
+    // shared ubo
+    VkBuffer scene_ubo_buffers[2];
+    VkDeviceMemory scene_ubo_memories[2];
+    void* scene_ubo_mappeds[2];
+    uint32 view_constants_stride;
+    VkDescriptorSetLayout view_constants_set_layout;
+    VkDescriptorSet view_constants_descriptor_sets[2];
 
     // water paint texture
     WaterPaintTexture* water_paint_texture;
@@ -563,7 +591,7 @@ const float water_tile_length = 10.0f;
 const float water_amplitude = 2e-4f;
 
 // outlines
-const float depth_threshold = 5.0f;
+const float depth_threshold = 2.0f;
 const float normal_threshold = 0.2f;
 
 Cube cube_instances[8192];
@@ -3351,7 +3379,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkDescriptorPoolSize descriptor_pool_sizes[4] = {0};
    	descriptor_pool_sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     descriptor_pool_sizes[0].descriptorCount = 1024;
-    descriptor_pool_sizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    descriptor_pool_sizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
     descriptor_pool_sizes[1].descriptorCount = 4;
     descriptor_pool_sizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
     descriptor_pool_sizes[2].descriptorCount = 4 + 1 + 1 + 1 + 1 + 1; // oit head image, h0, fft_buffer_a and b, water displacement TODO: this is silly
@@ -3365,6 +3393,72 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     descriptor_pool_creation_info.maxSets = 1024;
 
     vkCreateDescriptorPool(vulkan_state.logical_device_handle, &descriptor_pool_creation_info, 0, &vulkan_state.descriptor_pool);
+
+    // VIEW CONSTANTS UBO (per frame in flight)
+    {
+        VkPhysicalDeviceProperties props = {0};
+        vkGetPhysicalDeviceProperties(vulkan_state.physical_device_handle, &props);
+        VkDeviceSize align = props.limits.minUniformBufferOffsetAlignment;
+        vulkan_state.view_constants_stride = (uint32)((sizeof(ViewConstants) + align - 1) & ~(align - 1));
+
+        // descriptor set layout: one dynamic ubo
+        VkDescriptorSetLayoutBinding binding = {0};
+        binding.binding = 0;
+        binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+        binding.descriptorCount = 1;
+        binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        VkDescriptorSetLayoutCreateInfo layout_ci = {0};
+        layout_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layout_ci.bindingCount = 1;
+        layout_ci.pBindings = &binding;
+        vkCreateDescriptorSetLayout(vulkan_state.logical_device_handle, &layout_ci, 0, &vulkan_state.view_constants_set_layout);
+
+        VkDeviceSize buffer_size = (VkDeviceSize)vulkan_state.view_constants_stride * VIEW_BLOCK_COUNT;
+
+        for (int in_flight_index = 0; in_flight_index < 2; in_flight_index++)
+        {
+            VkBufferCreateInfo buffer_ci = {0};
+            buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            buffer_ci.size = buffer_size;
+            buffer_ci.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+            buffer_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            vkCreateBuffer(vulkan_state.logical_device_handle, &buffer_ci, 0, &vulkan_state.scene_ubo_buffers[in_flight_index]);
+
+            VkMemoryRequirements mem_req = {0};
+            vkGetBufferMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.scene_ubo_buffers[in_flight_index], &mem_req);
+
+            VkMemoryAllocateInfo alloc = {0};
+            alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+            alloc.allocationSize = mem_req.size;
+            alloc.memoryTypeIndex = findMemoryType(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            vkAllocateMemory(vulkan_state.logical_device_handle, &alloc, 0, &vulkan_state.scene_ubo_memories[in_flight_index]);
+            vkBindBufferMemory(vulkan_state.logical_device_handle, vulkan_state.scene_ubo_buffers[in_flight_index], vulkan_state.scene_ubo_memories[in_flight_index], 0);
+
+            vkMapMemory(vulkan_state.logical_device_handle, vulkan_state.scene_ubo_memories[in_flight_index], 0, buffer_size, 0, &vulkan_state.scene_ubo_mappeds[in_flight_index]);
+
+            VkDescriptorSetAllocateInfo ds_alloc = {0};
+            ds_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            ds_alloc.descriptorPool = vulkan_state.descriptor_pool;
+            ds_alloc.descriptorSetCount = 1;
+            ds_alloc.pSetLayouts = &vulkan_state.view_constants_set_layout;
+            vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &ds_alloc, &vulkan_state.view_constants_descriptor_sets[in_flight_index]);
+
+            VkDescriptorBufferInfo buffer_info = {0};
+            buffer_info.buffer = vulkan_state.scene_ubo_buffers[in_flight_index];
+            buffer_info.offset = 0;
+            buffer_info.range = sizeof(ViewConstants);
+
+            VkWriteDescriptorSet write_ds = {0};
+            write_ds.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write_ds.dstSet = vulkan_state.view_constants_descriptor_sets[in_flight_index];
+            write_ds.dstBinding = 0;
+            write_ds.descriptorCount = 1;
+            write_ds.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+            write_ds.pBufferInfo = &buffer_info;
+            vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write_ds, 0, 0);
+        }
+    }
 
     VkDescriptorSetAllocateInfo depth_descriptor_set_alloc = {0};
     depth_descriptor_set_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -3601,40 +3695,35 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
 	createSwapchainResources();
 
-	// CREATE CUBE (INSTANCED) PIPELINE LAYOUT
+	// CUBE (INSTANCED) PIPELINE LAYOUT
     {
-        VkPushConstantRange push_constant_range = {0};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        push_constant_range.offset = 0;
-        push_constant_range.size = (uint32)sizeof(InstancedPushConstants);
-
-        VkDescriptorSetLayout cube_set_layouts[2] =
+        VkDescriptorSetLayout cube_set_layouts[3] =
         {
+            vulkan_state.view_constants_set_layout,
             vulkan_state.descriptor_set_layout, // atlas
             vulkan_state.descriptor_set_layout, // water displacement
         };
-
         VkPipelineLayoutCreateInfo layout_info = {0};
         layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layout_info.setLayoutCount = 2;
+        layout_info.setLayoutCount = 3;
         layout_info.pSetLayouts = cube_set_layouts;
-        layout_info.pushConstantRangeCount = 1;
-        layout_info.pPushConstantRanges = &push_constant_range;
+        layout_info.pushConstantRangeCount = 0;
+        layout_info.pPushConstantRanges = 0;
 
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &layout_info, 0, &vulkan_state.cube_pipeline_layout);
     }
 
-    // CREATE MODEL PIPELINE LAYOUT
+    // MODEL PIPELINE LAYOUT
     {
         VkPushConstantRange push_constant_range = {0};
         push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         push_constant_range.offset = 0;
-        push_constant_range.size = (uint32)sizeof(PushConstants);
+        push_constant_range.size = (uint32)sizeof(ModelPushConstants);
 
         VkDescriptorSetLayout model_set_layouts[2] =
         {
-            vulkan_state.descriptor_set_layout, // TODO: wait, why did i have a texture here..? shouldn't need an atlas
-            vulkan_state.descriptor_set_layout, // water displacement
+            vulkan_state.view_constants_set_layout, // per-view constants
+            vulkan_state.descriptor_set_layout,     // water displacement
         };
 
         VkPipelineLayoutCreateInfo model_pipeline_layout_ci = {0};
@@ -3672,30 +3761,27 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     // WATER PIPELINE LAYOUT
     {
-        VkPushConstantRange push_constant_range = {0};
-        push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        push_constant_range.offset = 0;
-        push_constant_range.size = (uint32)sizeof(WaterPushConstants);
-
-        VkDescriptorSetLayout water_set_layouts[6] =
-        { 
-            vulkan_state.descriptor_set_layout, // underwater scene copy
-            vulkan_state.descriptor_set_layout,	// scene depth 
-            vulkan_state.descriptor_set_layout, // paint texture
-            vulkan_state.descriptor_set_layout, // displacement texture
-            vulkan_state.descriptor_set_layout, // reflection texture
-            vulkan_state.descriptor_set_layout, // water grid texture
+        VkDescriptorSetLayout water_set_layouts[7] =
+        {
+            vulkan_state.view_constants_set_layout, // view constants
+            vulkan_state.descriptor_set_layout,     // underwater scene copy
+            vulkan_state.descriptor_set_layout,     // scene depth
+            vulkan_state.descriptor_set_layout,     // paint texture
+            vulkan_state.descriptor_set_layout,     // displacement texture
+            vulkan_state.descriptor_set_layout,     // reflection texture
+            vulkan_state.descriptor_set_layout,     // water grid texture
         };
 
         VkPipelineLayoutCreateInfo water_pipeline_layout_ci = {0};
         water_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        water_pipeline_layout_ci.setLayoutCount = 6;
+        water_pipeline_layout_ci.setLayoutCount = 7;
         water_pipeline_layout_ci.pSetLayouts = water_set_layouts;
-        water_pipeline_layout_ci.pushConstantRangeCount = 1;
-        water_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
+        water_pipeline_layout_ci.pushConstantRangeCount = 0;
+        water_pipeline_layout_ci.pPushConstantRanges = 0;
 
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &water_pipeline_layout_ci, 0, &vulkan_state.water_pipeline_layout);
     }
+
 
     // WATERLINE PIPELINE LAYOUT
     {
@@ -3724,12 +3810,12 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         VkPushConstantRange push_constant_range = {0};
         push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
         push_constant_range.offset = 0;
-        push_constant_range.size = (uint32)sizeof(PushConstants);
+        push_constant_range.size = (uint32)sizeof(OutlinePushConstants);
 
         VkPipelineLayoutCreateInfo layout_ci = {0};
         layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layout_ci.setLayoutCount = 0;
-        layout_ci.pSetLayouts = 0;
+        layout_ci.setLayoutCount = 1;
+        layout_ci.pSetLayouts = &vulkan_state.view_constants_set_layout;
         layout_ci.pushConstantRangeCount = 1;
         layout_ci.pPushConstantRanges = &push_constant_range;
 
@@ -3789,13 +3875,19 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     {
         VkPushConstantRange push_constant_range = {0};
         push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        push_constant_range.offset     = 0;
-        push_constant_range.size       = (uint32)sizeof(PushConstants); 
+        push_constant_range.offset = 0;
+        push_constant_range.size = (uint32)sizeof(SpritePushConstants);
 
-        VkPipelineLayoutCreateInfo sprite_pipeline_layout_ci= {0};
+        VkDescriptorSetLayout sprite_set_layouts[2] =
+        {
+            vulkan_state.view_constants_set_layout, // per-view constants
+            vulkan_state.descriptor_set_layout,     // sprite atlas texture
+        };
+
+        VkPipelineLayoutCreateInfo sprite_pipeline_layout_ci = {0};
         sprite_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        sprite_pipeline_layout_ci.setLayoutCount = 1;
-        sprite_pipeline_layout_ci.pSetLayouts = &vulkan_state.descriptor_set_layout; 
+        sprite_pipeline_layout_ci.setLayoutCount = 2;
+        sprite_pipeline_layout_ci.pSetLayouts = sprite_set_layouts;
         sprite_pipeline_layout_ci.pushConstantRangeCount = 1;
         sprite_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
 
@@ -4473,7 +4565,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         FFTSpectrumPushConstants pc = {0};
         pc.texture_size = FFT_SIZE;
-        pc.tile_length = water_tile_length;
+        pc.water_tile_length = water_tile_length;
         pc.wind_direction_x = -0.5f;
         pc.wind_direction_z = -1.0f;
         pc.peak_frequency = 2.0f;
@@ -4687,7 +4779,7 @@ void vulkanDraw(void)
 
         FFTEvolvedPushConstants pc = {0};
         pc.texture_size = FFT_SIZE;
-        pc.tile_length = water_tile_length;
+        pc.water_tile_length = water_tile_length;
         pc.gravity = 9.81f;
         pc.time = water_time;
 
@@ -4750,7 +4842,7 @@ void vulkanDraw(void)
         
         FFTFinalizePushConstants pc = {0};
         pc.texture_size = FFT_SIZE;
-        pc.tile_length = water_tile_length;
+        pc.water_tile_length = water_tile_length;
         
         vkCmdPushConstants(command_buffer, vulkan_state.fft_finalize_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(FFTFinalizePushConstants), &pc);
         
@@ -4858,6 +4950,59 @@ void vulkanDraw(void)
     float reflected_view_matrix[16];
     mat4BuildReflectedView(reflected_view_matrix, vulkan_camera.coords, vulkan_camera.rotation, vulkan_state.water_plane_y);
 
+    // fill view constants for this frame
+    {
+        char* view_constants_base = (char*)vulkan_state.scene_ubo_mappeds[vulkan_state.current_frame];
+
+        // different view constants for each unique view
+        ViewConstants* main_view_constants       = (ViewConstants*)(view_constants_base + VIEW_MAIN       * vulkan_state.view_constants_stride);
+        ViewConstants* reflection_view_constants = (ViewConstants*)(view_constants_base + VIEW_REFLECTION * vulkan_state.view_constants_stride);
+        ViewConstants* sprite_view_constants     = (ViewConstants*)(view_constants_base + VIEW_SPRITE     * vulkan_state.view_constants_stride);
+
+        float identity_matrix[16];
+        mat4Identity(identity_matrix);
+
+        float focal_length = (float)vulkan_state.swapchain_extent.height / (TAU * tanf(vulkan_camera.fov / 360.0f));
+
+        float orthographic_matrix[16];
+        mat4BuildOrtho(orthographic_matrix, 0.0f, (float)vulkan_state.swapchain_extent.width, 0.0f, (float)vulkan_state.swapchain_extent.height, 0.0f, 1.0f);
+
+        // main camera
+        float main_view_projection[16];
+        float main_inverse_view_projection[16];
+        mat4Multiply(main_view_projection, projection_matrix, view_matrix);
+        mat4Inverse(main_inverse_view_projection, main_view_projection);
+
+        memcpy(main_view_constants->view,            view_matrix,                  sizeof(float) * 16);
+        memcpy(main_view_constants->proj,            projection_matrix,            sizeof(float) * 16);
+        memcpy(main_view_constants->view_proj,       main_view_projection,         sizeof(float) * 16);
+        memcpy(main_view_constants->inv_view_proj,   main_inverse_view_projection, sizeof(float) * 16);
+        memcpy(main_view_constants->light_view_proj, identity_matrix,              sizeof(float) * 16); // TODO: set up orthographic for directional shadows
+
+        main_view_constants->camera_position   = (Vec4){ vulkan_camera.coords.x, vulkan_camera.coords.y, vulkan_camera.coords.z, 0.0f };
+        main_view_constants->water_plane_y     = -999.0f;
+        main_view_constants->time              = water_time;
+        main_view_constants->water_tile_length = water_tile_length;
+        main_view_constants->focal_length      = focal_length;
+
+        // reflection camera: same globals, reflected view + real water plane
+        float reflection_view_projection[16];
+        float reflection_inverse_view_projection[16];
+        mat4Multiply(reflection_view_projection, projection_matrix, reflected_view_matrix);
+        mat4Inverse(reflection_inverse_view_projection, reflection_view_projection);
+
+        *reflection_view_constants = *main_view_constants;
+        memcpy(reflection_view_constants->view,          reflected_view_matrix,              sizeof(float) * 16);
+        memcpy(reflection_view_constants->view_proj,     reflection_view_projection,         sizeof(float) * 16);
+        memcpy(reflection_view_constants->inv_view_proj, reflection_inverse_view_projection, sizeof(float) * 16);
+        reflection_view_constants->water_plane_y = vulkan_state.water_plane_y;
+
+        // sprite camera: identity view, ortho projection
+        *sprite_view_constants = *main_view_constants;
+        memcpy(sprite_view_constants->view, identity_matrix,     sizeof(float) * 16);
+        memcpy(sprite_view_constants->proj, orthographic_matrix, sizeof(float) * 16);
+    }
+
     // RENDER PASSES
 
     VkRenderPassBeginInfo render_pass_begin_info = {0};
@@ -4899,28 +5044,23 @@ void vulkanDraw(void)
         // cubes
         if (cube_instance_count > 0)
         {
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_reflection_pipeline);
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline);
 
             VkBuffer cube_buffers[2] = { vulkan_state.cube_vertex_buffer, vulkan_state.cube_instance_buffers[vulkan_state.current_frame] };
             VkDeviceSize cube_offsets[2] = { 0, 0 };
             vkCmdBindVertexBuffers(command_buffer, 0, 2, cube_buffers, cube_offsets);
             vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-            VkDescriptorSet cube_sets[2] = 
+            VkDescriptorSet cube_descriptor_sets[3] =
             {
+                vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame],
                 vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index],
                 vulkan_state.displacement_sampled_descriptor_set,
             };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 2, cube_sets, 0, 0);
 
-            InstancedPushConstants cube_pc = {0};
-            memcpy(cube_pc.view, reflected_view_matrix, sizeof(cube_pc.view));
-            memcpy(cube_pc.proj, projection_matrix, sizeof(cube_pc.proj));
-            cube_pc.water_plane_y = vulkan_state.water_plane_y;
-            cube_pc.time = water_time;
-            cube_pc.tile_length = water_tile_length;
+            uint32 cube_view_constants_offset = VIEW_REFLECTION * vulkan_state.view_constants_stride;
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 3, cube_descriptor_sets, 1, &cube_view_constants_offset);
 
-            vkCmdPushConstants(command_buffer, vulkan_state.cube_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(InstancedPushConstants), &cube_pc);
             vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
         }
 
@@ -4929,36 +5069,31 @@ void vulkanDraw(void)
         {
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_reflection_pipeline);
 
-            VkDescriptorSet model_sets[2] = 
+            VkDescriptorSet model_descriptor_sets[2] =
             {
-                vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], // TODO: unused
+                vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame],
                 vulkan_state.displacement_sampled_descriptor_set,
             };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 2, model_sets, 0, 0);
+            uint32 model_view_constants_offset = VIEW_REFLECTION * vulkan_state.view_constants_stride;
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 2, model_descriptor_sets, 1, &model_view_constants_offset);
 
-            for (uint32 i = 0; i < model_instance_count; i++)
+            for (uint32 model_instance_index = 0; model_instance_index < model_instance_count; model_instance_index++)
             {
-                Model* model = &model_instances[i];
+                Model* model = &model_instances[model_instance_index];
                 LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
                 if (model_data->index_count == 0) continue;
 
-                VkDeviceSize offset = 0;
+                VkDeviceSize vertex_offset = 0;
                 float model_matrix[16];
                 mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
 
-                PushConstants model_pc = {0};
-                memcpy(model_pc.model, model_matrix, sizeof(model_pc.model));
-                memcpy(model_pc.view,  reflected_view_matrix, sizeof(model_pc.view));
-                memcpy(model_pc.proj,  projection_matrix, sizeof(model_pc.proj));
-                model_pc.uv_rect = (Vec4){0, 0, 1, 1};
-                model_pc.color = model->color;
-                model_pc.water_plane_y = vulkan_state.water_plane_y;
-                model_pc.time = water_time;
-                model_pc.tile_length = water_tile_length;
+                ModelPushConstants model_push_constants = {0};
+                memcpy(model_push_constants.model, model_matrix, sizeof(model_push_constants.model));
+                model_push_constants.color = model->color;
 
-                vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
+                vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &vertex_offset);
                 vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &model_pc);
+                vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(ModelPushConstants), &model_push_constants);
                 vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
             }
         }
@@ -4985,21 +5120,15 @@ void vulkanDraw(void)
         vkCmdBindVertexBuffers(command_buffer, 0, 2, cube_buffers, cube_offsets);
         vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-        VkDescriptorSet cube_sets[2] = 
+        VkDescriptorSet cube_descriptor_sets[3] =
         {
+            vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame],
             vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index],
             vulkan_state.displacement_sampled_descriptor_set,
         };
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 2, cube_sets, 0, 0);
+        uint32 cube_view_constants_offset = VIEW_MAIN * vulkan_state.view_constants_stride;
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 3, cube_descriptor_sets, 1, &cube_view_constants_offset);
 
-        InstancedPushConstants cube_pc = {0};
-        memcpy(cube_pc.view, view_matrix, sizeof(cube_pc.view));
-        memcpy(cube_pc.proj, projection_matrix, sizeof(cube_pc.proj));
-        cube_pc.water_plane_y = -999.0f;
-        cube_pc.time = water_time;
-        cube_pc.tile_length = water_tile_length;
-
-        vkCmdPushConstants(command_buffer, vulkan_state.cube_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(InstancedPushConstants), &cube_pc);
         vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
     }
 
@@ -5008,12 +5137,13 @@ void vulkanDraw(void)
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline);
 
-        VkDescriptorSet model_sets[2] = 
+        VkDescriptorSet model_descriptor_sets[2] =
         {
-            vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index], // TODO: unused
+            vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame],
             vulkan_state.displacement_sampled_descriptor_set,
         };
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 2, model_sets, 0, 0);
+        uint32 model_view_constants_offset = VIEW_MAIN * vulkan_state.view_constants_stride;
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 2, model_descriptor_sets, 1, &model_view_constants_offset);
 
         for (uint32 model_instance_index = 0; model_instance_index < model_instance_count; model_instance_index++)
         {
@@ -5021,23 +5151,17 @@ void vulkanDraw(void)
             LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
             if (model_data->index_count == 0) continue;
 
-            VkDeviceSize offset = 0;
+            VkDeviceSize vertex_offset = 0;
             float model_matrix[16];
             mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
 
-            PushConstants model_pc = {0};
-            memcpy(model_pc.model, model_matrix, sizeof(model_pc.model));
-            memcpy(model_pc.view, view_matrix, sizeof(model_pc.view));
-            memcpy(model_pc.proj, projection_matrix, sizeof(model_pc.proj));
-            model_pc.uv_rect = (Vec4){0, 0, 1, 1};
-            model_pc.color = model->color;
-            model_pc.water_plane_y = -999.0f;
-            model_pc.time = water_time;
-            model_pc.tile_length = water_tile_length;
+            ModelPushConstants model_push_constants = {0};
+            memcpy(model_push_constants.model, model_matrix, sizeof(model_push_constants.model));
+            model_push_constants.color = model->color;
 
-            vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
+            vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &vertex_offset);
             vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &model_pc);
+            vkCmdPushConstants(command_buffer, vulkan_state.model_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(ModelPushConstants), &model_push_constants);
             vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
         }
     }
@@ -5085,7 +5209,7 @@ void vulkanDraw(void)
     VkDescriptorSet post_sets[2] = { vulkan_state.depth_descriptor_set, vulkan_state.normal_descriptor_set };
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline_layout, 0, 2, post_sets, 0, 0);
 
-    float focal_length = (float)vulkan_state.swapchain_extent.height / ((2 * 3.141592653f) * tanf(vulkan_camera.fov / 360.0f));
+    float focal_length = (float)vulkan_state.swapchain_extent.height / (TAU * tanf(vulkan_camera.fov / 360.0f));
 
     float post_pc[6] = 
     {
@@ -5179,8 +5303,9 @@ void vulkanDraw(void)
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline);
 
-            VkDescriptorSet water_sets[6] =
+            VkDescriptorSet water_descriptor_sets[7] =
             {
+                vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame],
                 vulkan_state.scene_copy_descriptor_set,
                 vulkan_state.depth_descriptor_set,
                 vulkan_state.paint_descriptor_set,
@@ -5188,28 +5313,16 @@ void vulkanDraw(void)
                 vulkan_state.reflection_descriptor_set,
                 vulkan_state.descriptor_sets[vulkan_state.water_grid_asset_index],
             };
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_layout, 0, 6, water_sets, 0, 0);
+            uint32 water_view_constants_offset = VIEW_MAIN * vulkan_state.view_constants_stride;
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_layout, 0, 7, water_descriptor_sets, 1, &water_view_constants_offset);
 
             VkBuffer water_buffers[2] = { water_data->vertex_buffer, vulkan_state.water_instance_buffers[vulkan_state.current_frame] };
             VkDeviceSize water_offsets[2] = { 0, 0 };
             vkCmdBindVertexBuffers(command_buffer, 0, 2, water_buffers, water_offsets);
             vkCmdBindIndexBuffer(command_buffer, water_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-            WaterPushConstants water_pc = {0};
-            memcpy(water_pc.view, view_matrix, sizeof(water_pc.view));
-            memcpy(water_pc.proj, projection_matrix, sizeof(water_pc.proj));
-            float proj_view[16];
-            mat4Multiply(proj_view, projection_matrix, view_matrix);
-            mat4Inverse(water_pc.inv_view_proj, proj_view);
-            water_pc.time = water_time;
-            water_pc.focal_length = focal_length;
-            water_pc.water_plane_y = -999.0f;
-            water_pc.tile_length = water_tile_length;
-            water_pc.camera_position = vulkan_camera.coords;
-
-            vkCmdPushConstants(command_buffer, vulkan_state.water_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPushConstants), &water_pc);
-
             vkCmdDrawIndexed(command_buffer, water_data->index_count, water_instance_count, 0, 0, 0);
+
             vkCmdEndRenderPass(command_buffer);
         }
     }
@@ -5326,10 +5439,13 @@ void vulkanDraw(void)
     // selected outlines (on top of everything)
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.editor_outline_pipeline);
 
+    uint32 outline_view_constants_offset = VIEW_MAIN * vulkan_state.view_constants_stride;
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.editor_outline_pipeline_layout, 0, 1, &vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame], 1, &outline_view_constants_offset);
+
     // cube outlines
     {
-        VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.cube_vertex_buffer, &offset);
+        VkDeviceSize vertex_offset = 0;
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.cube_vertex_buffer, &vertex_offset);
         vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
         for (uint32 cube_outline_index = 0; cube_outline_index < cube_editor_outline_instance_count; cube_outline_index++)
@@ -5339,15 +5455,10 @@ void vulkanDraw(void)
             float model_matrix[16];
             mat4BuildTRS(model_matrix, cube->coords, cube->rotation, cube->scale);
 
-            PushConstants pc = {0};
-            memcpy(pc.model, model_matrix, sizeof(pc.model));
-            memcpy(pc.view, view_matrix, sizeof(pc.view));
-            memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
-            pc.uv_rect = cube->uv;
-            pc.water_plane_y = -999.0f;
-            pc.time = water_time;
+            OutlinePushConstants outline_push_constants = {0};
+            memcpy(outline_push_constants.model, model_matrix, sizeof(outline_push_constants.model));
 
-            vkCmdPushConstants(command_buffer, vulkan_state.editor_outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
+            vkCmdPushConstants(command_buffer, vulkan_state.editor_outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(OutlinePushConstants), &outline_push_constants);
             vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, 1, 0, 0, 0);
         }
     }
@@ -5359,22 +5470,17 @@ void vulkanDraw(void)
         LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
         if (model_data->index_count == 0) continue;
 
-        VkDeviceSize offset = 0;
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &offset);
+        VkDeviceSize vertex_offset = 0;
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &vertex_offset);
         vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
         float model_matrix[16];
         mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
 
-        PushConstants pc = {0};
-        memcpy(pc.model, model_matrix, sizeof(pc.model));
-        memcpy(pc.view, view_matrix, sizeof(pc.view));
-        memcpy(pc.proj, projection_matrix, sizeof(pc.proj));
-        pc.uv_rect = (Vec4){0, 0, 1, 1};
-        pc.water_plane_y = -999.0f;
-        pc.time = water_time;
+        OutlinePushConstants outline_push_constants = {0};
+        memcpy(outline_push_constants.model, model_matrix, sizeof(outline_push_constants.model));
 
-        vkCmdPushConstants(command_buffer, vulkan_state.editor_outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &pc);
+        vkCmdPushConstants(command_buffer, vulkan_state.editor_outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(OutlinePushConstants), &outline_push_constants);
         vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
     }
 
@@ -5476,13 +5582,12 @@ void vulkanDraw(void)
     // sprites
     vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline);
 
-    VkDeviceSize sprite_vb_offset = 0;
-    vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &sprite_vb_offset);
+    VkDeviceSize sprite_vertex_offset = 0;
+    vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &sprite_vertex_offset);
     vkCmdBindIndexBuffer(command_buffer, vulkan_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-    float ortho[16], view2d[16];
-    mat4BuildOrtho(ortho, 0.0f, (float)vulkan_state.swapchain_extent.width, 0.0f, (float)vulkan_state.swapchain_extent.height, 0.0f, 1.0f);
-    mat4Identity(view2d);
+    uint32 sprite_view_constants_offset = VIEW_SPRITE * vulkan_state.view_constants_stride;
+    vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame], 1, &sprite_view_constants_offset);
 
     int32 last_sprite_asset = -1;
 
@@ -5492,22 +5597,20 @@ void vulkanDraw(void)
 
         if ((int32)sprite->asset_index != last_sprite_asset)
         {
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.descriptor_sets[sprite->asset_index], 0, 0);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 1, 1, &vulkan_state.descriptor_sets[sprite->asset_index], 0, 0);
             last_sprite_asset = (int32)sprite->asset_index;
         }
 
         float model_matrix[16];
-        Vec4 identity_quaternion = { 0, 0, 0, 1 };
+        Vec4 identity_quaternion = { 0.0f, 0.0f, 0.0f, 1.0f };
         mat4BuildTRS(model_matrix, sprite->coords, identity_quaternion, sprite->size);
 
-        PushConstants push_constants = {0};
-        memcpy(push_constants.model, model_matrix, sizeof(push_constants.model));
-        memcpy(push_constants.view, view2d, sizeof(push_constants.view));
-        memcpy(push_constants.proj, ortho, sizeof(push_constants.proj));
-        push_constants.uv_rect = sprite->uv;
-        push_constants.color = (Vec4){ 0, 0, 0, sprite->alpha};
+        SpritePushConstants sprite_push_constants = {0};
+        memcpy(sprite_push_constants.model, model_matrix, sizeof(sprite_push_constants.model));
+        sprite_push_constants.uv_rect = sprite->uv;
+        sprite_push_constants.color = (Vec4){ 0.0f, 0.0f, 0.0f, sprite->alpha };
 
-        vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &push_constants);
+        vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SpritePushConstants), &sprite_push_constants);
 
         vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
     }

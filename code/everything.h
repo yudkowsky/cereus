@@ -6,6 +6,8 @@
 #include <string.h>
 #include <math.h> 
 
+#define TAU 6.2831853071f
+
 // TYPES
 
 typedef int8_t int8;

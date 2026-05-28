@@ -321,10 +321,10 @@ const float LASER_WIDTH = 0.25;
 const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
 
 const float PLAYER_MAX_SPEED = 0.12f;
-const int32 TURN_TIME = 10;
 const float MIN_DOWN_VELOCITY = -0.12f;
+const int32 TURN_TIME = 10;
 const float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f; // last number is number of frames for a full turn
-const float PLAYER_ACCELERATION = 0.04f;
+const float PLAYER_ACCELERATION = 0.03f;
 const float PLAYER_MAX_DECELERATION = 0.04f;
 const float CLIMBING_SPEED = 0.12f;
 const float GRAVITY = -0.03f;
@@ -525,13 +525,6 @@ Vec3 vec3Negate(Vec3 coords)
 {
     return (Vec3){ -coords.x, -coords.y, -coords.z }; 
 }
-
-/*
-Vec4 vec4Negate(Vec4 coords)
-{
-    return (Vec4){ -coords.x, -coords.y, -coords.z, -coords.w };
-}
-*/
 
 bool int3IsZero(Int3 coords)
 {
