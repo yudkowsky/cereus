@@ -111,6 +111,7 @@ typedef struct ViewConstants
     float inv_view_proj[16];
     float light_view_proj[16];
     Vec4 camera_position;
+    Vec4 light_direction;
     float water_plane_y;
     float time;
     float water_tile_length;
@@ -3559,8 +3560,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     {
         VkSamplerCreateInfo shadow_sampler_ci = {0};
         shadow_sampler_ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        shadow_sampler_ci.magFilter = VK_FILTER_NEAREST;
-        shadow_sampler_ci.minFilter = VK_FILTER_NEAREST;
+        shadow_sampler_ci.magFilter = VK_FILTER_LINEAR;
+        shadow_sampler_ci.minFilter = VK_FILTER_LINEAR;
         shadow_sampler_ci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER; // 1.0 on border, means no shadows here
         shadow_sampler_ci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
         shadow_sampler_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
@@ -3568,8 +3569,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         shadow_sampler_ci.anisotropyEnable = VK_FALSE;
         shadow_sampler_ci.maxAnisotropy = 1.0f;
         shadow_sampler_ci.unnormalizedCoordinates = VK_FALSE;
-        shadow_sampler_ci.compareEnable = VK_FALSE; // compare manually in shader
-        shadow_sampler_ci.compareOp = VK_COMPARE_OP_ALWAYS;
+        shadow_sampler_ci.compareEnable = VK_TRUE;
+        shadow_sampler_ci.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
         shadow_sampler_ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
         shadow_sampler_ci.minLod = 0.0f;
         shadow_sampler_ci.maxLod = 0.0f;
@@ -5318,7 +5319,7 @@ void vulkanDraw(void)
         mat4Multiply(main_view_projection, projection_matrix, view_matrix);
         mat4Inverse(main_inverse_view_projection, main_view_projection);
 
-        Vec3 sun_direction = { -0.5f, -1.0f, -0.3f };
+        Vec3 sun_direction = { -0.5f, -1.0f, -0.15f };
         Vec3 coverage_center = { 10.0f, 0.0f, 10.0f };
         float coverage_radius = 10.0f;
         float light_view_projection[16];
@@ -5331,6 +5332,7 @@ void vulkanDraw(void)
         memcpy(main_view_constants->light_view_proj, light_view_projection,        sizeof(float) * 16);
 
         main_view_constants->camera_position   = (Vec4){ vulkan_camera.coords.x, vulkan_camera.coords.y, vulkan_camera.coords.z, 0.0f };
+        main_view_constants->light_direction   = (Vec4){ sun_direction.x, sun_direction.y, sun_direction.z, 0.0 };
         main_view_constants->water_plane_y     = -999.0f;
         main_view_constants->time              = water_time;
         main_view_constants->water_tile_length = water_tile_length;
