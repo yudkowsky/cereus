@@ -23,34 +23,34 @@ Direction;
 
 typedef enum
 {
-    NONE = 0,
-    VOID,
-    GRID,
-    WALL,
-    BOX,
-    PLAYER,
-    MIRROR,
-    GLASS,
-    PACK,
-    WATER,
-    WIN_BLOCK,
+    TILE_TYPE_NONE = 0,
+    TILE_TYPE_VOID,
+    TILE_TYPE_GRID,
+    TILE_TYPE_WALL,
+    TILE_TYPE_BOX,
+    TILE_TYPE_PLAYER,
+    TILE_TYPE_MIRROR,
+    TILE_TYPE_GLASS,
+    TILE_TYPE_PACK,
+    TILE_TYPE_WATER,
+    TILE_TYPE_WIN_BLOCK,
 
-    SOURCE_RED,
-    SOURCE_BLUE,
-    SOURCE_MAGENTA,
+    TILE_TYPE_SOURCE_RED,
+    TILE_TYPE_SOURCE_BLUE,
+    TILE_TYPE_SOURCE_MAGENTA,
 
-    LOCKED_BLOCK,
-    LADDER,
-    WON_BLOCK,
+    TILE_TYPE_LOCKED_BLOCK,
+    TILE_TYPE_LADDER,
+    TILE_TYPE_WON_BLOCK,
 }
 TileType;
 
 typedef enum
 {
-    NO_COLOR = 0,
-    RED,
-    BLUE,
-    MAGENTA,
+    COLOR_NONE = 0,
+    COLOR_RED,
+    COLOR_BLUE,
+    COLOR_MAGENTA,
 }
 Color;
 
@@ -745,7 +745,7 @@ Direction getTileDirection(Int3 coords)
 void moveEntityInBufferAndState(Entity* e, Int3 end_coords, Direction end_direction)
 {
     TileType type = getTileType(e->coords); // could also get from id
-    setTileType(NONE, e->coords);
+    setTileType(TILE_TYPE_NONE, e->coords);
     setTileDirection(NO_DIRECTION, e->coords, e->mirror_orientation);
     e->coords = end_coords;
     e->direction = end_direction;
@@ -755,57 +755,57 @@ void moveEntityInBufferAndState(Entity* e, Int3 end_coords, Direction end_direct
 
 bool isSource(TileType type) 
 {
-    return (type == SOURCE_RED || type == SOURCE_BLUE || type == SOURCE_MAGENTA);
+    return (type == TILE_TYPE_SOURCE_RED || type == TILE_TYPE_SOURCE_BLUE || type == TILE_TYPE_SOURCE_MAGENTA);
 }
 
 // only checks tile types - doesn't do what canPush does
 bool isPushable(TileType type)
 {
-    return (type == BOX || type == MIRROR || type == PACK || isSource(type));
+    return (type == TILE_TYPE_BOX || type == TILE_TYPE_MIRROR || type == TILE_TYPE_PACK || isSource(type));
 }
 
 bool isEntity(TileType type)
 {
-    return (type == BOX || type == MIRROR || type == PACK || type == PLAYER || type == WIN_BLOCK || type == LOCKED_BLOCK || isSource(type));
+    return (type == TILE_TYPE_BOX || type == TILE_TYPE_MIRROR || type == TILE_TYPE_PACK || type == TILE_TYPE_PLAYER || type == TILE_TYPE_WIN_BLOCK || type == TILE_TYPE_LOCKED_BLOCK || isSource(type));
 }
 
 bool canBeUnderwater(TileType type)
 {
-    return (type == PLAYER || type == PACK || type == BOX || type == MIRROR || isSource(type));
+    return (type == TILE_TYPE_PLAYER || type == TILE_TYPE_PACK || type == TILE_TYPE_BOX || type == TILE_TYPE_MIRROR || isSource(type));
 }
 
 TileType getTileTypeFromId(int32 id)
 {
-    if (id == PLAYER_ID) return PLAYER;
-    if (id == PACK_ID) return PACK;
+    if (id == PLAYER_ID) return TILE_TYPE_PLAYER;
+    if (id == PACK_ID) return TILE_TYPE_PACK;
     int32 check = (id / 100 * 100);
     if (check >= ID_OFFSET_SOURCE && check < ID_OFFSET_WIN_BLOCK)
     {
         Color source_color = (id - ID_OFFSET_SOURCE) / 100;
         switch (source_color)
         {
-            case RED:     return SOURCE_RED;
-            case BLUE:    return SOURCE_BLUE;
-            case MAGENTA: return SOURCE_MAGENTA;
-            default: return NONE;
+            case COLOR_RED:     return TILE_TYPE_SOURCE_RED;
+            case COLOR_BLUE:    return TILE_TYPE_SOURCE_BLUE;
+            case COLOR_MAGENTA: return TILE_TYPE_SOURCE_MAGENTA;
+            default: return TILE_TYPE_NONE;
         }
     }
-    else if (check == ID_OFFSET_BOX)          return BOX;
-    else if (check == ID_OFFSET_MIRROR)       return MIRROR;
-    else if (check == ID_OFFSET_GLASS)        return GLASS;
-    else if (check == ID_OFFSET_WIN_BLOCK)    return WIN_BLOCK;
-    else if (check == ID_OFFSET_LOCKED_BLOCK) return LOCKED_BLOCK;
-    else return NONE;
+    else if (check == ID_OFFSET_BOX)          return TILE_TYPE_BOX;
+    else if (check == ID_OFFSET_MIRROR)       return TILE_TYPE_MIRROR;
+    else if (check == ID_OFFSET_GLASS)        return TILE_TYPE_GLASS;
+    else if (check == ID_OFFSET_WIN_BLOCK)    return TILE_TYPE_WIN_BLOCK;
+    else if (check == ID_OFFSET_LOCKED_BLOCK) return TILE_TYPE_LOCKED_BLOCK;
+    else return TILE_TYPE_NONE;
 }
 
 Color getEntityColor(Int3 coords)
 {
     switch (getTileType(coords))
     {
-        case SOURCE_RED:     return RED;
-        case SOURCE_BLUE:    return BLUE;
-        case SOURCE_MAGENTA: return MAGENTA;
-        default: return NO_COLOR;
+        case TILE_TYPE_SOURCE_RED:     return COLOR_RED;
+        case TILE_TYPE_SOURCE_BLUE:    return COLOR_BLUE;
+        case TILE_TYPE_SOURCE_MAGENTA: return COLOR_MAGENTA;
+        default: return COLOR_NONE;
     }
 }
 
@@ -816,13 +816,13 @@ Entity* getEntityAtCoords(Int3 coords)
     if (isSource(tile)) entity_group = world_state.sources;
     else switch(tile)
     {
-        case BOX:          entity_group = world_state.boxes;          break;
-        case MIRROR:       entity_group = world_state.mirrors;        break;
-        case GLASS:        entity_group = world_state.glass_blocks;  break;
-        case WIN_BLOCK:    entity_group = world_state.win_blocks;    break;
-        case LOCKED_BLOCK: entity_group = world_state.locked_blocks; break;
-        case PLAYER: return &world_state.player;
-        case PACK:   return &world_state.pack;
+        case TILE_TYPE_BOX:          entity_group = world_state.boxes;          break;
+        case TILE_TYPE_MIRROR:       entity_group = world_state.mirrors;        break;
+        case TILE_TYPE_GLASS:        entity_group = world_state.glass_blocks;  break;
+        case TILE_TYPE_WIN_BLOCK:    entity_group = world_state.win_blocks;    break;
+        case TILE_TYPE_LOCKED_BLOCK: entity_group = world_state.locked_blocks; break;
+        case TILE_TYPE_PLAYER: return &world_state.player;
+        case TILE_TYPE_PACK:   return &world_state.pack;
         default: return 0;
     }
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
@@ -872,9 +872,9 @@ int32 sourceColorIdOffset(Color color)
 {
     switch (color)
     {
-        case RED:     return RED * 100; 
-        case BLUE:    return BLUE * 100;
-        case MAGENTA: return MAGENTA * 100;
+        case COLOR_RED:     return COLOR_RED * 100; 
+        case COLOR_BLUE:    return COLOR_BLUE * 100;
+        case COLOR_MAGENTA: return COLOR_MAGENTA * 100;
         default: return 0;
     }
 }
@@ -1053,7 +1053,7 @@ void loadBufferInfo(FILE* file)
         FOR(tile_index, tile_count)
         {
             int32 buffer_index = 0;
-            TileType type = NONE;
+            TileType type = TILE_TYPE_NONE;
             Direction direction = NO_DIRECTION;
             fread(&buffer_index, 4, 1, file);
             fread(&type, 1, 1, file);
@@ -1165,7 +1165,7 @@ void writeBufferToFile(FILE* file, int32 version)
 
         for (int32 buffer_index = 0; buffer_index < level_dim.x*level_dim.y*level_dim.z * 2; buffer_index += 2)
         {
-            if (world_state.buffer[buffer_index] == NONE) continue;
+            if (world_state.buffer[buffer_index] == TILE_TYPE_NONE) continue;
             TileType type = (int8)world_state.buffer[buffer_index];
             Direction direction = (int8)world_state.buffer[buffer_index + 1];
             fwrite(&buffer_index, 4, 1, file); // write buffer_index, backsolve coords from level dims on decompression
@@ -1326,23 +1326,23 @@ SpriteId getSprite2DId(TileType tile)
 {
     switch (tile)
     {
-        case NONE:         return NO_ID;
-        case VOID:         return SPRITE_2D_VOID;
-        case GRID:         return SPRITE_2D_GRID;
-        case WALL:         return SPRITE_2D_WALL;
-        case BOX:          return SPRITE_2D_BOX;
-        case PLAYER:       return SPRITE_2D_PLAYER;
-        case MIRROR:       return SPRITE_2D_MIRROR;
-        case GLASS:        return SPRITE_2D_GLASS;
-        case PACK:         return SPRITE_2D_PACK;
-        case WATER:        return SPRITE_2D_WATER;
-        case WIN_BLOCK:    return SPRITE_2D_WIN_BLOCK;
-        case LOCKED_BLOCK: return SPRITE_2D_LOCKED_BLOCK;
-        case LADDER:       return SPRITE_2D_LADDER;
+        case TILE_TYPE_NONE:         return NO_ID;
+        case TILE_TYPE_VOID:         return SPRITE_2D_VOID;
+        case TILE_TYPE_GRID:         return SPRITE_2D_GRID;
+        case TILE_TYPE_WALL:         return SPRITE_2D_WALL;
+        case TILE_TYPE_BOX:          return SPRITE_2D_BOX;
+        case TILE_TYPE_PLAYER:       return SPRITE_2D_PLAYER;
+        case TILE_TYPE_MIRROR:       return SPRITE_2D_MIRROR;
+        case TILE_TYPE_GLASS:        return SPRITE_2D_GLASS;
+        case TILE_TYPE_PACK:         return SPRITE_2D_PACK;
+        case TILE_TYPE_WATER:        return SPRITE_2D_WATER;
+        case TILE_TYPE_WIN_BLOCK:    return SPRITE_2D_WIN_BLOCK;
+        case TILE_TYPE_LOCKED_BLOCK: return SPRITE_2D_LOCKED_BLOCK;
+        case TILE_TYPE_LADDER:       return SPRITE_2D_LADDER;
 
-        case SOURCE_RED:     return SPRITE_2D_SOURCE_RED;
-        case SOURCE_BLUE:    return SPRITE_2D_SOURCE_BLUE;
-        case SOURCE_MAGENTA: return SPRITE_2D_SOURCE_MAGENTA;
+        case TILE_TYPE_SOURCE_RED:     return SPRITE_2D_SOURCE_RED;
+        case TILE_TYPE_SOURCE_BLUE:    return SPRITE_2D_SOURCE_BLUE;
+        case TILE_TYPE_SOURCE_MAGENTA: return SPRITE_2D_SOURCE_MAGENTA;
         default: return 0;
     }
 }
@@ -1351,24 +1351,24 @@ SpriteId getCube3DId(TileType tile)
 {
     switch (tile)
     {
-        case NONE:         return NO_ID;
-        case VOID:         return CUBE_3D_VOID;
-        case GRID:         return CUBE_3D_GRID;
-        case WALL:         return CUBE_3D_WALL;
-        case BOX:          return CUBE_3D_BOX;
-        case PLAYER:       return CUBE_3D_PLAYER;
-        case MIRROR:       return CUBE_3D_MIRROR;
-        case GLASS:        return CUBE_3D_GLASS;
-        case PACK:         return CUBE_3D_PACK;
-        case WATER:        return CUBE_3D_WATER;
-        case WIN_BLOCK:    return CUBE_3D_WIN_BLOCK;
-        case LOCKED_BLOCK: return CUBE_3D_LOCKED_BLOCK;
-        case LADDER:       return CUBE_3D_LADDER;
-        case WON_BLOCK:    return CUBE_3D_WON_BLOCK;
+        case TILE_TYPE_NONE:         return NO_ID;
+        case TILE_TYPE_VOID:         return CUBE_3D_VOID;
+        case TILE_TYPE_GRID:         return CUBE_3D_GRID;
+        case TILE_TYPE_WALL:         return CUBE_3D_WALL;
+        case TILE_TYPE_BOX:          return CUBE_3D_BOX;
+        case TILE_TYPE_PLAYER:       return CUBE_3D_PLAYER;
+        case TILE_TYPE_MIRROR:       return CUBE_3D_MIRROR;
+        case TILE_TYPE_GLASS:        return CUBE_3D_GLASS;
+        case TILE_TYPE_PACK:         return CUBE_3D_PACK;
+        case TILE_TYPE_WATER:        return CUBE_3D_WATER;
+        case TILE_TYPE_WIN_BLOCK:    return CUBE_3D_WIN_BLOCK;
+        case TILE_TYPE_LOCKED_BLOCK: return CUBE_3D_LOCKED_BLOCK;
+        case TILE_TYPE_LADDER:       return CUBE_3D_LADDER;
+        case TILE_TYPE_WON_BLOCK:    return CUBE_3D_WON_BLOCK;
 
-        case SOURCE_RED:     return CUBE_3D_SOURCE_RED;
-        case SOURCE_BLUE:    return CUBE_3D_SOURCE_BLUE;
-        case SOURCE_MAGENTA: return CUBE_3D_SOURCE_MAGENTA;
+        case TILE_TYPE_SOURCE_RED:     return CUBE_3D_SOURCE_RED;
+        case TILE_TYPE_SOURCE_BLUE:    return CUBE_3D_SOURCE_BLUE;
+        case TILE_TYPE_SOURCE_MAGENTA: return CUBE_3D_SOURCE_MAGENTA;
         default: return 0;
     }
 }
@@ -1377,24 +1377,24 @@ SpriteId getModelId(TileType tile)
 {
     switch (tile)
     {
-        case NONE:         return NO_ID;
-        case VOID:         return MODEL_3D_VOID;
-        case GRID:         return MODEL_3D_GRID;
-        case WALL:         return MODEL_3D_WALL;
-        case BOX:          return MODEL_3D_BOX;
-        case PLAYER:       return MODEL_3D_PLAYER;
-        case MIRROR:       return MODEL_3D_MIRROR;
-        case GLASS:        return MODEL_3D_GLASS;
-        case PACK:         return MODEL_3D_PACK;
-        case WATER:        return MODEL_3D_WATER;
-        case WIN_BLOCK:    return MODEL_3D_WIN_BLOCK;
-        case LOCKED_BLOCK: return MODEL_3D_LOCKED_BLOCK;
-        case LADDER:       return MODEL_3D_LADDER;
-        case WON_BLOCK:    return MODEL_3D_WON_BLOCK;
+        case TILE_TYPE_NONE:         return NO_ID;
+        case TILE_TYPE_VOID:         return MODEL_3D_VOID;
+        case TILE_TYPE_GRID:         return MODEL_3D_GRID;
+        case TILE_TYPE_WALL:         return MODEL_3D_WALL;
+        case TILE_TYPE_BOX:          return MODEL_3D_BOX;
+        case TILE_TYPE_PLAYER:       return MODEL_3D_PLAYER;
+        case TILE_TYPE_MIRROR:       return MODEL_3D_MIRROR;
+        case TILE_TYPE_GLASS:        return MODEL_3D_GLASS;
+        case TILE_TYPE_PACK:         return MODEL_3D_PACK;
+        case TILE_TYPE_WATER:        return MODEL_3D_WATER;
+        case TILE_TYPE_WIN_BLOCK:    return MODEL_3D_WIN_BLOCK;
+        case TILE_TYPE_LOCKED_BLOCK: return MODEL_3D_LOCKED_BLOCK;
+        case TILE_TYPE_LADDER:       return MODEL_3D_LADDER;
+        case TILE_TYPE_WON_BLOCK:    return MODEL_3D_WON_BLOCK;
 
-        case SOURCE_RED:     return MODEL_3D_SOURCE_RED;
-        case SOURCE_BLUE:    return MODEL_3D_SOURCE_BLUE;
-        case SOURCE_MAGENTA: return MODEL_3D_SOURCE_MAGENTA;
+        case TILE_TYPE_SOURCE_RED:     return MODEL_3D_SOURCE_RED;
+        case TILE_TYPE_SOURCE_BLUE:    return MODEL_3D_SOURCE_BLUE;
+        case TILE_TYPE_SOURCE_MAGENTA: return MODEL_3D_SOURCE_MAGENTA;
         default: return 0;
     }
 }
@@ -1573,7 +1573,7 @@ RaycastHit raycastHitCube(Vec3 start, Vec3 direction, float max_distance)
         if (!intCoordsWithinLevelBounds(current_cube)) continue;
 
         TileType tile = getTileType(current_cube);
-        if (tile != NONE)
+        if (tile != TILE_TYPE_NONE)
         {
             output.hit = true;
             output.hit_coords = current_cube;
@@ -1589,7 +1589,7 @@ void editorPlaceOnlyInstanceOfTile(Entity* entity, Int3 coords, TileType tile, i
     for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
     {
         if (world_state.buffer[buffer_index] != tile) continue;
-        world_state.buffer[buffer_index] = NONE;
+        world_state.buffer[buffer_index] = TILE_TYPE_NONE;
         world_state.buffer[buffer_index + 1] = NORTH;
     }
     entity->coords = coords;
@@ -1762,7 +1762,7 @@ bool canPush(Int3 coords, Direction direction)
         // if will fall, don't allow push.
         Int3 coords_below = getNextCoords(current_coords, DOWN);
         TileType type_below = getTileType(coords_below);
-        if (type_below == NONE && temp_state.player_hit_by_blue_timer == 0) return false;
+        if (type_below == TILE_TYPE_NONE && temp_state.player_hit_by_blue_timer == 0) return false;
 
         // check within bounds
         current_coords = getNextCoords(current_coords, direction);
@@ -1773,8 +1773,8 @@ bool canPush(Int3 coords, Direction direction)
         if (trailingHitboxAtCoords(current_coords, &th)) return false;
 
         current_tile = getTileType(current_coords);
-        if (current_tile == NONE) return true;
-        if (current_tile == GRID || current_tile == WALL || current_tile == LADDER ) return false;
+        if (current_tile == TILE_TYPE_NONE) return true;
+        if (current_tile == TILE_TYPE_GRID || current_tile == TILE_TYPE_WALL || current_tile == TILE_TYPE_LADDER ) return false;
     }
     return false; // only here if hit the max entity push count
 }
@@ -1784,7 +1784,7 @@ bool canPushUp(Int3 coords)
     int32 stack_size = getPushableStackSize(coords);
     Int3 check_coords = coords;
     FOR(_, stack_size) check_coords = getNextCoords(check_coords, UP);
-    if (getTileType(check_coords) == NONE) return true;
+    if (getTileType(check_coords) == TILE_TYPE_NONE) return true;
     else return false;
 }
 
@@ -1795,7 +1795,7 @@ void pushAll(Int3 coords, Direction direction, bool on_head, int32 root_entity_i
     int32 push_count = 0;
     FOR(push_index, MAX_ENTITY_PUSH_COUNT)
     {
-        if (getTileType(current_coords) == NONE) break;
+        if (getTileType(current_coords) == TILE_TYPE_NONE) break;
         current_coords = getNextCoords(current_coords, direction);
         push_count++;
     }
@@ -1811,7 +1811,7 @@ void pushAll(Int3 coords, Direction direction, bool on_head, int32 root_entity_i
             Int3 next_coords = getNextCoords(e->coords, direction);
             TileType next_type = getTileType(next_coords);
 
-            if (next_type != NONE) break; // this is possible because of the inverse push index seeking. if not none, won't be pushable either, so break.
+            if (next_type != TILE_TYPE_NONE) break; // this is possible because of the inverse push index seeking. if not none, won't be pushable either, so break.
 
             createTrailingHitbox(e->id, e->coords, TRAILING_HITBOX_TIME);
             moveEntityInBufferAndState(e, next_coords, e->direction);
@@ -1863,7 +1863,7 @@ Vec3 getNormCoordsWithEntityCoordAlongAxis(Direction direction, Vec3 current_nor
 
 void updateLaserBuffer()
 {
-    FOR(laser_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED) laser_buffer[laser_index].color = NO_COLOR;
+    FOR(laser_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED) laser_buffer[laser_index].color = COLOR_NONE;
     temp_state.player_hit_by_red   = false;
 
     // if a source is magenta, create entry in sources as primary of it as both red and blue
@@ -1873,19 +1873,19 @@ void updateLaserBuffer()
     {
         Entity* s = &world_state.sources[source_index];
         if (s->removed || s->locked) continue;
-        if (s->color < MAGENTA)
+        if (s->color < COLOR_MAGENTA)
         {
             sources_as_primary[primary_index] = *s; 
             // color is already set correctly
             primary_index++;
         }
-        else if (s->color == MAGENTA)
+        else if (s->color == COLOR_MAGENTA)
         {
             sources_as_primary[primary_index] = *s;
-            sources_as_primary[primary_index].color = RED;
+            sources_as_primary[primary_index].color = COLOR_RED;
             primary_index++;
             sources_as_primary[primary_index] = *s;
-            sources_as_primary[primary_index].color = BLUE;
+            sources_as_primary[primary_index].color = COLOR_BLUE;
             primary_index++;
         }
     }
@@ -1944,7 +1944,7 @@ void updateLaserBuffer()
                     break;
                 }
 
-                TileType types_to_check[2] = { NONE, getTileType(current_tile_coords) }; // trailing hitbox, followed by real type; trailing hitbox intersection takes priority
+                TileType types_to_check[2] = { TILE_TYPE_NONE, getTileType(current_tile_coords) }; // trailing hitbox, followed by real type; trailing hitbox intersection takes priority
                 TrailingHitbox th = {0};                                                 // but normal collision will still be checked if the trailing hitbox exists but doesn't hit
                 if (trailingHitboxAtCoords(current_tile_coords, &th) && th.frames > 0)
                 {
@@ -1954,10 +1954,10 @@ void updateLaserBuffer()
                 FOR(check, 2)
                 {
                     TileType hit_type = types_to_check[check];
-                    if (hit_type == NONE) continue;
+                    if (hit_type == TILE_TYPE_NONE) continue;
                     bool this_is_th = check == 0;
 
-                    if (hit_type == PLAYER)
+                    if (hit_type == TILE_TYPE_PLAYER)
                     {
                         float distance_from_player = getDistanceAlongAxis(current_direction, current_norm_coords, player->position);
                         if (distance_from_player > 0.5f)
@@ -1971,14 +1971,14 @@ void updateLaserBuffer()
                         current_norm_coords = player->position;
 
                         // set player color
-                        if (source->color == RED)  temp_state.player_hit_by_red = true;
-                        if (source->color == BLUE) temp_state.player_hit_by_blue_timer = HIT_BY_BLUE_TIME;
+                        if (source->color == COLOR_RED)  temp_state.player_hit_by_red = true;
+                        if (source->color == COLOR_BLUE) temp_state.player_hit_by_blue_timer = HIT_BY_BLUE_TIME;
 
                         advance_tile = false;
                         break;
                     }
 
-                    if (hit_type == MIRROR)
+                    if (hit_type == TILE_TYPE_MIRROR)
                     {
                         // get mirror entity
                         Entity* mirror = {0};
@@ -2177,7 +2177,7 @@ bool canFall(Entity* e)
 
     // only allow fall if below is nothing, or void
     if (!intCoordsWithinLevelBounds(next_coords)) return false;
-    if (getTileType(next_coords) != NONE && getTileType(next_coords) != VOID) return false;
+    if (getTileType(next_coords) != TILE_TYPE_NONE && getTileType(next_coords) != TILE_TYPE_VOID) return false;
 
     // don't allow fall if trailing hitbox occupies tile below. this might not be the final version of how this code should look
     TrailingHitbox th;
@@ -2196,9 +2196,9 @@ void setFalling(Entity* e)
 
     // remove if above void: early return for this entity, but call doFallingEntity for the entity above, if there is one, so that it doesn't get its fall interrupted
     Int3 below = getNextCoords(e->coords, DOWN);
-    if (getTileType(below) == VOID)
+    if (getTileType(below) == TILE_TYPE_VOID)
     {
-        setTileType(NONE, e->coords);
+        setTileType(TILE_TYPE_NONE, e->coords);
         setTileDirection(NO_DIRECTION, e->coords, e->mirror_orientation);
         e->removed = true;
         Int3 coords_above = getNextCoords(e->coords, UP);
@@ -2341,11 +2341,11 @@ void gameInitializeState(char* level_name)
     for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
     {
         TileType buffer_contents = world_state.buffer[buffer_index];
-        if      (buffer_contents == BOX)          entity_group = world_state.boxes;
-        else if (buffer_contents == MIRROR)       entity_group = world_state.mirrors;
-        else if (buffer_contents == GLASS)        entity_group = world_state.glass_blocks;
-        else if (buffer_contents == WIN_BLOCK)    entity_group = world_state.win_blocks;
-        else if (buffer_contents == LOCKED_BLOCK) entity_group = world_state.locked_blocks;
+        if      (buffer_contents == TILE_TYPE_BOX)          entity_group = world_state.boxes;
+        else if (buffer_contents == TILE_TYPE_MIRROR)       entity_group = world_state.mirrors;
+        else if (buffer_contents == TILE_TYPE_GLASS)        entity_group = world_state.glass_blocks;
+        else if (buffer_contents == TILE_TYPE_WIN_BLOCK)    entity_group = world_state.win_blocks;
+        else if (buffer_contents == TILE_TYPE_LOCKED_BLOCK) entity_group = world_state.locked_blocks;
         else if (isSource(buffer_contents))       entity_group = world_state.sources;
 
         if (entity_group != 0)
@@ -2373,7 +2373,7 @@ void gameInitializeState(char* level_name)
             e->removed = false;
             entity_group = 0;
         }
-        else if (world_state.buffer[buffer_index] == PLAYER)
+        else if (world_state.buffer[buffer_index] == TILE_TYPE_PLAYER)
         {
             player->coords = bufferIndexToCoords(buffer_index);
             player->position = int3ToVec3(player->coords);
@@ -2381,7 +2381,7 @@ void gameInitializeState(char* level_name)
             player->rotation = directionToQuaternion(player->direction);
             player->id = PLAYER_ID;
         }
-        else if (world_state.buffer[buffer_index] == PACK)
+        else if (world_state.buffer[buffer_index] == TILE_TYPE_PACK)
         {
             pack->coords = bufferIndexToCoords(buffer_index);
             pack->position = int3ToVec3(pack->coords);
@@ -2480,9 +2480,9 @@ void updateLockedTiles()
         {
             // locked block to be unlocked
             lb->removed = true;
-            if (getTileType(lb->coords) == LOCKED_BLOCK)
+            if (getTileType(lb->coords) == TILE_TYPE_LOCKED_BLOCK)
             {
-                setTileType(NONE, lb->coords);
+                setTileType(TILE_TYPE_NONE, lb->coords);
                 setTileDirection(NORTH, lb->coords, 0);
             }
             if (!silence_unlocks_due_to_restart_or_undo) createDebugPopup("something was unlocked!", NO_TYPE);
@@ -2490,7 +2490,7 @@ void updateLockedTiles()
         else if (find_result == -1 && lb->removed)
         {
             lb->removed = false;
-            setTileType(LOCKED_BLOCK, lb->coords);
+            setTileType(TILE_TYPE_LOCKED_BLOCK, lb->coords);
             setTileDirection(NORTH, lb->coords, 0);
         }
     }
@@ -2725,7 +2725,7 @@ bool performUndo()
         Entity* e = getEntityFromId(delta->id);
         if (e && !e->removed)
         {
-            setTileType(NONE, e->coords);
+            setTileType(TILE_TYPE_NONE, e->coords);
             setTileDirection(NORTH, e->coords, e->mirror_orientation);
         }
         delta_pos = (delta_pos + 1) % MAX_UNDO_DELTAS;
@@ -2745,7 +2745,7 @@ bool performUndo()
             e->position = int3ToVec3(e->coords);
             e->direction = delta->old_direction;
             e->mirror_orientation = delta->old_mirror_orientation;
-            if (type == MIRROR) e->rotation = mirrorRotation(e->direction, e->mirror_orientation);
+            if (type == TILE_TYPE_MIRROR) e->rotation = mirrorRotation(e->direction, e->mirror_orientation);
             else e->rotation = directionToQuaternion(e->direction);
             e->removed = delta->was_removed;
 
@@ -2815,7 +2815,7 @@ void doStandardMovement(Direction direction, Int3 next_player_coords)
 void updatePackDetached()
 {
     TileType tile_behind_player = getTileType(getNextCoords(world_state.player.coords, oppositeDirection(world_state.player.direction)));
-    if (tile_behind_player == PACK || temp_state.pack_turn_state.pack_intermediate_states_timer > 0) 
+    if (tile_behind_player == TILE_TYPE_PACK || temp_state.pack_turn_state.pack_intermediate_states_timer > 0) 
     {
         temp_state.pack_attached = true;
         setTileDirection(player->direction, pack->coords, 0);
@@ -2880,7 +2880,7 @@ void mimicRotationalOffset(Entity* copied_e, Entity* e)
     Vec4 transform = quaternionFromAxis(int3ToVec3(AXIS_Y), rotation_direction_delta);
 
     Vec4 base_rotation = IDENTITY_QUATERNION;
-    if (getTileTypeFromId(e->id) == MIRROR) base_rotation = mirrorRotation(e->direction, e->mirror_orientation);
+    if (getTileTypeFromId(e->id) == TILE_TYPE_MIRROR) base_rotation = mirrorRotation(e->direction, e->mirror_orientation);
     else base_rotation = directionToQuaternion(e->direction);
 
     e->rotation = quaternionMultiply(transform, base_rotation);
@@ -2916,7 +2916,7 @@ void doPhysicsTick()
             TileType type_at_diagonal = getTileType(diagonal_coords);
             bool allow_diagonal = false;
             bool do_push = false;
-            if (type_at_diagonal == NONE) allow_diagonal = true;
+            if (type_at_diagonal == TILE_TYPE_NONE) allow_diagonal = true;
             if (isPushable(type_at_diagonal) && canPush(diagonal_coords, diagonal_push_direction))
             {
                 allow_diagonal = true;
@@ -2947,7 +2947,7 @@ void doPhysicsTick()
             TileType type_at_orthogonal = getTileType(orthogonal_coords);
             bool allow_orthogonal = false;
             bool do_push = false;
-            if (type_at_orthogonal == NONE) allow_orthogonal = true;
+            if (type_at_orthogonal == TILE_TYPE_NONE) allow_orthogonal = true;
             if (isPushable(type_at_orthogonal) && canPush(orthogonal_coords, orthogonal_push_direction))
             {
                 allow_orthogonal = true;
@@ -3107,7 +3107,7 @@ void doPhysicsTick()
 
                 // special case: if falling onto block where tile ahead is ladder (pointing right direction), then player catches the ladder and starts climbing down, and stops falling.
                 Int3 coords_ahead_and_below = getNextCoords(coords_below, player->direction);
-                if (getTileType(coords_ahead_and_below) == LADDER && getTileDirection(coords_ahead_and_below) == oppositeDirection(player->direction))
+                if (getTileType(coords_ahead_and_below) == TILE_TYPE_LADDER && getTileDirection(coords_ahead_and_below) == oppositeDirection(player->direction))
                 {
                     player->moving_direction = DOWN;
                     player->falling = false;
@@ -3155,11 +3155,11 @@ void doPhysicsTick()
             Int3 coords_ahead = getNextCoords(player->coords, player->direction);
             TileType type_ahead = getTileType(coords_ahead);
 
-            if (type_ahead == LADDER)
+            if (type_ahead == TILE_TYPE_LADDER)
             {
                 try_climb_more = true;
             }
-            else if (type_ahead == NONE)
+            else if (type_ahead == TILE_TYPE_NONE)
             {
                 move_forwards = true;
             }
@@ -3181,7 +3181,7 @@ void doPhysicsTick()
                 Int3 coords_above_player = getNextCoords(player->coords, UP);
                 TileType type_above_player = getTileType(coords_above_player);
 
-                if (type_above_player == NONE)
+                if (type_above_player == TILE_TYPE_NONE)
                 {
                     climb_more = true;
                 }
@@ -3207,7 +3207,7 @@ void doPhysicsTick()
                         Int3 coords_above_pack = getNextCoords(pack->coords, UP);
                         TileType type_above_pack = getTileType(coords_above_pack);
 
-                        if (type_above_pack == NONE)
+                        if (type_above_pack == TILE_TYPE_NONE)
                         {
                             pack_stays_with_player = true;
                         }
@@ -3280,7 +3280,7 @@ void doPhysicsTick()
             // probably in this case, when player climbs down, i want her to just move one tile at the time, and be able to move off of that thing when she lands, maybe?
             // so this might be correct regardless. remember if want to do this, handle this in pack case also
             bool land_here = false;
-            if (type_below_player != NONE) land_here = true;
+            if (type_below_player != TILE_TYPE_NONE) land_here = true;
 
             if (land_here)
             {
@@ -3302,7 +3302,7 @@ void doPhysicsTick()
                     TileType type_below_pack = getTileType(coords_below_pack);
 
                     bool pack_stays_with_player = false;
-                    if (type_below_pack == NONE) pack_stays_with_player = true;
+                    if (type_below_pack == TILE_TYPE_NONE) pack_stays_with_player = true;
 
                     if (pack_stays_with_player)
                     {
@@ -3659,7 +3659,7 @@ bool gameFrame(double delta_time, Input* input)
                     entity->position = (Vec3){0};
                     entity->removed = true;
                 }
-                setTileType(NONE, raycast_output.hit_coords);
+                setTileType(TILE_TYPE_NONE, raycast_output.hit_coords);
                 setTileDirection(NORTH, raycast_output.hit_coords, 0);
 
                 time_until_allow_meta_input = PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT;
@@ -3668,8 +3668,8 @@ bool gameFrame(double delta_time, Input* input)
             {
                 if (intCoordsWithinLevelBounds(raycast_output.place_coords))
                 {
-                    if (editor_state.picked_tile == PLAYER) editorPlaceOnlyInstanceOfTile(player, raycast_output.place_coords, PLAYER, PLAYER_ID);
-                    else if (editor_state.picked_tile == PACK) editorPlaceOnlyInstanceOfTile(pack, raycast_output.place_coords, PACK, PACK_ID);
+                    if (editor_state.picked_tile == TILE_TYPE_PLAYER) editorPlaceOnlyInstanceOfTile(player, raycast_output.place_coords, TILE_TYPE_PLAYER, PLAYER_ID);
+                    else if (editor_state.picked_tile == TILE_TYPE_PACK) editorPlaceOnlyInstanceOfTile(pack, raycast_output.place_coords, TILE_TYPE_PACK, PACK_ID);
                     if (isSource(editor_state.picked_tile)) 
                     {
                         setTileType(editor_state.picked_tile, raycast_output.place_coords); 
@@ -3683,16 +3683,16 @@ bool gameFrame(double delta_time, Input* input)
                         Entity* entity_group = 0;
                         switch (editor_state.picked_tile)
                         {
-                            case BOX:          entity_group = world_state.boxes;          break;
-                            case MIRROR:       entity_group = world_state.mirrors;        break;
-                            case GLASS:        entity_group = world_state.glass_blocks;  break;
-                            case WIN_BLOCK:    entity_group = world_state.win_blocks;    break;
-                            case LOCKED_BLOCK: entity_group = world_state.locked_blocks; break;
+                            case TILE_TYPE_BOX:          entity_group = world_state.boxes;         break;
+                            case TILE_TYPE_MIRROR:       entity_group = world_state.mirrors;       break;
+                            case TILE_TYPE_GLASS:        entity_group = world_state.glass_blocks;  break;
+                            case TILE_TYPE_WIN_BLOCK:    entity_group = world_state.win_blocks;    break;
+                            case TILE_TYPE_LOCKED_BLOCK: entity_group = world_state.locked_blocks; break;
                             default: entity_group = 0;
                         }
                         if (entity_group != 0) 
                         {
-                            setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, NO_COLOR);
+                            setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, COLOR_NONE);
                             setTileDirection(NORTH, raycast_output.place_coords, 0);
                         }
                         else 
@@ -3707,7 +3707,7 @@ bool gameFrame(double delta_time, Input* input)
             else if (input->keys_held & KEY_R && raycast_output.hit)
             {   
                 TileType type = getTileType(raycast_output.hit_coords);
-                if (type == MIRROR)
+                if (type == TILE_TYPE_MIRROR)
                 {
                     Entity* mirror = getEntityAtCoords(raycast_output.hit_coords);
                     if (mirror)
@@ -3736,7 +3736,7 @@ bool gameFrame(double delta_time, Input* input)
                         e->rotation = directionToQuaternion(direction);
                     }
                 }
-                else if (type == LADDER)
+                else if (type == TILE_TYPE_LADDER)
                 {
                     Direction direction = getTileDirection(raycast_output.hit_coords);
                     if (direction == EAST) direction = NORTH;
@@ -3933,7 +3933,7 @@ bool gameFrame(double delta_time, Input* input)
         if (input->keys_held & KEY_L)
         {
             editor_state.picked_tile++;
-            if (editor_state.picked_tile == LADDER + 1) editor_state.picked_tile = VOID;
+            if (editor_state.picked_tile == TILE_TYPE_LADDER + 1) editor_state.picked_tile = TILE_TYPE_VOID;
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
 
@@ -4214,7 +4214,7 @@ bool gameFrame(double delta_time, Input* input)
                         TileType next_tile = getTileType(next_player_coords);
                         switch (next_tile)
                         {
-                            case NONE:
+                            case TILE_TYPE_NONE:
                             {
                                 // currently not allowing input if trailing hitbox occupies next tile. this check might be too strict sometimes
                                 TrailingHitbox th = {0};
@@ -4222,13 +4222,13 @@ bool gameFrame(double delta_time, Input* input)
                                 else try_walk = true;
                                 break;
                             }
-                            case BOX:
-                            case GLASS:
-                            case PACK:
-                            case MIRROR:
-                            case SOURCE_RED:
-                            case SOURCE_BLUE:
-                            case SOURCE_MAGENTA:
+                            case TILE_TYPE_BOX:
+                            case TILE_TYPE_GLASS:
+                            case TILE_TYPE_PACK:
+                            case TILE_TYPE_MIRROR:
+                            case TILE_TYPE_SOURCE_RED:
+                            case TILE_TYPE_SOURCE_BLUE:
+                            case TILE_TYPE_SOURCE_MAGENTA:
                             {
                                 // figure out if push, pause, or fail here.
                                 if (canPush(next_player_coords, input_direction))
@@ -4238,7 +4238,7 @@ bool gameFrame(double delta_time, Input* input)
                                 }
                                 break;
                             }
-                            case LADDER:
+                            case TILE_TYPE_LADDER:
                             {
                                 // if ladder is facing towards the player, do the climb
                                 if (getTileDirection(next_player_coords) == oppositeDirection(player->direction)) try_climb = true;
@@ -4257,7 +4257,7 @@ bool gameFrame(double delta_time, Input* input)
 
                             // basic check for if walk will be allowed
                             bool allow_walk = true;
-                            if (tile_below_next_coords == NONE && !temp_state.player_hit_by_red) allow_walk = false;
+                            if (tile_below_next_coords == TILE_TYPE_NONE && !temp_state.player_hit_by_red) allow_walk = false;
                             if (isEntity(tile_below_next_coords) && !vec3IsZero(getEntityAtCoords(coords_below_next_coords)->velocity)) allow_walk = false;
 
                             if (allow_walk || cheating)
@@ -4315,7 +4315,7 @@ bool gameFrame(double delta_time, Input* input)
                             bool do_climb = false; 
                             Int3 coords_above_player = getNextCoords(player->coords, UP);
                             TileType type_above_player = getTileType(coords_above_player);
-                            if (type_above_player == NONE) do_climb = true;
+                            if (type_above_player == TILE_TYPE_NONE) do_climb = true;
                             else if (isPushable(type_above_player) && canPushUp(coords_above_player)) do_climb = true;
 
                             if (do_climb)
@@ -4347,7 +4347,7 @@ bool gameFrame(double delta_time, Input* input)
                         // NOTE: this defeats half the point of how i handle failed case later... but need to know now!
                         Int3 orthogonal_coords = getNextCoords(player->coords, oppositeDirection(input_direction));
                         TileType orthogonal_type = getTileType(orthogonal_coords);
-                        bool pack_would_cause_failed_case = orthogonal_type != NONE && (!isEntity(orthogonal_type) || canPush(orthogonal_coords, player->direction));
+                        bool pack_would_cause_failed_case = orthogonal_type != TILE_TYPE_NONE && (!isEntity(orthogonal_type) || canPush(orthogonal_coords, player->direction));
                         if (pack_would_cause_failed_case && temp_state.pack_turn_state.half_failed_turn_timer != 0) allow_turn = false;
                     }
 
@@ -4410,7 +4410,7 @@ bool gameFrame(double delta_time, Input* input)
                     {
                         player->moving_direction = DOWN;
                     }
-                    else if (type_below == LADDER && getTileDirection(coords_below) == move_direction)
+                    else if (type_below == TILE_TYPE_LADDER && getTileDirection(coords_below) == move_direction)
                     {
                         Int3 next_player_coords = getNextCoords(player->coords, move_direction);
                         Int3 next_pack_coords = getNextCoords(pack->coords, move_direction);
@@ -4424,7 +4424,7 @@ bool gameFrame(double delta_time, Input* input)
 
                         TileType type_to_push = getTileType(pushing_coords);
 
-                        if (type_to_push == NONE)
+                        if (type_to_push == TILE_TYPE_NONE)
                         {
                             allow_down_climb = true;
                         }
@@ -4472,7 +4472,7 @@ bool gameFrame(double delta_time, Input* input)
         doPhysicsTick();
 
         // win block logic
-        if (getTileType(getNextCoords(player->coords, DOWN)) == WIN_BLOCK)
+        if (getTileType(getNextCoords(player->coords, DOWN)) == TILE_TYPE_WIN_BLOCK)
         {
             if (input->keys_held & KEY_Q && time_until_allow_meta_input == 0)
             {
@@ -4534,7 +4534,7 @@ bool gameFrame(double delta_time, Input* input)
 
         // disallow input if player above void / water
         TileType tile_type_below_player = getTileType(getNextCoords(player->coords, DOWN));
-        if (tile_type_below_player == VOID || tile_type_below_player == WATER) temp_state.allow_movement_timer = -1;
+        if (tile_type_below_player == TILE_TYPE_VOID || tile_type_below_player == TILE_TYPE_WATER) temp_state.allow_movement_timer = -1;
 
         // reset undos performed if no longer holding z undos
         if (undos_performed > 0 && !(input->keys_held & KEY_Z)) undos_performed = 0;
@@ -4869,7 +4869,7 @@ bool gameFrame(double delta_time, Input* input)
         FOR(laser_buffer_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED)
         {
             LaserBuffer lb = laser_buffer[laser_buffer_index];
-            if (lb.color == NO_COLOR) continue; // laser buffer is not dense - this is check that there is actually something here
+            if (lb.color == COLOR_NONE) continue; // laser buffer is not dense - this is check that there is actually something here
 
             Vec3 diff = vec3Subtract(lb.end_coords, lb.start_coords);
             Vec3 center = vec3Add(lb.start_coords, vec3ScalarMultiply(diff, 0.5));
@@ -4881,9 +4881,9 @@ bool gameFrame(double delta_time, Input* input)
             Vec3 color_without_alpha = {0};
             switch (lb.color)
             {
-                case RED:     color_without_alpha = (Vec3){ 1.0f, 0.0f, 0.0f }; break;
-                case BLUE:    color_without_alpha = (Vec3){ 0.0f, 0.0f, 1.0f }; break;
-                case MAGENTA: color_without_alpha = (Vec3){ 1.0f, 0.0f, 1.0f }; break;
+                case COLOR_RED:     color_without_alpha = (Vec3){ 1.0f, 0.0f, 0.0f }; break;
+                case COLOR_BLUE:    color_without_alpha = (Vec3){ 0.0f, 0.0f, 1.0f }; break;
+                case COLOR_MAGENTA: color_without_alpha = (Vec3){ 1.0f, 0.0f, 1.0f }; break;
                 default: break;
             }
             float alpha = 1.0f;
@@ -4899,12 +4899,12 @@ bool gameFrame(double delta_time, Input* input)
         for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
         {
             TileType draw_tile = world_state.buffer[tile_index];
-            if (draw_tile == NONE) continue;
+            if (draw_tile == TILE_TYPE_NONE) continue;
             if (isEntity(draw_tile))
             {
                 Entity* e = getEntityAtCoords(bufferIndexToCoords(tile_index));
-                if (e->locked) draw_tile = LOCKED_BLOCK;
-                if (draw_tile == LOCKED_BLOCK)
+                if (e->locked) draw_tile = TILE_TYPE_LOCKED_BLOCK;
+                if (draw_tile == TILE_TYPE_LOCKED_BLOCK)
                 {
                     drawAsset(CUBE_3D_LOCKED_BLOCK, CUBE_3D, int3ToVec3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
                 }
@@ -4915,7 +4915,7 @@ bool gameFrame(double delta_time, Input* input)
                     else if (!in_overworld && findInSolvedLevels(world_state.level_name) != -1) draw_tile = WON_BLOCK;
                 }
                 */
-                if (draw_tile == PLAYER)
+                if (draw_tile == TILE_TYPE_PLAYER)
                 {
                     Vec4 player_color = { (float)temp_state.player_hit_by_red, 0.0f, (float)(temp_state.player_hit_by_blue_timer > 0) };
                     drawAsset(MODEL_3D_PLAYER, MODEL_3D, player->position, DEFAULT_SCALE, player->rotation, player_color, (Vec4){0}, (Vec4){0});
