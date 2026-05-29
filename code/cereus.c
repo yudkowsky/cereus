@@ -355,8 +355,8 @@ const int32 ID_OFFSET_BOX          = 100 * 1;
 const int32 ID_OFFSET_MIRROR       = 100 * 2;
 const int32 ID_OFFSET_GLASS        = 100 * 3;
 const int32 ID_OFFSET_SOURCE       = 100 * 4;
-const int32 ID_OFFSET_WIN_BLOCK    = 100 * 12;
-const int32 ID_OFFSET_LOCKED_BLOCK = 100 * 13;
+const int32 ID_OFFSET_WIN_BLOCK    = 100 * 7;
+const int32 ID_OFFSET_LOCKED_BLOCK = 100 * 8;
 
 const int32 FONT_FIRST_ASCII = 32;
 const int32 FONT_LAST_ASCII = 126;
@@ -2772,10 +2772,10 @@ bool performUndo()
     return true;
 }
 
-void levelChangePrep(char next_level[64])
+void levelChangePrep(char next_level[64], bool write_solved_levels)
 {
     bool level_was_just_solved = false;
-    if (!in_overworld && findInSolvedLevels(world_state.level_name) == -1)
+    if (!in_overworld && findInSolvedLevels(world_state.level_name) == -1 && write_solved_levels)
     {
         addToSolvedLevels(world_state.level_name);
         writeSolvedLevelsToFile();
@@ -3792,7 +3792,7 @@ bool gameFrame(double delta_time, Input* input)
                     Entity* wb = getEntityFromId(editor_state.selected_id);
                     if (wb->next_level[0] != 0)
                     {
-                        levelChangePrep(wb->next_level);
+                        levelChangePrep(wb->next_level, false);
                         gameInitializeState(wb->next_level);
                         writeSolvedLevelsToFile();
                         time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
@@ -4073,9 +4073,8 @@ bool gameFrame(double delta_time, Input* input)
         else
         {
             // NOTE: used to persist solved levels over level change and game init, but appears unnecessary
-            levelChangePrep("overworld");
+            levelChangePrep("overworld", false);
             gameInitializeState("overworld");
-            writeSolvedLevelsToFile();
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             temp_state.allow_movement_timer = 0;
         }
@@ -4504,7 +4503,7 @@ bool gameFrame(double delta_time, Input* input)
                     }
 
                     zeroAnimations();
-                    levelChangePrep(wb->next_level);
+                    levelChangePrep(wb->next_level, true);
                     gameInitializeState(wb->next_level);
                     time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 }
