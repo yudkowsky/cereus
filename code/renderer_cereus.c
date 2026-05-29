@@ -5041,7 +5041,8 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     for (uint32 instance_index = 0; instance_index < cube_instance_count; instance_index++)
     {
         Cube* cube = &cube_instances[instance_index];
-        mat4BuildBasicTRS(cube_gpu_instances[instance_index].model, cube->coords); // assumption that all cubes aren't rotated and are at unit scale
+        //mat4BuildBasicTRS(cube_gpu_instances[instance_index].model, cube->coords); // assumption that all cubes aren't rotated and are at unit scale
+        mat4BuildTRS(cube_gpu_instances[instance_index].model, cube->coords, cube->rotation, cube->scale);
         cube_gpu_instances[instance_index].uv_rect = cube->uv;
     }
 

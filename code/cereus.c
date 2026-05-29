@@ -331,7 +331,6 @@ const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
 const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
 const int32 TRAILING_HITBOX_TIME = 7;
 const int32 FALL_TRAILING_HITBOX_TIME = 10;
-const int32 TIME_AFTER_UNDO_UNTIL_PHYSICS_START = 4;
 const int32 SIMULATE_FORWARD_TICK_COUNT = 8;
 const int32 HALF_FAILED_PACK_TURN_COOLDOWN = 6;
 const int32 HIT_BY_BLUE_TIME = 3;
@@ -3397,11 +3396,20 @@ void doPhysicsTick()
 
     // handle moving entities
     Entity* pushed_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
-    FOR(group_index, 3)
+    FOR(group_index, 4)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            Entity* e = &pushed_entity_group[group_index][entity_index];
+            Entity* e = {0};
+            if (group_index == 3)
+            {
+                e = pack;
+                if (temp_state.pack_attached) continue;
+            }
+            else
+            {
+                e = &pushed_entity_group[group_index][entity_index];
+            }
             if (e->moving_direction == NO_DIRECTION && !e->moving_on_head) continue;
             Entity* root_e = getEntityFromId(e->root_entity_id);
             if (!root_e) continue;
@@ -4111,8 +4119,8 @@ bool gameFrame(double delta_time, Input* input)
 
                     undos_performed++;
                     silence_unlocks_due_to_restart_or_undo = true;
-                    undo_press_timer = TIME_AFTER_UNDO_UNTIL_PHYSICS_START;
-                    temp_state.allow_movement_timer = TIME_AFTER_UNDO_UNTIL_PHYSICS_START;
+                    undo_press_timer = time_until_allow_undo_or_restart_input;
+                    temp_state.allow_movement_timer = time_until_allow_undo_or_restart_input;
                 }
                 else
                 {
@@ -4895,7 +4903,7 @@ bool gameFrame(double delta_time, Input* input)
         // TODO: level_dim should be the actual size of the level, which changes whenever i save the level. otherwise this loop will be slow, especially in overworld (easily 2/3s of game time)
         //       there would also then be a start coord for this box, since it won't be at 0,0 necessarily...
         bool water_plane_defined = false;
-        for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z / 3; tile_index += 2) // TODO: sneaky framerate boost for recording some stuff
+        for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
         {
             TileType draw_tile = world_state.buffer[tile_index];
             if (draw_tile == NONE) continue;
@@ -4903,6 +4911,10 @@ bool gameFrame(double delta_time, Input* input)
             {
                 Entity* e = getEntityAtCoords(bufferIndexToCoords(tile_index));
                 if (e->locked) draw_tile = LOCKED_BLOCK;
+                if (draw_tile == LOCKED_BLOCK)
+                {
+                    drawAsset(CUBE_3D_LOCKED_BLOCK, CUBE_3D, int3ToVec3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
+                }
                 /*
                 if (draw_tile == WIN_BLOCK)
                 {
