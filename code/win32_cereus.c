@@ -230,8 +230,7 @@ int CALLBACK WinMain(
 		L"Window Name",
 		WS_OVERLAPPEDWINDOW,
         work_area.left, work_area.top,
-		//display_info.display_width, display_info.display_height,
-        //1920, 1080, // temp overwrite dims for easier debugging
+        //1920, 1080,
         work_area.right - work_area.left, work_area.bottom - work_area.top,
 		0, 0, module_handle, 0);
 

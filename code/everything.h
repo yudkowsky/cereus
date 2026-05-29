@@ -271,5 +271,5 @@ void gameRedraw(DisplayInfo);
 
 void vulkanInitialize(RendererPlatformHandles, DisplayInfo);
 void vulkanResize(uint32 width, uint32 height);
-void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, float global_time, Camera camera, ShaderMode shader_mode, WaterPaintTexture* water_paint_texture);
+void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, float global_time, float water_plane, Camera camera, ShaderMode shader_mode, WaterPaintTexture* water_paint_texture);
 void vulkanDraw();

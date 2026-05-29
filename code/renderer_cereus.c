@@ -572,7 +572,7 @@ const uint32 CUBE_INSTANCE_CAPACITY = 8192;
 const uint32 WATER_INSTANCE_CAPACITY = 8192;
 const uint32 LASER_INSTANCE_CAPACITY = 1024;
 
-const uint32 SHADOW_MAP_RESOLUTION = 2048;
+const uint32 SHADOW_MAP_RESOLUTION = 4192;
 
 // TODO: set these in loadAsset where stb_image gives me width / height. store in CachedAsset.
 const int32 ATLAS_2D_WIDTH = 128;
@@ -598,8 +598,8 @@ const float water_tile_length = 10.0f;
 const float water_amplitude = 2e-4f;
 
 // outlines
-const float depth_threshold = 2.0f;
-const float normal_threshold = 0.2f;
+const float depth_threshold = 1.5f;
+const float normal_threshold = 0.33f;
 
 Cube cube_instances[8192];
 uint32 cube_instance_count = 0;
@@ -4939,11 +4939,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     }
 
     vulkan_state.paint_image_first_upload = true;
-
-    vulkan_state.water_plane_y = WATER_PLANE_Y;
 }
 
-void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, float water_time_from_game, Camera camera_from_game, ShaderMode shader_mode_from_game, WaterPaintTexture* paint_from_game)
+void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, float water_time_from_game, float water_plane_from_game, Camera camera_from_game, ShaderMode shader_mode_from_game, WaterPaintTexture* paint_from_game)
 {  
     vkWaitForFences(vulkan_state.logical_device_handle, 1, &vulkan_state.in_flight_fences[vulkan_state.current_frame], VK_TRUE, UINT64_MAX);
 
@@ -4951,6 +4949,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     shader_mode = shader_mode_from_game;
     water_time = water_time_from_game;
     vulkan_state.water_paint_texture = paint_from_game;
+    vulkan_state.water_plane_y = water_plane_from_game;
 
     sprite_instance_count = 0;
     cube_instance_count = 0;
@@ -5320,10 +5319,10 @@ void vulkanDraw(void)
         mat4Inverse(main_inverse_view_projection, main_view_projection);
 
         Vec3 sun_direction = { -0.5f, -1.0f, -0.15f };
-        Vec3 coverage_center = { 10.0f, 0.0f, 10.0f };
-        float coverage_radius = 10.0f;
+        float covered_tiles_from_zero = 50.0f;
+        Vec3 coverage_center = { covered_tiles_from_zero / 2.0f, 0.0f, covered_tiles_from_zero / 2.0f };
         float light_view_projection[16];
-        mat4BuildDirectionalLight(light_view_projection, sun_direction, coverage_center, coverage_radius);
+        mat4BuildDirectionalLight(light_view_projection, sun_direction, coverage_center, covered_tiles_from_zero / 2.0f);
 
         memcpy(main_view_constants->view,            view_matrix,                  sizeof(float) * 16);
         memcpy(main_view_constants->proj,            projection_matrix,            sizeof(float) * 16);
@@ -5450,9 +5449,9 @@ void vulkanDraw(void)
         uint32 reflection_height = vulkan_state.swapchain_extent.height;
 
         VkClearValue reflection_clears[2] = {0};
-        reflection_clears[0].color.float32[0] = 0.4f; // much brighter clear values
+        reflection_clears[0].color.float32[0] = 0.1f; // much brighter clear values
         reflection_clears[0].color.float32[1] = 0.2f;
-        reflection_clears[0].color.float32[2] = 0.1f;
+        reflection_clears[0].color.float32[2] = 0.4f;
         reflection_clears[0].color.float32[3] = 1.0f;
         reflection_clears[1].depthStencil.depth = 1.0f;
         reflection_clears[1].depthStencil.stencil = 0;
@@ -5810,7 +5809,7 @@ void vulkanDraw(void)
             WaterlinePushConstants waterline_pc = {0};
             waterline_pc.texel_width = 1.0f / (float)vulkan_state.swapchain_extent.width;
             waterline_pc.texel_height = 1.0f / (float)vulkan_state.swapchain_extent.height;
-            waterline_pc.max_depth_difference = 0.02f;
+            waterline_pc.max_depth_difference = 0.1f;
             waterline_pc.outline_radius_px = 1.0f;
 
             vkCmdPushConstants(command_buffer, vulkan_state.waterline_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(waterline_pc), &waterline_pc);
@@ -6003,6 +6002,7 @@ void vulkanDraw(void)
     }
 
     // debug quad
+    /*
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline);
 
@@ -6037,6 +6037,7 @@ void vulkanDraw(void)
         vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SpritePushConstants), &debug_pc);
         vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
     }
+    */
 
     vkCmdEndRenderPass(command_buffer);
 

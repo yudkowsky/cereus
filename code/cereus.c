@@ -435,7 +435,7 @@ GameProgress game_progress = WORLD_0;
 Int3 level_dim = {0};
 Int3 restart_position = {0};
 bool in_overworld = true;
-//Vec3 light_direction = (Vec3){ -0.5f, -1.0f, -0.3f }; // TODO: define in level
+float water_plane_y = 0.0f;
 
 WorldState leap_of_faith_world_state_snapshot = {0};
 TemporaryState leap_of_faith_temp_state_snapshot = {0};
@@ -2457,7 +2457,7 @@ void gameRedraw(DisplayInfo display_from_platform)
     if (draw_command_count == 0) return;
     game_display = display_from_platform;
     recalculateDebugStartCoords();
-    vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, camera_with_ow_offset, game_shader_mode, &water_paint_texture);
+    vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, water_plane_y, camera_with_ow_offset, game_shader_mode, &water_paint_texture);
     vulkanDraw();
 }
 
@@ -4641,8 +4641,12 @@ bool gameFrame(double delta_time, Input* input)
             // show undo deltas in buffer
             char undo_buffer_text[256] = {0};
             snprintf(undo_buffer_text, sizeof(undo_buffer_text), "undo deltas in buffer: %d", undo_buffer.delta_count);
-            createDebugText(undo_buffer_text);
+            createDebugText(undo_buffer_text);, 
             */
+
+            char plane_text[256] = {0};
+            snprintf(plane_text, sizeof(plane_text), "water plane: %f", water_plane_y);
+            createDebugText(plane_text);
 
             // trailing hitbox info
             /*
@@ -4890,7 +4894,8 @@ bool gameFrame(double delta_time, Input* input)
         // draw models
         // TODO: level_dim should be the actual size of the level, which changes whenever i save the level. otherwise this loop will be slow, especially in overworld (easily 2/3s of game time)
         //       there would also then be a start coord for this box, since it won't be at 0,0 necessarily...
-        for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
+        bool water_plane_defined = false;
+        for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z / 3; tile_index += 2) // TODO: sneaky framerate boost for recording some stuff
         {
             TileType draw_tile = world_state.buffer[tile_index];
             if (draw_tile == NONE) continue;
@@ -4917,10 +4922,20 @@ bool gameFrame(double delta_time, Input* input)
             }
             else
             {
-                if (getCube3DId(draw_tile) == CUBE_3D_WATER) drawAsset(MODEL_3D_WATER, WATER_3D, int3ToVec3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
+                if (getCube3DId(draw_tile) == CUBE_3D_WATER) 
+                {
+                    if (!water_plane_defined) 
+                    {
+                        water_plane_y = getComponentAlongDirection(UP, int3ToVec3(bufferIndexToCoords(tile_index))) + 1.2f;
+                        water_plane_defined = true;
+                    }
+                    drawAsset(MODEL_3D_WATER, WATER_3D, int3ToVec3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
+                }
                 drawAsset(getCube3DId(draw_tile), CUBE_3D, int3ToVec3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
             }
         }
+
+        if (!water_plane_defined) water_plane_y = -999.0f;
 
         // draw selected entity
         if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
@@ -5066,7 +5081,7 @@ bool gameFrame(double delta_time, Input* input)
     }
 
     QueryPerformanceCounter(&t1);
-    vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, camera_with_ow_offset, game_shader_mode, &water_paint_texture);
+    vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, water_plane_y, camera_with_ow_offset, game_shader_mode, &water_paint_texture);
     QueryPerformanceCounter(&t2);
     vulkanDraw();
     QueryPerformanceCounter(&t3);
