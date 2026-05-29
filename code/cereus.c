@@ -162,8 +162,6 @@ typedef struct TemporaryState
 
     int32 allow_movement_timer; // if > 0, decrements every frame towards 0, and then able to move. if -1, movement is permanently stopped until some other action resets it.
     bool pack_attached;
-    Direction climbing_direction;
-
     int32 player_hit_by_red;
     int32 player_hit_by_blue_timer;
     PackTurnState pack_turn_state;
@@ -2399,7 +2397,7 @@ void gameInitializeState(char* level_name)
 
     temp_state.allow_movement_timer = 0;
     temp_state.pack_attached = true;
-    temp_state.climbing_direction = NO_DIRECTION;
+    player->moving_direction = NO_DIRECTION;
 
     if (in_overworld)
     {
@@ -2517,6 +2515,7 @@ void recordEntityDelta(Entity* e)
     undo_buffer.deltas[pos].id = e->id;
     undo_buffer.deltas[pos].old_coords = e->coords;
     undo_buffer.deltas[pos].old_direction = e->direction;
+    undo_buffer.deltas[pos].old_mirror_orientation = e->mirror_orientation;
     undo_buffer.deltas[pos].was_removed = e->removed;
     undo_buffer.delta_write_pos = (pos + 1) % MAX_UNDO_DELTAS;
     undo_buffer.delta_count++;
@@ -2685,7 +2684,7 @@ void zeroAnimations()
     pack->velocity = (Vec3){0};
 
     memset(&temp_state, 0, sizeof(TemporaryState));
-    temp_state.climbing_direction = NO_DIRECTION; // okay, i see what Anton meant here. maybe consider having 0 as NO_DIRECTION if this becomes annoying elsewhere
+    player->moving_direction = NO_DIRECTION; // okay, i see what Anton meant here. maybe consider having 0 as NO_DIRECTION if this becomes annoying elsewhere
 }
 
 // returns false only if already at oldest action
@@ -3054,7 +3053,7 @@ void doPhysicsTick()
     if (undo_press_timer > 0) want_to_fall = false;
     if (cheating) want_to_fall = false;
     if (temp_state.player_hit_by_red) want_to_fall = false;
-    if (temp_state.climbing_direction != NO_DIRECTION) want_to_fall = false;
+    if (player->moving_direction != NO_DIRECTION) want_to_fall = false;
 
     if (want_to_fall) setFalling(player);
 
@@ -3110,7 +3109,7 @@ void doPhysicsTick()
                 Int3 coords_ahead_and_below = getNextCoords(coords_below, player->direction);
                 if (getTileType(coords_ahead_and_below) == LADDER && getTileDirection(coords_ahead_and_below) == oppositeDirection(player->direction))
                 {
-                    temp_state.climbing_direction = DOWN;
+                    player->moving_direction = DOWN;
                     player->falling = false;
                 }
             }
@@ -3130,7 +3129,7 @@ void doPhysicsTick()
     }
 
     // climb logic
-    if (temp_state.climbing_direction == UP)
+    if (player->moving_direction == UP)
     {
         float y_coord_difference = getComponentAlongDirection(UP, vec3Subtract(int3ToVec3(player->coords), player->position));
 
@@ -3245,18 +3244,18 @@ void doPhysicsTick()
             {
                 player->position = int3ToVec3(player->coords); // normalise y coord
                 player->velocity = (Vec3){0};
-                temp_state.climbing_direction = NO_DIRECTION;
+                player->moving_direction = NO_DIRECTION;
                 if (do_push_forwards) pushAll(coords_ahead, player->direction, false, PLAYER_ID);
                 doStandardMovement(player->direction, coords_ahead);
             }
 
             if (reverse_direction)
             {
-                temp_state.climbing_direction = DOWN;
+                player->moving_direction = DOWN;
             }
         }
     }
-    else if (temp_state.climbing_direction == DOWN)
+    else if (player->moving_direction == DOWN)
     {
         float y_coord_difference = -getComponentAlongDirection(UP, vec3Subtract(int3ToVec3(player->coords), player->position));
         if (y_coord_difference > CLIMBING_SPEED)
@@ -3285,7 +3284,7 @@ void doPhysicsTick()
 
             if (land_here)
             {
-                temp_state.climbing_direction = NO_DIRECTION;
+                player->moving_direction = NO_DIRECTION;
                 player->position = int3ToVec3(player->coords);
                 player->velocity = (Vec3){0};
             }
@@ -4168,7 +4167,7 @@ bool gameFrame(double delta_time, Input* input)
             if (temp_state.allow_movement_timer != 0) allow_input = false;
             
             // if able to fall (and not climbing) then don't allow movement
-            if (canFall(player) && !temp_state.player_hit_by_red && !cheating && temp_state.climbing_direction == NO_DIRECTION) allow_input = false;
+            if (canFall(player) && !temp_state.player_hit_by_red && !cheating && player->moving_direction == NO_DIRECTION) allow_input = false;
 
             // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
             float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
@@ -4200,11 +4199,11 @@ bool gameFrame(double delta_time, Input* input)
                     if (!vec3IsZero(vec3SetComponentAlongDirection(input_direction, player->velocity, 0))) allow_movement = false;
 
                     // disallow movement forward if climbing UP. likely doesn't actually matter, would just be walking into a ladder
-                    if (temp_state.climbing_direction == UP) allow_movement = false;
+                    if (player->moving_direction == UP) allow_movement = false;
 
-                    if (temp_state.climbing_direction == DOWN)
+                    if (player->moving_direction == DOWN)
                     {
-                        temp_state.climbing_direction = UP;
+                        player->moving_direction = UP;
                     }
                     else if (allow_movement)
                     {
@@ -4271,7 +4270,7 @@ bool gameFrame(double delta_time, Input* input)
                             {
                                 // leap of faith logic
 
-                                // create snapshot of current world state
+                                // create snapshot of current state
                                 memcpy(&leap_of_faith_world_state_snapshot, &world_state, sizeof(WorldState));
                                 memcpy(&leap_of_faith_temp_state_snapshot,  &temp_state,  sizeof(TemporaryState));
                                 Input input_snapshot = *input;
@@ -4295,7 +4294,7 @@ bool gameFrame(double delta_time, Input* input)
                                     }
                                 }
 
-                                // restore everything
+                                // restore state
                                 memcpy(&world_state, &leap_of_faith_world_state_snapshot, sizeof(WorldState));
                                 memcpy(&temp_state,  &leap_of_faith_temp_state_snapshot,  sizeof(TemporaryState));
                                 *input = input_snapshot;
@@ -4322,7 +4321,7 @@ bool gameFrame(double delta_time, Input* input)
                             if (do_climb)
                             {
                                 recordActionForUndo(&world_state);
-                                temp_state.climbing_direction = UP;
+                                player->moving_direction = UP;
                             }
                         }
                     }
@@ -4332,7 +4331,7 @@ bool gameFrame(double delta_time, Input* input)
                     // TURN MOVEMENT
                     bool allow_turn = true;
                     if (player->falling) allow_turn = false;
-                    if (temp_state.climbing_direction != NO_DIRECTION) allow_turn = false;
+                    if (player->moving_direction != NO_DIRECTION) allow_turn = false;
                     
                     // get difference in position along axis of travel, and gate on some threshold to target
                     float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, int3ToVec3(player->coords)));
@@ -4407,9 +4406,9 @@ bool gameFrame(double delta_time, Input* input)
                     Int3 coords_below = getNextCoords(player->coords, DOWN);
                     TileType type_below = getTileType(coords_below);
 
-                    if (temp_state.climbing_direction == UP)
+                    if (player->moving_direction == UP)
                     {
-                        temp_state.climbing_direction = DOWN;
+                        player->moving_direction = DOWN;
                     }
                     else if (type_below == LADDER && getTileDirection(coords_below) == move_direction)
                     {
@@ -4666,12 +4665,6 @@ bool gameFrame(double delta_time, Input* input)
             TrailingHitbox th3 = temp_state.trailing_hitboxes[2];
             snprintf(th_text, sizeof(th_text), "trailing hitboxes: 1: %d %d %d; 2: %d %d %d; 3: %d %d %d; count: %i", th1.type, th1.id, th1.frames, th2.type, th2.id, th2.frames, th3.type, th3.id, th3.frames, th_count);
             createDebugText(th_text);
-            */
-
-            /*
-            char climb_text[256] = {0};
-            snprintf(climb_text, sizeof(climb_text), "climbing direction: %i", temp_state.climbing_direction);
-            createDebugText(climb_text);
             */
 
             /*
