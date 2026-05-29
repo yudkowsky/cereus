@@ -571,6 +571,8 @@ const uint32 CUBE_INSTANCE_CAPACITY = 8192;
 const uint32 WATER_INSTANCE_CAPACITY = 8192;
 const uint32 LASER_INSTANCE_CAPACITY = 1024;
 
+const uint32 SHADOW_MAP_RESOLUTION = 2048;
+
 // TODO: set these in loadAsset where stb_image gives me width / height. store in CachedAsset.
 const int32 ATLAS_2D_WIDTH = 128;
 const int32 ATLAS_2D_HEIGHT = 128;
@@ -650,33 +652,34 @@ void mat4Inverse(float out[16], float m[16])
     inv[4]  = -m[4]*m[10]*m[15] + m[4]*m[11]*m[14] + m[8]*m[6]*m[15] - m[8]*m[7]*m[14] - m[12]*m[6]*m[11] + m[12]*m[7]*m[10];
     inv[8]  =  m[4]*m[9]*m[15]  - m[4]*m[11]*m[13] - m[8]*m[5]*m[15] + m[8]*m[7]*m[13] + m[12]*m[5]*m[11] - m[12]*m[7]*m[9];
     inv[12] = -m[4]*m[9]*m[14]  + m[4]*m[10]*m[13] + m[8]*m[5]*m[14] - m[8]*m[6]*m[13] - m[12]*m[5]*m[10] + m[12]*m[6]*m[9];
-    
+
     inv[1]  = -m[1]*m[10]*m[15] + m[1]*m[11]*m[14] + m[9]*m[2]*m[15] - m[9]*m[3]*m[14] - m[13]*m[2]*m[11] + m[13]*m[3]*m[10];
     inv[5]  =  m[0]*m[10]*m[15] - m[0]*m[11]*m[14] - m[8]*m[2]*m[15] + m[8]*m[3]*m[14] + m[12]*m[2]*m[11] - m[12]*m[3]*m[10];
     inv[9]  = -m[0]*m[9]*m[15]  + m[0]*m[11]*m[13] + m[8]*m[1]*m[15] - m[8]*m[3]*m[13] - m[12]*m[1]*m[11] + m[12]*m[3]*m[9];
     inv[13] =  m[0]*m[9]*m[14]  - m[0]*m[10]*m[13] - m[8]*m[1]*m[14] + m[8]*m[2]*m[13] + m[12]*m[1]*m[10] - m[12]*m[2]*m[9];
-    
+
     inv[2]  =  m[1]*m[6]*m[15] - m[1]*m[7]*m[14] - m[5]*m[2]*m[15] + m[5]*m[3]*m[14] + m[13]*m[2]*m[7] - m[13]*m[3]*m[6];
     inv[6]  = -m[0]*m[6]*m[15] + m[0]*m[7]*m[14] + m[4]*m[2]*m[15] - m[4]*m[3]*m[14] - m[12]*m[2]*m[7] + m[12]*m[3]*m[6];
     inv[10] =  m[0]*m[5]*m[15] - m[0]*m[7]*m[13] - m[4]*m[1]*m[15] + m[4]*m[3]*m[13] + m[12]*m[1]*m[7] - m[12]*m[3]*m[5];
     inv[14] = -m[0]*m[5]*m[14] + m[0]*m[6]*m[13] + m[4]*m[1]*m[14] - m[4]*m[2]*m[13] - m[12]*m[1]*m[6] + m[12]*m[2]*m[5];
-    
+
     inv[3]  = -m[1]*m[6]*m[11] + m[1]*m[7]*m[10] + m[5]*m[2]*m[11] - m[5]*m[3]*m[10] - m[9]*m[2]*m[7] + m[9]*m[3]*m[6];
     inv[7]  =  m[0]*m[6]*m[11] - m[0]*m[7]*m[10] - m[4]*m[2]*m[11] + m[4]*m[3]*m[10] + m[8]*m[2]*m[7] - m[8]*m[3]*m[6];
     inv[11] = -m[0]*m[5]*m[11] + m[0]*m[7]*m[9]  + m[4]*m[1]*m[11] - m[4]*m[3]*m[9]  - m[8]*m[1]*m[7] + m[8]*m[3]*m[5];
     inv[15] =  m[0]*m[5]*m[10] - m[0]*m[6]*m[9]  - m[4]*m[1]*m[10] + m[4]*m[2]*m[9]  + m[8]*m[1]*m[6] - m[8]*m[2]*m[5];
-    
+
     float determinant = m[0]*inv[0] + m[1]*inv[4] + m[2]*inv[8] + m[3]*inv[12];
-    if (determinant == 0.0f) 
+    if (determinant == 0.0f)
     { 
         memcpy(out, m, 64); 
         return; 
     }
-    
+
     determinant = 1.0f / determinant;
     for (int i = 0; i < 16; i++) out[i] = inv[i] * determinant;
 }
 
+// TODO: clean these mat4Build... functions up a bit
 void mat4BuildTranslation(float output_matrix[16], Vec3 translation) 
 {
     mat4Identity(output_matrix);
@@ -839,6 +842,55 @@ void mat4BuildPerspective(float output_matrix[16], float fov_y_radians, float as
 	output_matrix[10] = z_far / (z_near - z_far);
 	output_matrix[11] = -1.0f;
 	output_matrix[14] = (z_near * z_far) / (z_near - z_far);
+}
+
+void mat4BuildDirectionalLight(float output_matrix[16], Vec3 light_direction, Vec3 coverage_center, float coverage_radius)
+{
+    // TODO: set up some sort of maths include with functions from game layer
+    float direction_length = sqrtf(light_direction.x*light_direction.x + light_direction.y*light_direction.y + light_direction.z*light_direction.z);
+    Vec3 forward = { light_direction.x/direction_length, light_direction.y/direction_length, light_direction.z/direction_length };
+    Vec3 up_reference = { 0.0f, 1.0f, 0.0f };
+
+    // fabricate viewpoint by stepping back from coverage center against light dir
+    Vec3 eye =
+    {
+        coverage_center.x - forward.x * coverage_radius,
+        coverage_center.y - forward.y * coverage_radius,
+        coverage_center.z - forward.z * coverage_radius,
+    };
+
+    Vec3 right = { 
+        (forward.y*up_reference.z - forward.z*up_reference.y),
+        (forward.z*up_reference.x - forward.x*up_reference.z),
+        (forward.x*up_reference.y - forward.y*up_reference.x)
+    };
+    float right_length = sqrtf(right.x*right.x + right.y*right.y + right.z*right.z);
+    right.x /= right_length;
+    right.y /= right_length;
+    right.z /= right_length;
+
+    Vec3 true_up =
+    {
+        right.y*forward.z - right.z*forward.y,
+        right.z*forward.x - right.x*forward.z,
+        right.x*forward.y - right.y*forward.x
+    };
+
+    // rotate world into light space, slide eye to origin
+    float light_view[16];
+    mat4Identity(light_view);
+    light_view[0] = right.x;    light_view[4] = right.y;    light_view[8]  = right.z;
+    light_view[1] = true_up.x;  light_view[5] = true_up.y;  light_view[9]  = true_up.z;
+    light_view[2] = forward.x;  light_view[6] = forward.y;  light_view[10] = forward.z;
+    light_view[12] = -(right.x*eye.x   + right.y*eye.y   + right.z*eye.z);
+    light_view[13] = -(true_up.x*eye.x + true_up.y*eye.y + true_up.z*eye.z);
+    light_view[14] = -(forward.x*eye.x + forward.y*eye.y + forward.z*eye.z);
+
+    // ortho box sized to the coverage region
+    float light_projection[16];
+    mat4BuildOrtho(light_projection, -coverage_radius, coverage_radius, -coverage_radius, coverage_radius, 0.0f, 2.0f * coverage_radius);
+
+    mat4Multiply(output_matrix, light_projection, light_view);
 }
 
 uint32 findMemoryType(uint32 type_bits, VkMemoryPropertyFlags property_flags)
@@ -2099,6 +2151,22 @@ void createSwapchainResources(void)
         vkCreateFramebuffer(vulkan_state.logical_device_handle, &framebuffer_ci, 0, &vulkan_state.swapchain_framebuffers[framebuffer_index]);
     }
 
+    // shadow framebuffer
+    {
+        VkImageView shadow_attachments[1] = { vulkan_state.shadow_map_image_view };
+
+        VkFramebufferCreateInfo shadow_framebuffer_ci = {0};
+        shadow_framebuffer_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        shadow_framebuffer_ci.renderPass = vulkan_state.shadow_render_pass;
+        shadow_framebuffer_ci.attachmentCount = 1;
+        shadow_framebuffer_ci.pAttachments = shadow_attachments;
+        shadow_framebuffer_ci.width = SHADOW_MAP_RESOLUTION;
+        shadow_framebuffer_ci.height = SHADOW_MAP_RESOLUTION;
+        shadow_framebuffer_ci.layers = 1;
+
+        vkCreateFramebuffer(vulkan_state.logical_device_handle, &shadow_framebuffer_ci, 0, &vulkan_state.shadow_framebuffer);
+    }
+
     // post-process framebuffers
     vulkan_state.outline_post_framebuffers = realloc(vulkan_state.outline_post_framebuffers, sizeof(VkFramebuffer) * vulkan_state.swapchain_image_count);
 
@@ -2828,6 +2896,57 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateRenderPass(vulkan_state.logical_device_handle, &rp_ci, 0, &vulkan_state.reflection_render_pass);
     }
 
+    // SHADOW RENDER PASS
+    {
+        VkAttachmentDescription shadow_depth_attachment = {0};
+        shadow_depth_attachment.format = vulkan_state.depth_format;
+        shadow_depth_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        shadow_depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        shadow_depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        shadow_depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        shadow_depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        shadow_depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        shadow_depth_attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+        VkAttachmentReference shadow_depth_reference = {0};
+        shadow_depth_reference.attachment = 0;
+        shadow_depth_reference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        VkSubpassDescription shadow_subpass = {0};
+        shadow_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        shadow_subpass.colorAttachmentCount = 0;
+        shadow_subpass.pColorAttachments = 0;
+        shadow_subpass.pDepthStencilAttachment = &shadow_depth_reference;
+
+        VkSubpassDependency shadow_dependencies[2] = {0};
+
+        shadow_dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+        shadow_dependencies[0].dstSubpass = 0;
+        shadow_dependencies[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        shadow_dependencies[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        shadow_dependencies[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        shadow_dependencies[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+        // depth writes must be visible
+        shadow_dependencies[1].srcSubpass = 0;
+        shadow_dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+        shadow_dependencies[1].srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        shadow_dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        shadow_dependencies[1].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        shadow_dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        VkRenderPassCreateInfo shadow_render_pass_ci = {0};
+        shadow_render_pass_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        shadow_render_pass_ci.attachmentCount = 1;
+        shadow_render_pass_ci.pAttachments = &shadow_depth_attachment;
+        shadow_render_pass_ci.subpassCount = 1;
+        shadow_render_pass_ci.pSubpasses = &shadow_subpass;
+        shadow_render_pass_ci.dependencyCount = 2;
+        shadow_render_pass_ci.pDependencies = shadow_dependencies;
+
+        vkCreateRenderPass(vulkan_state.logical_device_handle, &shadow_render_pass_ci, 0, &vulkan_state.shadow_render_pass);
+    }
+
 	VkCommandPoolCreateInfo command_pool_creation_info = {0}; // describes the command pool tied to graphics queue family
 	command_pool_creation_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     command_pool_creation_info.queueFamilyIndex = vulkan_state.graphics_family_index;
@@ -2873,6 +2992,50 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     //vulkan_state.images_in_flight = calloc(vulkan_state.swapchain_image_count, sizeof(VkFence)); // calloc because we want these to start at VK_NULL_HANDLE, i.e. 0.
 
     // TODO: this isnt in createSwapchainResources because it needs to exist before then... is this the best place for it, though?
+    // shadow map image
+    {
+        VkImageCreateInfo shadow_map_image_ci = {0};
+        shadow_map_image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        shadow_map_image_ci.imageType = VK_IMAGE_TYPE_2D;
+        shadow_map_image_ci.extent.width  = SHADOW_MAP_RESOLUTION;
+        shadow_map_image_ci.extent.height = SHADOW_MAP_RESOLUTION;
+        shadow_map_image_ci.extent.depth  = 1;
+        shadow_map_image_ci.mipLevels = 1;
+        shadow_map_image_ci.arrayLayers = 1;
+        shadow_map_image_ci.format = vulkan_state.depth_format;
+        shadow_map_image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        shadow_map_image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        shadow_map_image_ci.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        shadow_map_image_ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        shadow_map_image_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        vkCreateImage(vulkan_state.logical_device_handle, &shadow_map_image_ci, 0, &vulkan_state.shadow_map_image);
+
+        VkMemoryRequirements shadow_map_memory_requirements = {0};
+        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.shadow_map_image, &shadow_map_memory_requirements);
+
+        VkMemoryAllocateInfo shadow_map_alloc = {0};
+        shadow_map_alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        shadow_map_alloc.allocationSize = shadow_map_memory_requirements.size;
+        shadow_map_alloc.memoryTypeIndex = findMemoryType(shadow_map_memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+        vkAllocateMemory(vulkan_state.logical_device_handle, &shadow_map_alloc, 0, &vulkan_state.shadow_map_image_memory);
+        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.shadow_map_image, vulkan_state.shadow_map_image_memory, 0);
+
+        VkImageViewCreateInfo shadow_map_view_ci = {0};
+        shadow_map_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        shadow_map_view_ci.image = vulkan_state.shadow_map_image;
+        shadow_map_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        shadow_map_view_ci.format = vulkan_state.depth_format;
+        shadow_map_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        shadow_map_view_ci.subresourceRange.baseMipLevel = 0;
+        shadow_map_view_ci.subresourceRange.levelCount = 1;
+        shadow_map_view_ci.subresourceRange.baseArrayLayer = 0;
+        shadow_map_view_ci.subresourceRange.layerCount = 1;
+
+        vkCreateImageView(vulkan_state.logical_device_handle, &shadow_map_view_ci, 0, &vulkan_state.shadow_map_image_view);
+    }
+
     // h0 spectrum image
     {
         VkImageCreateInfo h0_image_ci = {0};
@@ -3027,6 +3190,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkShaderModule water_vert_smh = {0};
     VkShaderModule water_frag_smh = {0};
     VkShaderModule waterline_frag_smh = {0};
+    VkShaderModule shadow_cube_vert_smh = {0};
+    VkShaderModule shadow_model_vert_smh = {0};
     VkShaderModule laser_vert_smh = {0};
     VkShaderModule laser_frag_smh = {0};
     VkShaderModule oit_resolve_vert_smh = {0};
@@ -3036,37 +3201,41 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkShaderModule sprite_vert_smh = {0};
     VkShaderModule sprite_frag_smh = {0};
 
-    VkPipelineShaderStageCreateInfo fft_spectrum_stage_ci           = loadShaderStage("data/shaders/spirv/fft-spectrum.comp.spv",       &fft_spectrum_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
-    VkPipelineShaderStageCreateInfo fft_evolved_stage_ci            = loadShaderStage("data/shaders/spirv/fft-evolved.comp.spv",        &fft_evolved_smh,           VK_SHADER_STAGE_COMPUTE_BIT);
-    VkPipelineShaderStageCreateInfo fft_pass_stage_ci               = loadShaderStage("data/shaders/spirv/fft-pass.comp.spv",           &fft_pass_smh,              VK_SHADER_STAGE_COMPUTE_BIT);
-    VkPipelineShaderStageCreateInfo fft_finalize_stage_ci           = loadShaderStage("data/shaders/spirv/fft-finalize.comp.spv",       &fft_finalize_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
-    VkPipelineShaderStageCreateInfo cube_vert_stage_ci 	 	        = loadShaderStage("data/shaders/spirv/cube.vert.spv", 	  	  	    &cube_vert_smh, 	  	    VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo cube_frag_stage_ci 	 	        = loadShaderStage("data/shaders/spirv/cube.frag.spv", 	  	  	    &cube_frag_smh, 	  		VK_SHADER_STAGE_FRAGMENT_BIT);
-	VkPipelineShaderStageCreateInfo model_vert_stage_ci 	 	    = loadShaderStage("data/shaders/spirv/model.vert.spv",   	  	    &model_vert_smh,   		    VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo model_frag_stage_ci 	 	    = loadShaderStage("data/shaders/spirv/model.frag.spv",   	  	    &model_frag_smh,   		    VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo outline_post_vert_stage_ci      = loadShaderStage("data/shaders/spirv/outline-post.vert.spv",       &outline_post_vert_smh,     VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo outline_post_frag_stage_ci      = loadShaderStage("data/shaders/spirv/outline-post.frag.spv",       &outline_post_frag_smh,     VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo water_vert_stage_ci             = loadShaderStage("data/shaders/spirv/water.vert.spv",              &water_vert_smh,            VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo water_frag_stage_ci             = loadShaderStage("data/shaders/spirv/water.frag.spv",              &water_frag_smh,            VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo waterline_frag_stage_ci         = loadShaderStage("data/shaders/spirv/waterline.frag.spv",          &waterline_frag_smh,        VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo laser_vert_stage_ci             = loadShaderStage("data/shaders/spirv/laser.vert.spv",              &laser_vert_smh,            VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo laser_frag_stage_ci             = loadShaderStage("data/shaders/spirv/laser.frag.spv",              &laser_frag_smh,            VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo oit_resolve_vert_stage_ci       = loadShaderStage("data/shaders/spirv/oit-resolve.vert.spv",        &oit_resolve_vert_smh,      VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo oit_resolve_frag_stage_ci       = loadShaderStage("data/shaders/spirv/oit-resolve.frag.spv",        &oit_resolve_frag_smh,      VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo outline_select_vert_stage_ci    = loadShaderStage("data/shaders/spirv/outline-select.vert.spv",     &outline_select_vert_smh, 	VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo outline_select_frag_stage_ci    = loadShaderStage("data/shaders/spirv/outline-select.frag.spv",     &outline_select_frag_smh, 	VK_SHADER_STAGE_FRAGMENT_BIT);
-	VkPipelineShaderStageCreateInfo sprite_vert_stage_ci  	        = loadShaderStage("data/shaders/spirv/sprite.vert.spv",  	  	    &sprite_vert_smh,  		    VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo sprite_frag_stage_ci  	        = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  	    &sprite_frag_smh,  		    VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo fft_spectrum_stage_ci           = loadShaderStage("data/shaders/spirv/fft-spectrum.comp.spv",   &fft_spectrum_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo fft_evolved_stage_ci            = loadShaderStage("data/shaders/spirv/fft-evolved.comp.spv",    &fft_evolved_smh,           VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo fft_pass_stage_ci               = loadShaderStage("data/shaders/spirv/fft-pass.comp.spv",       &fft_pass_smh,              VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo fft_finalize_stage_ci           = loadShaderStage("data/shaders/spirv/fft-finalize.comp.spv",   &fft_finalize_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo cube_vert_stage_ci 	 	        = loadShaderStage("data/shaders/spirv/cube.vert.spv", 	  	  	&cube_vert_smh, 	  	    VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo cube_frag_stage_ci 	 	        = loadShaderStage("data/shaders/spirv/cube.frag.spv", 	  	  	&cube_frag_smh, 	  		VK_SHADER_STAGE_FRAGMENT_BIT);
+	VkPipelineShaderStageCreateInfo model_vert_stage_ci 	 	    = loadShaderStage("data/shaders/spirv/model.vert.spv",   	  	&model_vert_smh,   		    VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo model_frag_stage_ci 	 	    = loadShaderStage("data/shaders/spirv/model.frag.spv",   	  	&model_frag_smh,   		    VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo outline_post_vert_stage_ci      = loadShaderStage("data/shaders/spirv/outline-post.vert.spv",   &outline_post_vert_smh,     VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo outline_post_frag_stage_ci      = loadShaderStage("data/shaders/spirv/outline-post.frag.spv",   &outline_post_frag_smh,     VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo water_vert_stage_ci             = loadShaderStage("data/shaders/spirv/water.vert.spv",          &water_vert_smh,            VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo water_frag_stage_ci             = loadShaderStage("data/shaders/spirv/water.frag.spv",          &water_frag_smh,            VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo waterline_frag_stage_ci         = loadShaderStage("data/shaders/spirv/waterline.frag.spv",      &waterline_frag_smh,        VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo shadow_cube_vert_stage_ci       = loadShaderStage("data/shaders/spirv/shadow-cube.vert.spv",    &shadow_cube_vert_smh,      VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo shadow_model_vert_stage_ci      = loadShaderStage("data/shaders/spirv/shadow-model.vert.spv",   &shadow_model_vert_smh,     VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo laser_vert_stage_ci             = loadShaderStage("data/shaders/spirv/laser.vert.spv",          &laser_vert_smh,            VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo laser_frag_stage_ci             = loadShaderStage("data/shaders/spirv/laser.frag.spv",          &laser_frag_smh,            VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo oit_resolve_vert_stage_ci       = loadShaderStage("data/shaders/spirv/oit-resolve.vert.spv",    &oit_resolve_vert_smh,      VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo oit_resolve_frag_stage_ci       = loadShaderStage("data/shaders/spirv/oit-resolve.frag.spv",    &oit_resolve_frag_smh,      VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo outline_select_vert_stage_ci    = loadShaderStage("data/shaders/spirv/outline-select.vert.spv", &outline_select_vert_smh, 	VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo outline_select_frag_stage_ci    = loadShaderStage("data/shaders/spirv/outline-select.frag.spv", &outline_select_frag_smh, 	VK_SHADER_STAGE_FRAGMENT_BIT);
+	VkPipelineShaderStageCreateInfo sprite_vert_stage_ci  	        = loadShaderStage("data/shaders/spirv/sprite.vert.spv",  	  	&sprite_vert_smh,  		    VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo sprite_frag_stage_ci  	        = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  	&sprite_frag_smh,  		    VK_SHADER_STAGE_FRAGMENT_BIT);
 
-    VkPipelineShaderStageCreateInfo cube_shader_stages[2]  	 	        = { cube_vert_stage_ci,    	        cube_frag_stage_ci }; 
-   	VkPipelineShaderStageCreateInfo model_shader_stages[2]   	        = { model_vert_stage_ci,   	        model_frag_stage_ci };
-    VkPipelineShaderStageCreateInfo outline_post_shader_stages[2]       = { outline_post_vert_stage_ci,     outline_post_frag_stage_ci };
-    VkPipelineShaderStageCreateInfo water_shader_stages[2]              = { water_vert_stage_ci,            water_frag_stage_ci };
-    VkPipelineShaderStageCreateInfo waterline_shader_stages[2]          = { outline_post_vert_stage_ci,        waterline_frag_stage_ci };
-    VkPipelineShaderStageCreateInfo laser_shader_stages[2]              = { laser_vert_stage_ci,            laser_frag_stage_ci };
-    VkPipelineShaderStageCreateInfo oit_resolve_shader_stages[2]        = { oit_resolve_vert_stage_ci,      oit_resolve_frag_stage_ci };
-    VkPipelineShaderStageCreateInfo outline_select_shader_stages[2]     = { outline_select_vert_stage_ci,   outline_select_frag_stage_ci }; 
-    VkPipelineShaderStageCreateInfo sprite_shader_stages[2]  	        = { sprite_vert_stage_ci,  	        sprite_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo cube_shader_stages[2]  	 	    = { cube_vert_stage_ci,    	        cube_frag_stage_ci }; 
+   	VkPipelineShaderStageCreateInfo model_shader_stages[2]   	    = { model_vert_stage_ci,   	        model_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo outline_post_shader_stages[2]   = { outline_post_vert_stage_ci,     outline_post_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo water_shader_stages[2]          = { water_vert_stage_ci,            water_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo waterline_shader_stages[2]      = { outline_post_vert_stage_ci,     waterline_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo laser_shader_stages[2]          = { laser_vert_stage_ci,            laser_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo oit_resolve_shader_stages[2]    = { oit_resolve_vert_stage_ci,      oit_resolve_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo outline_select_shader_stages[2] = { outline_select_vert_stage_ci,   outline_select_frag_stage_ci }; 
+    VkPipelineShaderStageCreateInfo sprite_shader_stages[2]  	    = { sprite_vert_stage_ci,  	        sprite_frag_stage_ci };
+    VkPipelineShaderStageCreateInfo shadow_cube_stages[1]           = { shadow_cube_vert_stage_ci };
+    VkPipelineShaderStageCreateInfo shadow_model_stages[1]          = { shadow_model_vert_stage_ci };
 
     // vertex input
     // per-vertex data: used for individually drawn meshes (sprites, models (currently), lasers, etc.)
@@ -3386,6 +3555,28 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateSampler(vulkan_state.logical_device_handle, &sampler_ci, 0, &vulkan_state.tiling_linear_sampler);
     }
 
+    // shadow sampler
+    {
+        VkSamplerCreateInfo shadow_sampler_ci = {0};
+        shadow_sampler_ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        shadow_sampler_ci.magFilter = VK_FILTER_NEAREST;
+        shadow_sampler_ci.minFilter = VK_FILTER_NEAREST;
+        shadow_sampler_ci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER; // 1.0 on border, means no shadows here
+        shadow_sampler_ci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        shadow_sampler_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+        shadow_sampler_ci.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+        shadow_sampler_ci.anisotropyEnable = VK_FALSE;
+        shadow_sampler_ci.maxAnisotropy = 1.0f;
+        shadow_sampler_ci.unnormalizedCoordinates = VK_FALSE;
+        shadow_sampler_ci.compareEnable = VK_FALSE; // compare manually in shader
+        shadow_sampler_ci.compareOp = VK_COMPARE_OP_ALWAYS;
+        shadow_sampler_ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        shadow_sampler_ci.minLod = 0.0f;
+        shadow_sampler_ci.maxLod = 0.0f;
+
+        vkCreateSampler(vulkan_state.logical_device_handle, &shadow_sampler_ci, 0, &vulkan_state.shadow_sampler);
+    }
+
     // standard descriptor set for normal vertex / fragment shader pairs
 	VkDescriptorSetLayoutBinding descriptor_set_binding = {0};
 	descriptor_set_binding.binding = 0;
@@ -3574,6 +3765,31 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     
     // below descriptor sets are updated only once, because they don't need to be updated on resize
 
+    // shadow map descriptor set
+    {
+        VkDescriptorSetAllocateInfo shadow_map_descriptor_set_alloc = {0};
+        shadow_map_descriptor_set_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        shadow_map_descriptor_set_alloc.descriptorPool = vulkan_state.descriptor_pool;
+        shadow_map_descriptor_set_alloc.descriptorSetCount = 1;
+        shadow_map_descriptor_set_alloc.pSetLayouts = &vulkan_state.descriptor_set_layout;
+        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &shadow_map_descriptor_set_alloc, &vulkan_state.shadow_map_descriptor_set);
+
+        VkDescriptorImageInfo shadow_map_image_info = {0};
+        shadow_map_image_info.sampler = vulkan_state.shadow_sampler;
+        shadow_map_image_info.imageView = vulkan_state.shadow_map_image_view;
+        shadow_map_image_info.imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+        VkWriteDescriptorSet shadow_map_descriptor_write = {0};
+        shadow_map_descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        shadow_map_descriptor_write.dstSet = vulkan_state.shadow_map_descriptor_set;
+        shadow_map_descriptor_write.dstBinding = 0;
+        shadow_map_descriptor_write.descriptorCount = 1;
+        shadow_map_descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        shadow_map_descriptor_write.pImageInfo = &shadow_map_image_info;
+
+        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &shadow_map_descriptor_write, 0, 0);
+    }
+
     // h0 storage image descriptor set
     {
         VkDescriptorSetAllocateInfo alloc_info = {0};
@@ -3749,15 +3965,16 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
 	// CUBE (INSTANCED) PIPELINE LAYOUT
     {
-        VkDescriptorSetLayout cube_set_layouts[3] =
+        VkDescriptorSetLayout cube_set_layouts[4] =
         {
             vulkan_state.view_constants_set_layout,
             vulkan_state.descriptor_set_layout, // atlas
             vulkan_state.descriptor_set_layout, // water displacement
+            vulkan_state.descriptor_set_layout, // shadow map
         };
         VkPipelineLayoutCreateInfo layout_info = {0};
         layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        layout_info.setLayoutCount = 3;
+        layout_info.setLayoutCount = 4;
         layout_info.pSetLayouts = cube_set_layouts;
         layout_info.pushConstantRangeCount = 0;
         layout_info.pPushConstantRanges = 0;
@@ -3772,15 +3989,16 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         push_constant_range.offset = 0;
         push_constant_range.size = (uint32)sizeof(ModelPushConstants);
 
-        VkDescriptorSetLayout model_set_layouts[2] =
+        VkDescriptorSetLayout model_set_layouts[3] =
         {
             vulkan_state.view_constants_set_layout, // per-view constants
             vulkan_state.descriptor_set_layout,     // water displacement
+            vulkan_state.descriptor_set_layout,     // shadow map
         };
 
         VkPipelineLayoutCreateInfo model_pipeline_layout_ci = {0};
         model_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        model_pipeline_layout_ci.setLayoutCount = 2;
+        model_pipeline_layout_ci.setLayoutCount = 3;
         model_pipeline_layout_ci.pSetLayouts = model_set_layouts;
         model_pipeline_layout_ci.pushConstantRangeCount = 1;
         model_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
@@ -3940,6 +4158,23 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         sprite_pipeline_layout_ci.pPushConstantRanges = &push_constant_range;
 
         vkCreatePipelineLayout(vulkan_state.logical_device_handle, &sprite_pipeline_layout_ci, 0, &vulkan_state.sprite_pipeline_layout);
+    }
+
+    // SHADOW PIPELINE LAYOUT
+    {
+        VkPushConstantRange shadow_push_constant_range = {0};
+        shadow_push_constant_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        shadow_push_constant_range.offset = 0;
+        shadow_push_constant_range.size = sizeof(float) * 16;
+
+        VkPipelineLayoutCreateInfo shadow_pipeline_layout_ci = {0};
+        shadow_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        shadow_pipeline_layout_ci.setLayoutCount = 1;
+        shadow_pipeline_layout_ci.pSetLayouts = &vulkan_state.view_constants_set_layout;
+        shadow_pipeline_layout_ci.pushConstantRangeCount = 1;
+        shadow_pipeline_layout_ci.pPushConstantRanges = &shadow_push_constant_range;
+
+        vkCreatePipelineLayout(vulkan_state.logical_device_handle, &shadow_pipeline_layout_ci, 0, &vulkan_state.shadow_pipeline_layout);
     }
 
     // FFT SPECTRUM PIPELINE LAYOUT
@@ -4223,6 +4458,64 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         waterline_pipeline_ci.pColorBlendState = &waterline_blend_ci;
 
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &waterline_pipeline_ci, 0, &vulkan_state.waterline_pipeline);
+    }
+
+    // shadow cube pipeline
+    {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
+        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
+        depth_stencil_state_creation_info.stencilTestEnable = VK_FALSE;
+
+        rasterization_state_creation_info.depthBiasEnable = VK_TRUE;
+        rasterization_state_creation_info.depthBiasConstantFactor = 1.0f;
+        rasterization_state_creation_info.depthBiasSlopeFactor = 2.0f;
+
+        VkPipelineColorBlendStateCreateInfo shadow_blend_ci = {0};
+        shadow_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        shadow_blend_ci.attachmentCount = 0;
+        shadow_blend_ci.pAttachments = 0;
+
+        VkGraphicsPipelineCreateInfo shadow_cube_ci = base_graphics_pipeline_creation_info;
+        shadow_cube_ci.stageCount = 1;
+        shadow_cube_ci.pStages = shadow_cube_stages;
+        shadow_cube_ci.pVertexInputState = &vertex_input_instanced;
+        shadow_cube_ci.pColorBlendState = &shadow_blend_ci;
+        shadow_cube_ci.layout = vulkan_state.shadow_pipeline_layout;
+        shadow_cube_ci.renderPass = vulkan_state.shadow_render_pass;
+
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &shadow_cube_ci, 0, &vulkan_state.shadow_cube_pipeline);
+    }
+
+    // shadow model pipeline
+    {
+        resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
+        depth_stencil_state_creation_info.depthTestEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthWriteEnable = VK_TRUE;
+        depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
+        depth_stencil_state_creation_info.stencilTestEnable = VK_FALSE;
+
+        rasterization_state_creation_info.depthBiasEnable = VK_TRUE;
+        rasterization_state_creation_info.depthBiasConstantFactor = 1.0f;
+        rasterization_state_creation_info.depthBiasSlopeFactor = 2.0f;
+
+        VkPipelineColorBlendStateCreateInfo shadow_blend_ci = {0};
+        shadow_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        shadow_blend_ci.attachmentCount = 0;
+        shadow_blend_ci.pAttachments = 0;
+
+        VkGraphicsPipelineCreateInfo shadow_model_ci = base_graphics_pipeline_creation_info;
+        shadow_model_ci.stageCount = 1;
+        shadow_model_ci.pStages = shadow_model_stages;
+        shadow_model_ci.pVertexInputState = &vertex_input_simple;
+        shadow_model_ci.pColorBlendState = &shadow_blend_ci;
+        shadow_model_ci.layout = vulkan_state.shadow_pipeline_layout;
+        shadow_model_ci.renderPass = vulkan_state.shadow_render_pass;
+
+        vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &shadow_model_ci, 0, &vulkan_state.shadow_model_pipeline);
     }
 
     // define outline post pipeline. different enough that we might as well set up an entirely new creation info. sets up state first, then assigns
@@ -5025,11 +5318,17 @@ void vulkanDraw(void)
         mat4Multiply(main_view_projection, projection_matrix, view_matrix);
         mat4Inverse(main_inverse_view_projection, main_view_projection);
 
+        Vec3 sun_direction = { -0.5f, -1.0f, -0.3f };
+        Vec3 coverage_center = { 10.0f, 0.0f, 10.0f };
+        float coverage_radius = 10.0f;
+        float light_view_projection[16];
+        mat4BuildDirectionalLight(light_view_projection, sun_direction, coverage_center, coverage_radius);
+
         memcpy(main_view_constants->view,            view_matrix,                  sizeof(float) * 16);
         memcpy(main_view_constants->proj,            projection_matrix,            sizeof(float) * 16);
         memcpy(main_view_constants->view_proj,       main_view_projection,         sizeof(float) * 16);
         memcpy(main_view_constants->inv_view_proj,   main_inverse_view_projection, sizeof(float) * 16);
-        memcpy(main_view_constants->light_view_proj, identity_matrix,              sizeof(float) * 16); // TODO: set up orthographic for directional shadows
+        memcpy(main_view_constants->light_view_proj, light_view_projection,        sizeof(float) * 16);
 
         main_view_constants->camera_position   = (Vec4){ vulkan_camera.coords.x, vulkan_camera.coords.y, vulkan_camera.coords.z, 0.0f };
         main_view_constants->water_plane_y     = -999.0f;
@@ -5066,6 +5365,82 @@ void vulkanDraw(void)
     render_pass_begin_info.renderArea.extent = vulkan_state.swapchain_extent;
     render_pass_begin_info.clearValueCount = 3;
     render_pass_begin_info.pClearValues = clear_values;
+
+    // SHADOW PASS
+    {
+        VkClearValue shadow_clear = {0};
+        shadow_clear.depthStencil.depth = 1.0f;
+
+        VkRenderPassBeginInfo shadow_rp_begin = {0};
+        shadow_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        shadow_rp_begin.renderPass = vulkan_state.shadow_render_pass;
+        shadow_rp_begin.framebuffer = vulkan_state.shadow_framebuffer;
+        shadow_rp_begin.renderArea.offset = (VkOffset2D){ 0, 0 };
+        shadow_rp_begin.renderArea.extent = (VkExtent2D){ SHADOW_MAP_RESOLUTION, SHADOW_MAP_RESOLUTION };
+        shadow_rp_begin.clearValueCount = 1;
+        shadow_rp_begin.pClearValues = &shadow_clear;
+
+        vkCmdBeginRenderPass(command_buffer, &shadow_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+
+        // full shadow map
+        VkViewport shadow_viewport = {0};
+        shadow_viewport.x = 0.0f;
+        shadow_viewport.y = 0.0f;
+        shadow_viewport.width  = (float)SHADOW_MAP_RESOLUTION;
+        shadow_viewport.height = (float)SHADOW_MAP_RESOLUTION;
+        shadow_viewport.minDepth = 0.0f;
+        shadow_viewport.maxDepth = 1.0f;
+
+        VkRect2D shadow_scissor = {0};
+        shadow_scissor.extent.width  = SHADOW_MAP_RESOLUTION;
+        shadow_scissor.extent.height = SHADOW_MAP_RESOLUTION;
+
+        vkCmdSetViewport(command_buffer, 0, 1, &shadow_viewport);
+        vkCmdSetScissor(command_buffer, 0, 1, &shadow_scissor);
+
+        uint32 shadow_view_constants_offset = VIEW_MAIN * vulkan_state.view_constants_stride;
+
+        // cube casters
+        if (cube_instance_count > 0)
+        {
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.shadow_cube_pipeline);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.shadow_pipeline_layout, 0, 1, &vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame], 1, &shadow_view_constants_offset);
+
+            VkBuffer cube_buffers[2] = { vulkan_state.cube_vertex_buffer, vulkan_state.cube_instance_buffers[vulkan_state.current_frame] };
+            VkDeviceSize cube_offsets[2] = { 0, 0 };
+            vkCmdBindVertexBuffers(command_buffer, 0, 2, cube_buffers, cube_offsets);
+            vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+            vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
+        }
+
+        // model casters
+        if (model_instance_count > 0)
+        {
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.shadow_model_pipeline);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.shadow_pipeline_layout, 0, 1, &vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame], 1, &shadow_view_constants_offset);
+
+            for (uint32 model_instance_index = 0; model_instance_index < model_instance_count; model_instance_index++)
+            {
+                Model* model = &model_instances[model_instance_index];
+                LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
+                if (model_data->index_count == 0) continue;
+
+                float model_matrix[16];
+                mat4BuildTRS(model_matrix, model->coords, model->rotation, model->scale);
+
+                vkCmdPushConstants(command_buffer, vulkan_state.shadow_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(float) * 16, model_matrix);
+
+                VkDeviceSize vertex_offset = 0;
+                vkCmdBindVertexBuffers(command_buffer, 0, 1, &model_data->vertex_buffer, &vertex_offset);
+                vkCmdBindIndexBuffer(command_buffer, model_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+
+                vkCmdDrawIndexed(command_buffer, model_data->index_count, 1, 0, 0, 0);
+            }
+        }
+
+        vkCmdEndRenderPass(command_buffer);
+    }
 
     // REFLECTION PASS
     {
@@ -5104,15 +5479,16 @@ void vulkanDraw(void)
             vkCmdBindVertexBuffers(command_buffer, 0, 2, cube_buffers, cube_offsets);
             vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-            VkDescriptorSet cube_descriptor_sets[3] =
+            VkDescriptorSet cube_descriptor_sets[4] =
             {
                 vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame],
                 vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index],
                 vulkan_state.displacement_sampled_descriptor_set,
+                vulkan_state.shadow_map_descriptor_set,
             };
 
             uint32 cube_view_constants_offset = VIEW_REFLECTION * vulkan_state.view_constants_stride;
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 3, cube_descriptor_sets, 1, &cube_view_constants_offset);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 4, cube_descriptor_sets, 1, &cube_view_constants_offset);
 
             vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
         }
@@ -5122,13 +5498,14 @@ void vulkanDraw(void)
         {
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_reflection_pipeline);
 
-            VkDescriptorSet model_descriptor_sets[2] =
+            VkDescriptorSet model_descriptor_sets[3] =
             {
                 vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame],
                 vulkan_state.displacement_sampled_descriptor_set,
+                vulkan_state.shadow_map_descriptor_set,
             };
             uint32 model_view_constants_offset = VIEW_REFLECTION * vulkan_state.view_constants_stride;
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 2, model_descriptor_sets, 1, &model_view_constants_offset);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 3, model_descriptor_sets, 1, &model_view_constants_offset);
 
             for (uint32 model_instance_index = 0; model_instance_index < model_instance_count; model_instance_index++)
             {
@@ -5173,14 +5550,15 @@ void vulkanDraw(void)
         vkCmdBindVertexBuffers(command_buffer, 0, 2, cube_buffers, cube_offsets);
         vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-        VkDescriptorSet cube_descriptor_sets[3] =
+        VkDescriptorSet cube_descriptor_sets[4] =
         {
             vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame],
             vulkan_state.descriptor_sets[vulkan_state.atlas_3d_asset_index],
             vulkan_state.displacement_sampled_descriptor_set,
+            vulkan_state.shadow_map_descriptor_set,
         };
         uint32 cube_view_constants_offset = VIEW_MAIN * vulkan_state.view_constants_stride;
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 3, cube_descriptor_sets, 1, &cube_view_constants_offset);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline_layout, 0, 4, cube_descriptor_sets, 1, &cube_view_constants_offset);
 
         vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, cube_instance_count, 0, 0, 0);
     }
@@ -5190,13 +5568,14 @@ void vulkanDraw(void)
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline);
 
-        VkDescriptorSet model_descriptor_sets[2] =
+        VkDescriptorSet model_descriptor_sets[3] =
         {
             vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame],
             vulkan_state.displacement_sampled_descriptor_set,
+            vulkan_state.shadow_map_descriptor_set,
         };
         uint32 model_view_constants_offset = VIEW_MAIN * vulkan_state.view_constants_stride;
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 2, model_descriptor_sets, 1, &model_view_constants_offset);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.model_pipeline_layout, 0, 3, model_descriptor_sets, 1, &model_view_constants_offset);
 
         for (uint32 model_instance_index = 0; model_instance_index < model_instance_count; model_instance_index++)
         {
@@ -5621,40 +6000,41 @@ void vulkanDraw(void)
         vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
     }
 
-    // debug window
-    /*
+    // debug quad
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline);
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &sprite_vb_offset);
+
+        VkDeviceSize debug_vertex_offset = 0;
+        vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.sprite_vertex_buffer, &debug_vertex_offset);
         vkCmdBindIndexBuffer(command_buffer, vulkan_state.sprite_index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-        //vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.paint_descriptor_set, 0, 0);
-        //vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.fft_buffer_a_sampled_descriptor_set, 0, 0);
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.reflection_descriptor_set, 0, 0);
+        uint32 debug_view_constants_offset = VIEW_SPRITE * vulkan_state.view_constants_stride;
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame], 1, &debug_view_constants_offset);
+
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 1, 1, &vulkan_state.shadow_map_descriptor_set, 0, 0);
 
         float debug_size = 300.0f;
         float debug_margin = 10.0f;
-        Vec3 debug_coords;
-        debug_coords.x = (float)vulkan_state.swapchain_extent.width - debug_margin - debug_size * 0.5f;
-        debug_coords.y = (float)vulkan_state.swapchain_extent.height - (debug_margin + debug_size * 0.5f);
-        debug_coords.z = 0.0f;
+        Vec3 debug_coords =
+        {
+            (float)vulkan_state.swapchain_extent.width  - debug_margin - debug_size * 0.5f,
+            (float)vulkan_state.swapchain_extent.height - debug_margin - debug_size * 0.5f,
+            0.0f,
+        };
         Vec3 debug_scale = { debug_size, debug_size, 1.0f };
 
         float debug_model[16];
-        Vec4 identity_quaternion = { 0, 0, 0, 1 };
+        Vec4 identity_quaternion = { 0.0f, 0.0f, 0.0f, 1.0f };
         mat4BuildTRS(debug_model, debug_coords, identity_quaternion, debug_scale);
 
-        PushConstants debug_pc = {0};
+        SpritePushConstants debug_pc = {0};
         memcpy(debug_pc.model, debug_model, sizeof(debug_pc.model));
-        memcpy(debug_pc.view, view2d, sizeof(debug_pc.view));
-        memcpy(debug_pc.proj, ortho, sizeof(debug_pc.proj));
         debug_pc.uv_rect = (Vec4){ 0.0f, 0.0f, 1.0f, 1.0f };
-        debug_pc.alpha = 1.0f;
+        debug_pc.color   = (Vec4){ 0.0f, 0.0f, 0.0f, 1.0f }; // opaque
 
-        vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushConstants), &debug_pc);
+        vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SpritePushConstants), &debug_pc);
         vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
     }
-    */
 
     vkCmdEndRenderPass(command_buffer);
 

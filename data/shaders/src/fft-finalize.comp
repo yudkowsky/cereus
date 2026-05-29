@@ -7,7 +7,7 @@ layout(set = 1, binding = 0, rgba16f) uniform writeonly image2D water_image; // 
 layout(push_constant) uniform PushConstants
 {
     int texture_size;
-    float tile_length;
+    float water_tile_length;
 }
 pc;
 
@@ -30,7 +30,7 @@ void main()
     float height_down   = imageLoad(fft_buffer_a_image, texel_down).x;
     float height_up     = imageLoad(fft_buffer_a_image, texel_up).x;
 
-    float texel_world_size = pc.tile_length / float(N);
+    float texel_world_size = pc.water_tile_length / float(N);
 
     float dhdx = (height_right - height_left) / (2.0 * texel_world_size);
     float dhdz = (height_up    - height_down) / (2.0 * texel_world_size);

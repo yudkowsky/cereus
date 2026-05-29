@@ -435,6 +435,7 @@ GameProgress game_progress = WORLD_0;
 Int3 level_dim = {0};
 Int3 restart_position = {0};
 bool in_overworld = true;
+//Vec3 light_direction = (Vec3){ -0.5f, -1.0f, -0.3f }; // TODO: define in level
 
 WorldState leap_of_faith_world_state_snapshot = {0};
 TemporaryState leap_of_faith_temp_state_snapshot = {0};
