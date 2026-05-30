@@ -2812,18 +2812,6 @@ void doStandardMovement(Direction direction, Int3 next_player_coords)
     }
 }
 
-void updatePackDetached()
-{
-    TileType tile_behind_player = getTileType(getNextCoords(world_state.player.coords, oppositeDirection(world_state.player.direction)));
-    if (tile_behind_player == TILE_TYPE_PACK || temp_state.pack_turn_state.pack_intermediate_states_timer > 0) 
-    {
-        temp_state.pack_attached = true;
-        setTileDirection(player->direction, pack->coords, 0);
-        pack->direction = player->direction;
-    }
-    else temp_state.pack_attached = false;
-}
-
 void clearMovementState(Entity* e)
 {
     e->moving_direction = NO_DIRECTION;
@@ -2974,16 +2962,6 @@ void doPhysicsTick()
         temp_state.pack_turn_state.pack_intermediate_states_timer--;
     }
 
-    // TODO: this updating of pack every frame means that the pack snaps to where it would be if it were attached. e.g. player turns s.t. pack is behind player direction,
-    // but player hasn't gotten that rotation yet, and this causes snap of just less than 90deg to behind where player is currently looking.
-    // similarly, when climb causes attach, pack can snap up to where player is descending from, or into a block which is behind where player is ascending from. this is not good
-    //
-    // some things to consider when handling this: i want to not actually attach the pack unless the player is fully at the right place, e.g. shouldn't snap up if player climbs down and then up
-    // without having been fully in the correct position to attach.
-    // but i also want to be able to turn and then walk before the turn is fully finished, and still attach pack - this is a case where the player will never have fully correct rotation
-    // and also be in the correct tile. so need to be at least a little bit intelligent here.
-    updatePackDetached();
-
     // falling logic for entities
     Entity* falling_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
     FOR(group_index, 4)
@@ -3129,6 +3107,7 @@ void doPhysicsTick()
     }
 
     // climb logic
+    // TODO: condense into one logical pass, instead of the two cases
     if (player->moving_direction == UP)
     {
         float y_coord_difference = getComponentAlongDirection(UP, vec3Subtract(int3ToVec3(player->coords), player->position));
@@ -3176,7 +3155,7 @@ void doPhysicsTick()
             if (try_climb_more)
             {
                 bool climb_more = false;
-                bool push_up = false;
+                bool player_push_up = false;
 
                 Int3 coords_above_player = getNextCoords(player->coords, UP);
                 TileType type_above_player = getTileType(coords_above_player);
@@ -3188,21 +3167,27 @@ void doPhysicsTick()
                 else if (isPushable(type_above_player) && canPushUp(coords_above_player))
                 {
                     climb_more = true;
-                    push_up = true;
+                    player_push_up = true;
                 }
 
                 if (climb_more)
                 {
-                    createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
-                    if (push_up) pushUp(coords_above_player, PLAYER_ID);
-                    moveEntityInBufferAndState(player, coords_above_player, player->direction);
-                    player->position.y += CLIMBING_SPEED;
-                    player->velocity.y = CLIMBING_SPEED;
+                    if (!temp_state.pack_attached)
+                    {
+                        // check behind previous player position for pack: if exists, pack should attach, but only if won't instantly detach.
+                        Int3 coords_behind = getNextCoords(player->coords, oppositeDirection(player->direction));
+                        if (getTileType(coords_behind) == TILE_TYPE_PACK)
+                        {
+                            // want to attach
+                            Int3 next_coords_for_pack_if_attach = getNextCoords(coords_behind, UP);
+                            if (getTileType(next_coords_for_pack_if_attach) == TILE_TYPE_NONE) temp_state.pack_attached = true;
+                        }
+                    }
 
                     if (temp_state.pack_attached)
                     {
                         bool pack_stays_with_player = false;
-                        bool pack_pushes = false;
+                        bool pack_push_up = false;
 
                         Int3 coords_above_pack = getNextCoords(pack->coords, UP);
                         TileType type_above_pack = getTileType(coords_above_pack);
@@ -3214,15 +3199,14 @@ void doPhysicsTick()
                         else if (isPushable(type_above_pack) && canPushUp(coords_above_pack))
                         {
                             pack_stays_with_player = true;
-                            pack_pushes = true;
+                            pack_push_up = true;
                         }
 
                         if (pack_stays_with_player)
                         {
                             createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
-                            if (pack_pushes) pushUp(coords_above_pack, PACK_ID);
+                            if (pack_push_up) pushUp(coords_above_pack, PACK_ID);
                             moveEntityInBufferAndState(pack, coords_above_pack, player->direction);
-
                             pack->position.y += CLIMBING_SPEED;
                             pack->velocity.y = CLIMBING_SPEED;
                         }
@@ -3233,6 +3217,12 @@ void doPhysicsTick()
                             pack->velocity = (Vec3){0};
                         }
                     }
+
+                    createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
+                    if (player_push_up) pushUp(coords_above_player, PLAYER_ID);
+                    moveEntityInBufferAndState(player, coords_above_player, player->direction);
+                    player->position.y += CLIMBING_SPEED;
+                    player->velocity.y = CLIMBING_SPEED;
                 }
                 else
                 {
@@ -3320,6 +3310,43 @@ void doPhysicsTick()
                 }
             }
         }
+    }
+
+    // TODO: this updating of pack every frame means that the pack snaps to where it would be if it were attached. e.g. player turns s.t. pack is behind player direction,
+    // but player hasn't gotten that rotation yet, and this causes snap of just less than 90deg to behind where player is currently looking.
+    // similarly, when climb causes attach, pack can snap up to where player is descending from, or into a block which is behind where player is ascending from. this is not good
+    //
+    // some things to consider when handling this: i want to not actually attach the pack unless the player is fully at the right place, e.g. shouldn't snap up if player climbs down and then up
+    // without having been fully in the correct position to attach.
+    // but i also want to be able to turn and then walk before the turn is fully finished, and still attach pack - this is a case where the player will never have fully correct rotation
+    // and also be in the correct tile. so need to be at least a little bit intelligent here.
+
+    // update pack attached if relevant
+    TileType tile_behind_player = getTileType(getNextCoords(world_state.player.coords, oppositeDirection(world_state.player.direction)));
+    if (tile_behind_player == TILE_TYPE_PACK)
+    {
+        if (!temp_state.pack_attached && (player->moving_direction == UP || player->moving_direction == DOWN || player->falling))
+        {
+            // vertical movement of player causing pack attach. in this case, will never have hit correct coords yet;
+            // instead, this is handled in the climbing case, where there is a clear "transition to next tile" block.
+            temp_state.pack_attached = false;
+        }
+        else if (pack->falling)
+        {
+            // if pack still falling, pack is still in air, so should not attach. 
+            // player is not moving vertically, so will be no problem with opposite movement causing miss.
+            temp_state.pack_attached = false;
+        }
+        else
+        {
+            // no vertical movement, so player turned such that pack is behind, or pack has fallen behind player and settled. 
+            // set attached to true and let later code handle correct pack movement TODO: actually implement this
+            temp_state.pack_attached = true;
+        }
+    }
+    else if (temp_state.pack_turn_state.pack_intermediate_states_timer == 0)
+    {
+        temp_state.pack_attached = false;
     }
 
     // player movement

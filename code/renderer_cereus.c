@@ -572,7 +572,7 @@ const uint32 CUBE_INSTANCE_CAPACITY = 8192;
 const uint32 WATER_INSTANCE_CAPACITY = 8192;
 const uint32 LASER_INSTANCE_CAPACITY = 1024;
 
-const uint32 SHADOW_MAP_RESOLUTION = 4192;
+const uint32 SHADOW_MAP_RESOLUTION = 4096;
 
 // TODO: set these in loadAsset where stb_image gives me width / height. store in CachedAsset.
 const int32 ATLAS_2D_WIDTH = 128;
