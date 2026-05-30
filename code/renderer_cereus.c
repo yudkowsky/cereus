@@ -490,6 +490,7 @@ typedef struct VulkanState
     // models
     LoadedModel loaded_models[64];
     LoadedModel laser_cylinder_model; // TODO: probably index everything into loaded models; figure out what order i want to put stuff in, if can't just take their id
+    LoadedModel dummy_cube_model;
 
     // OIT stuff
     VkBuffer oit_fragment_pool;
@@ -609,9 +610,6 @@ uint32 model_instance_count = 0;
 
 Water water_instances[8192];
 uint32 water_instance_count = 0;
-
-Cube cube_editor_outline_instances[1024];
-uint32 cube_editor_outline_instance_count = 0;
 
 Model model_editor_outline_instances[1024];
 uint32 model_editor_outline_instance_count = 0;
@@ -1495,6 +1493,7 @@ void loadAllEntities()
     vulkan_state.loaded_models[MODEL_3D_SOURCE_MAGENTA - MODEL_3D_VOID] = loadModel("data/assets/models/magenta-source.glb");
 
     vulkan_state.laser_cylinder_model = loadModel("data/assets/models/laser-cylinder.glb");
+    vulkan_state.dummy_cube_model = loadModel("data/assets/models/dummy-cube.glb");
 }
 
 VkPipelineShaderStageCreateInfo loadShaderStage(char* path, VkShaderModule* module, VkShaderStageFlagBits stage_bit)
@@ -4955,7 +4954,6 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     cube_instance_count = 0;
     laser_instance_count = 0;
     model_instance_count = 0;
-    cube_editor_outline_instance_count = 0;
     model_editor_outline_instance_count = 0;
     water_instance_count = 0;
 
@@ -5876,33 +5874,12 @@ void vulkanDraw(void)
     uint32 outline_view_constants_offset = VIEW_MAIN * vulkan_state.view_constants_stride;
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.editor_outline_pipeline_layout, 0, 1, &vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame], 1, &outline_view_constants_offset);
 
-    // cube outlines
-    {
-        VkDeviceSize vertex_offset = 0;
-        vkCmdBindVertexBuffers(command_buffer, 0, 1, &vulkan_state.cube_vertex_buffer, &vertex_offset);
-        vkCmdBindIndexBuffer(command_buffer, vulkan_state.cube_index_buffer, 0, VK_INDEX_TYPE_UINT32);
-
-        for (uint32 cube_outline_index = 0; cube_outline_index < cube_editor_outline_instance_count; cube_outline_index++)
-        {
-            Cube* cube = &cube_editor_outline_instances[cube_outline_index];
-
-            float model_matrix[16];
-            mat4BuildTRS(model_matrix, cube->coords, cube->rotation, cube->scale);
-
-            OutlinePushConstants outline_push_constants = {0};
-            memcpy(outline_push_constants.model, model_matrix, sizeof(outline_push_constants.model));
-
-            vkCmdPushConstants(command_buffer, vulkan_state.editor_outline_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(OutlinePushConstants), &outline_push_constants);
-            vkCmdDrawIndexed(command_buffer, vulkan_state.cube_index_count, 1, 0, 0, 0);
-        }
-    }
-
     // model outlines
     for (uint32 model_outline_index = 0; model_outline_index < model_editor_outline_instance_count; model_outline_index++)
     {
         Model* model = &model_editor_outline_instances[model_outline_index];
 
-        LoadedModel* model_data = &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
+        LoadedModel* model_data = model->model_id == SPRITEID_ASSET_COUNT ? &vulkan_state.dummy_cube_model : &vulkan_state.loaded_models[model->model_id - MODEL_3D_VOID];
         if (model_data->index_count == 0) continue;
 
         VkDeviceSize vertex_offset = 0;

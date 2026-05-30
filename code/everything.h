@@ -142,7 +142,7 @@ typedef enum SpriteId
     MODEL_3D_LADDER,
     MODEL_3D_WON_BLOCK,
 
-    ASSET_COUNT
+    SPRITEID_ASSET_COUNT
 }
 SpriteId;
 

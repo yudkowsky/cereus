@@ -350,7 +350,6 @@ const Vec4 IDENTITY_QUATERNION  = { 0, 0, 0, 1 };
 
 const int32 PLAYER_ID = 1;
 const int32 PACK_ID   = 2;
-const int32 OUTLINE_DRAW_ID = ASSET_COUNT;
 const int32 ID_OFFSET_BOX          = 100 * 1;
 const int32 ID_OFFSET_MIRROR       = 100 * 2;
 const int32 ID_OFFSET_GLASS        = 100 * 3;
@@ -391,7 +390,7 @@ Input prev_input = {0}; // copied from previous frame input to generate keys_pre
 DrawCommand draw_commands[16768] = {0};
 int32 draw_command_count = 0;
 
-const char debug_level_name[64] = "testing";
+const char debug_level_name[64] = "red-blue-i";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
@@ -3309,15 +3308,6 @@ void doPhysicsTick()
         }
     }
 
-    // TODO: this updating of pack every frame means that the pack snaps to where it would be if it were attached. e.g. player turns s.t. pack is behind player direction,
-    // but player hasn't gotten that rotation yet, and this causes snap of just less than 90deg to behind where player is currently looking.
-    // similarly, when climb causes attach, pack can snap up to where player is descending from, or into a block which is behind where player is ascending from. this is not good
-    //
-    // some things to consider when handling this: i want to not actually attach the pack unless the player is fully at the right place, e.g. shouldn't snap up if player climbs down and then up
-    // without having been fully in the correct position to attach.
-    // but i also want to be able to turn and then walk before the turn is fully finished, and still attach pack - this is a case where the player will never have fully correct rotation
-    // and also be in the correct tile. so need to be at least a little bit intelligent here.
-
     // update pack attached if relevant
     TileType tile_behind_player = getTileType(getNextCoords(world_state.player.coords, oppositeDirection(world_state.player.direction)));
     if (tile_behind_player == TILE_TYPE_PACK)
@@ -3337,7 +3327,7 @@ void doPhysicsTick()
         else
         {
             // no vertical movement, so player turned such that pack is behind, or pack has fallen behind player and settled. 
-            // set attached to true and let later code handle correct pack movement TODO: actually implement this
+            // set attached to true and let later code handle correct pack movement
             temp_state.pack_attached = true;
         }
     }
@@ -3347,74 +3337,94 @@ void doPhysicsTick()
     }
 
     // player movement
+
+    // handle directional movement
+    FOR(direction_index, 4)
     {
-        // handle directional movement
-        FOR(direction_index, 4)
+        // only handle velocity / position if offset from the coords
+        Vec3 difference_in_player_position = vec3Subtract(int3ToVec3(player->coords), player->position);
+        float difference_in_position_along_direction = getComponentAlongDirection(direction_index, difference_in_player_position);
+        float sign = direction_index == NORTH || direction_index == WEST ? -1.0f : 1.0f;
+        if (difference_in_position_along_direction * sign <= 0) continue; // will continue if west picks up a difference in the east direction (and north in south direction)
+
+        float position_along_direction = getComponentAlongDirection(direction_index, player->position);
+        float coords_along_direction = getComponentAlongDirection(direction_index, int3ToVec3(player->coords));
+        float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(direction_index, sign);
+        if (!wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign))
         {
-            // only handle velocity / position if offset from the coords
-            Vec3 difference_in_player_position = vec3Subtract(int3ToVec3(player->coords), player->position);
-            float difference_in_position_along_direction = getComponentAlongDirection(direction_index, difference_in_player_position);
-            float sign = direction_index == NORTH || direction_index == WEST ? -1.0f : 1.0f;
-            if (difference_in_position_along_direction * sign <= 0) continue; // will continue if west picks up a difference in the east direction (and north in south direction)
-
-            float position_along_direction = getComponentAlongDirection(direction_index, player->position);
-            float coords_along_direction = getComponentAlongDirection(direction_index, int3ToVec3(player->coords));
-            float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(direction_index, sign);
-            if (!wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign))
-            {
-                // no overshooting: accelerate fully
-                if (direction_index == NORTH || direction_index == SOUTH) player->velocity.z = speculative_velocity_along_direction;
-                else player->velocity.x = speculative_velocity_along_direction;
-                player->position = vec3Add(player->position, player->velocity);
-            }
-            else
-            {
-                float current_speed = sign * getComponentAlongDirection(direction_index, player->velocity);
-                float remaining_distance = sign * difference_in_position_along_direction;
-                float stopping_distance = oneDimensionalDecelerationSimulation(current_speed, PLAYER_MAX_DECELERATION);
-                float distance_error = remaining_distance - stopping_distance;
-                int32 frames_to_stop = (int32)(ceilf(current_speed / PLAYER_MAX_DECELERATION));
-                if (frames_to_stop < 1) frames_to_stop = 1;
-                float movement_adjustment = distance_error / (float)frames_to_stop;
-
-                float decelerated_speed = current_speed - PLAYER_MAX_DECELERATION;
-                if (decelerated_speed < 0) decelerated_speed = 0;
-
-                // move position by velocity + adjustment, then set velocity to decelerated value
-                float actual_movement = current_speed + movement_adjustment;
-
-                player->position = vec3AddFloatAlongDirection(direction_index, sign * actual_movement, player->position);
-                if (direction_index == NORTH || direction_index == SOUTH) player->velocity.z = sign * decelerated_speed;
-                else player->velocity.x = sign * decelerated_speed;
-            }
-        }
-
-        // player rotation
-        float total_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
-        float frame_count = ceilf((float)fabs(total_angle) / MAX_ANGULAR_VELOCITY);
-        if (frame_count <= 1)
-        {
-            player->rotation = directionToQuaternion(player->direction);
+            // no overshooting: accelerate fully
+            if (direction_index == NORTH || direction_index == SOUTH) player->velocity.z = speculative_velocity_along_direction;
+            else player->velocity.x = speculative_velocity_along_direction;
+            player->position = vec3Add(player->position, player->velocity);
         }
         else
         {
-            float step_angle = total_angle / frame_count;
-            Vec4 rotation_this_frame = quaternionFromAxis(int3ToVec3(AXIS_Y), step_angle);
-            player->rotation = quaternionMultiply(rotation_this_frame, player->rotation);
+            float current_speed = sign * getComponentAlongDirection(direction_index, player->velocity);
+            float remaining_distance = sign * difference_in_position_along_direction;
+            float stopping_distance = oneDimensionalDecelerationSimulation(current_speed, PLAYER_MAX_DECELERATION);
+            float distance_error = remaining_distance - stopping_distance;
+            int32 frames_to_stop = (int32)(ceilf(current_speed / PLAYER_MAX_DECELERATION));
+            if (frames_to_stop < 1) frames_to_stop = 1;
+            float movement_adjustment = distance_error / (float)frames_to_stop;
+
+            float decelerated_speed = current_speed - PLAYER_MAX_DECELERATION;
+            if (decelerated_speed < 0) decelerated_speed = 0;
+
+            // move position by velocity + adjustment, then set velocity to decelerated value
+            float actual_movement = current_speed + movement_adjustment;
+
+            player->position = vec3AddFloatAlongDirection(direction_index, sign * actual_movement, player->position);
+            if (direction_index == NORTH || direction_index == SOUTH) player->velocity.z = sign * decelerated_speed;
+            else player->velocity.x = sign * decelerated_speed;
         }
+        player->moving_direction = direction_index;
+    }
+    if (vec3IsZero(player->velocity)) player->moving_direction = NO_DIRECTION;
 
-        // pack rotation and movement
-        bool do_pack_rotation = false;
-        if (temp_state.pack_attached) do_pack_rotation = true;
-        else if (!vec4IsEqual(pack->rotation, directionToQuaternion(pack->direction))) do_pack_rotation = true; // pack has detached, but should still be rotating somewhere. i.e. player is currently falling. so use players rotation as before
+    // player rotation
+    float total_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
+    float frame_count = ceilf((float)fabs(total_angle) / MAX_ANGULAR_VELOCITY);
+    if (frame_count <= 1)
+    {
+        player->rotation = directionToQuaternion(player->direction);
+    }
+    else
+    {
+        float step_angle = total_angle / frame_count;
+        Vec4 rotation_this_frame = quaternionFromAxis(int3ToVec3(AXIS_Y), step_angle);
+        player->rotation = quaternionMultiply(rotation_this_frame, player->rotation);
+    }
 
-        if (do_pack_rotation)
+    // pack rotation and movement
+    bool do_pack_swing = false;
+    bool do_pack_swing_without_y = false;
+    bool player_is_rotating = vec4IsEqual(pack->rotation, directionToQuaternion(pack->direction));
+
+    if (temp_state.pack_attached)
+    {
+        if (temp_state.pack_turn_state.pack_intermediate_states_timer == 0 && player_is_rotating)
         {
-            // pack follows player movement if attached
-            Vec3 rotated_offset = vec3RotateByQuaternion(int3ToVec3(AXIS_Z), player->rotation); // AXIS_Z because pack is 0, 0, 1 relative to player 0, 0, 0, when player has no rotation.
-            pack->position = vec3Add(player->position, rotated_offset);
-            pack->rotation = player->rotation;
+            pack->position = vec3AddFloatAlongDirection(player->direction, player->direction == NORTH || player->direction == WEST ? 1.0f : -1.0f, player->position);
         }
+        else
+        {
+            do_pack_swing = true;
+        }
+    }
+    else if (!player_is_rotating)
+    {
+        // pack has detached, but should still be rotating: player is falling, and that has caused pack detach. keep rotation and movement, but stay at same y level
+        do_pack_swing = true;
+        do_pack_swing_without_y = true;
+    }
+
+    if (do_pack_swing)
+    {
+        Vec3 rotated_offset = vec3RotateByQuaternion(int3ToVec3(AXIS_Z), player->rotation); // AXIS_Z because pack is 0, 0, 1 relative to player 0, 0, 0, when player has no rotation.
+        Vec3 new_pack_position = vec3Add(player->position, rotated_offset);
+        pack->rotation = player->rotation;
+        if (do_pack_swing_without_y) vec3SetComponentAlongDirection(UP, new_pack_position, pack->position.y);
+        pack->position = new_pack_position;
     }
 
     // handle moving entities
@@ -4449,7 +4459,6 @@ bool gameFrame(double delta_time, Input* input)
                             else pushing_coords = next_player_coords;
 
                             TileType type_to_push = getTileType(pushing_coords);
-
                             if (type_to_push == TILE_TYPE_NONE)
                             {
                                 allow_down_climb = true;
@@ -4656,7 +4665,7 @@ bool gameFrame(double delta_time, Input* input)
             
             // pack info
             char pack_text[256] = {0};
-            snprintf(pack_text, sizeof(pack_text), "pack info: coords: %i, %i, %i, pos norm: %.2f, %.2f, %.2f, velocity: %.2f, %.2f, %.2f, attached: %i", pack->coords.x, pack->coords.y, pack->coords.z, pack->position.x, pack->position.y, pack->position.z, pack->velocity.x, pack->velocity.y, pack->velocity.z, temp_state.pack_attached);
+            snprintf(pack_text, sizeof(pack_text), "pack info: coords: %i, %i, %i, pos norm: %.2f, %.2f, %.2f, velocity: %.2f, %.2f, %.2f, attached: %i, timer: %i", pack->coords.x, pack->coords.y, pack->coords.z, pack->position.x, pack->position.y, pack->position.z, pack->velocity.x, pack->velocity.y, pack->velocity.z, temp_state.pack_attached, temp_state.pack_turn_state.pack_intermediate_states_timer);
             createDebugText(pack_text);
 
             // boxes
@@ -4665,11 +4674,6 @@ bool gameFrame(double delta_time, Input* input)
             Entity box2 = world_state.boxes[1];
             snprintf(box_text, sizeof(box_text), "box 1: moving dir: %i, on_head: %i, moving dir: %i, on_head: %i", box1.moving_direction, box1.moving_on_head, box2.moving_direction, box2.moving_on_head);
             createDebugText(box_text);
-
-            // pack attached
-            char attached_text[256] = {0};
-            snprintf(attached_text, sizeof(attached_text), "pack attached: %i", temp_state.pack_attached);
-            createDebugText(attached_text);
 
             /*
             // show undo deltas in buffer
@@ -5009,8 +5013,8 @@ bool gameFrame(double delta_time, Input* input)
                         x_draw_coords = vec3Add(x_draw_coords, outline_offset);
                         z_draw_coords = vec3Add(z_draw_coords, outline_offset);
 
-                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
-                        drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                        drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                        drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
                         x_draw_offset += OVERWORLD_SCREEN_SIZE_X;
                     }
                     x_draw_offset = 0;
@@ -5024,12 +5028,12 @@ bool gameFrame(double delta_time, Input* input)
                 Vec3 z_draw_coords_near = (Vec3){ (float)level_dim.x / 2.0f, (float)level_dim.y / 2.0f, -0.5f};
                 Vec3 x_draw_coords_far  = (Vec3){ (float)level_dim.x + 0.5f, (float)level_dim.y / 2.0f, (float)level_dim.z / 2.0f };
                 Vec3 z_draw_coords_far  = (Vec3){ (float)level_dim.x / 2.0f, (float)level_dim.y / 2.0f, (float)level_dim.z + 0.5f };
-                Vec3 x_draw_scale = (Vec3){ 0,                         (float)level_dim.y, (float)level_dim.z + 1.0f };
-                Vec3 z_draw_scale = (Vec3){ (float)level_dim.x + 1.0f, (float)level_dim.y, 0 };
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_near, x_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_near, z_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, x_draw_coords_far,  x_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, z_draw_coords_far,  z_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                Vec3 x_draw_scale = (Vec3){ 0, 7, (float)level_dim.z + 1.0f };
+                Vec3 z_draw_scale = (Vec3){ (float)level_dim.x + 1.0f, 7, 0 };
+                drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, x_draw_coords_near, x_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, z_draw_coords_near, z_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, x_draw_coords_far,  x_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, z_draw_coords_far,  z_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
             }
         }
 
@@ -5040,7 +5044,7 @@ bool gameFrame(double delta_time, Input* input)
             {
                 TrailingHitbox th = temp_state.trailing_hitboxes[th_index];
                 if (th.frames == 0) continue;
-                drawAsset(OUTLINE_DRAW_ID, OUTLINE_3D, int3ToVec3(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, int3ToVec3(th.coords), DEFAULT_SCALE, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
             }
         }
     }
