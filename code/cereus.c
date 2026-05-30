@@ -4367,7 +4367,7 @@ bool gameFrame(double delta_time, Input* input)
                         if (trailingHitboxAtCoords(diagonal_coords, &th)) allow_turn = false;
 
                         // check if would cause failed case, and if so check if we already had one of those, and if so disallow turn
-                        // NOTE: this defeats half the point of how i handle failed case later... but need to know now!
+                        // this defeats half the point of how i handle failed case later... but need to know now!
                         Int3 orthogonal_coords = getNextCoords(player->coords, oppositeDirection(input_direction));
                         TileType orthogonal_type = getTileType(orthogonal_coords);
                         bool pack_would_cause_failed_case = orthogonal_type != TILE_TYPE_NONE && (!isEntity(orthogonal_type) || canPush(orthogonal_coords, player->direction));
@@ -4441,20 +4441,24 @@ bool gameFrame(double delta_time, Input* input)
                         bool do_push = false;
                         bool allow_down_climb = false;
 
-                        Int3 pushing_coords = (Int3){0};
-                        if (temp_state.pack_attached) pushing_coords = next_pack_coords;
-                        else pushing_coords = next_player_coords;
-
-                        TileType type_to_push = getTileType(pushing_coords);
-
-                        if (type_to_push == TILE_TYPE_NONE)
+                        Int3 coords_below_next_player_coords = getNextCoords(next_player_coords, DOWN);
+                        if (getTileType(coords_below_next_player_coords) == TILE_TYPE_NONE)
                         {
-                            allow_down_climb = true;
-                        }
-                        else if (isPushable(type_to_push) && canPush(pushing_coords, move_direction))
-                        {
-                            do_push = true;
-                            allow_down_climb = true;
+                            Int3 pushing_coords = (Int3){0};
+                            if (temp_state.pack_attached) pushing_coords = next_pack_coords;
+                            else pushing_coords = next_player_coords;
+
+                            TileType type_to_push = getTileType(pushing_coords);
+
+                            if (type_to_push == TILE_TYPE_NONE)
+                            {
+                                allow_down_climb = true;
+                            }
+                            else if (isPushable(type_to_push) && canPush(pushing_coords, move_direction))
+                            {
+                                do_push = true;
+                                allow_down_climb = true;
+                            }
                         }
 
                         if (allow_down_climb)
