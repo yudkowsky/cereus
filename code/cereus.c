@@ -1630,13 +1630,13 @@ Direction getDirectionFromCoordDiff(Int3 to_coords, Int3 from_coords)
     return NO_DIRECTION;
 }
 
-int32 getPushableStackSize(Int3 first_entity_coords)
+int32 getPushableStackSize(Int3 first_entity_coords, Direction seek_direction)
 {
     Int3 current_stack_coords = first_entity_coords;
     int32 stack_size = 1;
     FOR(find_stack_size_index, MAX_PUSHABLE_STACK_SIZE)
     {
-        current_stack_coords = getNextCoords(current_stack_coords, UP);
+        current_stack_coords = getNextCoords(current_stack_coords, seek_direction);
         TileType next_tile_type = getTileType(current_stack_coords);
         if (!isPushable(next_tile_type)) break;
         stack_size++;
@@ -1779,12 +1779,13 @@ bool canPush(Int3 coords, Direction direction)
     return false; // only here if hit the max entity push count
 }
 
-bool canPushUp(Int3 coords)
+bool canPushVertical(Int3 coords, Direction direction)
 {
-    int32 stack_size = getPushableStackSize(coords);
+    int32 stack_size = getPushableStackSize(coords, direction);
     Int3 check_coords = coords;
-    FOR(_, stack_size) check_coords = getNextCoords(check_coords, UP);
-    if (getTileType(check_coords) == TILE_TYPE_NONE) return true;
+    FOR(_, stack_size) check_coords = getNextCoords(check_coords, direction);
+    TileType type_after_stack = getTileType(check_coords);
+    if (type_after_stack == TILE_TYPE_NONE) return true;
     else return false;
 }
 
@@ -1803,7 +1804,7 @@ void pushAll(Int3 coords, Direction direction, bool on_head, int32 root_entity_i
 
     for (int32 inverse_push_index = push_count; inverse_push_index != 0; inverse_push_index--)
     {
-        int32 stack_size = getPushableStackSize(current_coords);
+        int32 stack_size = getPushableStackSize(current_coords, UP);
         Int3 current_stack_coords = current_coords;
         FOR(stack_index, stack_size)
         {
@@ -1828,27 +1829,27 @@ void pushAll(Int3 coords, Direction direction, bool on_head, int32 root_entity_i
 }
 
 // assumes able to be pushed
-void pushUp(Int3 coords, int32 root_entity_id)
+void pushVertical(Int3 coords, int32 root_entity_id, Direction direction)
 {
-    int32 stack_size = getPushableStackSize(coords);
+    int32 stack_size = getPushableStackSize(coords, direction);
     Int3 current_coords = coords;
-    FOR(_, stack_size - 1) current_coords = getNextCoords(current_coords, UP); // put current coords at top of stack
+    FOR(_, stack_size - 1) current_coords = getNextCoords(current_coords, direction); // iterate to end of stack
 
     for (int32 inverse_stack_index = stack_size; inverse_stack_index != 0; inverse_stack_index--)
     {
         // iterate down the stack
         Entity* e = getEntityAtCoords(current_coords);
-        Int3 next_coords = getNextCoords(current_coords, UP);
+        Int3 next_coords = getNextCoords(current_coords, direction);
 
         createTrailingHitbox(e->id, e->coords, TRAILING_HITBOX_TIME);
         moveEntityInBufferAndState(e, next_coords, e->direction);
 
-        e->moving_direction = UP;
-        e->moving_on_head = false; // is this important for anything in this context?
+        e->moving_direction = direction;
+        e->moving_on_head = false; // NOTE: not always true? is this important for anything
         e->root_entity_id = root_entity_id;
         e->tied_to_pack_and_decoupled = false;
 
-        current_coords = getNextCoords(current_coords, DOWN);
+        current_coords = getNextCoords(current_coords, oppositeDirection(direction));
     }
 }
 
@@ -2212,7 +2213,7 @@ void setFalling(Entity* e)
     }
 
     Int3 next_coords = getNextCoords(e->coords, DOWN);
-    int32 stack_size = getPushableStackSize(e->coords);
+    int32 stack_size = getPushableStackSize(e->coords, UP);
     Int3 current_start_coords = e->coords;
     Int3 current_end_coords = next_coords; 
 
@@ -3108,6 +3109,7 @@ void doPhysicsTick()
 
     // climb logic
     // NOTE: UP and DOWN climb cases are different enough that they're still in separate clauses. think about if is worth being smarter here, or if this is clearest
+    // NOTE: currently not allowing pushing of objects down if try to climb down, and you are blue. will find out in level design if this is something I want to actually add.
     if (player->moving_direction == UP || player->moving_direction == DOWN)
     {
         float y_coord_difference = getSignedComponentAlongDirection(player->moving_direction, vec3Subtract(int3ToVec3(player->coords), player->position));
@@ -3142,7 +3144,7 @@ void doPhysicsTick()
                     {
                         climb_up = true;
                     }
-                    else if (isPushable(type_above_player) && canPushUp(coords_above_player))
+                    else if (isPushable(type_above_player) && canPushVertical(coords_above_player, UP))
                     {
                         climb_up = true;
                         player_push_up = true;
@@ -3158,8 +3160,9 @@ void doPhysicsTick()
                             {
                                 // want to attach
                                 Int3 next_coords_for_pack_if_attach = getNextCoords(coords_behind, UP);
-                                if (getTileType(next_coords_for_pack_if_attach) == TILE_TYPE_NONE) temp_state.pack_attached = true;
-                                // TODO: allow push up here, not just NONE
+                                TileType type_of_next_coords = getTileType(next_coords_for_pack_if_attach);
+                                if (type_of_next_coords == TILE_TYPE_NONE) temp_state.pack_attached = true;
+                                else if (isPushable(type_of_next_coords) && canPushVertical(coords_above_player, UP)) temp_state.pack_attached = true;
                             }
                         }
 
@@ -3175,7 +3178,7 @@ void doPhysicsTick()
                             {
                                 pack_stays_with_player = true;
                             }
-                            else if (isPushable(type_above_pack) && canPushUp(coords_above_pack))
+                            else if (isPushable(type_above_pack) && canPushVertical(coords_above_pack, UP))
                             {
                                 pack_stays_with_player = true;
                                 pack_push_up = true;
@@ -3184,7 +3187,7 @@ void doPhysicsTick()
                             if (pack_stays_with_player)
                             {
                                 createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
-                                if (pack_push_up) pushUp(coords_above_pack, PACK_ID);
+                                if (pack_push_up) pushVertical(coords_above_pack, PACK_ID, UP);
                                 moveEntityInBufferAndState(pack, coords_above_pack, player->direction);
                                 pack->position.y += CLIMBING_SPEED;
                                 pack->velocity.y = CLIMBING_SPEED;
@@ -3198,15 +3201,13 @@ void doPhysicsTick()
                         }
 
                         createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
-                        if (player_push_up) pushUp(coords_above_player, PLAYER_ID);
+                        if (player_push_up) pushVertical(coords_above_player, PLAYER_ID, UP);
                         moveEntityInBufferAndState(player, coords_above_player, player->direction);
                         player->position.y += CLIMBING_SPEED;
                         player->velocity.y = CLIMBING_SPEED;
                     }
                     else // something unpushable above player
                     {
-                        // reverse direction
-                        // TODO: same as todo below; should disallow climb input for a bit?
                         player->moving_direction = DOWN;
                     }
                 }
@@ -3226,6 +3227,12 @@ void doPhysicsTick()
 
                     if (move_forwards)
                     {
+                        if (!temp_state.pack_attached)
+                        {
+                            Int3 coords_behind_player = getNextCoords(player->coords, oppositeDirection(player->direction));
+                            if (getTileType(coords_behind_player) == TILE_TYPE_PACK) temp_state.pack_attached = true;
+                        }
+
                         player->position = int3ToVec3(player->coords); // normalize y coord
                         player->velocity = (Vec3){0};
                         player->moving_direction = NO_DIRECTION;
@@ -3234,8 +3241,6 @@ void doPhysicsTick()
                     }
                     else // something unpushable ahead
                     {
-                        // reverse direction
-                        // TODO: check if should disallow climb up input for a bit
                         player->moving_direction = DOWN;
                     }
                 }
@@ -3245,8 +3250,7 @@ void doPhysicsTick()
                 Int3 coords_below_player = getNextCoords(player->coords, DOWN);
                 TileType type_below_player = getTileType(coords_below_player);
 
-                // TODO: if player is blue while climbing and there is pushable beneath, then push down one tile at a time.
-                if (type_below_player == TILE_TYPE_NONE)
+                if (type_below_player == TILE_TYPE_NONE) 
                 {
                     if (!temp_state.pack_attached)
                     {
@@ -3257,7 +3261,6 @@ void doPhysicsTick()
                             // want to attach
                             Int3 next_coords_for_pack_if_attach = getNextCoords(coords_behind, DOWN);
                             if (getTileType(next_coords_for_pack_if_attach) == TILE_TYPE_NONE) temp_state.pack_attached = true;
-                            // TODO: allow push down here edge case like above, not just NONE
                         }
                     }
 
@@ -4332,12 +4335,12 @@ bool gameFrame(double delta_time, Input* input)
                         {
                             // only handles setting climbing direction to UP if player wants to climb up. everything else is handled later, 
                             // because i want to keep climbing sometimes, even if there's been no input for it.
-                            bool do_climb = false; 
                             Int3 coords_above_player = getNextCoords(player->coords, UP);
                             TileType type_above_player = getTileType(coords_above_player);
-                            if (type_above_player == TILE_TYPE_NONE) do_climb = true;
-                            else if (isPushable(type_above_player) && canPushUp(coords_above_player)) do_climb = true;
 
+                            bool do_climb = false; 
+                            if (type_above_player == TILE_TYPE_NONE) do_climb = true;
+                            else if (isPushable(type_above_player) && canPushVertical(coords_above_player, UP)) do_climb = true;
                             if (do_climb)
                             {
                                 recordActionForUndo(&world_state);
@@ -4393,7 +4396,7 @@ bool gameFrame(double delta_time, Input* input)
                             TileType type_above = getTileType(coords_above);
 
                             int32 stack_size = 0;
-                            if (isPushable(type_above)) stack_size = getPushableStackSize(coords_above);
+                            if (isPushable(type_above)) stack_size = getPushableStackSize(coords_above, UP);
 
                             // need to add either 1 or -1 to direction of entity being rotated
                             if (stack_size > 0)
