@@ -69,6 +69,14 @@ typedef struct DisplayInfo
 }
 DisplayInfo;
 
+typedef enum
+{
+    GAME_QUIT,
+    GAME_GAMEPLAY,
+    GAME_EDITOR,
+}
+GameResult;
+
 typedef enum 
 {
 	SPRITE_2D,
@@ -266,7 +274,7 @@ WaterPaintTexture;
 // FUCNTIONS
 
 void gameInitialize(char* level_name, DisplayInfo);
-bool gameFrame(double delta_time, Input*);
+GameResult gameFrame(double delta_time, Input*);
 void gameRedraw(DisplayInfo);
 
 void vulkanInitialize(RendererPlatformHandles, DisplayInfo);

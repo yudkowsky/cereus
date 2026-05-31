@@ -5,9 +5,10 @@
 
 HWND global_window_handle = 0;
 Input input = {0};
-bool cursor_locked = false; // TODO: let the player have a cursor until game input, but give it back as soon as mouse is attempted to be moved (in game mode)
+bool cursor_locked = false;
 bool window_focused = false;
 DisplayInfo display_info = {0};
+bool clicked_in_client = false;
 
 void centerCursorInWindow()
 {
@@ -51,40 +52,12 @@ LRESULT CALLBACK windowMessageProcessor(
         }
         case WM_ACTIVATE:
         {
-            if (LOWORD(wParam) == WA_INACTIVE)
-            {
-                window_focused = false;
-                cursor_locked = false;
-                while (ShowCursor(TRUE) < 0) { }
-            }
-            else // WM_ACTIVE or WA_CLICKACTIVE
-            {
-                // only re-lock if not clicking on title bar. when activating via alt-tab, the click isn't on a non-client area
-                POINT point = {0};
-                GetCursorPos(&point);
-                POINT client_point = point;
-                ScreenToClient(window_handle, &client_point);
-                bool click_in_client = (client_point.x >= 0 && client_point.x < display_info.client_width && client_point.y >= 0 && client_point.y < display_info.client_height);
-
-                // re-lock if alt-tab (WA_ACTIVE) or clicked inside client area
-                if (LOWORD(wParam) == WA_ACTIVE || click_in_client)
-                {
-                    window_focused = true;
-                    cursor_locked = true;
-                    while (ShowCursor(FALSE) >= 0) { }
-                    centerCursorInWindow();
-                }
-            }
+            window_focused = (LOWORD(wParam) != WA_INACTIVE);
             break;
         }
         case WM_LBUTTONDOWN:
         {
-            if (!cursor_locked)
-            {
-                cursor_locked = true;
-                while (ShowCursor(FALSE) >= 0) { }
-                centerCursorInWindow();
-            }
+            clicked_in_client = true;
             break;
         }
         case WM_SIZE:
@@ -221,7 +194,7 @@ int CALLBACK WinMain(
     display_info.display_height = (int32)dev_mode.dmPelsHeight;
     display_info.refresh_rate = (int32)dev_mode.dmDisplayFrequency;
 
-    RECT work_area; // TODO: think about putting work area as display_width/height in display_info
+    RECT work_area;
 	SystemParametersInfoW(SPI_GETWORKAREA, 0, &work_area, 0);
 
 	HWND window_handle = CreateWindowExW(
@@ -270,13 +243,12 @@ int CALLBACK WinMain(
     char* file_path = 0;
     if (command_line[0] != '\0') file_path = command_line;
 
-    gameInitialize(file_path, display_info); 
-
 	double frame_times[60] = {0};
 	int32 frame_time_index = 0;
     int32 title_update_counter = 0;
-
 	LARGE_INTEGER work_start, work_end;
+
+    gameInitialize(file_path, display_info); 
 
     while (running)
     {
@@ -293,23 +265,46 @@ int CALLBACK WinMain(
             DispatchMessage(&queued_message);
         }
 
+        // profiling
         LARGE_INTEGER current_tick;
         QueryPerformanceCounter(&current_tick);
         double delta_time = (current_tick.QuadPart - last_tick.QuadPart) * seconds_per_tick;
         last_tick = current_tick;
 
+        // do gameplay tick
         input.keys_held = pollKeys();
 
-        bool quit = gameFrame(delta_time, &input); 
-        if (quit) return 0;
+        GameResult game_result = gameFrame(delta_time, &input); 
+
+        if (game_result == GAME_QUIT) return 0;
+
+        // decide when to give mouse based on gameplay mode
+        bool want_cursor_locked = false;
+        if (!window_focused) want_cursor_locked = false;
+        else if (game_result == GAME_EDITOR) want_cursor_locked = true;
+        else
+        {
+            want_cursor_locked = cursor_locked;
+            if (fabs(input.mouse_dx) + fabs(input.mouse_dy) > 4) want_cursor_locked = false;
+            if (input.keys_held & ~(KEY_LEFT_MOUSE | KEY_RIGHT_MOUSE | KEY_MIDDLE_MOUSE)) want_cursor_locked = true; // mouse buttons handled elsewhere, mask out for titlebar press
+            if (clicked_in_client) want_cursor_locked = true;
+        }
+        clicked_in_client = false;
+
+        if (want_cursor_locked != cursor_locked)
+        {
+            cursor_locked = want_cursor_locked;
+            ShowCursor(cursor_locked ? FALSE : TRUE);
+        }
+
+        if (cursor_locked) centerCursorInWindow();
 
         input.mouse_dx = 0;
         input.mouse_dy = 0;
         input.mouse_scroll_this_frame = 0;
         input.text.count = 0;
 
-        centerCursorInWindow();
-
+        // profiling
         QueryPerformanceCounter(&work_end);
 
         LARGE_INTEGER frame_end;
@@ -319,7 +314,7 @@ int CALLBACK WinMain(
         frame_time_index = (frame_time_index + 1) % 60;
         
         title_update_counter++;
-        if (title_update_counter >= 100)
+        if (title_update_counter >= 20)
         {
             double avg_ms = 0.0;
             for (int i = 0; i < 60; i++) avg_ms += frame_times[i];
@@ -328,7 +323,6 @@ int CALLBACK WinMain(
             double fps = 1000.0 / avg_ms;
 
             wchar_t title_buffer[256];
-            //swprintf(title_buffer, 256, L"mspt: %.2f", work_ms);
             swprintf(title_buffer, 256, L"fps: %.0f", fps);
             SetWindowTextW(window_handle, title_buffer);
             title_update_counter = 0;

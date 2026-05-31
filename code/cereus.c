@@ -42,6 +42,8 @@ typedef enum
     TILE_TYPE_LOCKED_BLOCK,
     TILE_TYPE_LADDER,
     TILE_TYPE_WON_BLOCK,
+
+    TILE_TYPE_COUNT
 }
 TileType;
 
@@ -95,7 +97,6 @@ typedef struct Entity
 Entity;
 
 #define MAX_ENTITY_INSTANCE_COUNT 64
-#define ENTITY_ARRAY_COUNT 6
 
 // the approx. 2MB buffer is dense representation of the level encoded by coords
 typedef struct
@@ -766,11 +767,6 @@ bool isPushable(TileType type)
 bool isEntity(TileType type)
 {
     return (type == TILE_TYPE_BOX || type == TILE_TYPE_MIRROR || type == TILE_TYPE_PACK || type == TILE_TYPE_PLAYER || type == TILE_TYPE_WIN_BLOCK || type == TILE_TYPE_LOCKED_BLOCK || isSource(type));
-}
-
-bool canBeUnderwater(TileType type)
-{
-    return (type == TILE_TYPE_PLAYER || type == TILE_TYPE_PACK || type == TILE_TYPE_BOX || type == TILE_TYPE_MIRROR || isSource(type));
 }
 
 TileType getTileTypeFromId(int32 id)
@@ -1844,7 +1840,7 @@ void pushVertical(Int3 coords, int32 root_entity_id, Direction direction)
         moveEntityInBufferAndState(e, next_coords, e->direction);
 
         e->moving_direction = direction;
-        e->moving_on_head = false; // NOTE: not always true? is this important for anything
+        e->moving_on_head = root_entity_id == PLAYER_ID ? true : false;
         e->root_entity_id = root_entity_id;
         e->tied_to_pack_and_decoupled = false;
 
@@ -2423,6 +2419,7 @@ void gameInitializeState(char* level_name)
     camera_screen_offset.z = (int32)(camera.coords.z / OVERWORLD_SCREEN_SIZE_Z);
     camera.rotation = buildCameraQuaternion(camera);
     camera_target_plane = player->coords.y;
+    if (in_overworld) ow_player_coords_for_offset = player->coords;
 
     updateLaserBuffer();
 
@@ -3557,7 +3554,7 @@ void doPhysicsTick()
     }
 }
 
-bool gameFrame(double delta_time, Input* input)
+GameResult gameFrame(double delta_time, Input* input)
 {   
     // TEMP: for profiling
     long long frequency, t0, t1, t2, t3;
@@ -4102,7 +4099,7 @@ bool gameFrame(double delta_time, Input* input)
         if (in_overworld)
         {
             // exit game
-            return true;
+            return GAME_QUIT;
         }
         else
         {
@@ -5135,5 +5132,5 @@ bool gameFrame(double delta_time, Input* input)
         frame_counter = 0;
     }
 
-    return false;
+    return editor_state.editor_mode == NO_MODE ? GAME_GAMEPLAY : GAME_EDITOR;
 }
