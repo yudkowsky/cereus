@@ -2,11 +2,6 @@
 
 #include "linearize-depth.glsl"
 
-layout(location = 0) in vec3 frag_world_pos;
-
-layout(location = 0) out vec4 out_color;
-layout(location = 1) out float out_water_depth;
-
 layout(set = 0, binding = 0) uniform ViewConstants 
 {
     mat4 view;
@@ -17,6 +12,7 @@ layout(set = 0, binding = 0) uniform ViewConstants
     vec4 camera_position;
     vec4 light_direction;
     float water_plane_y;
+    bool discard_below_water_plane;
     float time;
     float water_tile_length;
     float focal_length;
@@ -29,6 +25,11 @@ layout(set = 3, binding = 0) uniform sampler2D paint_texture;
 layout(set = 4, binding = 0) uniform sampler2D water_texture;
 layout(set = 5, binding = 0) uniform sampler2D reflection_texture;
 layout(set = 6, binding = 0) uniform sampler2D grid_texture;
+
+layout(location = 0) in vec3 frag_world_pos;
+
+layout(location = 0) out vec4 out_color;
+layout(location = 1) out float out_water_depth;
 
 // paint texture definitions
 // TODO: these are same as in everything.h, but can't include that file... a bit messy
@@ -67,8 +68,9 @@ void main()
     // write water depth for use in waterline detection
     out_water_depth = gl_FragCoord.z;
 
-    // idea here is to only do water.vert once, so all vertices get to fragment shader here (unlike before, which would be depth tested)
-    // so now i instead blend out all geometry we don't want to actually render; can't discard because that would not output the water depth to texture. TODO: check if no better solution here
+    // idea here is to only do water.vert once, so all vertices get to fragment shader, even ones behind geometry.
+    // so now i instead blend out all geometry we don't want to actually render; can't discard because that wouldn't
+    // output the water depth to texture.
     float scene_depth = texture(depth_texture, gl_FragCoord.xy * (1.0/vec2(textureSize(depth_texture, 0)))).r;
     if (gl_FragCoord.z >= scene_depth)
     {
@@ -80,7 +82,7 @@ void main()
     vec2 screen_uv = gl_FragCoord.xy * texel;
     vec3 scene = texture(scene_texture, screen_uv).rgb;
 
-    // tint scene
+    // tint underwater scene based on depth
     float water_surface_linear_depth = linearizeDepth(gl_FragCoord.z);
     float scene_center_linear_depth = linearizeDepth(texture(depth_texture, screen_uv).r);
     float underwater_distance = max(scene_center_linear_depth - water_surface_linear_depth, 0.0);
@@ -139,6 +141,14 @@ void main()
     float distortion_strength = reflection_distortion_strength / pixel_world_size;
     vec2 reflection_uv_offset = normal.xz * distortion_strength;
     vec2 reflection_uv = screen_uv + reflection_uv_offset;
+
+    // offset reflection uv by wave height
+    float reflection_height_strength = 1.0;
+    float wave_height = frag_world_pos.y - view_constants.water_plane_y;
+    float grazing = sqrt(max(1.0 - cos_theta * cos_theta, 0.0));
+    float height_shift = wave_height * grazing / pixel_world_size * texel.y * reflection_height_strength;
+    reflection_uv.y += height_shift;
+
     vec3 reflection_color = texture(reflection_texture, reflection_uv).rgb;
 
     // specular reflection

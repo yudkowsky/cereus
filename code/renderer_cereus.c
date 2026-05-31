@@ -113,6 +113,7 @@ typedef struct ViewConstants
     Vec4 camera_position;
     Vec4 light_direction;
     float water_plane_y;
+    bool discard_below_water_plane;
     float time;
     float water_tile_length;
     float focal_length;
@@ -5342,12 +5343,13 @@ void vulkanDraw(void)
         memcpy(main_view_constants->inv_view_proj,   main_inverse_view_projection, sizeof(float) * 16);
         memcpy(main_view_constants->light_view_proj, light_view_projection,        sizeof(float) * 16);
 
-        main_view_constants->camera_position   = (Vec4){ vulkan_camera.coords.x, vulkan_camera.coords.y, vulkan_camera.coords.z, 0.0f };
-        main_view_constants->light_direction   = (Vec4){ sun_direction.x, sun_direction.y, sun_direction.z, 0.0 };
-        main_view_constants->water_plane_y     = -999.0f;
-        main_view_constants->time              = water_time;
-        main_view_constants->water_tile_length = water_tile_length;
-        main_view_constants->focal_length      = focal_length;
+        main_view_constants->camera_position           = (Vec4){ vulkan_camera.coords.x, vulkan_camera.coords.y, vulkan_camera.coords.z, 0.0f };
+        main_view_constants->light_direction           = (Vec4){ sun_direction.x, sun_direction.y, sun_direction.z, 0.0 };
+        main_view_constants->water_plane_y             = vulkan_state.water_plane_y;
+        main_view_constants->discard_below_water_plane = false;
+        main_view_constants->time                      = water_time;
+        main_view_constants->water_tile_length         = water_tile_length;
+        main_view_constants->focal_length              = focal_length;
 
         // reflection camera: same globals, reflected view + real water plane
         float reflection_view_projection[16];
@@ -5359,7 +5361,7 @@ void vulkanDraw(void)
         memcpy(reflection_view_constants->view,          reflected_view_matrix,              sizeof(float) * 16);
         memcpy(reflection_view_constants->view_proj,     reflection_view_projection,         sizeof(float) * 16);
         memcpy(reflection_view_constants->inv_view_proj, reflection_inverse_view_projection, sizeof(float) * 16);
-        reflection_view_constants->water_plane_y = vulkan_state.water_plane_y;
+        reflection_view_constants->discard_below_water_plane = true;
 
         // sprite camera: identity view, ortho projection
         *sprite_view_constants = *main_view_constants;

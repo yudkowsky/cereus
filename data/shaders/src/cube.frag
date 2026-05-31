@@ -1,4 +1,5 @@
 #version 450
+
 #include "shadow.glsl"
 
 layout(set = 0, binding = 0) uniform ViewConstants 
@@ -11,6 +12,7 @@ layout(set = 0, binding = 0) uniform ViewConstants
     vec4 camera_position;
     vec4 light_direction;
     float water_plane_y;
+    bool discard_below_water_plane;
     float time;
     float water_tile_length;
     float focal_length;
@@ -30,10 +32,13 @@ layout(location = 1) out vec4 out_normal;
 
 void main()
 {
-    vec2 displacement_uv = frag_world_pos.xz / view_constants.water_tile_length;
-    float wave_displacement = texture(water_texture, displacement_uv).w;
-    float water_surface_y = view_constants.water_plane_y - wave_displacement;
-    if (frag_world_pos.y < water_surface_y - 0.01) discard;
+    if (view_constants.discard_below_water_plane)
+    {
+        vec2 displacement_uv = frag_world_pos.xz / view_constants.water_tile_length;
+        float wave_displacement = texture(water_texture, displacement_uv).w;
+        float water_surface_y = view_constants.water_plane_y - wave_displacement;
+        if (frag_world_pos.y < water_surface_y - 0.01) discard;
+    }
 
     vec4 tex = texture(input_texture, uv);
 

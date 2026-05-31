@@ -11,6 +11,7 @@ layout(set = 0, binding = 0) uniform ViewConstants
     vec4 camera_position;
     vec4 light_direction;
     float water_plane_y;
+    bool discard_below_water_plane;
     float time;
     float water_tile_length;
     float focal_length;
@@ -36,10 +37,13 @@ pc;
 
 void main()
 {
-    vec2 displacement_uv = frag_world_pos.xz / view_constants.water_tile_length;
-    float wave_displacement = texture(water_texture, displacement_uv).w;
-    float water_surface_y = view_constants.water_plane_y - wave_displacement;
-    if (frag_world_pos.y < water_surface_y) discard;
+    if (view_constants.discard_below_water_plane)
+    {
+        vec2 displacement_uv = frag_world_pos.xz / view_constants.water_tile_length;
+        float wave_displacement = texture(water_texture, displacement_uv).w;
+        float water_surface_y = view_constants.water_plane_y - wave_displacement;
+        if (frag_world_pos.y < water_surface_y) discard;
+    }
 
     vec3 N = normalize(normal);
     vec3 light_direction = normalize(vec3(0.3, 1.0, 0.5));

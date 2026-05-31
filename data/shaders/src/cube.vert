@@ -24,6 +24,7 @@ layout(set = 0, binding = 0) uniform ViewConstants
     vec4 camera_position;
     vec4 light_direction;
     float water_plane_y;
+    bool discard_below_water_plane;
     float time;
     float water_tile_length;
     float focal_length;
