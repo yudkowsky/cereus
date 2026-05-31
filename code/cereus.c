@@ -3423,8 +3423,8 @@ void doPhysicsTick()
         Vec3 rotated_offset = vec3RotateByQuaternion(int3ToVec3(AXIS_Z), player->rotation); // AXIS_Z because pack is 0, 0, 1 relative to player 0, 0, 0, when player has no rotation.
         Vec3 new_pack_position = vec3Add(player->position, rotated_offset);
         pack->rotation = player->rotation;
-        if (do_pack_swing_without_y) vec3SetComponentAlongDirection(UP, new_pack_position, pack->position.y);
-        pack->position = new_pack_position;
+        if (do_pack_swing_without_y) pack->position = vec3SetComponentAlongDirection(UP, new_pack_position, pack->position.y);
+        else pack->position = new_pack_position;
     }
 
     // handle moving entities
@@ -5028,8 +5028,8 @@ bool gameFrame(double delta_time, Input* input)
                 Vec3 z_draw_coords_near = (Vec3){ (float)level_dim.x / 2.0f, (float)level_dim.y / 2.0f, -0.5f};
                 Vec3 x_draw_coords_far  = (Vec3){ (float)level_dim.x + 0.5f, (float)level_dim.y / 2.0f, (float)level_dim.z / 2.0f };
                 Vec3 z_draw_coords_far  = (Vec3){ (float)level_dim.x / 2.0f, (float)level_dim.y / 2.0f, (float)level_dim.z + 0.5f };
-                Vec3 x_draw_scale = (Vec3){ 0, 7, (float)level_dim.z + 1.0f };
-                Vec3 z_draw_scale = (Vec3){ (float)level_dim.x + 1.0f, 7, 0 };
+                Vec3 x_draw_scale = (Vec3){ 0, (float)level_dim.y, (float)level_dim.z + 1.0f };
+                Vec3 z_draw_scale = (Vec3){ (float)level_dim.x + 1.0f, (float)level_dim.y, 0 };
                 drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, x_draw_coords_near, x_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
                 drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, z_draw_coords_near, z_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
                 drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, x_draw_coords_far,  x_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
