@@ -3398,11 +3398,11 @@ void doPhysicsTick()
     // pack rotation and movement
     bool do_pack_swing = false;
     bool do_pack_swing_without_y = false;
-    bool player_is_rotating = vec4IsEqual(pack->rotation, directionToQuaternion(pack->direction));
+    bool pack_is_stationary = vec4IsEqual(pack->rotation, directionToQuaternion(pack->direction));
 
     if (temp_state.pack_attached)
     {
-        if (temp_state.pack_turn_state.pack_intermediate_states_timer == 0 && player_is_rotating)
+        if (temp_state.pack_turn_state.pack_intermediate_states_timer == 0 && pack_is_stationary)
         {
             pack->position = vec3AddFloatAlongDirection(player->direction, player->direction == NORTH || player->direction == WEST ? 1.0f : -1.0f, player->position);
         }
@@ -3411,7 +3411,7 @@ void doPhysicsTick()
             do_pack_swing = true;
         }
     }
-    else if (!player_is_rotating)
+    else if (!pack_is_stationary && !pack->moving_on_head)
     {
         // pack has detached, but should still be rotating: player is falling, and that has caused pack detach. keep rotation and movement, but stay at same y level
         do_pack_swing = true;
