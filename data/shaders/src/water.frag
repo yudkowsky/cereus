@@ -51,12 +51,12 @@ const float max_depth_difference = 0.02;
 const float grid_push_by_normal = 0.5;
 
 // grid line dimensions
-const float half_grid_line_width = 0.02;
-const float corner_size = 0.025;
+//const float half_grid_line_width = 0.02;
+//const float corner_size = 0.025;
 
 // grid line graphics
-const vec3 grid_line_tint = { 0.2, 0.4, 0.6 };
-const float grid_opacity = 0.08;
+//const vec3 grid_line_tint = { 0.2, 0.4, 0.6 };
+const float grid_opacity = 0.05;
 
 // reflections
 const float reflection_distortion_strength = 0.0001;
@@ -103,11 +103,14 @@ void main()
     float paint_value = texture(paint_texture, snapped).r;
 
     // grid line width and opacity scale with paint
+    /*
     float effective_half_width = half_grid_line_width * paint_value;
     float effective_corner_size = corner_size * paint_value;
+    */
     float effective_opacity = grid_opacity * paint_value;
 
     // is this on the grid? using unmodified normals
+    /*
     vec2 distance_to_line = abs(fract(pushed_xz - 0.5) - 0.5); // shenanigans to get alignment with (0,0) in corner
     float inner_size = 0.5 - effective_half_width - effective_corner_size;
     vec2 pos_to_inner = distance_to_line - vec2(inner_size);
@@ -116,19 +119,36 @@ void main()
     {
         base_color = mix(base_color, grid_line_tint, effective_opacity);
     }
+    */
+
+    // water grid animation sampling
+    float time_per_frame = 0.5;
+    int frames_in_animation = 5;
+    float current_frame_opacity = fract(view_constants.time / time_per_frame);
+    int frame_number = int(view_constants.time / time_per_frame);
+    int next_frame_number = frame_number + 1;
+
+    // forward -> back -> forward play loop
+    frame_number = frame_number % ((frames_in_animation - 1) * 2);
+    if (frame_number >= frames_in_animation) frame_number = 2 * (frames_in_animation - 1) - frame_number;
+    next_frame_number = next_frame_number % ((frames_in_animation - 1) * 2);
+    if (next_frame_number >= frames_in_animation) next_frame_number = 2 * (frames_in_animation - 1) - next_frame_number;
+    //frame_number = frame_number % frames_in_animation; 
+
+    // sample current and next frame, alpha blend. assuming 4*4 animation
+    vec2 grid_uv = fract((pushed_xz + 0.5) / 4.0);
+    grid_uv = vec2(grid_uv.x += (frame_number % 4), grid_uv.y += (frame_number / 4)) / 4.0;
+    vec2 next_grid_uv = fract((pushed_xz + 0.5) / 4.0);
+    next_grid_uv = vec2(next_grid_uv.x += (next_frame_number % 4), next_grid_uv.y += (next_frame_number / 4)) / 4.0;
+
+    vec4 grid_color = mix(texture(grid_texture, grid_uv).rgba, texture(grid_texture, next_grid_uv).rgba, current_frame_opacity);
+    base_color += grid_color.rgb * grid_color.a * grid_opacity * paint_value;
+
+    // TODO: paint multiplier should lower opacity. check if need to try to make thinner at lower paint, 
+    // (maybe by subtracting from opacity?) or if lowering opacity does the same
 
     // TODO: change normals based on paint normal map
     vec3 normal = unmodified_normal;
-
-    // TODO: grid lines texture sampling
-    /*
-    vec2 grid_uv = fract(grid_pos / 4.0);
-    vec4 grid_color = texture(grid_texture, grid_uv).rgba;
-    base_color += grid_color.rgb * grid_color.a * grid_opacity * paint_value;
-
-    // TODO: paint multiplier should also lower opacity. check if need to try to make thinner at lower paint, 
-    // (maybe by subtracting from opacity?) or if lowering opacity does the same
-    */
 
     // reflection based on fresnel strength
     vec3 view_dir = normalize(view_constants.camera_position.xyz - frag_world_pos);

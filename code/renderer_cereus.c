@@ -587,7 +587,7 @@ const int32 ATLAS_3D_HEIGHT = 320;
 const char* ATLAS_2D_PATH 	= "data/assets/sprites/atlas-2d.png";
 const char* ATLAS_FONT_PATH = "data/assets/sprites/atlas-font.png";
 const char* ATLAS_3D_PATH 	= "data/assets/sprites/atlas-3d.png";
-const char* WATER_GRID_PATH = "data/assets/maps/water-grid.png";
+const char* WATER_GRID_PATH = "data/assets/maps/water-grid/water-grid.png";
 
 VulkanState vulkan_state;
 DisplayInfo vulkan_display = {0};
@@ -3529,44 +3529,49 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     // pixel art sampler
     {
-        VkSamplerCreateInfo sampler_creation_info = {0};
-        sampler_creation_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        sampler_creation_info.magFilter = VK_FILTER_NEAREST;
-        sampler_creation_info.minFilter = VK_FILTER_NEAREST;
-        sampler_creation_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        sampler_creation_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        sampler_creation_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-        sampler_creation_info.anisotropyEnable = VK_FALSE;
-        sampler_creation_info.maxAnisotropy = 1.0f;
-        sampler_creation_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-        sampler_creation_info.unnormalizedCoordinates = VK_FALSE;
-        sampler_creation_info.compareEnable = VK_FALSE;
-        sampler_creation_info.compareOp = VK_COMPARE_OP_ALWAYS;
-        sampler_creation_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
-        sampler_creation_info.mipLodBias = 0.0f;
-        sampler_creation_info.minLod = 0.0f;
-        sampler_creation_info.maxLod = 0.0f;
+        VkSamplerCreateInfo pixel_sampler_ci = {0};
+        pixel_sampler_ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        pixel_sampler_ci.magFilter = VK_FILTER_NEAREST;
+        pixel_sampler_ci.minFilter = VK_FILTER_NEAREST;
+        pixel_sampler_ci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        pixel_sampler_ci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        pixel_sampler_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        pixel_sampler_ci.anisotropyEnable = VK_FALSE;
+        pixel_sampler_ci.maxAnisotropy = 1.0f;
+        pixel_sampler_ci.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        pixel_sampler_ci.unnormalizedCoordinates = VK_FALSE;
+        pixel_sampler_ci.compareEnable = VK_FALSE;
+        pixel_sampler_ci.compareOp = VK_COMPARE_OP_ALWAYS;
+        pixel_sampler_ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        pixel_sampler_ci.mipLodBias = 0.0f;
+        pixel_sampler_ci.minLod = 0.0f;
+        pixel_sampler_ci.maxLod = 0.0f;
 
-        vkCreateSampler(vulkan_state.logical_device_handle, &sampler_creation_info, 0, &vulkan_state.pixel_art_sampler);
+        vkCreateSampler(vulkan_state.logical_device_handle, &pixel_sampler_ci, 0, &vulkan_state.pixel_art_sampler);
     }
 
     // linear sampler with repeat
     {
-        VkSamplerCreateInfo sampler_ci = {0};
-        sampler_ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        sampler_ci.magFilter = VK_FILTER_LINEAR;
-        sampler_ci.minFilter = VK_FILTER_LINEAR;
-        sampler_ci.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        sampler_ci.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        sampler_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        sampler_ci.anisotropyEnable = VK_FALSE;
-        sampler_ci.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-        sampler_ci.unnormalizedCoordinates = VK_FALSE;
-        sampler_ci.compareEnable = VK_FALSE;
-        sampler_ci.compareOp = VK_COMPARE_OP_ALWAYS;
-        sampler_ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        VkSamplerCreateInfo linear_sampler_ci = {0};
+        linear_sampler_ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        linear_sampler_ci.magFilter = VK_FILTER_LINEAR;
+        linear_sampler_ci.minFilter = VK_FILTER_LINEAR;
+        linear_sampler_ci.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        linear_sampler_ci.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        linear_sampler_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        linear_sampler_ci.anisotropyEnable = VK_FALSE;
+        linear_sampler_ci.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        linear_sampler_ci.unnormalizedCoordinates = VK_FALSE;
+        linear_sampler_ci.compareEnable = VK_FALSE;
+        linear_sampler_ci.compareOp = VK_COMPARE_OP_ALWAYS;
+        linear_sampler_ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        linear_sampler_ci.minLod = 0.0f;
+        linear_sampler_ci.maxLod = VK_LOD_CLAMP_NONE;
+        linear_sampler_ci.mipLodBias = 0.0f;
+        linear_sampler_ci.anisotropyEnable = VK_TRUE;
+        linear_sampler_ci.maxAnisotropy = 16.0f;
         
-        vkCreateSampler(vulkan_state.logical_device_handle, &sampler_ci, 0, &vulkan_state.tiling_linear_sampler);
+        vkCreateSampler(vulkan_state.logical_device_handle, &linear_sampler_ci, 0, &vulkan_state.tiling_linear_sampler);
     }
 
     // shadow sampler
