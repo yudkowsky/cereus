@@ -2309,12 +2309,25 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     vulkan_state.surface_handle = VK_NULL_HANDLE;
     vulkan_state.physical_device_handle = VK_NULL_HANDLE;
 
-    // lists extensions we will need, in the creation process:
-    // VK_KHR_surface: required to present to a window
-    // VK_KHR_win32_surface: win32 binding for WSI
-    // (surface = bridge between vulkan and platform)
     char* instance_extensions[] = { "VK_KHR_surface", "VK_KHR_win32_surface" };
+
+    // only enable validation if available on device
+    uint32 layer_count = 0;
+    vkEnumerateInstanceLayerProperties(&layer_count, 0);
+    VkLayerProperties* available = malloc(sizeof(VkLayerProperties) * layer_count);
+    vkEnumerateInstanceLayerProperties(&layer_count, available);
+
     char* validation_layers[] = { "VK_LAYER_KHRONOS_validation" };
+    bool has_validation = false;
+    for (uint32 layer_index = 0; layer_index < layer_count; layer_index++)
+    {
+        if (strcmp(available[layer_index].layerName, "VK_LAYER_KHRONOS_validation") == 0)
+        {
+            has_validation = true;
+            break;
+        }
+    }
+    free(available);
 
 	VkApplicationInfo api_info = {0};
     api_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -2325,8 +2338,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     instance_ci.pApplicationInfo = &api_info;
     instance_ci.enabledExtensionCount = 2;
     instance_ci.ppEnabledExtensionNames = instance_extensions;
-    instance_ci.enabledLayerCount = 1;
-    instance_ci.ppEnabledLayerNames = validation_layers;
+    instance_ci.enabledLayerCount = has_validation ? 1 : 0;
+    instance_ci.ppEnabledLayerNames = has_validation ? validation_layers : 0;
 
     vkCreateInstance(&instance_ci, 0, &vulkan_state.vulkan_instance_handle);
 
