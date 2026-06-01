@@ -25,6 +25,7 @@ layout(set = 3, binding = 0) uniform sampler2D paint_texture;
 layout(set = 4, binding = 0) uniform sampler2D water_texture;
 layout(set = 5, binding = 0) uniform sampler2D reflection_texture;
 layout(set = 6, binding = 0) uniform sampler2D grid_texture;
+layout(set = 7, binding = 0) uniform sampler2D grid_normal_texture;
 
 layout(location = 0) in vec3 frag_world_pos;
 
@@ -121,31 +122,25 @@ void main()
     }
     */
 
+    // TODO: all these texture lookups are expensive (and loading them is slow, too!)
     // water grid animation sampling
-    float time_per_frame = 0.5;
-    int frames_in_animation = 5;
+    float time_per_frame = 0.125;
+    int frames_in_animation_edge = 7;
     float current_frame_opacity = fract(view_constants.time / time_per_frame);
     int frame_number = int(view_constants.time / time_per_frame);
     int next_frame_number = frame_number + 1;
 
-    // forward -> back -> forward play loop
-    frame_number = frame_number % ((frames_in_animation - 1) * 2);
-    if (frame_number >= frames_in_animation) frame_number = 2 * (frames_in_animation - 1) - frame_number;
-    next_frame_number = next_frame_number % ((frames_in_animation - 1) * 2);
-    if (next_frame_number >= frames_in_animation) next_frame_number = 2 * (frames_in_animation - 1) - next_frame_number;
-    //frame_number = frame_number % frames_in_animation; 
+    frame_number = frame_number % (frames_in_animation_edge * frames_in_animation_edge);
+    next_frame_number = next_frame_number % (frames_in_animation_edge * frames_in_animation_edge);
 
-    // sample current and next frame, alpha blend. assuming 4*4 animation
+    // sample current and next frame, alpha blend
     vec2 grid_uv = fract((pushed_xz + 0.5) / 4.0);
-    grid_uv = vec2(grid_uv.x += (frame_number % 4), grid_uv.y += (frame_number / 4)) / 4.0;
+    grid_uv = vec2(grid_uv.x += (frame_number % frames_in_animation_edge), grid_uv.y += (frame_number / frames_in_animation_edge)) / frames_in_animation_edge;
     vec2 next_grid_uv = fract((pushed_xz + 0.5) / 4.0);
-    next_grid_uv = vec2(next_grid_uv.x += (next_frame_number % 4), next_grid_uv.y += (next_frame_number / 4)) / 4.0;
+    next_grid_uv = vec2(next_grid_uv.x += (next_frame_number % frames_in_animation_edge), next_grid_uv.y += (next_frame_number / frames_in_animation_edge)) / frames_in_animation_edge;
 
     vec4 grid_color = mix(texture(grid_texture, grid_uv).rgba, texture(grid_texture, next_grid_uv).rgba, current_frame_opacity);
     base_color += grid_color.rgb * grid_color.a * grid_opacity * paint_value;
-
-    // TODO: paint multiplier should lower opacity. check if need to try to make thinner at lower paint, 
-    // (maybe by subtracting from opacity?) or if lowering opacity does the same
 
     // TODO: change normals based on paint normal map
     vec3 normal = unmodified_normal;
@@ -173,7 +168,7 @@ void main()
 
     // specular reflection
     /*
-    vec3 light_dir = normalize(vec3(0.3, 1.0, 0.2)); // TODO: establish canonical 'sun direction'
+    vec3 light_dir = normalize(vec3(0.3, 1.0, 0.2)); // TODO: revisit this, with real sun direction
     vec3 halfway = normalize(view_dir + light_dir);
     float spec_dot = max(dot(normal, halfway), 0.0);
     float specular = step(0.95, pow(spec_dot, 400.0));

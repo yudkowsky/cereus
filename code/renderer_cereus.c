@@ -435,6 +435,7 @@ typedef struct VulkanState
 	int32 atlas_font_asset_index;
     int32 atlas_3d_asset_index;
     int32 water_grid_asset_index;
+    int32 water_grid_normal_asset_index;
 
     // shared ubo
     VkBuffer scene_ubo_buffers[2];
@@ -584,10 +585,11 @@ const int32 ATLAS_FONT_HEIGHT = 180;
 const int32 ATLAS_3D_WIDTH = 480;
 const int32 ATLAS_3D_HEIGHT = 320;
 
-const char* ATLAS_2D_PATH 	= "data/assets/sprites/atlas-2d.png";
-const char* ATLAS_FONT_PATH = "data/assets/sprites/atlas-font.png";
-const char* ATLAS_3D_PATH 	= "data/assets/sprites/atlas-3d.png";
-const char* WATER_GRID_PATH = "data/assets/maps/water-grid/water-grid.png";
+const char* ATLAS_2D_PATH 	       = "data/assets/sprites/atlas-2d.png";
+const char* ATLAS_FONT_PATH        = "data/assets/sprites/atlas-font.png";
+const char* ATLAS_3D_PATH 	       = "data/assets/sprites/atlas-3d.png";
+const char* WATER_GRID_PATH        = "data/assets/maps/water-grid/water-grid.png";
+const char* WATER_GRID_NORMAL_PATH = "data/assets/maps/water-grid/water-grid-normal.png";
 
 VulkanState vulkan_state;
 DisplayInfo vulkan_display = {0};
@@ -4050,7 +4052,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     // WATER PIPELINE LAYOUT
     {
-        VkDescriptorSetLayout water_set_layouts[7] =
+        VkDescriptorSetLayout water_set_layouts[8] =
         {
             vulkan_state.view_constants_set_layout, // view constants
             vulkan_state.descriptor_set_layout,     // underwater scene copy
@@ -4059,11 +4061,12 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
             vulkan_state.descriptor_set_layout,     // displacement texture
             vulkan_state.descriptor_set_layout,     // reflection texture
             vulkan_state.descriptor_set_layout,     // water grid texture
+            vulkan_state.descriptor_set_layout,     // water grid normals texture
         };
 
         VkPipelineLayoutCreateInfo water_pipeline_layout_ci = {0};
         water_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        water_pipeline_layout_ci.setLayoutCount = 7;
+        water_pipeline_layout_ci.setLayoutCount = 8;
         water_pipeline_layout_ci.pSetLayouts = water_set_layouts;
         water_pipeline_layout_ci.pushConstantRangeCount = 0;
         water_pipeline_layout_ci.pPushConstantRanges = 0;
@@ -4303,10 +4306,11 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 	base_graphics_pipeline_creation_info.basePipelineHandle = VK_NULL_HANDLE; // not deriving from another pipeline.
 	base_graphics_pipeline_creation_info.basePipelineIndex = -1;
 
-    vulkan_state.atlas_2d_asset_index   = getOrLoadAsset((char*)ATLAS_2D_PATH);
-    vulkan_state.atlas_font_asset_index = getOrLoadAsset((char*)ATLAS_FONT_PATH);
-    vulkan_state.atlas_3d_asset_index   = getOrLoadAsset((char*)ATLAS_3D_PATH);
-    vulkan_state.water_grid_asset_index = getOrLoadAsset((char*)WATER_GRID_PATH);
+    vulkan_state.atlas_2d_asset_index          = getOrLoadAsset((char*)ATLAS_2D_PATH);
+    vulkan_state.atlas_font_asset_index        = getOrLoadAsset((char*)ATLAS_FONT_PATH);
+    vulkan_state.atlas_3d_asset_index          = getOrLoadAsset((char*)ATLAS_3D_PATH);
+    vulkan_state.water_grid_asset_index        = getOrLoadAsset((char*)WATER_GRID_PATH);
+    vulkan_state.water_grid_normal_asset_index = getOrLoadAsset((char*)WATER_GRID_NORMAL_PATH);
 
 	// define instanced cube pipeline: depth on, blending off
     {
@@ -5755,7 +5759,7 @@ void vulkanDraw(void)
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline);
 
-            VkDescriptorSet water_descriptor_sets[7] =
+            VkDescriptorSet water_descriptor_sets[8] =
             {
                 vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame],
                 vulkan_state.scene_copy_descriptor_set,
@@ -5764,9 +5768,10 @@ void vulkanDraw(void)
                 vulkan_state.displacement_sampled_descriptor_set,
                 vulkan_state.reflection_descriptor_set,
                 vulkan_state.descriptor_sets[vulkan_state.water_grid_asset_index],
+                vulkan_state.descriptor_sets[vulkan_state.water_grid_normal_asset_index],
             };
             uint32 water_view_constants_offset = VIEW_MAIN * vulkan_state.view_constants_stride;
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_layout, 0, 7, water_descriptor_sets, 1, &water_view_constants_offset);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_layout, 0, 8, water_descriptor_sets, 1, &water_view_constants_offset);
 
             VkBuffer water_buffers[2] = { water_data->vertex_buffer, vulkan_state.water_instance_buffers[vulkan_state.current_frame] };
             VkDeviceSize water_offsets[2] = { 0, 0 };
