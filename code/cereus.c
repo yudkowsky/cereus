@@ -391,7 +391,7 @@ Input prev_input = {0}; // copied from previous frame input to generate keys_pre
 DrawCommand draw_commands[16768] = {0};
 int32 draw_command_count = 0;
 
-const char debug_level_name[64] = "red-blue-i";
+const char debug_level_name[64] = "overworld";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";

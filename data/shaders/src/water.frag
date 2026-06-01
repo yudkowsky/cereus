@@ -98,29 +98,11 @@ void main()
     vec2 normal_push = unmodified_normal.xz * grid_push_by_normal;
     vec2 pushed_xz = frag_world_pos.xz + normal_push;
 
-    // sample paint texture given movement by unmodified normals
+    // sample paint texture given movement by unmodified normal
     vec2 paint_uv = (pushed_xz + 0.5) / WATER_PAINT_TILE_COUNT;
     vec2 snapped = (floor(paint_uv * WATER_PAINT_SIDE) + 0.5) / WATER_PAINT_SIDE;
     float paint_value = texture(paint_texture, snapped).r;
-
-    // grid line width and opacity scale with paint
-    /*
-    float effective_half_width = half_grid_line_width * paint_value;
-    float effective_corner_size = corner_size * paint_value;
-    */
     float effective_opacity = grid_opacity * paint_value;
-
-    // is this on the grid? using unmodified normals
-    /*
-    vec2 distance_to_line = abs(fract(pushed_xz - 0.5) - 0.5); // shenanigans to get alignment with (0,0) in corner
-    float inner_size = 0.5 - effective_half_width - effective_corner_size;
-    vec2 pos_to_inner = distance_to_line - vec2(inner_size);
-    float sdf = length(max(pos_to_inner, vec2(0.0))) + min(max(pos_to_inner.x, pos_to_inner.y), 0.0) - effective_corner_size;
-    if (sdf > 0.0) 
-    {
-        base_color = mix(base_color, grid_line_tint, effective_opacity);
-    }
-    */
 
     // TODO: all these texture lookups are expensive (and loading them is slow, too!)
     // water grid animation sampling
@@ -142,13 +124,22 @@ void main()
     vec4 grid_color = mix(texture(grid_texture, grid_uv).rgba, texture(grid_texture, next_grid_uv).rgba, current_frame_opacity);
     base_color += grid_color.rgb * grid_color.a * grid_opacity * paint_value;
 
-    // TODO: change normals based on paint normal map
-    vec3 normal = unmodified_normal;
+    // change normals based on paint normal map
+    vec3 ridge_texture = (texture(grid_normal_texture, grid_uv).rgb * 2.0 - 1.0);
+    float ridge_strength = 0.5;
+    vec2 peturb = ridge_texture.xy * paint_value * ridge_strength;
+    vec3 normal = normalize(vec3(
+        unmodified_normal.x + peturb.x, 
+        unmodified_normal.y, 
+        unmodified_normal.z + peturb.y
+    ));
 
-    // reflection based on fresnel strength
+    // reflection based on fresnel strength and grid stuff
     vec3 view_dir = normalize(view_constants.camera_position.xyz - frag_world_pos);
     float cos_theta = max(dot(view_dir, normal), 0.0);
-    float fresnel = min_reflection + (1.0 - min_reflection) * pow(1.0 - cos_theta, fresnel_exponent);
+    const float min_reflection_on_grid = 0.5;
+    float reflection_dampen_on_foam = mix(1.0, min_reflection_on_grid, clamp(grid_color.r * grid_color.a * paint_value, 0.0, 1.0));
+    float fresnel = (min_reflection + (1.0 - min_reflection) * pow(1.0 - cos_theta, fresnel_exponent)) * reflection_dampen_on_foam;
 
     // reflection distortion based on normals and distance to camera
     float dist_to_camera = distance(view_constants.camera_position.xyz, frag_world_pos);

@@ -1032,7 +1032,7 @@ Vec4 spriteUV(SpriteId id, AssetType type, int32 atlas_width, int32 atlas_height
     return (Vec4){u0,v0,u1,v1};
 }
 
-int32 loadAsset(char* path)
+int32 loadAsset(char* path, VkFormat format)
 {
     int width, height, channels;
     uint8* pixels = (uint8*)stbi_load(path, &width, &height, &channels, STBI_rgb_alpha);
@@ -1079,7 +1079,7 @@ int32 loadAsset(char* path)
     image_info.extent.depth = 1;
     image_info.mipLevels = 1;
     image_info.arrayLayers = 1; 
-    image_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    image_info.format = format;
     image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
     image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     image_info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -1162,7 +1162,7 @@ int32 loadAsset(char* path)
     image_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     image_view_info.image = texture_image;
     image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    image_view_info.format = VK_FORMAT_R8G8B8A8_SRGB;
+    image_view_info.format = format;
     image_view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     image_view_info.subresourceRange.baseMipLevel = 0;
     image_view_info.subresourceRange.levelCount = 1;
@@ -1205,14 +1205,15 @@ int32 loadAsset(char* path)
     return (int32)(vulkan_state.asset_cache_count - 1);
 }
 
-int32 getOrLoadAsset(char* path)
+// TODO: why do i have this as a separate function?
+int32 getOrLoadAsset(char* path, VkFormat format)
 {
     // check if already loaded
     for (uint32 asset_cache_index = 0; asset_cache_index < vulkan_state.asset_cache_count; asset_cache_index++)
     {
         if (strcmp(vulkan_state.asset_cache[asset_cache_index].path, path) == 0) return (int32)asset_cache_index;
     }
-    return loadAsset(path);
+    return loadAsset(path, format);
 }
 
 void uploadBufferToLocalDevice(void* source, VkDeviceSize size, VkBufferUsageFlags final_usage, VkBuffer* out_buffer, VkDeviceMemory* out_memory)
@@ -4306,11 +4307,11 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 	base_graphics_pipeline_creation_info.basePipelineHandle = VK_NULL_HANDLE; // not deriving from another pipeline.
 	base_graphics_pipeline_creation_info.basePipelineIndex = -1;
 
-    vulkan_state.atlas_2d_asset_index          = getOrLoadAsset((char*)ATLAS_2D_PATH);
-    vulkan_state.atlas_font_asset_index        = getOrLoadAsset((char*)ATLAS_FONT_PATH);
-    vulkan_state.atlas_3d_asset_index          = getOrLoadAsset((char*)ATLAS_3D_PATH);
-    vulkan_state.water_grid_asset_index        = getOrLoadAsset((char*)WATER_GRID_PATH);
-    vulkan_state.water_grid_normal_asset_index = getOrLoadAsset((char*)WATER_GRID_NORMAL_PATH);
+    vulkan_state.atlas_2d_asset_index          = getOrLoadAsset((char*)ATLAS_2D_PATH,          VK_FORMAT_R8G8B8A8_SRGB);
+    vulkan_state.atlas_font_asset_index        = getOrLoadAsset((char*)ATLAS_FONT_PATH,        VK_FORMAT_R8G8B8A8_SRGB);
+    vulkan_state.atlas_3d_asset_index          = getOrLoadAsset((char*)ATLAS_3D_PATH,          VK_FORMAT_R8G8B8A8_SRGB);
+    vulkan_state.water_grid_asset_index        = getOrLoadAsset((char*)WATER_GRID_PATH,        VK_FORMAT_R8G8B8A8_SRGB);
+    vulkan_state.water_grid_normal_asset_index = getOrLoadAsset((char*)WATER_GRID_NORMAL_PATH, VK_FORMAT_R8G8B8A8_UNORM);
 
 	// define instanced cube pipeline: depth on, blending off
     {
