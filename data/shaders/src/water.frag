@@ -24,8 +24,8 @@ layout(set = 2, binding = 0) uniform sampler2D depth_texture;
 layout(set = 3, binding = 0) uniform sampler2D paint_texture;
 layout(set = 4, binding = 0) uniform sampler2D water_texture;
 layout(set = 5, binding = 0) uniform sampler2D reflection_texture;
-layout(set = 6, binding = 0) uniform sampler2D grid_texture;
-layout(set = 7, binding = 0) uniform sampler2D grid_normal_texture;
+layout(set = 6, binding = 0) uniform sampler2DArray grid_texture;
+layout(set = 7, binding = 0) uniform sampler2DArray grid_normal_texture;
 
 layout(location = 0) in vec3 frag_world_pos;
 
@@ -104,33 +104,34 @@ void main()
     float paint_value = texture(paint_texture, snapped).r;
     float effective_opacity = grid_opacity * paint_value;
 
-    // TODO: all these texture lookups are expensive (and loading them is slow, too!)
     // water grid animation sampling
     float time_per_frame = 0.125;
-    int frames_in_animation_edge = 7;
-    float current_frame_opacity = fract(view_constants.time / time_per_frame);
-    int frame_number = int(view_constants.time / time_per_frame);
-    int next_frame_number = frame_number + 1;
+    int total_frames = 49;
+    float frame_blend = fract(view_constants.time / time_per_frame);
+    int frame_a = int(view_constants.time / time_per_frame) % total_frames;
+    int frame_b = (frame_a + 1) % total_frames;
 
-    frame_number = frame_number % (frames_in_animation_edge * frames_in_animation_edge);
-    next_frame_number = next_frame_number % (frames_in_animation_edge * frames_in_animation_edge);
+    vec2 tile_uv = (pushed_xz + 0.5) / 4.0; // reapeat sampler handles
 
-    // sample current and next frame, alpha blend
-    vec2 grid_uv = fract((pushed_xz + 0.5) / 4.0);
-    grid_uv = vec2(grid_uv.x += (frame_number % frames_in_animation_edge), grid_uv.y += (frame_number / frames_in_animation_edge)) / frames_in_animation_edge;
-    vec2 next_grid_uv = fract((pushed_xz + 0.5) / 4.0);
-    next_grid_uv = vec2(next_grid_uv.x += (next_frame_number % frames_in_animation_edge), next_grid_uv.y += (next_frame_number / frames_in_animation_edge)) / frames_in_animation_edge;
+    // grid is single channel
+    float grid = mix(
+        texture(grid_texture, vec3(tile_uv, float(frame_a))).r,
+        texture(grid_texture, vec3(tile_uv, float(frame_b))).r,
+        frame_blend);
 
-    vec4 grid_color = mix(texture(grid_texture, grid_uv).rgba, texture(grid_texture, next_grid_uv).rgba, current_frame_opacity);
-    base_color += grid_color.rgb * grid_color.a * grid_opacity * paint_value;
+    base_color += vec3(grid) * grid_opacity * paint_value;
 
-    // change normals based on paint normal map
-    vec3 ridge_texture = (texture(grid_normal_texture, grid_uv).rgb * 2.0 - 1.0);
+    // normal is dual channel in xz
+    vec3 ridge_texture = mix(
+        texture(grid_normal_texture, vec3(tile_uv, float(frame_a))).rgb,
+        texture(grid_normal_texture, vec3(tile_uv, float(frame_b))).rgb,
+        frame_blend) * 2.0 - 1.0;
+
     float ridge_strength = 0.5;
     vec2 peturb = ridge_texture.xy * paint_value * ridge_strength;
     vec3 normal = normalize(vec3(
-        unmodified_normal.x + peturb.x, 
-        unmodified_normal.y, 
+        unmodified_normal.x + peturb.x,
+        unmodified_normal.y,
         unmodified_normal.z + peturb.y
     ));
 
@@ -138,7 +139,7 @@ void main()
     vec3 view_dir = normalize(view_constants.camera_position.xyz - frag_world_pos);
     float cos_theta = max(dot(view_dir, normal), 0.0);
     const float min_reflection_on_grid = 0.5;
-    float reflection_dampen_on_foam = mix(1.0, min_reflection_on_grid, clamp(grid_color.r * grid_color.a * paint_value, 0.0, 1.0));
+    float reflection_dampen_on_foam = mix(1.0, min_reflection_on_grid, clamp(grid * paint_value, 0.0, 1.0));
     float fresnel = (min_reflection + (1.0 - min_reflection) * pow(1.0 - cos_theta, fresnel_exponent)) * reflection_dampen_on_foam;
 
     // reflection distortion based on normals and distance to camera

@@ -588,8 +588,8 @@ const int32 ATLAS_3D_HEIGHT = 320;
 const char* ATLAS_2D_PATH 	       = "data/assets/sprites/atlas-2d.png";
 const char* ATLAS_FONT_PATH        = "data/assets/sprites/atlas-font.png";
 const char* ATLAS_3D_PATH 	       = "data/assets/sprites/atlas-3d.png";
-const char* WATER_GRID_PATH        = "data/assets/maps/water-grid/water-grid.png";
-const char* WATER_GRID_NORMAL_PATH = "data/assets/maps/water-grid/water-grid-normal.png";
+const char* WATER_GRID_PATH        = "data/assets/maps/water-grid/water-grid.dds";
+const char* WATER_GRID_NORMAL_PATH = "data/assets/maps/water-grid/water-grid-normal.dds";
 
 VulkanState vulkan_state;
 DisplayInfo vulkan_display = {0};
@@ -1214,6 +1214,233 @@ int32 getOrLoadAsset(char* path, VkFormat format)
         if (strcmp(vulkan_state.asset_cache[asset_cache_index].path, path) == 0) return (int32)asset_cache_index;
     }
     return loadAsset(path, format);
+}
+
+// load BC4/BC5 DDS array texture TODO: various cleanups / formatting stuff (and that imageBarrier thing)
+int32 loadDdsArray(char* path)
+{
+    void*  file_data = 0;
+    size_t file_size = 0;
+    if (!readEntireFile(path, &file_data, &file_size)) return -1;
+
+    uint8* bytes = (uint8*)file_data;
+    if (memcmp(bytes, "DDS ", 4) != 0) { free(file_data); return -1; }
+
+    // DDS_HEADER fields are at fixed offsets
+    uint32 height = *(uint32*)(bytes + 12);
+    uint32 width  = *(uint32*)(bytes + 16);
+    uint32 levels = *(uint32*)(bytes + 28);
+    // DX10 header starts at byte 128
+    uint32 dxgi   = *(uint32*)(bytes + 128);
+    uint32 layers = *(uint32*)(bytes + 140);
+    uint8* texels = bytes + 148;
+
+    VkFormat format;
+    uint32 block_bytes;
+    if (dxgi == 80) 
+    {
+        format = VK_FORMAT_BC4_UNORM_BLOCK; 
+        block_bytes = 8;
+    }
+    else if (dxgi == 83)
+    { 
+        format = VK_FORMAT_BC5_UNORM_BLOCK;
+        block_bytes = 16;
+    }
+    else
+    {
+        free(file_data);
+        return -1;
+    }
+
+    // precompute level sizes and get one slice's total size
+    uint32 level_size[16] = {0};
+    uint32 slice_size = 0;
+    for (uint32 level = 0; level < levels; level++)
+    {
+        uint32 lw = width  >> level; if (lw == 0) lw = 1;
+        uint32 lh = height >> level; if (lh == 0) lh = 1;
+        uint32 bx = (lw + 3) / 4;
+        uint32 by = (lh + 3) / 4;
+        level_size[level] = bx * by * block_bytes;
+        slice_size += level_size[level];
+    }
+    VkDeviceSize payload_size = (VkDeviceSize)slice_size * layers;
+
+    // staging buffer
+    VkBuffer staging = VK_NULL_HANDLE;
+    VkDeviceMemory staging_memory = VK_NULL_HANDLE;
+
+    VkBufferCreateInfo buffer_info = {0};
+    buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buffer_info.size = payload_size;
+    buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    vkCreateBuffer(vulkan_state.logical_device_handle, &buffer_info, 0, &staging);
+
+    VkMemoryRequirements memory_requirements = {0};
+    vkGetBufferMemoryRequirements(vulkan_state.logical_device_handle, staging, &memory_requirements);
+
+    VkMemoryAllocateInfo alloc_info = {0};
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = memory_requirements.size;
+    alloc_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    vkAllocateMemory(vulkan_state.logical_device_handle, &alloc_info, 0, &staging_memory);
+    vkBindBufferMemory(vulkan_state.logical_device_handle, staging, staging_memory, 0);
+
+    void* mapped = 0;
+    vkMapMemory(vulkan_state.logical_device_handle, staging_memory, 0, payload_size, 0, &mapped);
+    memcpy(mapped, texels, (size_t)payload_size);
+    vkUnmapMemory(vulkan_state.logical_device_handle, staging_memory);
+
+    // device local image
+    VkImage texture_image = VK_NULL_HANDLE;
+    VkDeviceMemory texture_image_memory = VK_NULL_HANDLE;
+
+    VkImageCreateInfo image_info = {0};
+    image_info.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    image_info.imageType     = VK_IMAGE_TYPE_2D;
+    image_info.extent.width  = width;
+    image_info.extent.height = height;
+    image_info.extent.depth  = 1;
+    image_info.mipLevels     = levels;
+    image_info.arrayLayers   = layers;
+    image_info.format        = format;
+    image_info.tiling        = VK_IMAGE_TILING_OPTIMAL;
+    image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    image_info.usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    image_info.samples       = VK_SAMPLE_COUNT_1_BIT;
+    image_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+    vkCreateImage(vulkan_state.logical_device_handle, &image_info, 0, &texture_image);
+
+    vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, texture_image, &memory_requirements);
+    alloc_info.allocationSize  = memory_requirements.size;
+    alloc_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    vkAllocateMemory(vulkan_state.logical_device_handle, &alloc_info, 0, &texture_image_memory);
+    vkBindImageMemory(vulkan_state.logical_device_handle, texture_image, texture_image_memory, 0);
+
+    // copy regions
+    VkBufferImageCopy* regions = malloc(sizeof(VkBufferImageCopy) * levels * layers);
+    uint32 region_count = 0;
+    VkDeviceSize offset = 0;
+    for (uint32 layer = 0; layer < layers; layer++)
+    {
+        for (uint32 level = 0; level < levels; level++)
+        {
+            uint32 lw = width  >> level; 
+            if (lw == 0) lw = 1;
+            uint32 lh = height >> level; 
+            if (lh == 0) lh = 1;
+
+            VkBufferImageCopy* region = &regions[region_count++];
+            *region = (VkBufferImageCopy){0};
+            region->bufferOffset = offset;
+            region->imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            region->imageSubresource.mipLevel = level;
+            region->imageSubresource.baseArrayLayer = layer;
+            region->imageSubresource.layerCount     = 1;
+            region->imageExtent.width  = lw;
+            region->imageExtent.height = lh;
+            region->imageExtent.depth  = 1;
+            offset += level_size[level];
+        }
+    }
+
+    // submit
+    VkCommandBufferAllocateInfo cb_alloc = {0};
+    cb_alloc.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cb_alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cb_alloc.commandPool = vulkan_state.graphics_command_pool_handle;
+    cb_alloc.commandBufferCount = 1;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    vkAllocateCommandBuffers(vulkan_state.logical_device_handle, &cb_alloc, &cmd);
+
+    VkCommandBufferBeginInfo cb_begin = {0};
+    cb_begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    cb_begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(cmd, &cb_begin);
+
+    // full range barrier TODO: imageBarrier here, need to change that function to allow diff level
+    VkImageMemoryBarrier barrier = {0};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.image = texture_image;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.levelCount = levels;
+    barrier.subresourceRange.layerCount = layers;
+
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, 0, 0, 0, 1, &barrier);
+
+    vkCmdCopyBufferToImage(cmd, staging, texture_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, region_count, regions);
+
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, 0, 0, 0, 1, &barrier);
+
+    vkEndCommandBuffer(cmd);
+
+    VkSubmitInfo submit = {0};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &cmd;
+    vkQueueSubmit(vulkan_state.graphics_queue_handle, 1, &submit, VK_NULL_HANDLE);
+    vkQueueWaitIdle(vulkan_state.graphics_queue_handle);
+
+    vkFreeCommandBuffers(vulkan_state.logical_device_handle, vulkan_state.graphics_command_pool_handle, 1, &cmd);
+    vkDestroyBuffer(vulkan_state.logical_device_handle, staging, 0);
+    vkFreeMemory(vulkan_state.logical_device_handle, staging_memory, 0);
+    free(regions);
+    free(file_data);
+
+    // array view
+    VkImageViewCreateInfo view_info = {0};
+    view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    view_info.image = texture_image;
+    view_info.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+    view_info.format = format;
+    view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info.subresourceRange.levelCount = levels;
+    view_info.subresourceRange.layerCount = layers;
+    VkImageView texture_image_view = VK_NULL_HANDLE;
+    vkCreateImageView(vulkan_state.logical_device_handle, &view_info, 0, &texture_image_view);
+
+    // descriptor
+    VkDescriptorImageInfo image_desc = {0};
+    image_desc.sampler = vulkan_state.tiling_linear_sampler;
+    image_desc.imageView = texture_image_view;
+    image_desc.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkDescriptorSetAllocateInfo ds_alloc = {0};
+    ds_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    ds_alloc.descriptorPool = vulkan_state.descriptor_pool;
+    ds_alloc.descriptorSetCount = 1;
+    ds_alloc.pSetLayouts = &vulkan_state.descriptor_set_layout;
+    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &ds_alloc, &vulkan_state.descriptor_sets[vulkan_state.asset_cache_count]);
+
+    VkWriteDescriptorSet write = {0};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = vulkan_state.descriptor_sets[vulkan_state.asset_cache_count];
+    write.dstBinding = 0;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.pImageInfo = &image_desc;
+    vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &write, 0, 0);
+
+    // cache bookkeeping
+    vulkan_state.asset_cache[vulkan_state.asset_cache_count].image  = texture_image;
+    vulkan_state.asset_cache[vulkan_state.asset_cache_count].memory = texture_image_memory;
+    vulkan_state.asset_cache[vulkan_state.asset_cache_count].view   = texture_image_view;
+    strcpy(vulkan_state.asset_cache[vulkan_state.asset_cache_count].path, path);
+
+    vulkan_state.asset_cache_count++;
+    return (int32)(vulkan_state.asset_cache_count - 1);
 }
 
 void uploadBufferToLocalDevice(void* source, VkDeviceSize size, VkBufferUsageFlags final_usage, VkBuffer* out_buffer, VkDeviceMemory* out_memory)
@@ -2533,6 +2760,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     device_features.wideLines = VK_TRUE;
     device_features.fragmentStoresAndAtomics = VK_TRUE;
     device_features.independentBlend = VK_TRUE;
+    device_features.textureCompressionBC = VK_TRUE;
 
     VkDeviceCreateInfo device_info = {0}; // struct that bundles everthing the driver needs to create the logical device
     device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -4310,8 +4538,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     vulkan_state.atlas_2d_asset_index          = getOrLoadAsset((char*)ATLAS_2D_PATH,          VK_FORMAT_R8G8B8A8_SRGB);
     vulkan_state.atlas_font_asset_index        = getOrLoadAsset((char*)ATLAS_FONT_PATH,        VK_FORMAT_R8G8B8A8_SRGB);
     vulkan_state.atlas_3d_asset_index          = getOrLoadAsset((char*)ATLAS_3D_PATH,          VK_FORMAT_R8G8B8A8_SRGB);
-    vulkan_state.water_grid_asset_index        = getOrLoadAsset((char*)WATER_GRID_PATH,        VK_FORMAT_R8G8B8A8_SRGB);
-    vulkan_state.water_grid_normal_asset_index = getOrLoadAsset((char*)WATER_GRID_NORMAL_PATH, VK_FORMAT_R8G8B8A8_UNORM);
+
+    vulkan_state.water_grid_asset_index        = loadDdsArray((char*)WATER_GRID_PATH);
+    vulkan_state.water_grid_normal_asset_index = loadDdsArray((char*)WATER_GRID_NORMAL_PATH);
 
 	// define instanced cube pipeline: depth on, blending off
     {
