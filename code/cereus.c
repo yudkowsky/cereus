@@ -364,7 +364,7 @@ const int32 FONT_CELL_WIDTH_PX = 6;
 const int32 FONT_CELL_HEIGHT_PX = 10;
 const float DEFAULT_TEXT_SCALE = 30.0f;
 
-const int32 SAVE_WRITE_VERSION = 1;
+const int32 SAVE_WRITE_VERSION = 2;
 
 const int32 CAMERA_CHUNK_SIZE = 24;
 const char MAIN_CAMERA_CHUNK_TAG[4] = "CMRA";
@@ -377,6 +377,8 @@ const char LOCKED_INFO_CHUNK_TAG[4] = "LOKB";
 const int32 OVERWORLD_SCREEN_SIZE_X = 21;
 const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 
+const float NO_WATER_PLANE_LOW_VALUE = -999.0f;
+
 const double DEFAULT_PHYSICS_TIMESTEP = 1.0/60.0;
 double physics_timestep_multiplier = 1.0;
 double physics_accumulator = 0; // time accumulator affected by physics timestep
@@ -388,7 +390,7 @@ bool step_to_next_tick = false;
 DisplayInfo game_display = {0};
 Input prev_input = {0}; // copied from previous frame input to generate keys_pressed
 
-DrawCommand draw_commands[16768] = {0};
+DrawCommand draw_commands[8192] = {0};
 int32 draw_command_count = 0;
 
 const char debug_level_name[64] = "overworld";
@@ -430,6 +432,7 @@ TemporaryState temp_state = {0};
 LaserBuffer laser_buffer[512] = {0}; // 512 = 64 max sources * 16 max laser turns
 GameProgress game_progress = WORLD_0;
 Int3 level_dim = {0};
+Int3 level_origin = {0};
 Int3 restart_position = {0};
 bool in_overworld = true;
 float water_plane_y = 0.0f;
@@ -437,6 +440,7 @@ float water_plane_y = 0.0f;
 WorldState leap_of_faith_world_state_snapshot = {0};
 TemporaryState leap_of_faith_temp_state_snapshot = {0};
 WorldState overworld_zero_state = {0};
+uint8 temp_buffer_array[sizeof(world_state.buffer)];
 
 int32 time_until_allow_meta_input = 0;
 int32 time_until_allow_undo_or_restart_input = 0;
@@ -490,11 +494,6 @@ Vec3 int3ToVec3(Int3 int_coords)
 Int3 vec3ToInt3(Vec3 position)
 {
     return (Int3){ (int32)roundf(position.x), (int32)roundf(position.y), (int32)roundf(position.z) };
-}
-
-bool intCoordsWithinLevelBounds(Int3 coords) 
-{
-    return (coords.x >= 0 && coords.y >= 0 && coords.z >= 0 && coords.x < level_dim.x && coords.y < level_dim.y && coords.z < level_dim.z); 
 }
 
 bool int3IsEqual(Int3 a, Int3 b) 
@@ -703,10 +702,20 @@ void cameraBasisFromYaw(float yaw, Vec3* right, Vec3* forward)
 
 // BUFFER / STATE INTERFACING
 
+bool intCoordsWithinLevelBounds(Int3 coords) 
+{
+    return coords.x >= level_origin.x && coords.y >= level_origin.y && coords.z >= level_origin.z
+        && coords.x < level_origin.x + level_dim.x && coords.y < level_origin.y + level_dim.y && coords.z < level_origin.z + level_dim.z;
+}
+
 int32 coordsToBufferIndexType(Int3 coords)
 {
-    return 2*(level_dim.x*level_dim.z*coords.y + level_dim.x*coords.z + coords.x); 
+    int32 x = coords.x - level_origin.x;
+    int32 y = coords.y - level_origin.y;
+    int32 z = coords.z - level_origin.z;
+    return 2 * (level_dim.x*level_dim.z*y + level_dim.x*z + x);
 }
+
 int32 coordsToBufferIndexDirection(Int3 coords)
 {
     return coordsToBufferIndexType(coords) + 1;
@@ -714,11 +723,13 @@ int32 coordsToBufferIndexDirection(Int3 coords)
 
 Int3 bufferIndexToCoords(int32 buffer_index)
 {
-    Int3 coords = {0};
-    coords.x = (buffer_index/2) % level_dim.x;
-    coords.y = (buffer_index/2) / (level_dim.x * level_dim.z);
-    coords.z = ((buffer_index/2) / level_dim.x) % level_dim.z;
-    return coords;
+    int32 tile_index = buffer_index / 2; // TODO: probably redo this with a struct instead of always dealing with "two bytes"?
+
+    return (Int3){
+        (tile_index % level_dim.x) + level_origin.x,
+        tile_index / (level_dim.x*level_dim.z) + level_origin.y,
+        (tile_index / level_dim.x) % level_dim.z + level_origin.z,
+    };
 }
 
 void setTileType(TileType type, Int3 coords) 
@@ -752,6 +763,50 @@ void moveEntityInBufferAndState(Entity* e, Int3 end_coords, Direction end_direct
     setTileType(type, end_coords);
     setTileDirection(end_direction, end_coords, e->mirror_orientation);
 }
+
+void getLevelMinAndMax(Int3* level_min, Int3* level_max)
+{
+    *level_min = (Int3){ INT32_MAX, INT32_MAX, INT32_MAX };
+    *level_max = (Int3){ INT32_MIN, INT32_MIN, INT32_MIN };
+    for (int32 tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
+    {
+        if (world_state.buffer[tile_index] == TILE_TYPE_NONE) continue;
+        Int3 coords = bufferIndexToCoords(tile_index);
+        if (coords.x > level_max->x) level_max->x = coords.x;
+        if (coords.y > level_max->y) level_max->y = coords.y;
+        if (coords.z > level_max->z) level_max->z = coords.z;
+        if (coords.x < level_min->x) level_min->x = coords.x;
+        if (coords.y < level_min->y) level_min->y = coords.y;
+        if (coords.z < level_min->z) level_min->z = coords.z;
+    }
+}
+
+// returns false if reindex would be too large
+bool reindexBuffer(Int3 new_origin, Int3 new_dim)
+{
+    int32 new_total_tiles = new_dim.x*new_dim.y*new_dim.z;
+    if (new_total_tiles * 2 > (int32)sizeof(world_state.buffer)) return false;
+
+    for (int32 tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
+    {
+        if (world_state.buffer[tile_index] == TILE_TYPE_NONE) continue;
+        Int3 coords = bufferIndexToCoords(tile_index);
+        int32 new_x = coords.x - new_origin.x;
+        int32 new_y = coords.y - new_origin.y;
+        int32 new_z = coords.z - new_origin.z;
+        if (new_x < 0 || new_y < 0 || new_z < 0 || new_x >= new_dim.x || new_y >= new_dim.y || new_z >= new_dim.z) continue; // guard in case something goes wrong
+        int32 new_index = 2 * (new_dim.x*new_dim.z*new_y + new_dim.x*new_z + new_x);
+        temp_buffer_array[new_index] = world_state.buffer[tile_index];
+        temp_buffer_array[new_index + 1] = world_state.buffer[tile_index + 1];
+    }
+    memcpy(world_state.buffer, temp_buffer_array, new_total_tiles * 2);
+    memset(temp_buffer_array, 0, new_total_tiles*2);
+    level_origin = new_origin;
+    level_dim = new_dim;
+    return true;
+}
+
+// ENTITY STUFF
 
 bool isSource(TileType type) 
 {
@@ -956,9 +1011,10 @@ void setEntityVecsFromInts(Entity* e)
 // .level file structure: 
 //
 // first byte is version. version 0 is a dense representation, like the buffer i have in memory. 
-// version 1 encodes buffer index, tile type, direction for every object, in a sparse representation, and so is much smaller, because >99% of a level is air
-// then 3 bytes: x,y,z of level dimensions
-// next x*y*z * 2 bytes: actual level buffer. this is still dense. takes up 2MB memory for the largest level (overworld, which is 250*250*16 in dimension; 2 bytes, one for tile type, one for direction)
+// version 1 encodes buffer index, tile type, direction for every object, in a sparse representation, and so is much smaller, large % of a level is air
+// version 2 adds level_origin in 3 bytes after level_dim, so bumps everything up by 4 extra bytes. (this means there is one empty byte)
+// then 3 + 3 bytes: x,y,z of level dimensions (stride), and x,y,z of level origin
+// then sparse representation of level, 6 bytes per tile: buffer_index, tile type (and orientation), and direction
 
 // then chunking starts: 4 bytes for tag, 4 bytes for size (not including tag or size), and then data
 // camera:          tag: CMRA,  size: 24 (6 * 4b),          data: x, y, z, fov, yaw, pitch (as floats)
@@ -990,12 +1046,13 @@ int32 getCountAndPositionOfChunk(FILE* file, char tag[3], int32 positions[64])
     {
         chunk_start = 4 + (level_dim.x*level_dim.y*level_dim.z * 2);
     }
-    else if (version == 1)
+    else if (version == 1 || version == 2)
     {
-        fseek(file, 4, SEEK_SET);
+        int32 tile_count_offset = (version == 1) ? 4 : 8;
+        fseek(file, tile_count_offset, SEEK_SET);
         int32 tile_count = 0;
         fread(&tile_count, 4, 1, file);
-        chunk_start = 8 + (tile_count * 6);
+        chunk_start = tile_count_offset + 4 + (tile_count * 6);
     }
     fseek(file, chunk_start, SEEK_SET);
 
@@ -1036,12 +1093,24 @@ void loadBufferInfo(FILE* file)
     level_dim.x = x;
     level_dim.y = y;
     level_dim.z = z;
+    
+    level_origin = (Int3){0};
+    if (version == 2)
+    {
+        fread(&x, 1, 1, file);
+        fread(&y, 1, 1, file);
+        fread(&z, 1, 1, file);
+        level_origin.x = x;
+        level_origin.y = y;
+        level_origin.z = z;
+        fseek(file, 8, SEEK_SET);
+    }
 
     if (version == 0)
     {
         fread(&world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
     }
-    else if (version == 1)
+    else if (version == 1 || version == 2)
     {
         int32 tile_count = 0;
         fread(&tile_count, 4, 1, file);
@@ -1152,11 +1221,12 @@ void writeBufferToFile(FILE* file, int32 version)
     {
         fwrite(world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
     }
-    else if (version == 1)
+    else if (version == 1 || version == 2)
     {
+        int32 maybe_extra_4_bytes_for_v2 = version == 1 ? 0 : 4;
         int32 tile_count = 0;
-
-        fseek(file, 8, SEEK_SET); // leave space for tile_count
+        // leave space for dims, (origin), and tile_count
+        fseek(file, 8 + maybe_extra_4_bytes_for_v2, SEEK_SET);
 
         for (int32 buffer_index = 0; buffer_index < level_dim.x*level_dim.y*level_dim.z * 2; buffer_index += 2)
         {
@@ -1168,10 +1238,11 @@ void writeBufferToFile(FILE* file, int32 version)
             fwrite(&direction, 1, 1, file);
             tile_count++;
         }
+        // seek back to after level_dim (and origin)
+        fseek(file, 4 + maybe_extra_4_bytes_for_v2, SEEK_SET);
 
-        fseek(file, 4, SEEK_SET); // seek back to after level_dims
         fwrite(&tile_count, 4, 1, file);
-        fseek(file, (8 + (tile_count * 6)), SEEK_SET); // set seek to end of tiles
+        fseek(file, (8 + maybe_extra_4_bytes_for_v2 + (tile_count * 6)), SEEK_SET); // set seek to end of tiles
     }
 }
 
@@ -1222,13 +1293,20 @@ bool saveLevelRewrite(char* path)
     if (!file) return false;
 
     fwrite(&SAVE_WRITE_VERSION, 1, 1, file);
-    uint8 x, y, z;
-    x = (uint8)level_dim.x;
-    y = (uint8)level_dim.y;
-    z = (uint8)level_dim.z;
-    fwrite(&x, 1, 1, file);
-    fwrite(&y, 1, 1, file);
-    fwrite(&z, 1, 1, file);
+
+    uint8 level_x = (uint8)level_dim.x;
+    uint8 level_y = (uint8)level_dim.y;
+    uint8 level_z = (uint8)level_dim.z;
+    fwrite(&level_x, 1, 1, file);
+    fwrite(&level_y, 1, 1, file);
+    fwrite(&level_z, 1, 1, file);
+
+    uint8 origin_x = (uint8)level_origin.x;
+    uint8 origin_y = (uint8)level_origin.y;
+    uint8 origin_z = (uint8)level_origin.z;
+    fwrite(&origin_x, 1, 1, file);
+    fwrite(&origin_y, 1, 1, file);
+    fwrite(&origin_z, 1, 1, file);
 
     writeBufferToFile(file, SAVE_WRITE_VERSION);
     writeCameraToFile(file, &saved_main_camera, false);
@@ -2315,8 +2393,20 @@ void gameInitializeState(char* level_name)
     buildLevelPathFromName(world_state.level_name, &level_path, false);
     FILE* file = fopen(level_path, "rb+");
     loadBufferInfo(file);
+
+    // TEMP: reindex at startup until i trust it to already be correct
+    {
+        // reindex at correct coords
+        Int3 level_min, level_max;
+        getLevelMinAndMax(&level_min, &level_max);
+        Int3 actual_level_dim = int3Add(int3Subtract(level_max, level_min), (Int3){1,1,1});
+        actual_level_dim.y = actual_level_dim.y > 16 ? actual_level_dim.y : 16; // TODO: fix min y coord for now; later change this per-level
+        reindexBuffer(level_min, actual_level_dim);
+    }
+
     fclose(file);
 
+    // clear entity data TODO: do all in one memset. also, do a better flag instead of that id = -1 system that's still hanging around.
     memset(world_state.boxes,         0, sizeof(world_state.boxes)); 
     memset(world_state.mirrors,       0, sizeof(world_state.mirrors));
     memset(world_state.glass_blocks,  0, sizeof(world_state.glass_blocks));
@@ -2333,6 +2423,7 @@ void gameInitializeState(char* level_name)
         world_state.locked_blocks[entity_index].id  = -1;
     }
 
+    // rebuild entity array
     Entity* entity_group = 0;
     for (int buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
     {
@@ -4920,10 +5011,10 @@ GameResult gameFrame(double delta_time, Input* input)
             drawAsset(0, LASER, center, scale, rotation, color_with_alpha, lb.start_clip_plane, lb.end_clip_plane); // the model doesnt matter
         }
 
-        // draw models
-        // TODO: level_dim should be the actual size of the level, which changes whenever i save the level. otherwise this loop will be slow, especially in overworld (easily 2/3s of game time)
-        //       there would also then be a start coord for this box, since it won't be at 0,0 necessarily...
-        bool water_plane_defined = false;
+        // draw models, manage some water state
+        float previous_water_plane_y = water_plane_y;
+        float next_water_plane_y = NO_WATER_PLANE_LOW_VALUE;
+
         for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
         {
             TileType draw_tile = world_state.buffer[tile_index];
@@ -4936,13 +5027,6 @@ GameResult gameFrame(double delta_time, Input* input)
                 {
                     drawAsset(CUBE_3D_LOCKED_BLOCK, CUBE_3D, int3ToVec3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
                 }
-                /*
-                if (draw_tile == WIN_BLOCK)
-                {
-                    if (in_overworld && findInSolvedLevels(e->next_level) != -1) draw_tile = WON_BLOCK;
-                    else if (!in_overworld && findInSolvedLevels(world_state.level_name) != -1) draw_tile = WON_BLOCK;
-                }
-                */
                 if (draw_tile == TILE_TYPE_PLAYER)
                 {
                     Vec4 player_color = { (float)temp_state.player_hit_by_red, 0.0f, (float)(temp_state.player_hit_by_blue_timer > 0) };
@@ -4957,18 +5041,26 @@ GameResult gameFrame(double delta_time, Input* input)
             {
                 if (getCube3DId(draw_tile) == CUBE_3D_WATER) 
                 {
-                    if (!water_plane_defined) 
-                    {
-                        water_plane_y = getComponentAlongDirection(UP, int3ToVec3(bufferIndexToCoords(tile_index))) + 1.2f;
-                        water_plane_defined = true;
-                    }
+                    if (next_water_plane_y == NO_WATER_PLANE_LOW_VALUE) next_water_plane_y = getComponentAlongDirection(UP, int3ToVec3(bufferIndexToCoords(tile_index))) + 1.2f;
                     drawAsset(MODEL_3D_WATER, WATER_3D, int3ToVec3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
                 }
                 drawAsset(getCube3DId(draw_tile), CUBE_3D, int3ToVec3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
             }
         }
 
-        if (!water_plane_defined) water_plane_y = -999.0f;
+        if (next_water_plane_y != previous_water_plane_y)
+        {
+            // change in water level
+            water_plane_y = next_water_plane_y;
+            if (next_water_plane_y == NO_WATER_PLANE_LOW_VALUE)
+            {
+                // TODO: disable water in WATR file info
+            }
+            else
+            {
+                // TODO: enable water in WATR file info
+            }
+        }
 
         // draw selected entity
         if (editor_state.selected_id >= 0 && (editor_state.editor_mode == SELECT || editor_state.editor_mode == SELECT_WRITE))
