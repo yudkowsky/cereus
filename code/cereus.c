@@ -229,7 +229,7 @@ typedef struct
 }
 RaycastHit;
 
-typedef enum
+typedef enum // TODO: prefix enum
 {
     NO_TYPE = 0,
     GAMEPLAY_MODE_CHANGE,
@@ -245,6 +245,7 @@ typedef enum
     DRAW_TRAILING_HITBOX_TOGGLE,
     STEP_THROUGH_TOGGLE,
     PAINT_BRUSH_RADIUS_CHANGE,
+    EDITOR_BLOCK_PLACE_OOB,
 }
 PopupType;
 
@@ -2394,16 +2395,6 @@ void gameInitializeState(char* level_name)
     FILE* file = fopen(level_path, "rb+");
     loadBufferInfo(file);
 
-    // TEMP: reindex at startup until i trust it to already be correct
-    {
-        // reindex at correct coords
-        Int3 level_min, level_max;
-        getLevelMinAndMax(&level_min, &level_max);
-        Int3 actual_level_dim = int3Add(int3Subtract(level_max, level_min), (Int3){1,1,1});
-        actual_level_dim.y = actual_level_dim.y > 16 ? actual_level_dim.y : 16; // TODO: fix min y coord for now; later change this per-level
-        reindexBuffer(level_min, actual_level_dim);
-    }
-
     fclose(file);
 
     // clear entity data TODO: do all in one memset. also, do a better flag instead of that id = -1 system that's still hanging around.
@@ -3774,7 +3765,7 @@ GameResult gameFrame(double delta_time, Input* input)
         {
             if ((input->keys_held & KEY_LEFT_MOUSE || input->keys_held & KEY_F) && raycast_output.hit) 
             {
-                Entity *entity= getEntityAtCoords(raycast_output.hit_coords);
+                Entity *entity = getEntityAtCoords(raycast_output.hit_coords);
                 if (entity != 0)
                 {
                     entity->coords = (Int3){0};
@@ -3784,11 +3775,43 @@ GameResult gameFrame(double delta_time, Input* input)
                 setTileType(TILE_TYPE_NONE, raycast_output.hit_coords);
                 setTileDirection(NORTH, raycast_output.hit_coords, 0);
 
+                Int3 level_min, level_max;
+                getLevelMinAndMax(&level_min, &level_max);
+                if (level_min.x <= level_max.x)
+                {
+                    // not an empty level
+                    Int3 actual_level_dim = int3Add(int3Subtract(level_max, level_min), (Int3){1,1,1});
+                    actual_level_dim.y = actual_level_dim.y > 16 ? actual_level_dim.y : 16; // TODO: fix min y coord for now; later change this per-level
+                    reindexBuffer(level_min, actual_level_dim); // TODO: should check here if actually need to reindex, mostly won't need to. 
+                }                                               // but this is good way to get all levels to be correct dimension anyway, for now
+
                 time_until_allow_meta_input = PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT;
             }
             else if ((input->keys_held & KEY_RIGHT_MOUSE || input->keys_held & KEY_H) && raycast_output.hit) 
             {
-                if (intCoordsWithinLevelBounds(raycast_output.place_coords))
+                bool place_allowed = false;
+                if (!intCoordsWithinLevelBounds(raycast_output.place_coords))
+                {
+                    // tile doesn't fit: grow level sizes to include, if possible
+                    Int3 new_origin = level_origin;
+                    if (raycast_output.place_coords.x < new_origin.x) new_origin.x = raycast_output.place_coords.x;
+                    if (raycast_output.place_coords.y < new_origin.y) new_origin.y = raycast_output.place_coords.y;
+                    if (raycast_output.place_coords.z < new_origin.z) new_origin.z = raycast_output.place_coords.z;
+
+                    Int3 new_max = int3Subtract(int3Add(level_origin, level_dim), (Int3){ 1,1,1 }); // set new_max to previous old max coord
+                    if (raycast_output.place_coords.x > new_max.x) new_max.x = raycast_output.place_coords.x;
+                    if (raycast_output.place_coords.y > new_max.y) new_max.y = raycast_output.place_coords.y;
+                    if (raycast_output.place_coords.z > new_max.z) new_max.z = raycast_output.place_coords.z;
+
+                    Int3 new_dim = int3Add(int3Subtract(new_max, new_origin), (Int3){ 1,1,1 });
+                    place_allowed = reindexBuffer(new_origin, new_dim);
+                }
+                else
+                {
+                    place_allowed = true;
+                }
+
+                if (place_allowed)
                 {
                     if (editor_state.picked_tile == TILE_TYPE_PLAYER) editorPlaceOnlyInstanceOfTile(player, raycast_output.place_coords, TILE_TYPE_PLAYER, PLAYER_ID);
                     else if (editor_state.picked_tile == TILE_TYPE_PACK) editorPlaceOnlyInstanceOfTile(pack, raycast_output.place_coords, TILE_TYPE_PACK, PACK_ID);
@@ -3822,6 +3845,10 @@ GameResult gameFrame(double delta_time, Input* input)
                             setTileDirection(NORTH, raycast_output.place_coords, 0);
                         }
                     }
+                }
+                else
+                {
+                    createDebugPopup("block placement OOB", EDITOR_BLOCK_PLACE_OOB);
                 }
 
                 time_until_allow_meta_input = PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT;
@@ -5011,7 +5038,7 @@ GameResult gameFrame(double delta_time, Input* input)
             drawAsset(0, LASER, center, scale, rotation, color_with_alpha, lb.start_clip_plane, lb.end_clip_plane); // the model doesnt matter
         }
 
-        // draw models, manage some water state
+        // draw models, change water_plane_y
         float previous_water_plane_y = water_plane_y;
         float next_water_plane_y = NO_WATER_PLANE_LOW_VALUE;
 
