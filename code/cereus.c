@@ -745,11 +745,13 @@ void setTileDirection(Direction direction, Int3 coords, MirrorOrientation mirror
 
 TileType getTileType(Int3 coords) 
 {
+    if (!intCoordsWithinLevelBounds(coords)) return TILE_TYPE_WALL;
     return world_state.buffer[coordsToBufferIndexType(coords)]; 
 }
 
 Direction getTileDirection(Int3 coords) 
 {
+    if (!intCoordsWithinLevelBounds(coords)) return NO_DIRECTION;
     return world_state.buffer[coordsToBufferIndexDirection(coords)]; 
 }
 
@@ -2534,7 +2536,7 @@ void gameRedraw(DisplayInfo display_from_platform)
     game_display = display_from_platform;
     recalculateDebugStartCoords();
     vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, water_plane_y, camera_with_ow_offset, game_shader_mode, &water_paint_texture);
-    vulkanDraw();
+    vulkanDraw(false);
 }
 
 void updateLockedTiles()
@@ -5235,18 +5237,21 @@ GameResult gameFrame(double delta_time, Input* input)
         }
     }
 
+    // TEMP: profiling
+    static int frame_counter = 0; // local persist
+    bool do_profiling_output = frame_counter++ >= 60;
+
     QueryPerformanceCounter(&t1);
     vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, water_plane_y, camera_with_ow_offset, game_shader_mode, &water_paint_texture);
     QueryPerformanceCounter(&t2);
-    vulkanDraw();
+    vulkanDraw(do_profiling_output);
     QueryPerformanceCounter(&t3);
 
     double game_logic_ms = 1000.0 * (double)(t1 - t0) / (double)frequency;
     double submit_ms     = 1000.0 * (double)(t2 - t1) / (double)frequency;
     double draw_ms       = 1000.0 * (double)(t3 - t2) / (double)frequency;
 
-    static int frame_counter = 0; // local persist
-    if (frame_counter++ >= 60)
+    if (do_profiling_output)
     {
         char buffer[256];
         snprintf(buffer, sizeof(buffer), "game: %.2f ms; submit: %.2f ms; draw: %.2f ms; total: %.2f ms\n", game_logic_ms, submit_ms, draw_ms, game_logic_ms + submit_ms + draw_ms);

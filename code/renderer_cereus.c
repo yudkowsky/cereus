@@ -332,7 +332,6 @@ typedef struct VulkanState
     VkImage shadow_map_image;
     VkDeviceMemory shadow_map_image_memory;
     VkImageView shadow_map_image_view;
-    VkSampler shadow_sampler;
     VkDescriptorSet shadow_map_descriptor_set;
 
     // RENDER PASSES
@@ -420,13 +419,15 @@ typedef struct VulkanState
     VkPipelineLayout shadow_pipeline_layout;
 
     // shared resources
-    VkSampler pixel_art_sampler;
     VkDescriptorSetLayout descriptor_set_layout;
     VkDescriptorPool descriptor_pool;
     VkDescriptorSet descriptor_sets[1024];
 
-    // linear sampler which repeats for tileable textures
+    // samplers
+    VkSampler pixel_art_sampler;
+    VkSampler linear_clamp_sampler;
     VkSampler tiling_linear_sampler;
+    VkSampler shadow_sampler;
 
     // asset cache
     CachedAsset asset_cache[256];
@@ -514,7 +515,7 @@ VulkanState;
 #define V1 (0.5f)
 #define V2 (1.0f)
 
-static const Vertex SPRITE_VERTICES[] =
+const Vertex SPRITE_VERTICES[] =
 {
     { -0.5f, -0.5f, 0.0f,  0.0f, 1.0f,  0,0,1 },
     {  0.5f, -0.5f, 0.0f,  1.0f, 1.0f,  0,0,1 },
@@ -522,7 +523,7 @@ static const Vertex SPRITE_VERTICES[] =
     { -0.5f,  0.5f, 0.0f,  0.0f, 0.0f,  0,0,1 },
 };
 
-static const Vertex CUBE_VERTICES[] = 
+const Vertex CUBE_VERTICES[] = 
 {
     { -0.5f, -0.5f,  0.5f,  U0, V1,  0,0,1 },
     {  0.5f, -0.5f,  0.5f,  U1, V1,  0,0,1 },
@@ -555,7 +556,7 @@ static const Vertex CUBE_VERTICES[] =
     {  0.5f, -0.5f, -0.5f,  U2, V2,  0,-1,0 },
 };
 
-static const uint32 CUBE_INDICES[36] = 
+const uint32 CUBE_INDICES[36] = 
 {
     0, 1, 2,  0, 2, 3,
     4, 5, 6,  4, 6, 7,
@@ -565,7 +566,7 @@ static const uint32 CUBE_INDICES[36] =
    20,21,22, 20,22,23
 };
 
-static const uint32 SPRITE_INDICES[6] =
+const uint32 SPRITE_INDICES[6] =
 {
     0, 1, 2,
     0, 2, 3
@@ -574,6 +575,8 @@ static const uint32 SPRITE_INDICES[6] =
 const uint32 CUBE_INSTANCE_CAPACITY = 8192;
 const uint32 WATER_INSTANCE_CAPACITY = 8192;
 const uint32 LASER_INSTANCE_CAPACITY = 1024;
+
+const int32 REFLECTION_DOWNSCALE = 2;
 
 const uint32 SHADOW_MAP_RESOLUTION = 4096;
 
@@ -893,6 +896,12 @@ void mat4BuildDirectionalLight(float output_matrix[16], Vec3 light_direction, Ve
     mat4BuildOrtho(light_projection, -coverage_radius, coverage_radius, -coverage_radius, coverage_radius, 0.0f, 2.0f * coverage_radius);
 
     mat4Multiply(output_matrix, light_projection, light_view);
+}
+
+int32 reflectionExtent(uint32 full)
+{
+    uint32 length = (full + REFLECTION_DOWNSCALE - 1) / REFLECTION_DOWNSCALE;
+    return length == 0 ? 1 : length;
 }
 
 uint32 findMemoryType(uint32 type_bits, VkMemoryPropertyFlags property_flags)
@@ -2106,9 +2115,9 @@ void createSwapchainResources(void)
         vkBindBufferMemory(vulkan_state.logical_device_handle, vulkan_state.oit_counter_buffer, vulkan_state.oit_counter_memory, 0);
     }
 
-    // reflection color image TODO: currently full res, try with half-res later
-    uint32 reflection_width  = vulkan_state.swapchain_extent.width;
-    uint32 reflection_height = vulkan_state.swapchain_extent.height;
+    // reflection color image
+    uint32 reflection_width  = reflectionExtent(vulkan_state.swapchain_extent.width);
+    uint32 reflection_height = reflectionExtent(vulkan_state.swapchain_extent.height);
 
     {
         VkImageCreateInfo ci = {0};
@@ -2347,7 +2356,7 @@ void createSwapchainResources(void)
 
     // reflections
     VkDescriptorImageInfo reflection_desc_info = {0};
-    reflection_desc_info.sampler = vulkan_state.pixel_art_sampler;
+    reflection_desc_info.sampler = vulkan_state.linear_clamp_sampler;
     reflection_desc_info.imageView = vulkan_state.reflection_color_image_view;
     reflection_desc_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
@@ -3779,6 +3788,25 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         pixel_sampler_ci.maxLod = 0.0f;
 
         vkCreateSampler(vulkan_state.logical_device_handle, &pixel_sampler_ci, 0, &vulkan_state.pixel_art_sampler);
+    }
+
+    // linear clamp sampler
+    {
+        VkSamplerCreateInfo linear_clamp_ci = {0};
+        linear_clamp_ci.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+        linear_clamp_ci.magFilter = VK_FILTER_LINEAR;
+        linear_clamp_ci.minFilter = VK_FILTER_LINEAR;
+        linear_clamp_ci.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        linear_clamp_ci.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        linear_clamp_ci.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        linear_clamp_ci.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        linear_clamp_ci.unnormalizedCoordinates = VK_FALSE;
+        linear_clamp_ci.compareEnable = VK_FALSE;
+        linear_clamp_ci.compareOp = VK_COMPARE_OP_ALWAYS;
+        linear_clamp_ci.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+        linear_clamp_ci.maxLod = 0.0f;
+
+        vkCreateSampler(vulkan_state.logical_device_handle, &linear_clamp_ci, 0, &vulkan_state.linear_clamp_sampler);
     }
 
     // linear sampler with repeat
@@ -5292,8 +5320,8 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     for (uint32 instance_index = 0; instance_index < cube_instance_count; instance_index++)
     {
         Cube* cube = &cube_instances[instance_index];
-        //mat4BuildBasicTRS(cube_gpu_instances[instance_index].model, cube->coords); // assumption that all cubes aren't rotated and are at unit scale
-        mat4BuildTRS(cube_gpu_instances[instance_index].model, cube->coords, cube->rotation, cube->scale);
+        mat4BuildBasicTRS(cube_gpu_instances[instance_index].model, cube->coords); // assumption that all cubes aren't rotated and are at unit scale
+        //mat4BuildTRS(cube_gpu_instances[instance_index].model, cube->coords, cube->rotation, cube->scale);
         cube_gpu_instances[instance_index].uv_rect = cube->uv;
     }
 
@@ -5321,7 +5349,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, flo
     }
 }
 
-void vulkanDraw(void)
+void vulkanDraw(bool do_profiling_output)
 {
     uint32 swapchain_image_index = 0;
     VkResult acquire_result = vkAcquireNextImageKHR(vulkan_state.logical_device_handle, vulkan_state.swapchain_handle, UINT64_MAX, vulkan_state.image_available_semaphores[vulkan_state.current_frame], VK_NULL_HANDLE, &swapchain_image_index);
@@ -5620,6 +5648,9 @@ void vulkanDraw(void)
     render_pass_begin_info.clearValueCount = 3;
     render_pass_begin_info.pClearValues = clear_values;
 
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, current_pool, query_index++);
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, current_pool, query_index++);
+
     // SHADOW PASS
     {
         VkClearValue shadow_clear = {0};
@@ -5696,10 +5727,13 @@ void vulkanDraw(void)
         vkCmdEndRenderPass(command_buffer);
     }
 
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, current_pool, query_index++);
+    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, current_pool, query_index++);
+
     // REFLECTION PASS
     {
-        uint32 reflection_width  = vulkan_state.swapchain_extent.width;
-        uint32 reflection_height = vulkan_state.swapchain_extent.height;
+        uint32 reflection_width  = reflectionExtent(vulkan_state.swapchain_extent.width);
+        uint32 reflection_height = reflectionExtent(vulkan_state.swapchain_extent.height);
 
         VkClearValue reflection_clears[2] = {0};
         reflection_clears[0].color.float32[0] = 0.1f; // much brighter clear values
@@ -5720,8 +5754,22 @@ void vulkanDraw(void)
 
         vkCmdBeginRenderPass(command_buffer, &reflection_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
 
-        vkCmdSetViewport(command_buffer, 0, 1, &viewport);
-        vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+        float reflection_scale = 1.0f / (float)REFLECTION_DOWNSCALE;
+
+        VkViewport reflection_viewport = viewport;
+        reflection_viewport.y      *= reflection_scale;
+        reflection_viewport.x      *= reflection_scale;
+        reflection_viewport.width  *= reflection_scale;
+        reflection_viewport.height *= reflection_scale;
+
+        VkRect2D reflection_scissor = {0};
+        reflection_scissor.offset.x      = scissor.offset.x / REFLECTION_DOWNSCALE;
+        reflection_scissor.offset.y      = scissor.offset.y / REFLECTION_DOWNSCALE;
+        reflection_scissor.extent.width  = scissor.extent.width  / REFLECTION_DOWNSCALE;
+        reflection_scissor.extent.height = scissor.extent.height / REFLECTION_DOWNSCALE;
+
+        vkCmdSetViewport(command_buffer, 0, 1, &reflection_viewport);
+        vkCmdSetScissor(command_buffer, 0, 1, &reflection_scissor);
 
         // cubes
         if (cube_instance_count > 0)
@@ -5953,11 +6001,6 @@ void vulkanDraw(void)
         VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
         VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
         VK_IMAGE_ASPECT_COLOR_BIT);
-
-    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, current_pool, query_index++);
-    vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, current_pool, query_index++);
-
-    // no water depth pass
 
     vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, current_pool, query_index++);
     vkCmdWriteTimestamp(command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, current_pool, query_index++);
@@ -6329,28 +6372,29 @@ void vulkanDraw(void)
 
     vulkan_state.current_frame = (vulkan_state.current_frame + 1) % vulkan_state.frames_in_flight;
 
-    // profiling read out TODO: bad
-    /*
+    // TEMP: profiling
     uint32 read_pool_index = (vulkan_state.timestamp_frame_index + 1) % 3;
     if (vulkan_state.timestamp_pool_valid[read_pool_index])
     {
-        uint32 count = vulkan_state.timestamp_query_counts[read_pool_index];
-        vkGetQueryPoolResults(vulkan_state.logical_device_handle, vulkan_state.timestamp_query_pools[read_pool_index], 0, count, sizeof(uint64) * count, vulkan_state.timestamp_results[read_pool_index], sizeof(uint64), VK_QUERY_RESULT_64_BIT);
-
-        uint64* t = vulkan_state.timestamp_results[read_pool_index];
-        char* region_names[] = 
+        if (do_profiling_output)
         {
-            "fft", "reflection", "scene", "outline", "scene copy",
-            "water depth", "water", "waterline", "overlay"
-        };
-        for (uint32 i = 0; i + 1 < count; i += 2)
-        {
-            double ns = (double)(t[i+1] - t[i]) * vulkan_state.timestamp_period;
-            double ms = ns / 1e6;
-            printf("%s: %.3f ms\n", region_names[i/2], ms);
+            uint32 count = vulkan_state.timestamp_query_counts[read_pool_index];
+            vkGetQueryPoolResults(vulkan_state.logical_device_handle, vulkan_state.timestamp_query_pools[read_pool_index], 0, count, sizeof(uint64) * count, vulkan_state.timestamp_results[read_pool_index], sizeof(uint64), VK_QUERY_RESULT_64_BIT);
+            uint64* t = vulkan_state.timestamp_results[read_pool_index];
+            char* region_names[] = 
+            {
+                "fft", "setup", "shadow", "reflection", "scene", "outline", "scene copy", "water", "waterline", "overlay"
+            };
+            for (uint32 i = 0; i + 1 < count; i += 2)
+            {
+                double ns = (double)(t[i+1] - t[i]) * vulkan_state.timestamp_period;
+                double ms = ns / 1e6;
+                char line[128];
+                snprintf(line, sizeof(line), "%s: %.3f ms\n", region_names[i/2], ms);
+                OutputDebugStringA(line);
+            }
         }
     }
-    */
 
     vulkan_state.timestamp_frame_index++;
 }
