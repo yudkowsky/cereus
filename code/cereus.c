@@ -2974,6 +2974,21 @@ void interpolateDecoupledTowardsCoords(Entity* e)
     }
 }
 
+// called on failed or half-failed turn to handle on head entities
+void revertHeadStackRotation()
+{
+    int32 reverse_add = (4 + temp_state.pack_turn_state.initial_player_direction - player->direction) % 4;
+    Int3 current_coords = getNextCoords(player->coords, UP);
+    int32 stack_size = getPushableStackSize(current_coords, UP);
+
+    FOR(_, stack_size)
+    {
+        Entity* e = getEntityAtCoords(current_coords);
+        e->direction = (e->direction + reverse_add) % 4;
+        current_coords = getNextCoords(current_coords, UP);
+    }
+}
+
 void doPhysicsTick()
 {
     // pack turn sequence
@@ -3009,10 +3024,11 @@ void doPhysicsTick()
             }
             else
             {
+                if (isPushable(getTileType(getNextCoords(player->coords, UP)))) revertHeadStackRotation();
                 player->direction = temp_state.pack_turn_state.initial_player_direction;
                 pack->direction = temp_state.pack_turn_state.initial_player_direction;
-                temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
                 popLastUndoAction();
+                temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
             }
         }
         else if (temp_state.pack_turn_state.pack_intermediate_states_timer == orthogonal_trigger)
@@ -3036,17 +3052,18 @@ void doPhysicsTick()
             }
             else
             {
-                // failed animation (push above still happens)
+                // half failed case (push above still happens)
+                if (isPushable(getTileType(getNextCoords(player->coords, UP)))) revertHeadStackRotation();
                 Int3 start_pack_coords = getNextCoords(player->coords, oppositeDirection(temp_state.pack_turn_state.initial_player_direction));
                 moveEntityInBufferAndState(pack, start_pack_coords, player->direction);
                 player->direction = temp_state.pack_turn_state.initial_player_direction;
-                temp_state.pack_turn_state.pack_intermediate_states_timer = 1; // will be set to 0 below
                 if (!temp_state.pack_turn_state.diagonal_push_happened_this_turn) popLastUndoAction();
                 temp_state.pack_turn_state.half_failed_turn_timer = HALF_FAILED_PACK_TURN_COOLDOWN;
+                temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
             }
             temp_state.pack_turn_state.diagonal_push_happened_this_turn = false;
         }
-        temp_state.pack_turn_state.pack_intermediate_states_timer--;
+        if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0) temp_state.pack_turn_state.pack_intermediate_states_timer--;
     }
 
     // falling logic for entities
@@ -4498,16 +4515,20 @@ GameResult gameFrame(double delta_time, Input* input)
 
                     if (temp_state.pack_attached)
                     {
-                        Int3 diagonal_coords = getNextCoords(pack->coords, oppositeDirection(input_direction));
-                        TrailingHitbox th;
-                        if (trailingHitboxAtCoords(diagonal_coords, &th)) allow_turn = false;
-
-                        // check if would cause failed case, and if so check if we already had one of those, and if so disallow turn
+                        // check if would cause half-failed case, and if so check if we already had one of those, and if so disallow turn
                         // this defeats half the point of how i handle failed case later... but need to know now!
                         Int3 orthogonal_coords = getNextCoords(player->coords, oppositeDirection(input_direction));
                         TileType orthogonal_type = getTileType(orthogonal_coords);
-                        bool pack_would_cause_failed_case = orthogonal_type != TILE_TYPE_NONE && (!isEntity(orthogonal_type) || canPush(orthogonal_coords, player->direction));
-                        if (pack_would_cause_failed_case && temp_state.pack_turn_state.half_failed_turn_timer != 0) allow_turn = false;
+                        bool pack_would_cause_failed_case_orthogonal = orthogonal_type != TILE_TYPE_NONE && (!isEntity(orthogonal_type) || canPush(orthogonal_coords, player->direction));
+                        if (pack_would_cause_failed_case_orthogonal && temp_state.pack_turn_state.half_failed_turn_timer != 0) allow_turn = false;
+
+                        // NOTE: when adding full-failed turn animation, will need architecture for guarding that animation also
+                        //       i could just handle the full-failure case here, since no state will change
+
+                        /* NOTE: do i need this? should just get automatically handled in pack turn state handler
+                        TrailingHitbox th;
+                        if (trailingHitboxAtCoords(diagonal_coords, &th)) allow_turn = false;
+                        */
                     }
 
                     if (allow_turn)
@@ -4799,7 +4820,7 @@ GameResult gameFrame(double delta_time, Input* input)
             char box_text[256] = {0};
             Entity box1 = world_state.boxes[0];
             Entity box2 = world_state.boxes[1];
-            snprintf(box_text, sizeof(box_text), "box 1: moving dir: %i, on_head: %i, moving dir: %i, on_head: %i", box1.moving_direction, box1.moving_on_head, box2.moving_direction, box2.moving_on_head);
+            snprintf(box_text, sizeof(box_text), "box 1: moving dir: %i, on_head: %i; box 2: moving dir: %i, on_head: %i", box1.moving_direction, box1.moving_on_head, box2.moving_direction, box2.moving_on_head);
             createDebugText(box_text);
 
             /*
