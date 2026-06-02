@@ -134,6 +134,7 @@ typedef struct
     Direction initial_player_direction;
     int32 half_failed_turn_timer;
     bool diagonal_push_happened_this_turn; // used for deciding whether or not to pop undo if half-fails
+    int32 turn_total_frames;
 }
 PackTurnState;
 
@@ -2978,7 +2979,12 @@ void doPhysicsTick()
     // pack turn sequence
     if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0)
     {
-        if (temp_state.pack_turn_state.pack_intermediate_states_timer == TURN_TIME)
+        int32 total = temp_state.pack_turn_state.turn_total_frames;
+        int32 diagonal_trigger = total < TURN_TIME ? total : TURN_TIME;
+        int32 orthogonal_trigger = diagonal_trigger - 3;
+        if (orthogonal_trigger < 1) orthogonal_trigger = 1;
+
+        if (temp_state.pack_turn_state.pack_intermediate_states_timer == diagonal_trigger)
         {
             Int3 diagonal_coords = temp_state.pack_turn_state.pack_intermediate_coords;
             Direction diagonal_push_direction = oppositeDirection(player->direction);
@@ -3009,7 +3015,7 @@ void doPhysicsTick()
                 popLastUndoAction();
             }
         }
-        else if (temp_state.pack_turn_state.pack_intermediate_states_timer == 7)
+        else if (temp_state.pack_turn_state.pack_intermediate_states_timer == orthogonal_trigger)
         {
             Direction orthogonal_push_direction = temp_state.pack_turn_state.initial_player_direction;
             Int3 orthogonal_coords = getNextCoords(pack->coords, orthogonal_push_direction);
@@ -3034,7 +3040,7 @@ void doPhysicsTick()
                 Int3 start_pack_coords = getNextCoords(player->coords, oppositeDirection(temp_state.pack_turn_state.initial_player_direction));
                 moveEntityInBufferAndState(pack, start_pack_coords, player->direction);
                 player->direction = temp_state.pack_turn_state.initial_player_direction;
-                temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
+                temp_state.pack_turn_state.pack_intermediate_states_timer = 1; // will be set to 0 below
                 if (!temp_state.pack_turn_state.diagonal_push_happened_this_turn) popLastUndoAction();
                 temp_state.pack_turn_state.half_failed_turn_timer = HALF_FAILED_PACK_TURN_COOLDOWN;
             }
@@ -3464,7 +3470,7 @@ void doPhysicsTick()
 
     // player rotation
     float total_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
-    float frame_count = ceilf((float)fabs(total_angle) / MAX_ANGULAR_VELOCITY);
+    float frame_count = ceilf((float)fabs(total_angle) / MAX_ANGULAR_VELOCITY - 1e-3f);
     if (frame_count <= 1)
     {
         player->rotation = directionToQuaternion(player->direction);
@@ -4514,7 +4520,10 @@ GameResult gameFrame(double delta_time, Input* input)
 
                         if (temp_state.pack_attached)
                         {
-                            temp_state.pack_turn_state.pack_intermediate_states_timer = TURN_TIME;
+                            float turn_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
+                            int32 rotation_frames = (int32)ceilf((float)fabs(turn_angle) / MAX_ANGULAR_VELOCITY - 1e-3f);
+                            temp_state.pack_turn_state.pack_intermediate_states_timer = rotation_frames;
+                            temp_state.pack_turn_state.turn_total_frames = rotation_frames;
                             temp_state.pack_turn_state.pack_intermediate_coords = getNextCoords(pack->coords, oppositeDirection(input_direction));
                             temp_state.pack_turn_state.initial_player_direction = initial_player_direction;
                         }
@@ -4532,14 +4541,12 @@ GameResult gameFrame(double delta_time, Input* input)
                             if (stack_size > 0)
                             {
                                 int32 direction_add = (4 + player->direction - initial_player_direction) % 4;
-
                                 Int3 current_coords = coords_above;
+
                                 FOR(stack_index, stack_size)
                                 {
                                     Entity* e = getEntityAtCoords(current_coords);
-
                                     e->direction = (e->direction + direction_add) % 4;
-
                                     e->moving_direction = NO_DIRECTION;
                                     e->moving_on_head = true;
                                     e->root_entity_id = PLAYER_ID;
