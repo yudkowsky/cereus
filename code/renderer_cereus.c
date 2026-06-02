@@ -324,9 +324,13 @@ typedef struct VulkanState
     VkImageView reflection_color_image_view;
     VkDescriptorSet reflection_descriptor_set;
 
-    VkImage reflection_depth_image;
-    VkDeviceMemory reflection_depth_image_memory;
-    VkImageView reflection_depth_image_view;
+    VkImage reflection_msaa_color_image;
+    VkDeviceMemory reflection_msaa_color_image_memory;
+    VkImageView reflection_msaa_color_image_view;
+
+    VkImage reflection_msaa_depth_image;
+    VkDeviceMemory reflection_msaa_depth_image_memory;
+    VkImageView reflection_msaa_depth_image_view;
 
     // shadow map for directional light
     VkImage shadow_map_image;
@@ -2162,7 +2166,47 @@ void createSwapchainResources(void)
         vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.reflection_color_image_view);
     }
 
-    // reflection depth image
+    // TODO: think about adding VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT and allocate from LAZILY ALLOCATED memory type if possible
+    // reflection MSAA color image
+    {
+        VkImageCreateInfo ci = {0};
+        ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        ci.imageType = VK_IMAGE_TYPE_2D;
+        ci.extent.width = reflection_width;
+        ci.extent.height = reflection_height;
+        ci.extent.depth = 1;
+        ci.mipLevels = 1;
+        ci.arrayLayers = 1;
+        ci.format = vulkan_state.swapchain_format;
+        ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        ci.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        ci.samples = VK_SAMPLE_COUNT_4_BIT;
+        ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        vkCreateImage(vulkan_state.logical_device_handle, &ci, 0, &vulkan_state.reflection_msaa_color_image);
+
+        VkMemoryRequirements mem_req = {0};
+        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.reflection_msaa_color_image, &mem_req);
+
+        VkMemoryAllocateInfo alloc = {0};
+        alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc.allocationSize = mem_req.size;
+        alloc.memoryTypeIndex = findMemoryType(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        vkAllocateMemory(vulkan_state.logical_device_handle, &alloc, 0, &vulkan_state.reflection_msaa_color_image_memory);
+        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.reflection_msaa_color_image, vulkan_state.reflection_msaa_color_image_memory, 0);
+
+        VkImageViewCreateInfo view_ci = {0};
+        view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_ci.image = vulkan_state.reflection_msaa_color_image;
+        view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_ci.format = vulkan_state.swapchain_format;
+        view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        view_ci.subresourceRange.levelCount = 1;
+        view_ci.subresourceRange.layerCount = 1;
+        vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.reflection_msaa_color_image_view);
+    }
+
+    // reflection MSAA depth image
     {
         VkImageCreateInfo ci = {0};
         ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -2176,34 +2220,29 @@ void createSwapchainResources(void)
         ci.tiling = VK_IMAGE_TILING_OPTIMAL;
         ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         ci.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-        ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        ci.samples = VK_SAMPLE_COUNT_4_BIT;
         ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-        vkCreateImage(vulkan_state.logical_device_handle, &ci, 0, &vulkan_state.reflection_depth_image);
+        vkCreateImage(vulkan_state.logical_device_handle, &ci, 0, &vulkan_state.reflection_msaa_depth_image);
 
         VkMemoryRequirements mem_req = {0};
-        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.reflection_depth_image, &mem_req);
+        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.reflection_msaa_depth_image, &mem_req);
 
         VkMemoryAllocateInfo alloc = {0};
         alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
         alloc.allocationSize = mem_req.size;
         alloc.memoryTypeIndex = findMemoryType(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-        vkAllocateMemory(vulkan_state.logical_device_handle, &alloc, 0, &vulkan_state.reflection_depth_image_memory);
-        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.reflection_depth_image, vulkan_state.reflection_depth_image_memory, 0);
+        vkAllocateMemory(vulkan_state.logical_device_handle, &alloc, 0, &vulkan_state.reflection_msaa_depth_image_memory);
+        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.reflection_msaa_depth_image, vulkan_state.reflection_msaa_depth_image_memory, 0);
 
         VkImageViewCreateInfo view_ci = {0};
         view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        view_ci.image = vulkan_state.reflection_depth_image;
+        view_ci.image = vulkan_state.reflection_msaa_depth_image;
         view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
         view_ci.format = vulkan_state.depth_format;
         view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-        view_ci.subresourceRange.baseMipLevel = 0;
         view_ci.subresourceRange.levelCount = 1;
-        view_ci.subresourceRange.baseArrayLayer = 0;
         view_ci.subresourceRange.layerCount = 1;
-
-        vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.reflection_depth_image_view);
+        vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.reflection_msaa_depth_image_view);
     }
 
     // command buffers
@@ -2488,12 +2527,17 @@ void createSwapchainResources(void)
 
     // reflection framebuffer
     {
-        VkImageView reflection_attachments[2] = { vulkan_state.reflection_color_image_view, vulkan_state.reflection_depth_image_view };
+        VkImageView reflection_attachments[3] =
+        {
+            vulkan_state.reflection_msaa_color_image_view,
+            vulkan_state.reflection_msaa_depth_image_view,
+            vulkan_state.reflection_color_image_view,
+        };
 
         VkFramebufferCreateInfo fb_ci = {0};
         fb_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         fb_ci.renderPass = vulkan_state.reflection_render_pass;
-        fb_ci.attachmentCount = 2;
+        fb_ci.attachmentCount = 3;
         fb_ci.pAttachments = reflection_attachments;
         fb_ci.width = reflection_width;
         fb_ci.height = reflection_height;
@@ -3088,25 +3132,37 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     // reflected scene render pass
     {
-        VkAttachmentDescription reflection_attachments[2] = {0};
+        VkAttachmentDescription reflection_attachments[3] = {0};
 
+        // MSAA color
         reflection_attachments[0].format = vulkan_state.swapchain_format;
-        reflection_attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+        reflection_attachments[0].samples = VK_SAMPLE_COUNT_4_BIT;
         reflection_attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        reflection_attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        reflection_attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         reflection_attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         reflection_attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         reflection_attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        reflection_attachments[0].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        reflection_attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
+        // MSAA depth
         reflection_attachments[1].format = vulkan_state.depth_format;
-        reflection_attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+        reflection_attachments[1].samples = VK_SAMPLE_COUNT_4_BIT;
         reflection_attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         reflection_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         reflection_attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         reflection_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         reflection_attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         reflection_attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        // resolve target
+        reflection_attachments[2].format = vulkan_state.swapchain_format;
+        reflection_attachments[2].samples = VK_SAMPLE_COUNT_1_BIT;
+        reflection_attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        reflection_attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        reflection_attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        reflection_attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        reflection_attachments[2].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        reflection_attachments[2].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
         VkAttachmentReference reflection_color_ref = {0};
         reflection_color_ref.attachment = 0;
@@ -3116,10 +3172,15 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         reflection_depth_ref.attachment = 1;
         reflection_depth_ref.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
+        VkAttachmentReference reflection_resolve_ref = {0};
+        reflection_resolve_ref.attachment = 2;
+        reflection_resolve_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
         VkSubpassDescription reflection_subpass = {0};
         reflection_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         reflection_subpass.colorAttachmentCount = 1;
         reflection_subpass.pColorAttachments = &reflection_color_ref;
+        reflection_subpass.pResolveAttachments = &reflection_resolve_ref;
         reflection_subpass.pDepthStencilAttachment = &reflection_depth_ref;
 
         VkSubpassDependency reflection_dependencies[2] = {0};
@@ -3140,7 +3201,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         VkRenderPassCreateInfo rp_ci = {0};
         rp_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        rp_ci.attachmentCount = 2;
+        rp_ci.attachmentCount = 3;
         rp_ci.pAttachments = reflection_attachments;
         rp_ci.subpassCount = 1;
         rp_ci.pSubpasses = &reflection_subpass;
@@ -3676,20 +3737,15 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     laser_vertex_input.vertexAttributeDescriptionCount = 6;
     laser_vertex_input.pVertexAttributeDescriptions = laser_attributes;
 
-    // empty vertex input for outline post render
     VkPipelineVertexInputStateCreateInfo empty_vertex_input = {0};
     empty_vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
-    // struct that describes how vertices are assembled into primatives before rasterization
     VkPipelineInputAssemblyStateCreateInfo input_assembly_state_creation_info = {0}; 
     input_assembly_state_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
     input_assembly_state_creation_info.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     input_assembly_state_creation_info.primitiveRestartEnable = VK_FALSE;
 
-    // a viewport maps from clip space ([-1, 1]) to a rectangle in framebuffer pixels (i.e. window coords)
-    // a scissor is another pixel-space rectangle; fragments outside it are discarded
-    
-    VkViewport dummy_viewport = {0}; // placeholders to satisfy the pointer requirement; actual values are ignored because we'll set viewport at drawtime
+    VkViewport dummy_viewport = {0};
     VkRect2D dummy_scissor = {0};
 
     VkPipelineViewportStateCreateInfo viewport_state_creation_info = {0}; // describes viewport for the pipeline. set at drawtime.
@@ -3708,22 +3764,25 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     VkPipelineRasterizationStateCreateInfo rasterization_state_creation_info = {0};
     rasterization_state_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterization_state_creation_info.depthClampEnable = VK_FALSE; // keep vertices outside the near / far range clipped (discarded)
-    rasterization_state_creation_info.rasterizerDiscardEnable = VK_FALSE; // don't discard primitives; we want to rasterize
-    rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_FILL; // fill triangles (not lines / points)
-    rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE; // turn off back/face culling: skip rasterizing triangles facing a certain way
-    rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; // define which winding would be "front"; doesn't matter while cull is off
+    rasterization_state_creation_info.depthClampEnable = VK_FALSE;
+    rasterization_state_creation_info.rasterizerDiscardEnable = VK_FALSE;
+    rasterization_state_creation_info.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterization_state_creation_info.cullMode = VK_CULL_MODE_NONE;
+    rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterization_state_creation_info.depthBiasEnable = VK_FALSE; 
     rasterization_state_creation_info.lineWidth = 1.0f;
 
     VkPipelineMultisampleStateCreateInfo multisample_state_creation_info = {0};
     multisample_state_creation_info.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisample_state_creation_info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT; // no multisampling yet
-    multisample_state_creation_info.sampleShadingEnable = VK_FALSE; // disable per-sample shading
+    multisample_state_creation_info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT; 
+    multisample_state_creation_info.sampleShadingEnable = VK_FALSE;
     multisample_state_creation_info.minSampleShading = 1.0f;
-    multisample_state_creation_info.pSampleMask = 0; // use all samples (default mask)
+    multisample_state_creation_info.pSampleMask = 0;
     multisample_state_creation_info.alphaToCoverageEnable = VK_FALSE;
     multisample_state_creation_info.alphaToOneEnable = VK_FALSE;
+
+    VkPipelineMultisampleStateCreateInfo reflection_multisample = multisample_state_creation_info;
+    reflection_multisample.rasterizationSamples = VK_SAMPLE_COUNT_4_BIT;
 
 	// shared info for graphics pipeline that is tweaked based on sprite or cube (default right now is cube, but the parts that are particular to cube are defined later anyway)
 
@@ -4602,6 +4661,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         ci.layout = vulkan_state.cube_pipeline_layout;
         ci.renderPass = vulkan_state.reflection_render_pass;
         ci.pColorBlendState = &refl_blend_ci;
+        ci.pMultisampleState = &reflection_multisample;
 
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &ci, 0, &vulkan_state.cube_reflection_pipeline);
     }
@@ -4638,6 +4698,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         model_ci.layout = vulkan_state.model_pipeline_layout;
         model_ci.renderPass = vulkan_state.reflection_render_pass;
         model_ci.pColorBlendState = &refl_blend_ci;
+        model_ci.pMultisampleState = &reflection_multisample;
 
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &model_ci, 0, &vulkan_state.model_reflection_pipeline);
     }
@@ -5774,7 +5835,7 @@ void vulkanDraw(bool do_profiling_output)
         // cubes
         if (cube_instance_count > 0)
         {
-            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_pipeline);
+            vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.cube_reflection_pipeline);
 
             VkBuffer cube_buffers[2] = { vulkan_state.cube_vertex_buffer, vulkan_state.cube_instance_buffers[vulkan_state.current_frame] };
             VkDeviceSize cube_offsets[2] = { 0, 0 };
@@ -6459,9 +6520,13 @@ void vulkanResize(uint32 width, uint32 height)
     vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.reflection_color_image, 0);
     vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.reflection_color_image_memory, 0);
 
-    vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.reflection_depth_image_view, 0);
-    vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.reflection_depth_image, 0);
-    vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.reflection_depth_image_memory, 0);
+    vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.reflection_msaa_color_image_view, 0);
+    vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.reflection_msaa_color_image, 0);
+    vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.reflection_msaa_color_image_memory, 0);
+
+    vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.reflection_msaa_depth_image_view, 0);
+    vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.reflection_msaa_depth_image, 0);
+    vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.reflection_msaa_depth_image_memory, 0);
 
     // old swapchain is destroyed inside createSwapchainResources
     createSwapchainResources();
