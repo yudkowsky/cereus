@@ -5071,7 +5071,7 @@ GameResult gameFrame(double delta_time, Input* input)
             if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position, DEFAULT_SCALE, selected_e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
         }
 
-        // draw camera boundary lines
+        // draw camera boundary lines TODO: draw also in overworld, and differentiate by color - and make better graphics for them anyway
         if (draw_level_boundary)
         {
             if (in_overworld)
@@ -5113,12 +5113,15 @@ GameResult gameFrame(double delta_time, Input* input)
             else
             {
                 // draw level boundary
-                Vec3 x_draw_coords_near = (Vec3){ -0.5f,                     (float)level_dim.y / 2.0f, ((float)level_dim.z / 2.0f) };
-                Vec3 z_draw_coords_near = (Vec3){ (float)level_dim.x / 2.0f, (float)level_dim.y / 2.0f, -0.5f};
-                Vec3 x_draw_coords_far  = (Vec3){ (float)level_dim.x + 0.5f, (float)level_dim.y / 2.0f, (float)level_dim.z / 2.0f };
-                Vec3 z_draw_coords_far  = (Vec3){ (float)level_dim.x / 2.0f, (float)level_dim.y / 2.0f, (float)level_dim.z + 0.5f };
-                Vec3 x_draw_scale = (Vec3){ 0, (float)level_dim.y, (float)level_dim.z + 1.0f };
-                Vec3 z_draw_scale = (Vec3){ (float)level_dim.x + 1.0f, (float)level_dim.y, 0 };
+                Vec3 level_origin_as_vec = vec3Subtract(int3ToVec3(level_origin), (Vec3){ 0.5f, 0.5f, 0.5f } ); // TODO: rename vec3FromInt3
+                Vec3 level_dim_as_vec = int3ToVec3(level_dim);
+                Vec3 x_draw_coords_near = (Vec3){ level_origin_as_vec.x, level_origin_as_vec.y + (level_dim_as_vec.y / 2), level_origin_as_vec.z + (level_dim_as_vec.z / 2) };
+                Vec3 x_draw_coords_far  = (Vec3){ level_origin_as_vec.x + level_dim_as_vec.x, level_origin_as_vec.y + (level_dim_as_vec.y / 2), level_origin_as_vec.z + (level_dim_as_vec.z / 2) };
+                Vec3 z_draw_coords_near = (Vec3){ level_origin_as_vec.x + (level_dim_as_vec.x / 2), level_origin_as_vec.y + (level_dim_as_vec.y / 2), level_origin_as_vec.z };
+                Vec3 z_draw_coords_far  = (Vec3){ level_origin_as_vec.x + (level_dim_as_vec.x / 2), level_origin_as_vec.y + (level_dim_as_vec.y / 2), level_origin_as_vec.z + level_dim_as_vec.z };
+                Vec3 x_draw_scale = (Vec3){ 0, level_dim_as_vec.y, level_dim_as_vec.z };
+                Vec3 z_draw_scale = (Vec3){ level_dim_as_vec.x, level_dim_as_vec.y, 0 };
+
                 drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, x_draw_coords_near, x_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
                 drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, z_draw_coords_near, z_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
                 drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, x_draw_coords_far,  x_draw_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
