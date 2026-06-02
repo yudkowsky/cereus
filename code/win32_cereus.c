@@ -203,8 +203,8 @@ int CALLBACK WinMain(
 		L"Window Name",
 		WS_OVERLAPPEDWINDOW,
         work_area.left, work_area.top,
-        //1920, 1080,
-        work_area.right - work_area.left, work_area.bottom - work_area.top,
+        1920, 1080,
+        //work_area.right - work_area.left, work_area.bottom - work_area.top,
 		0, 0, module_handle, 0);
 
     global_window_handle = window_handle;
