@@ -2948,23 +2948,32 @@ void doPhysicsTick()
         int32 orthogonal_trigger = diagonal_trigger - 3;
         if (orthogonal_trigger < 1) orthogonal_trigger = 1;
 
+        // TODO: combine parts of these into some combined behavior
         if (temp_state.pack_turn_state.pack_intermediate_states_timer == diagonal_trigger)
         {
             Int3 diagonal_coords = temp_state.pack_turn_state.pack_intermediate_coords;
             Direction diagonal_push_direction = oppositeDirection(player->direction);
             TileType type_at_diagonal = getTileType(diagonal_coords);
+
             bool allow_diagonal = false;
             bool do_push = false;
-            if (type_at_diagonal == TILE_TYPE_NONE) allow_diagonal = true;
-            if (isPushable(type_at_diagonal) && canPush(diagonal_coords, diagonal_push_direction))
+
+            TrailingHitbox th;
+            bool blocked_by_th = (trailingHitboxAtCoords(diagonal_coords, &th));
+
+            if (!blocked_by_th)
             {
-                TrailingHitbox th;
-                if (!(trailingHitboxAtCoords(diagonal_coords, &th) && th.id != PACK_ID))
+                if (type_at_diagonal == TILE_TYPE_NONE) 
+                {
+                    allow_diagonal = true;
+                }
+                else if (isPushable(type_at_diagonal) && canPush(diagonal_coords, diagonal_push_direction))
                 {
                     allow_diagonal = true;
                     do_push = true;
                 }
             }
+
             if (allow_diagonal)
             {
                 if (do_push) 
@@ -2989,14 +2998,26 @@ void doPhysicsTick()
             Direction orthogonal_push_direction = temp_state.pack_turn_state.initial_player_direction;
             Int3 orthogonal_coords = getNextCoords(pack->coords, orthogonal_push_direction);
             TileType type_at_orthogonal = getTileType(orthogonal_coords);
+
             bool allow_orthogonal = false;
             bool do_push = false;
-            if (type_at_orthogonal == TILE_TYPE_NONE) allow_orthogonal = true;
-            if (isPushable(type_at_orthogonal) && canPush(orthogonal_coords, orthogonal_push_direction))
+
+            TrailingHitbox th;
+            bool blocked_by_th = (trailingHitboxAtCoords(orthogonal_coords, &th));
+
+            if (!blocked_by_th)
             {
-                allow_orthogonal = true;
-                do_push = true;
+                if (type_at_orthogonal == TILE_TYPE_NONE) 
+                {
+                    allow_orthogonal = true;
+                }
+                if (isPushable(type_at_orthogonal) && canPush(orthogonal_coords, orthogonal_push_direction))
+                {
+                    allow_orthogonal = true;
+                    do_push = true;
+                }
             }
+
             if (allow_orthogonal)
             {
                 if (do_push) pushAll(orthogonal_coords, orthogonal_push_direction, false, PACK_ID);
