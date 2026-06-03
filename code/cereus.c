@@ -3024,19 +3024,17 @@ void doPhysicsTick()
         if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0) temp_state.pack_turn_state.pack_intermediate_states_timer--;
     }
 
-    // reset fall_handled
-    Entity* fall_reset_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
-    FOR(group_index, 3) FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) fall_reset_group[group_index][entity_index].fall_handled = false;
+    // reset fall_handled for all falling_entities 
+    Entity* falling_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
+    FOR(group_index, 3) FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) falling_entity_group[group_index][entity_index].fall_handled = false;
     player->fall_handled = false;
     pack->fall_handled = false;
 
     bool do_any_falling = true;
     if (undo_press_timer > 0) do_any_falling = false;
     if (cheating) do_any_falling = false;
-
     if (do_any_falling)
     {
-        Entity* falling_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
         FOR(group_index, 5)
         {
             bool is_player = (group_index == 3);
@@ -3159,9 +3157,11 @@ void doPhysicsTick()
                                     }
                                     else
                                     {
+                                        // landed
                                         player->position.y = (float)player->coords.y;
                                         player->falling = false;
                                         player->velocity.y = 0;
+
                                         if (temp_state.pack_attached)
                                         {
                                             pack->position.y = (float)pack->coords.y;
@@ -4361,12 +4361,16 @@ GameResult gameFrame(double delta_time, Input* input)
             bool allow_input = true;
             if (temp_state.allow_movement_timer != 0) allow_input = false;
             
-            // if able to fall (and not climbing) then don't allow movement
-            if (canFall(player) && !temp_state.player_hit_by_red && !cheating && player->moving_direction == NO_DIRECTION) allow_input = false;
-
             // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
             float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
             if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) allow_input = false;
+
+            // if able to fall then don't allow movement
+            bool player_immune_to_fall = false;
+            if (temp_state.player_hit_by_red) player_immune_to_fall = true;
+            if (player->moving_direction == UP || player->moving_direction == DOWN) player_immune_to_fall = true;
+            if (cheating) player_immune_to_fall = true;
+            if (canFall(player) && !player_immune_to_fall) allow_input = false;
 
             if (allow_input && (input->keys_held & KEY_W || input->keys_held & KEY_A || input->keys_held & KEY_S || input->keys_held & KEY_D))
             {
