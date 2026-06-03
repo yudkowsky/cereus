@@ -324,7 +324,7 @@ const float PLAYER_MAX_SPEED = 0.12f;
 const float MIN_FALL_VELOCITY = -0.15f;
 const int32 TURN_TIME = 10;
 const float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f; // last number is number of frames for a full turn
-const float PLAYER_ACCELERATION = 0.03f;
+const float PLAYER_ACCELERATION = 0.04f;
 const float PLAYER_MAX_DECELERATION = 0.04f;
 const float CLIMBING_SPEED = 0.12f;
 const float GRAVITY = -0.03f;
@@ -2247,27 +2247,6 @@ void updateLaserBuffer()
     }
 }
 
-// FALLING LOGIC
-
-bool canFall(Entity* e)
-{
-    if (e->removed) return false;
-    Int3 next_coords = getNextCoords(e->coords, DOWN); 
-
-    // only allow fall if below is nothing, or void
-    if (!intCoordsWithinLevelBounds(next_coords)) return false;
-    if (getTileType(next_coords) != TILE_TYPE_NONE && getTileType(next_coords) != TILE_TYPE_VOID) return false;
-
-    // don't allow fall if trailing hitbox occupies tile below. this might not be the final version of how this code should look
-    TrailingHitbox th;
-    if (trailingHitboxAtCoords(next_coords, &th))
-    {
-        if (!getEntityFromId(th.id)->falling) return false;
-    }
-
-    return true;
-}
-
 // TEXT INPUT
 
 void updateTextInput(Input *input)
@@ -2852,6 +2831,18 @@ void doStandardMovement(Direction direction, Int3 next_player_coords)
     }
 }
 
+bool canFall(Entity* e)
+{
+    Int3 coords_below = getNextCoords(e->coords, DOWN);
+    TileType type_below = getTileType(coords_below);
+    if (type_below != TILE_TYPE_NONE && type_below != TILE_TYPE_VOID) return false;
+
+    //TrailingHitbox th;
+    //if (trailingHitboxAtCoords(coords_below, &th)) return false;
+
+    return true;
+}
+
 void clearMovementState(Entity* e)
 {
     e->moving_direction = NO_DIRECTION;
@@ -2967,8 +2958,12 @@ void doPhysicsTick()
             if (type_at_diagonal == TILE_TYPE_NONE) allow_diagonal = true;
             if (isPushable(type_at_diagonal) && canPush(diagonal_coords, diagonal_push_direction))
             {
-                allow_diagonal = true;
-                do_push = true;
+                TrailingHitbox th;
+                if (!(trailingHitboxAtCoords(diagonal_coords, &th) && th.id != PACK_ID))
+                {
+                    allow_diagonal = true;
+                    do_push = true;
+                }
             }
             if (allow_diagonal)
             {
@@ -3030,204 +3025,168 @@ void doPhysicsTick()
     player->fall_handled = false;
     pack->fall_handled = false;
 
-    bool do_any_falling = true;
-    if (undo_press_timer > 0) do_any_falling = false;
-    if (cheating) do_any_falling = false;
-    if (do_any_falling)
+    // falling logic
+    FOR(group_index, 5)
     {
-        FOR(group_index, 5)
+        bool is_player = (group_index == 3);
+        bool is_pack   = (group_index == 4);
+        if (is_pack && temp_state.pack_attached) break;
+
+        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            bool is_player = (group_index == 3);
-            bool is_pack   = (group_index == 4);
+            if (entity_index > 0 && group_index > 2) break; // lets me continue in player or pack case
 
-            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+            Entity* e;
+            if (is_player) e = player;
+            else if (is_pack) e = pack;
+            else e = &falling_entity_group[group_index][entity_index];
+
+            if (e->id == -1) continue; // TODO: remove this as a thing, and make 'removed' 0 by default, so can zero all arrays in init
+            if (e->removed) continue;
+            if (e->fall_handled) continue; // happens when entity below is removed due to void, so this would look like bottom, even though already handled
+
+            bool want_to_fall = true;
+            if (!canFall(e)) want_to_fall = false;
+            if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(e->position, vec3FromInt3(e->coords)), 0))) want_to_fall = false; // not horizontally stationary
+            if (!want_to_fall && !e->falling) continue;
+
+            // find the real bottom of the stack (to then interate up from)
+            Int3 bottom_coords = e->coords;
+            while (true)
             {
-                Entity* e;
-                if (is_player)
-                {
-                    e = player;
-                }
-                else if (is_pack)
-                {
-                    if (temp_state.pack_attached) break;
-                    e = pack;
-                }
-                else
-                {
-                    e = &falling_entity_group[group_index][entity_index];
-                }
+                Int3 below_coords = getNextCoords(bottom_coords, DOWN);
+                if (!isPushable(getTileType(below_coords))) break;
+                Entity* below_e = getEntityAtCoords(below_coords);
+                if (below_e == 0 || below_e->fall_handled) break;
+                bottom_coords = below_coords;
+            }
 
-                bool go_next = false;
-                if (e->id == -1) go_next = true; // TODO: remove this as a thing, and make 'removed' 0 by default, so can zero all arrays in init
-                if (e->removed) go_next = true;
-                if (e->fall_handled) go_next = true; // happens when entity below is removed due to void, so this would look like bottom, even though already handled
-                if (isPushable(getTileType(getNextCoords(e->coords, DOWN)))) go_next = true; // don't handle if isn't bottom of stack
+            int32 stack_size_upper_bound = getPushableStackSize(bottom_coords, UP); // is upper bound - could be less than this, if stack wants to be split, or if separate stacks have seemingly merged
+            Int3 current_coords = bottom_coords;
+            FOR(stack_index, stack_size_upper_bound)
+            {
+                Entity* e_in_stack = getEntityAtCoords(current_coords);
 
-                if (go_next)
+                if (e_in_stack->fall_handled) break; // another fall_handled check: entity above may have fallen such that they now form one stack (from getNextCoords pov), so guard on already fallen this frame
+                if (e_in_stack->id == PACK_ID && temp_state.pack_attached && stack_index != 0) break; // stack split because pack should not fall if attached
+
+                e_in_stack->fall_handled = true;
+                current_coords = getNextCoords(current_coords, UP);
+
+                // calculate test velocity and position if were to fall this frame
+                float test_y_velocity = e_in_stack->velocity.y + GRAVITY;
+                test_y_velocity = floatMax(test_y_velocity, MIN_FALL_VELOCITY);
+                float test_y_position = e_in_stack->position.y + test_y_velocity;
+
+                // if falling and will only fall within current block, just apply that fall and continue
+                if (test_y_position > getComponentAlongDirection(DOWN, vec3FromInt3(e_in_stack->coords)))
                 {
-                    if (is_player || is_pack) break;
+                    // will only be here if e.falling, because otherwise would immediately be crossing a boundary
+                    if (e_in_stack->id == PLAYER_ID)
+                    {
+                        player->velocity.y = test_y_velocity;
+                        player->position.y = test_y_position;
+                        if (temp_state.pack_attached)
+                        {
+                            pack->velocity.y = test_y_velocity;
+                            pack->position.y = test_y_position;
+                        }
+                    }
+                    else
+                    {
+                        e_in_stack->velocity.y = test_y_velocity;
+                        e_in_stack->position.y = test_y_position;
+                    }
                     continue;
                 }
 
-                // this is bottom of stack
-                Int3 current_coords = e->coords;
-                int32 stack_index = 0;
-                while (isPushable(getTileType(current_coords)))
+                // anything here wants to fall across a tile boundary
+                bool landing = false;
+                if (!canFall(e_in_stack)) landing = true;
+                if (undo_press_timer > 0) landing = true;
+                if (cheating) landing = true;
+
+                if (e_in_stack->id == PLAYER_ID && temp_state.player_hit_by_red) landing = true;
+                else if (temp_state.player_hit_by_blue_timer != 0) landing = true;
+
+                if (landing)
                 {
-                    Entity* e_in_stack = getEntityAtCoords(current_coords);
-                    if (e_in_stack == 0 || e_in_stack->fall_handled) break; // another fall_handled check: entity above may have fallen such that they now form one stack (from getNextCoords pov), so guard on already fallen this frame
+                    e_in_stack->position.y = (float)e_in_stack->coords.y;
+                    e_in_stack->velocity.y = 0;
+                    e_in_stack->moving_direction = NO_DIRECTION;
+                    e_in_stack->falling = false;
+                    continue;
+                }
 
-                    // stack split possibilities
-                    if (e_in_stack->id == PACK_ID && temp_state.pack_attached && stack_index != 0) break;
-                    if (e_in_stack->id == PLAYER_ID && temp_state.player_hit_by_red && stack_index != 0) break;
-
-                    e_in_stack->fall_handled = true;
-                    Int3 coords_above = getNextCoords(current_coords, UP);
-
-                    if (e_in_stack->id == PLAYER_ID)
+                // anything here will complete the fall
+                if (e_in_stack->id == PLAYER_ID)
+                {
+                    if (!temp_state.player_hit_by_red)
                     {
-                        bool allow_player_falling = true;
-                        if (temp_state.player_hit_by_red) allow_player_falling = false;
-                        if (player->moving_direction == UP || player->moving_direction == DOWN) allow_player_falling = false;
+                        createTrailingHitbox(PLAYER_ID, player->coords, FALL_TRAILING_HITBOX_TIME);
+                        player->position.y = test_y_position;
+                        player->velocity.y = test_y_velocity;
+                        Int3 coords_below = getNextCoords(player->coords, DOWN);
+                        moveEntityInBufferAndState(player, coords_below, player->direction);
 
-                        if (allow_player_falling)
+                        // special case: if falling onto block where tile ahead is ladder (pointing right direction), then player catches the ladder and starts climbing down, and stops falling.
+                        Int3 coords_ahead_and_below = getNextCoords(coords_below, player->direction);
+                        if (getTileType(coords_ahead_and_below) == TILE_TYPE_LADDER && getTileDirection(coords_ahead_and_below) == oppositeDirection(player->direction))
                         {
-                            // player falling logic
-                            bool want_to_fall = false;
-                            if (canFall(player)) want_to_fall = true;
-                            if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(player->position, vec3FromInt3(player->coords)), 0))) want_to_fall = false; // not stationary
-
-                            if (want_to_fall) player->falling = true;
-
-                            if (player->falling)
-                            {
-                                float test_y_velocity = player->velocity.y + GRAVITY;
-                                test_y_velocity = floatMax(test_y_velocity, MIN_FALL_VELOCITY);
-                                float test_y_position = player->position.y + test_y_velocity;
-                                if (test_y_position > getComponentAlongDirection(DOWN, vec3FromInt3(player->coords)))
-                                {
-                                    // within a block: update player coords, and pack coords too, if pack attached
-                                    player->velocity.y = test_y_velocity;
-                                    player->position.y = test_y_position;
-                                    if (temp_state.pack_attached)
-                                    {
-                                        pack->velocity.y = test_y_velocity;
-                                        pack->position.y = test_y_position;
-                                    }
-                                }
-                                else
-                                {
-                                    if (want_to_fall)
-                                    {
-                                        createTrailingHitbox(PLAYER_ID, player->coords, FALL_TRAILING_HITBOX_TIME);
-
-                                        player->position.y = test_y_position;
-                                        player->velocity.y = test_y_velocity;
-                                        Int3 coords_below = getNextCoords(player->coords, DOWN);
-                                        moveEntityInBufferAndState(player, coords_below, player->direction);
-
-                                        if (temp_state.pack_attached)
-                                        {
-                                            if (canFall(pack))
-                                            {
-                                                createTrailingHitbox(PACK_ID, pack->coords, FALL_TRAILING_HITBOX_TIME);
-
-                                                pack->position.y = test_y_position;
-                                                pack->velocity.y = test_y_velocity;
-                                                Int3 pack_next_coords = getNextCoords(pack->coords, DOWN);
-                                                moveEntityInBufferAndState(pack, pack_next_coords, pack->direction);
-                                            }
-                                            else
-                                            {
-                                                // pack will detach
-                                                pack->position.y = (float)pack->coords.y;
-                                                pack->falling = false;
-                                                pack->velocity.y = 0;
-                                                temp_state.pack_attached = false;
-                                            }
-                                        }
-
-                                        // special case: if falling onto block where tile ahead is ladder (pointing right direction), then player catches the ladder and starts climbing down, and stops falling.
-                                        Int3 coords_ahead_and_below = getNextCoords(coords_below, player->direction);
-                                        if (getTileType(coords_ahead_and_below) == TILE_TYPE_LADDER && getTileDirection(coords_ahead_and_below) == oppositeDirection(player->direction))
-                                        {
-                                            player->moving_direction = DOWN;
-                                            player->falling = false;
-                                        }
-                                    }
-                                    else
-                                    {
-                                        // landed
-                                        player->position.y = (float)player->coords.y;
-                                        player->falling = false;
-                                        player->velocity.y = 0;
-
-                                        if (temp_state.pack_attached)
-                                        {
-                                            pack->position.y = (float)pack->coords.y;
-                                            pack->falling = false;
-                                            pack->velocity.y = 0;
-                                        }
-                                    }
-                                }
-                            }
+                            player->falling = false;
+                            player->moving_direction = DOWN;
                         }
-                    }
-                    else if (temp_state.player_hit_by_blue_timer == 0)
-                    {
-                        // entity falling logic
-                        bool want_to_fall = canFall(e_in_stack);
-                        if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(e_in_stack->position, vec3FromInt3(e_in_stack->coords)), 0))) want_to_fall = false;
-
-                        if (want_to_fall) e_in_stack->falling = true;
-
-                        if (e_in_stack->falling)
+                        else
                         {
-                            float test_y_velocity = e_in_stack->velocity.y + GRAVITY;
-                            test_y_velocity = floatMax(test_y_velocity, MIN_FALL_VELOCITY);
-                            float test_y_position = e_in_stack->position.y + test_y_velocity;
+                            player->falling = true;
+                            //player->moving_direction == DOWN; TODO: if can do this, then just set moving_dir to DOWN in either case 
+                        }
 
-                            if (test_y_position > getComponentAlongDirection(DOWN, vec3FromInt3(e_in_stack->coords)))
+                        if (temp_state.pack_attached)
+                        {
+                            if (canFall(pack))
                             {
-                                // still within the current tile
-                                e_in_stack->velocity.y = test_y_velocity;
-                                e_in_stack->position.y = test_y_position;
-                            }
-                            else if (want_to_fall)
-                            {
-                                // crossing the tile boundary, keep falling
-                                Int3 coords_below = getNextCoords(e_in_stack->coords, DOWN);
-                                createTrailingHitbox(e_in_stack->id, e_in_stack->coords, FALL_TRAILING_HITBOX_TIME);
-
-                                if (getTileType(coords_below) == TILE_TYPE_VOID)
-                                {
-                                    // fell onto void: remove
-                                    setTileType(TILE_TYPE_NONE, e_in_stack->coords);
-                                    setTileDirection(NO_DIRECTION, e_in_stack->coords, e_in_stack->mirror_orientation);
-                                    e_in_stack->removed = true;
-                                }
-                                else
-                                {
-                                    e_in_stack->position.y = test_y_position;
-                                    e_in_stack->velocity.y = test_y_velocity;
-                                    moveEntityInBufferAndState(e_in_stack, coords_below, e_in_stack->direction);
-                                }
+                                createTrailingHitbox(PACK_ID, pack->coords, FALL_TRAILING_HITBOX_TIME);
+                                pack->position.y = test_y_position;
+                                pack->velocity.y = test_y_velocity;
+                                //pack->moving_direction == DOWN; TODO
+                                Int3 pack_next_coords = getNextCoords(pack->coords, DOWN);
+                                moveEntityInBufferAndState(pack, pack_next_coords, pack->direction);
                             }
                             else
                             {
-                                // landed
-                                e_in_stack->position.y = (float)e_in_stack->coords.y;
-                                e_in_stack->velocity.y = 0;
-                                e_in_stack->falling = false;
+                                // pack will detach
+                                pack->position.y = (float)pack->coords.y;
+                                pack->velocity.y = 0;
+                                //pack->moving_direction == NO_DIRECTION; TODO
+                                temp_state.pack_attached = false;
                             }
                         }
                     }
-
-                    current_coords = coords_above;
-                    stack_index++;
                 }
-
-                if (is_player || is_pack) break;
+                else
+                {
+                    if (temp_state.player_hit_by_blue_timer == 0)
+                    {
+                        createTrailingHitbox(e_in_stack->id, e_in_stack->coords, FALL_TRAILING_HITBOX_TIME);
+                        Int3 coords_below = getNextCoords(e_in_stack->coords, DOWN);
+                        if (getTileType(coords_below) == TILE_TYPE_VOID)
+                        {
+                            // fell onto void: remove
+                            setTileType(TILE_TYPE_NONE, e_in_stack->coords);
+                            setTileDirection(NO_DIRECTION, e_in_stack->coords, e_in_stack->mirror_orientation);
+                            e_in_stack->removed = true;
+                        }
+                        else
+                        {
+                            e_in_stack->position.y = test_y_position;
+                            e_in_stack->velocity.y = test_y_velocity;
+                            //e_in_stack->moving_direction = DOWN; TODO
+                            e_in_stack->falling = true;
+                            moveEntityInBufferAndState(e_in_stack, coords_below, e_in_stack->direction);
+                        }
+                    }
+                }
             }
         }
     }
@@ -3377,6 +3336,17 @@ void doPhysicsTick()
 
                 if (type_below_player == TILE_TYPE_NONE) 
                 {
+                    /*
+                    // capture head stack
+                    Int3 head_stack_bottom = getNextCoords(player->coords, UP);
+                    int32 head_stack_size = 0;
+                    if (isPushable(getTileType(head_stack_bottom)) && temp_state.player_hit_by_blue_timer == 0) head_stack_size = getPushableStackSize(head_stack_bottom, UP);
+
+                    char debug[64];
+                    snprintf(debug, sizeof(debug), "head_stack_size: %d", head_stack_size);
+                    createDebugPopup(debug, 12091);
+                    */
+
                     if (!temp_state.pack_attached)
                     {
                         // check behind player position for pack: if exists, pack should attach, but only if won't instantly detach.
@@ -3416,6 +3386,23 @@ void doPhysicsTick()
                     moveEntityInBufferAndState(player, coords_below_player, player->direction);
                     player->position.y -= CLIMBING_SPEED;
                     player->velocity.y = -CLIMBING_SPEED;
+
+                    /*
+                    // shift head stack down one tile into space player vacatee
+                    Int3 current_coords = head_stack_bottom;
+                    FOR(stack_index, head_stack_size)
+                    {
+                        Entity* e = getEntityAtCoords(current_coords);
+                        createTrailingHitbox(e->id, e->coords, TRAILING_HITBOX_TIME);
+                        moveEntityInBufferAndState(e, getNextCoords(e->coords, DOWN), e->direction);
+                        e->moving_direction = DOWN;
+                        e->moving_on_head = true;
+                        e->root_entity_id = PLAYER_ID;
+                        e->tied_to_pack_and_decoupled = false;
+
+                        current_coords = getNextCoords(current_coords, UP);
+                    }
+                    */
 
                     Int3 new_coords_ahead = getNextCoords(player->coords, player->direction);
                     if (getTileType(new_coords_ahead) != TILE_TYPE_LADDER)
@@ -4360,7 +4347,7 @@ GameResult gameFrame(double delta_time, Input* input)
             // HANDLE INPUT
             bool allow_input = true;
             if (temp_state.allow_movement_timer != 0) allow_input = false;
-            
+
             // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
             float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
             if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) allow_input = false;
@@ -4533,11 +4520,11 @@ GameResult gameFrame(double delta_time, Input* input)
                     // TURN MOVEMENT
                     bool allow_turn = true;
                     if (player->falling) allow_turn = false;
-                    if (player->moving_direction != NO_DIRECTION) allow_turn = false;
+                    if (player->moving_direction == UP || player->moving_direction == DOWN) allow_turn = false;
                     
                     // get difference in position along axis of travel, and gate on some threshold to target
                     float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, vec3FromInt3(player->coords)));
-                    if (fabs(difference_in_player_position_along_direction) > 0.2) allow_turn = false;
+                    if (fabs(difference_in_player_position_along_direction) > 0.3) allow_turn = false;
 
                     if (temp_state.pack_attached)
                     {
@@ -4548,13 +4535,7 @@ GameResult gameFrame(double delta_time, Input* input)
                         bool pack_would_cause_failed_case_orthogonal = orthogonal_type != TILE_TYPE_NONE && (!isEntity(orthogonal_type) || canPush(orthogonal_coords, player->direction));
                         if (pack_would_cause_failed_case_orthogonal && temp_state.pack_turn_state.half_failed_turn_timer != 0) allow_turn = false;
 
-                        // NOTE: when adding full-failed turn animation, will need architecture for guarding that animation also
-                        //       i could just handle the full-failure case here, since no state will change
-
-                        /* NOTE: do i need this? should just get automatically handled in pack turn state handler
-                        TrailingHitbox th;
-                        if (trailingHitboxAtCoords(diagonal_coords, &th)) allow_turn = false;
-                        */
+                        // NOTE: when adding full-failed turn animation, will need architecture for guarding that animation
                     }
 
                     if (allow_turn)
