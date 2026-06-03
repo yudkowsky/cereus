@@ -80,6 +80,7 @@ typedef struct Entity
     Vec3 velocity; // not reliably used except for player
     Direction moving_direction; // could be encoded in velocity, i guess? but used for different things...
     bool falling;
+    bool fall_handled; // reset each frame
     bool moving_on_head;
     int32 root_entity_id;
     bool tied_to_pack_and_decoupled;
@@ -820,7 +821,7 @@ bool isSource(TileType type)
 // only checks tile types - doesn't do what canPush does
 bool isPushable(TileType type)
 {
-    return (type == TILE_TYPE_BOX || type == TILE_TYPE_MIRROR || type == TILE_TYPE_PACK || isSource(type));
+    return (type == TILE_TYPE_BOX || type == TILE_TYPE_MIRROR || type == TILE_TYPE_PACK || type == TILE_TYPE_PLAYER || isSource(type));
 }
 
 bool isEntity(TileType type)
@@ -2267,49 +2268,6 @@ bool canFall(Entity* e)
     return true;
 }
 
-void setFalling(Entity* e)
-{
-    // canFall will only return true for the bottom entity in a stack. so whenever this check is passed, the first entity is always the one in the bottom of the stack.
-    if (!canFall(e)) return;
-
-    // remove if above void: early return for this entity, but call doFallingEntity for the entity above, if there is one, so that it doesn't get its fall interrupted
-    Int3 below = getNextCoords(e->coords, DOWN);
-    if (getTileType(below) == TILE_TYPE_VOID)
-    {
-        setTileType(TILE_TYPE_NONE, e->coords);
-        setTileDirection(NO_DIRECTION, e->coords, e->mirror_orientation);
-        e->removed = true;
-        Int3 coords_above = getNextCoords(e->coords, UP);
-
-        if (isPushable(getTileType(coords_above)))
-        {
-            Entity* e_above = getEntityAtCoords(coords_above);
-            if (e_above) setFalling(e_above);
-        }
-        return;
-    }
-
-    Int3 next_coords = getNextCoords(e->coords, DOWN);
-    int32 stack_size = getPushableStackSize(e->coords, UP);
-    Int3 current_start_coords = e->coords;
-    Int3 current_end_coords = next_coords; 
-
-    FOR(stack_fall_index, stack_size)
-    {
-        Entity* e_in_stack = getEntityAtCoords(current_start_coords);
-
-        // two checks which have to do with breaking a stack so that everything below a point falls, but not above a certain point
-        if (e_in_stack->id == PACK_ID && temp_state.pack_attached && stack_fall_index != 0) break; // if e is pack, and pack_attached, and this isn't the entity on which the function was called, break fall here
-        if (e_in_stack->id == PLAYER_ID && temp_state.player_hit_by_red && stack_fall_index != 0) break; // similarly, if player is red above a falling stack, then break to allow stack to fall, but keep player floating
-
-        e_in_stack->falling = true;
-
-        current_end_coords = current_start_coords;
-        current_start_coords = getNextCoords(current_start_coords, UP);
-    }
-    return;
-}
-
 // TEXT INPUT
 
 void updateTextInput(Input *input)
@@ -3066,146 +3024,206 @@ void doPhysicsTick()
         if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0) temp_state.pack_turn_state.pack_intermediate_states_timer--;
     }
 
-    // falling logic for entities
-    Entity* falling_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
-    FOR(group_index, 4)
+    // reset fall_handled
+    Entity* fall_reset_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
+    FOR(group_index, 3) FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) fall_reset_group[group_index][entity_index].fall_handled = false;
+    player->fall_handled = false;
+    pack->fall_handled = false;
+
+    bool do_any_falling = true;
+    if (undo_press_timer > 0) do_any_falling = false;
+    if (cheating) do_any_falling = false;
+
+    if (do_any_falling)
     {
-        // handle pack as the 4th group here (if not attached). then immediately break
-        bool is_pack = false;
-        if (group_index == 3) is_pack = true;
-
-        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+        Entity* falling_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
+        FOR(group_index, 5)
         {
-            Entity* e;
-            if (is_pack)
+            bool is_player = (group_index == 3);
+            bool is_pack   = (group_index == 4);
+
+            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
             {
-                if (temp_state.pack_attached) break;
-                e = pack;
-            }
-            else e = &falling_entity_group[group_index][entity_index];
-
-            bool want_to_fall = false;
-            if (!e->falling) want_to_fall = true;
-            if (canFall(e)) want_to_fall = true;
-            if (undo_press_timer > 0) want_to_fall = false;
-            if (cheating) want_to_fall = false;
-            if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(e->position, vec3FromInt3(e->coords)), 0))) want_to_fall = false; // not stationary. not using e->velocity because it gets set after, so wouldn't work when pushing stationary object
-            if (temp_state.player_hit_by_blue_timer > 0) want_to_fall = false;
-
-            if (want_to_fall) setFalling(e); // only updates false -> true
-
-            if (e->falling)
-            {
-                float test_y_velocity = e->velocity.y + GRAVITY;
-                test_y_velocity = floatMax(test_y_velocity, MIN_FALL_VELOCITY);
-                float test_y_position = e->position.y + test_y_velocity;
-                if (test_y_position > getComponentAlongDirection(DOWN, vec3FromInt3(e->coords)))
+                Entity* e;
+                if (is_player)
                 {
-                    // within a block: update falling entity position and velocity, but not coords
-                    e->velocity.y = test_y_velocity;
-                    e->position.y = test_y_position;
+                    e = player;
+                }
+                else if (is_pack)
+                {
+                    if (temp_state.pack_attached) break;
+                    e = pack;
                 }
                 else
                 {
-                    if (want_to_fall)
-                    {
-                        createTrailingHitbox(e->id, e->coords, FALL_TRAILING_HITBOX_TIME);
-
-                        e->position.y = test_y_position;
-                        e->velocity.y = test_y_velocity;
-                        Int3 next_coords = getNextCoords(e->coords, DOWN);
-                        moveEntityInBufferAndState(e, next_coords, e->direction);
-                    }
-                    else
-                    {
-                        e->position.y = (float)e->coords.y;
-                        e->falling = false;
-                        e->velocity.y = 0;
-                    }
+                    e = &falling_entity_group[group_index][entity_index];
                 }
-            }
-            if (is_pack) break;
-        }
-    }
 
-    // player falling logic
-    bool want_to_fall = false;
-    if (canFall(player)) want_to_fall = true;
-    if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(player->position, vec3FromInt3(player->coords)), 0))) want_to_fall = false; // not stationary
-    if (undo_press_timer > 0) want_to_fall = false;
-    if (cheating) want_to_fall = false;
-    if (temp_state.player_hit_by_red) want_to_fall = false;
-    if (player->moving_direction != NO_DIRECTION) want_to_fall = false;
+                bool go_next = false;
+                if (e->id == -1) go_next = true; // TODO: remove this as a thing, and make 'removed' 0 by default, so can zero all arrays in init
+                if (e->removed) go_next = true;
+                if (e->fall_handled) go_next = true; // happens when entity below is removed due to void, so this would look like bottom, even though already handled
+                if (isPushable(getTileType(getNextCoords(e->coords, DOWN)))) go_next = true; // don't handle if isn't bottom of stack
 
-    if (want_to_fall) setFalling(player);
-
-    if (player->falling)
-    {
-        float test_y_velocity = player->velocity.y + GRAVITY;
-        test_y_velocity = floatMax(test_y_velocity, MIN_FALL_VELOCITY);
-        float test_y_position = player->position.y + test_y_velocity;
-        if (test_y_position > getComponentAlongDirection(DOWN, vec3FromInt3(player->coords)))
-        {
-            // within a block: update player coords, and pack coords too, if pack attached
-            player->velocity.y = test_y_velocity;
-            player->position.y = test_y_position;
-            if (temp_state.pack_attached)
-            {
-                pack->velocity.y = test_y_velocity;
-                pack->position.y = test_y_position;
-            }
-        }
-        else
-        {
-            if (want_to_fall)
-            {
-                createTrailingHitbox(PLAYER_ID, player->coords, FALL_TRAILING_HITBOX_TIME);
-
-                player->position.y = test_y_position;
-                player->velocity.y = test_y_velocity;
-                Int3 coords_below = getNextCoords(player->coords, DOWN);
-                moveEntityInBufferAndState(player, coords_below, player->direction);
-
-                if (temp_state.pack_attached)
+                if (go_next)
                 {
-                    if (canFall(pack))
-                    {
-                        createTrailingHitbox(PACK_ID, pack->coords, FALL_TRAILING_HITBOX_TIME);
-
-                        pack->position.y = test_y_position;
-                        pack->velocity.y = test_y_velocity;
-                        Int3 pack_next_coords = getNextCoords(pack->coords, DOWN);
-                        moveEntityInBufferAndState(pack, pack_next_coords, pack->direction);
-                    }
-                    else
-                    {
-                        // pack will detach
-                        pack->position.y = (float)pack->coords.y;
-                        pack->falling = false;
-                        pack->velocity.y = 0;
-                        temp_state.pack_attached = false;
-                    }
+                    if (is_player || is_pack) break;
+                    continue;
                 }
 
-                // special case: if falling onto block where tile ahead is ladder (pointing right direction), then player catches the ladder and starts climbing down, and stops falling.
-                Int3 coords_ahead_and_below = getNextCoords(coords_below, player->direction);
-                if (getTileType(coords_ahead_and_below) == TILE_TYPE_LADDER && getTileDirection(coords_ahead_and_below) == oppositeDirection(player->direction))
+                // this is bottom of stack
+                Int3 current_coords = e->coords;
+                int32 stack_index = 0;
+                while (isPushable(getTileType(current_coords)))
                 {
-                    player->moving_direction = DOWN;
-                    player->falling = false;
+                    Entity* e_in_stack = getEntityAtCoords(current_coords);
+                    if (e_in_stack == 0 || e_in_stack->fall_handled) break; // another fall_handled check: entity above may have fallen such that they now form one stack (from getNextCoords pov), so guard on already fallen this frame
+
+                    // stack split possibilities
+                    if (e_in_stack->id == PACK_ID && temp_state.pack_attached && stack_index != 0) break;
+                    if (e_in_stack->id == PLAYER_ID && temp_state.player_hit_by_red && stack_index != 0) break;
+
+                    e_in_stack->fall_handled = true;
+                    Int3 coords_above = getNextCoords(current_coords, UP);
+
+                    if (e_in_stack->id == PLAYER_ID)
+                    {
+                        if (!temp_state.player_hit_by_red)
+                        {
+                            // player falling logic
+                            bool want_to_fall = false;
+                            if (canFall(player)) want_to_fall = true;
+                            if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(player->position, vec3FromInt3(player->coords)), 0))) want_to_fall = false; // not stationary
+
+                            if (want_to_fall) player->falling = true;
+
+                            if (player->falling)
+                            {
+                                float test_y_velocity = player->velocity.y + GRAVITY;
+                                test_y_velocity = floatMax(test_y_velocity, MIN_FALL_VELOCITY);
+                                float test_y_position = player->position.y + test_y_velocity;
+                                if (test_y_position > getComponentAlongDirection(DOWN, vec3FromInt3(player->coords)))
+                                {
+                                    // within a block: update player coords, and pack coords too, if pack attached
+                                    player->velocity.y = test_y_velocity;
+                                    player->position.y = test_y_position;
+                                    if (temp_state.pack_attached)
+                                    {
+                                        pack->velocity.y = test_y_velocity;
+                                        pack->position.y = test_y_position;
+                                    }
+                                }
+                                else
+                                {
+                                    if (want_to_fall)
+                                    {
+                                        createTrailingHitbox(PLAYER_ID, player->coords, FALL_TRAILING_HITBOX_TIME);
+
+                                        player->position.y = test_y_position;
+                                        player->velocity.y = test_y_velocity;
+                                        Int3 coords_below = getNextCoords(player->coords, DOWN);
+                                        moveEntityInBufferAndState(player, coords_below, player->direction);
+
+                                        if (temp_state.pack_attached)
+                                        {
+                                            if (canFall(pack))
+                                            {
+                                                createTrailingHitbox(PACK_ID, pack->coords, FALL_TRAILING_HITBOX_TIME);
+
+                                                pack->position.y = test_y_position;
+                                                pack->velocity.y = test_y_velocity;
+                                                Int3 pack_next_coords = getNextCoords(pack->coords, DOWN);
+                                                moveEntityInBufferAndState(pack, pack_next_coords, pack->direction);
+                                            }
+                                            else
+                                            {
+                                                // pack will detach
+                                                pack->position.y = (float)pack->coords.y;
+                                                pack->falling = false;
+                                                pack->velocity.y = 0;
+                                                temp_state.pack_attached = false;
+                                            }
+                                        }
+
+                                        // special case: if falling onto block where tile ahead is ladder (pointing right direction), then player catches the ladder and starts climbing down, and stops falling.
+                                        Int3 coords_ahead_and_below = getNextCoords(coords_below, player->direction);
+                                        if (getTileType(coords_ahead_and_below) == TILE_TYPE_LADDER && getTileDirection(coords_ahead_and_below) == oppositeDirection(player->direction))
+                                        {
+                                            player->moving_direction = DOWN;
+                                            player->falling = false;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        player->position.y = (float)player->coords.y;
+                                        player->falling = false;
+                                        player->velocity.y = 0;
+                                        if (temp_state.pack_attached)
+                                        {
+                                            pack->position.y = (float)pack->coords.y;
+                                            pack->falling = false;
+                                            pack->velocity.y = 0;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else if (temp_state.player_hit_by_blue_timer == 0)
+                    {
+                        // entity falling logic
+                        bool want_to_fall = canFall(e_in_stack);
+                        if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(e_in_stack->position, vec3FromInt3(e_in_stack->coords)), 0))) want_to_fall = false;
+
+                        if (want_to_fall) e_in_stack->falling = true;
+
+                        if (e_in_stack->falling)
+                        {
+                            float test_y_velocity = e_in_stack->velocity.y + GRAVITY;
+                            test_y_velocity = floatMax(test_y_velocity, MIN_FALL_VELOCITY);
+                            float test_y_position = e_in_stack->position.y + test_y_velocity;
+
+                            if (test_y_position > getComponentAlongDirection(DOWN, vec3FromInt3(e_in_stack->coords)))
+                            {
+                                // still within the current tile
+                                e_in_stack->velocity.y = test_y_velocity;
+                                e_in_stack->position.y = test_y_position;
+                            }
+                            else if (want_to_fall)
+                            {
+                                // crossing the tile boundary, keep falling
+                                Int3 coords_below = getNextCoords(e_in_stack->coords, DOWN);
+                                createTrailingHitbox(e_in_stack->id, e_in_stack->coords, FALL_TRAILING_HITBOX_TIME);
+
+                                if (getTileType(coords_below) == TILE_TYPE_VOID)
+                                {
+                                    // fell onto void: remove
+                                    setTileType(TILE_TYPE_NONE, e_in_stack->coords);
+                                    setTileDirection(NO_DIRECTION, e_in_stack->coords, e_in_stack->mirror_orientation);
+                                    e_in_stack->removed = true;
+                                }
+                                else
+                                {
+                                    e_in_stack->position.y = test_y_position;
+                                    e_in_stack->velocity.y = test_y_velocity;
+                                    moveEntityInBufferAndState(e_in_stack, coords_below, e_in_stack->direction);
+                                }
+                            }
+                            else
+                            {
+                                // landed
+                                e_in_stack->position.y = (float)e_in_stack->coords.y;
+                                e_in_stack->velocity.y = 0;
+                                e_in_stack->falling = false;
+                            }
+                        }
+                    }
+
+                    current_coords = coords_above;
+                    stack_index++;
                 }
-            }
-            else
-            {
-                player->position.y = (float)player->coords.y;
-                player->falling = false;
-                player->velocity.y = 0;
-                if (temp_state.pack_attached)
-                {
-                    pack->position.y = (float)pack->coords.y;
-                    pack->falling = false;
-                    pack->velocity.y = 0;
-                }
+
+                if (is_player || is_pack) break;
             }
         }
     }
