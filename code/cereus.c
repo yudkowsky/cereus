@@ -3088,7 +3088,11 @@ void doPhysicsTick()
 
                     if (e_in_stack->id == PLAYER_ID)
                     {
-                        if (!temp_state.player_hit_by_red)
+                        bool allow_player_falling = true;
+                        if (temp_state.player_hit_by_red) allow_player_falling = false;
+                        if (player->moving_direction == UP || player->moving_direction == DOWN) allow_player_falling = false;
+
+                        if (allow_player_falling)
                         {
                             // player falling logic
                             bool want_to_fall = false;
@@ -3229,7 +3233,7 @@ void doPhysicsTick()
     }
 
     // climb logic
-    // NOTE: UP and DOWN climb cases are different enough that they're still in separate clauses. think about if is worth being smarter here, or if this is clearest
+    // NOTE: UP and DOWN climb cases are different enough that they're still in separate scopes. think about if is worth being smarter here, or if this is clearest
     // NOTE: currently not allowing pushing of objects down if try to climb down, and you are blue. will find out in level design if this is something I want to actually add.
     if (player->moving_direction == UP || player->moving_direction == DOWN)
     {
