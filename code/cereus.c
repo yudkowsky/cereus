@@ -2948,94 +2948,70 @@ void doPhysicsTick()
         int32 orthogonal_trigger = diagonal_trigger - 3;
         if (orthogonal_trigger < 1) orthogonal_trigger = 1;
 
-        // TODO: combine parts of these into some combined behavior
-        if (temp_state.pack_turn_state.pack_intermediate_states_timer == diagonal_trigger)
+        bool this_is_diagonal = false;
+        bool this_is_orthogonal = false;
+        if (temp_state.pack_turn_state.pack_intermediate_states_timer == diagonal_trigger) this_is_diagonal = true;
+        if (temp_state.pack_turn_state.pack_intermediate_states_timer == orthogonal_trigger) this_is_orthogonal = true;
+
+        if (this_is_diagonal || this_is_orthogonal)
         {
-            Int3 diagonal_coords = temp_state.pack_turn_state.pack_intermediate_coords;
-            Direction diagonal_push_direction = oppositeDirection(player->direction);
-            TileType type_at_diagonal = getTileType(diagonal_coords);
+            Int3 coords_at_turn;
+            Direction push_direction;
+            if (this_is_diagonal)
+            {
+                push_direction = oppositeDirection(player->direction);
+                coords_at_turn = temp_state.pack_turn_state.pack_intermediate_coords;
+            }
+            else
+            {
+                push_direction = temp_state.pack_turn_state.initial_player_direction;
+                coords_at_turn = getNextCoords(pack->coords, push_direction);
+            }
+            TileType type_at_push = getTileType(coords_at_turn);
 
-            bool allow_diagonal = false;
+            bool allow_turn = false;
             bool do_push = false;
-
             TrailingHitbox th;
-            bool blocked_by_th = (trailingHitboxAtCoords(diagonal_coords, &th));
+            bool blocked_by_th = trailingHitboxAtCoords(coords_at_turn, &th);
 
             if (!blocked_by_th)
             {
-                if (type_at_diagonal == TILE_TYPE_NONE) 
+                if (type_at_push == TILE_TYPE_NONE)
                 {
-                    allow_diagonal = true;
+                    allow_turn = true;
                 }
-                else if (isPushable(type_at_diagonal) && canPush(diagonal_coords, diagonal_push_direction))
+                else if (isPushable(type_at_push) && canPush(coords_at_turn, push_direction))
                 {
-                    allow_diagonal = true;
+                    allow_turn = true;
                     do_push = true;
                 }
             }
 
-            if (allow_diagonal)
+            if (allow_turn)
             {
-                if (do_push) 
+                if (do_push)
                 {
-                    pushAll(diagonal_coords, diagonal_push_direction, false, PACK_ID);
-                    temp_state.pack_turn_state.diagonal_push_happened_this_turn = true;
+                    pushAll(coords_at_turn, push_direction, false, PACK_ID);
+                    if (this_is_diagonal) temp_state.pack_turn_state.diagonal_push_happened_this_turn = true;
                 }
                 createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
-                moveEntityInBufferAndState(pack, diagonal_coords, player->direction);
+                moveEntityInBufferAndState(pack, coords_at_turn, player->direction);
             }
             else
             {
                 if (isPushable(getTileType(getNextCoords(player->coords, UP)))) revertHeadStackRotation();
-                player->direction = temp_state.pack_turn_state.initial_player_direction;
-                pack->direction = temp_state.pack_turn_state.initial_player_direction;
-                popLastUndoAction();
-                temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
-            }
-        }
-        else if (temp_state.pack_turn_state.pack_intermediate_states_timer == orthogonal_trigger)
-        {
-            Direction orthogonal_push_direction = temp_state.pack_turn_state.initial_player_direction;
-            Int3 orthogonal_coords = getNextCoords(pack->coords, orthogonal_push_direction);
-            TileType type_at_orthogonal = getTileType(orthogonal_coords);
-
-            bool allow_orthogonal = false;
-            bool do_push = false;
-
-            TrailingHitbox th;
-            bool blocked_by_th = (trailingHitboxAtCoords(orthogonal_coords, &th));
-
-            if (!blocked_by_th)
-            {
-                if (type_at_orthogonal == TILE_TYPE_NONE) 
+                if (this_is_orthogonal)
                 {
-                    allow_orthogonal = true;
+                    Int3 start_pack_coords = getNextCoords(player->coords, oppositeDirection(temp_state.pack_turn_state.initial_player_direction));
+                    moveEntityInBufferAndState(pack, start_pack_coords, player->direction);
                 }
-                if (isPushable(type_at_orthogonal) && canPush(orthogonal_coords, orthogonal_push_direction))
-                {
-                    allow_orthogonal = true;
-                    do_push = true;
-                }
-            }
-
-            if (allow_orthogonal)
-            {
-                if (do_push) pushAll(orthogonal_coords, orthogonal_push_direction, false, PACK_ID);
-                createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
-                moveEntityInBufferAndState(pack, orthogonal_coords, player->direction);
-            }
-            else
-            {
-                // half failed case (push above still happens)
-                if (isPushable(getTileType(getNextCoords(player->coords, UP)))) revertHeadStackRotation();
-                Int3 start_pack_coords = getNextCoords(player->coords, oppositeDirection(temp_state.pack_turn_state.initial_player_direction));
-                moveEntityInBufferAndState(pack, start_pack_coords, player->direction);
+                if (this_is_diagonal || !temp_state.pack_turn_state.diagonal_push_happened_this_turn) popLastUndoAction();
                 player->direction = temp_state.pack_turn_state.initial_player_direction;
-                if (!temp_state.pack_turn_state.diagonal_push_happened_this_turn) popLastUndoAction();
+                pack->direction = player->direction;
                 temp_state.pack_turn_state.half_failed_turn_timer = HALF_FAILED_PACK_TURN_COOLDOWN;
                 temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
             }
-            temp_state.pack_turn_state.diagonal_push_happened_this_turn = false;
+            if (this_is_orthogonal) temp_state.pack_turn_state.diagonal_push_happened_this_turn = false;
         }
         if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0) temp_state.pack_turn_state.pack_intermediate_states_timer--;
     }
