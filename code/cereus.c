@@ -429,8 +429,6 @@ int32 camera_target_plane = 0; // y level of xz plane which calculates targeted 
 
 // general state
 WorldState world_state = {0};
-Entity* player = &world_state.player;
-Entity* pack = &world_state.pack;
 TemporaryState temp_state = {0};
 LaserBuffer laser_buffer[512] = {0}; // 512 = 64 max sources * 16 max laser turns
 GameProgress game_progress = WORLD_0;
@@ -439,6 +437,12 @@ Int3 level_origin = {0};
 Int3 restart_position = {0};
 bool in_overworld = true;
 float water_plane_y = 0.0f;
+
+Entity* player = &world_state.player;
+Entity* pack = &world_state.pack;
+Entity* all_entity_groups[6] = { world_state.boxes, world_state.mirrors, world_state.locked_blocks, world_state.glass_blocks, world_state.sources, world_state.win_blocks };
+Entity* interactible_entity_groups[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
+Entity* lockable_entity_groups[4] = { world_state.boxes, world_state.mirrors, world_state.win_blocks, world_state.sources };
 
 WorldState leap_of_faith_world_state_snapshot = {0};
 TemporaryState leap_of_faith_temp_state_snapshot = {0};
@@ -1203,12 +1207,11 @@ void loadLockedInfoPaths(FILE* file)
         if (fread(&path, 1, 64, file) != 64) return;
         path[63] = '\0';
 
-        Entity* entity_group[6] = { world_state.boxes, world_state.mirrors, world_state.locked_blocks, world_state.glass_blocks, world_state.sources, world_state.win_blocks };
         FOR(group_index, 6)
         {
             FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
             {
-                Entity* e = &entity_group[group_index][entity_index];
+                Entity* e = &all_entity_groups[group_index][entity_index];
                 if (e->coords.x == x && e->coords.y == y && e->coords.z == z)
                 {
                     memcpy(e->unlocked_by, path, sizeof(e->unlocked_by));
@@ -1325,12 +1328,11 @@ bool saveLevelRewrite(char* path)
         writeWinBlockToFile(file, wb);
     }
 
-    Entity* entity_group[6] = { world_state.boxes, world_state.mirrors, world_state.locked_blocks, world_state.glass_blocks, world_state.sources, world_state.win_blocks };
     FOR(group_index, 6)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            Entity* e = &entity_group[group_index][entity_index];
+            Entity* e = &all_entity_groups[group_index][entity_index];
             if (e->removed) continue;
             if (e->unlocked_by[0] == '\0') continue;
             writeLockedInfoToFile(file, e);
@@ -2479,12 +2481,11 @@ void gameRedraw(DisplayInfo display_from_platform)
 
 void updateLockedTiles()
 {
-    Entity* entity_group[4] = { world_state.boxes, world_state.mirrors, world_state.win_blocks, world_state.sources };
     FOR(group_index, 4)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            Entity* e = &entity_group[group_index][entity_index];
+            Entity* e = &lockable_entity_groups[group_index][entity_index];
             if (findInSolvedLevels(e->unlocked_by) == -1) e->locked = true; 
             else e->locked = false;
         }
@@ -3017,8 +3018,7 @@ void doPhysicsTick()
     }
 
     // reset fall_handled for all falling_entities 
-    Entity* falling_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources }; // TODO: can declare these with player and pack pointers?
-    FOR(group_index, 3) FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) falling_entity_group[group_index][entity_index].fall_handled = false;
+    FOR(group_index, 3) FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) interactible_entity_groups[group_index][entity_index].fall_handled = false;
     player->fall_handled = false;
     pack->fall_handled = false;
 
@@ -3036,7 +3036,7 @@ void doPhysicsTick()
             Entity* e;
             if (is_player) e = player;
             else if (is_pack) e = pack;
-            else e = &falling_entity_group[group_index][entity_index];
+            else e = &interactible_entity_groups[group_index][entity_index];
 
             if (e->id == -1) continue; // TODO: remove this as a thing, and make 'removed' 0 by default, so can zero all arrays in init
             if (e->removed) continue;
@@ -3527,7 +3527,6 @@ void doPhysicsTick()
     }
 
     // handle moving entities
-    Entity* pushed_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
     FOR(group_index, 4)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -3540,7 +3539,7 @@ void doPhysicsTick()
             }
             else
             {
-                e = &pushed_entity_group[group_index][entity_index];
+                e = &interactible_entity_groups[group_index][entity_index];
             }
             if (e->moving_direction == NO_DIRECTION && !e->moving_on_head) continue;
             Entity* root_e = getEntityFromId(e->root_entity_id);
