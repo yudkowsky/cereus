@@ -3121,6 +3121,7 @@ void doPhysicsTick()
                         player->position.y = test_y_position;
                         player->velocity.y = test_y_velocity;
                         Int3 coords_below = getNextCoords(player->coords, DOWN);
+                        Int3 coords_above = getNextCoords(player->coords, UP);
                         moveEntityInBufferAndState(player, coords_below, player->direction);
 
                         // special case: if falling onto block where tile ahead is ladder (pointing right direction), then player catches the ladder and starts climbing down, and stops falling.
@@ -3129,6 +3130,23 @@ void doPhysicsTick()
                         {
                             player->falling = false;
                             player->moving_direction = DOWN;
+
+                            // doing "push down" manually because player being pushable causes problems. not very hard, but maybe should be doing this differently, or at least differentiate isFallable vs isPushable
+                            Int3 stack_coords = coords_above;
+                            int32 stack_on_head_size = getPushableStackSize(coords_above, UP);
+                            FOR(stack_on_head_index, stack_on_head_size)
+                            {
+                                Entity* e_on_head = getEntityAtCoords(stack_coords);
+                                createTrailingHitbox(e_on_head->id, e_on_head->coords, FALL_TRAILING_HITBOX_TIME);
+                                e_on_head->position = vec3FromInt3(e_on_head->coords);
+                                e_on_head->velocity = (Vec3){0};
+                                e_on_head->moving_direction = DOWN;
+                                e_on_head->moving_on_head = true;
+                                e_on_head->root_entity_id = PLAYER_ID;
+                                moveEntityInBufferAndState(e_on_head, getNextCoords(stack_coords, DOWN), e_on_head->direction);
+
+                                stack_coords = getNextCoords(stack_coords, UP);
+                            }
                         }
                         else
                         {
@@ -3527,41 +3545,60 @@ void doPhysicsTick()
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            Entity* e = {0};
-            if (group_index == 3)
-            {
-                e = pack;
-                if (temp_state.pack_attached) continue;
-            }
-            else
-            {
-                e = &interactible_entity_groups[group_index][entity_index];
-            }
+            if (group_index == 3 && (entity_index > 0 || temp_state.pack_attached)) break;
+
+            Entity* e;
+            if (group_index == 3) e = pack;
+            else e = &interactible_entity_groups[group_index][entity_index];
+
             if (e->moving_direction == NO_DIRECTION && !e->moving_on_head) continue;
+
             Entity* root_e = getEntityFromId(e->root_entity_id);
             if (!root_e) continue;
 
             // NOTE: there used to be a e->falling check here, is it necessary?
 
-            if (e->moving_direction == NO_DIRECTION)
+            if (e->moving_direction == NO_DIRECTION || e->moving_direction == DOWN || e->moving_direction == UP)
             {
-                // only here if moving_on_head, this is a rotation: find rotation from target to current of player, and apply the same rotation to target direction of the entity.
-                mimicRotationalOffset(player, e);
-                if (vec4IsEqual(e->rotation, directionToQuaternion(e->direction))) 
+                if (e->moving_direction == NO_DIRECTION && e->moving_on_head) 
                 {
-                    clearMovementState(e);
-                    continue;
+                    mimicRotationalOffset(player, e);
+                    if (vec4IsEqual(e->rotation, directionToQuaternion(e->direction))) 
+                    {
+                        clearMovementState(e);
+                        continue;
+                    }
                 }
 
-                // follow along with player coords still. this is for the case where player is still moving when this rotation happens.
-                // check that player isn't moving into a position where the object can't go before applying this movement
-                Int3 previous_player_coords = getNextCoords(player->coords, oppositeDirection(player->direction));
-                Int3 previous_player_coords_with_moving_entity_y = int3FromVec3(vec3SetComponentAlongDirection(UP, vec3FromInt3(previous_player_coords), (float)e->coords.y));
-                Entity* e_exists_if_no_push = getEntityAtCoords(previous_player_coords_with_moving_entity_y); // if this entity exists, that means push hasn't been allowed to happen
-                if (!(e_exists_if_no_push && e_exists_if_no_push->id == e->id)) // probably don't need the second check, how would there be a different entity in this position?
+                if (e->moving_direction == NO_DIRECTION)
                 {
-                    e->position.x = player->position.x;
-                    e->position.z = player->position.z;
+                    // must be rotation. follow along with player coords still. this is for the case where player is still moving when this rotation happens.
+                    // check that player isn't moving into a position where the object can't go before applying this movement
+                    Int3 previous_player_coords = getNextCoords(player->coords, oppositeDirection(player->direction));
+                    Int3 previous_player_coords_with_moving_entity_y = int3FromVec3(vec3SetComponentAlongDirection(UP, vec3FromInt3(previous_player_coords), (float)e->coords.y));
+                    Entity* e_exists_if_no_push = getEntityAtCoords(previous_player_coords_with_moving_entity_y); // if this entity exists, that means push hasn't been allowed to happen
+                    if (!(e_exists_if_no_push && e_exists_if_no_push->id == e->id)) // probably don't need the second check, how would there be a different entity in this position?
+                    {
+                        e->position.x = player->position.x;
+                        e->position.z = player->position.z;
+                    }
+                }
+                else
+                {
+                    // climbing, this object is on head or on pack
+                    if (player->moving_direction == NO_DIRECTION)
+                    {
+                        // reset
+                        e->position = vec3FromInt3(e->coords);
+                        e->velocity = (Vec3){0};
+                        clearMovementState(e);
+                    }
+                    else
+                    {
+                        e->position.x = (float)e->coords.x;
+                        e->position.z = (float)e->coords.z;
+                        e->position.y = player->position.y + (float)(e->coords.y - player->coords.y);
+                    }
                 }
             }
             else
