@@ -1709,16 +1709,16 @@ Direction getDirectionFromCoordDiff(Int3 to_coords, Int3 from_coords)
     return NO_DIRECTION;
 }
 
-int32 getPushableStackSize(Int3 first_entity_coords, Direction seek_direction)
+int32 getPushableStackSize(Int3 first_coords, Direction seek_direction)
 {
-    Int3 current_stack_coords = first_entity_coords;
-    int32 stack_size = 1;
+    Int3 current_stack_coords = first_coords;
+    int32 stack_size = 0;
     FOR(find_stack_size_index, MAX_PUSHABLE_STACK_SIZE)
     {
-        current_stack_coords = getNextCoords(current_stack_coords, seek_direction);
         TileType next_tile_type = getTileType(current_stack_coords);
         if (!isPushable(next_tile_type)) break;
         stack_size++;
+        current_stack_coords = getNextCoords(current_stack_coords, seek_direction);
     }
     return stack_size;
 }
@@ -2683,6 +2683,14 @@ void recordLevelChangeForUndo(char* current_level_name, bool level_was_just_solv
     //writeUndoBufferToFile();
 }
 
+void clearMovementState(Entity* e)
+{
+    e->moving_direction = NO_DIRECTION;
+    e->moving_on_head = false;
+    e->root_entity_id = 0;
+    e->tied_to_pack_and_decoupled = false;
+}
+
 void zeroAnimations()
 {
     // set all entities velocity to zero, and rotation to equal their direction
@@ -2693,12 +2701,15 @@ void zeroAnimations()
             Entity* e = &interactible_entity_groups[group_index][entity_index];
             e->velocity = (Vec3){0};
             e->rotation = directionToQuaternion(e->direction);
+            clearMovementState(e);
         }
     }
     player->rotation = directionToQuaternion(player->direction);
     player->velocity = (Vec3){0};
+    clearMovementState(player);
     pack->rotation = directionToQuaternion(pack->direction);
     pack->velocity = (Vec3){0};
+    clearMovementState(pack);
 
     memset(&temp_state, 0, sizeof(TemporaryState));
 }
@@ -2834,18 +2845,10 @@ bool canFall(Entity* e)
     TileType type_below = getTileType(coords_below);
     if (type_below != TILE_TYPE_NONE && type_below != TILE_TYPE_VOID) return false;
 
-    //TrailingHitbox th;
-    //if (trailingHitboxAtCoords(coords_below, &th)) return false;
+    TrailingHitbox th;
+    if (trailingHitboxAtCoords(coords_below, &th) && !getEntityFromId(th.id)->falling) return false;
 
     return true;
-}
-
-void clearMovementState(Entity* e)
-{
-    e->moving_direction = NO_DIRECTION;
-    e->moving_on_head = false;
-    e->root_entity_id = 0;
-    e->tied_to_pack_and_decoupled = false;
 }
 
 // expects positive value for deceleration
@@ -3556,8 +3559,6 @@ void doPhysicsTick()
             Entity* root_e = getEntityFromId(e->root_entity_id);
             if (!root_e) continue;
 
-            // NOTE: there used to be a e->falling check here, is it necessary?
-
             if (e->moving_direction == NO_DIRECTION || e->moving_direction == DOWN || e->moving_direction == UP)
             {
                 if (e->moving_direction == NO_DIRECTION && e->moving_on_head) 
@@ -3609,29 +3610,32 @@ void doPhysicsTick()
 
                 if (difference_in_root_position_along_direction != 0)
                 {
+                    // root entity is still moving
+
                     Vec3 test_position = vec3AddFloatAlongDirection(e->moving_direction, difference_in_root_position_along_direction, vec3FromInt3(e->coords));
                     float test_movement_towards_direction = getSignedComponentAlongDirection(e->moving_direction, vec3Subtract(test_position, e->position));
 
-                    bool do_standard_entity_move = false;
-                    if (test_movement_towards_direction > 0) do_standard_entity_move = true; // prevents negative snapping of an object-to-be-pushed towards player
-                    if (test_movement_towards_direction > 0.5) do_standard_entity_move = false; // prevents too large a jump (happens if pack rotation not done before root_e moves by one tile)
-                    if (e->tied_to_pack_and_decoupled) do_standard_entity_move = false;
-                    if (e->moving_on_head) do_standard_entity_move = true;
+                    bool entity_pack_decoupled = e->tied_to_pack_and_decoupled;
+                    bool entity_on_head_hit_something = false;
 
-                    if (do_standard_entity_move)
+                    if (test_movement_towards_direction > 0.5f)
                     {
-                        e->position = test_position;
-                        e->velocity = vec3AddFloatAlongDirection(e->moving_direction, getComponentAlongDirection(e->moving_direction, root_e->velocity), (Vec3){0});
-
-                        if (e->moving_on_head)
-                        {
-                            // apply player rotation too, in case player isn't done rotating when this move happens.
-                            mimicRotationalOffset(player, e);
-                        }
+                        // moving too quickly
+                        if (root_e == pack) entity_pack_decoupled = true; // half-failed turn causes push
+                        else entity_on_head_hit_something = true;
                     }
-                    else if (root_e == pack)
+                    else if (test_movement_towards_direction < 0.0f && test_movement_towards_direction >= -0.5f) 
                     {
-                        // here if pack would overshoot, or otherwise misbehave
+                        continue; // moving backwards, e.g. snap to player when push triggered, but player hasn't gotten there yet. but not super large diff
+                    }
+                    else if (test_movement_towards_direction < -0.5f)
+                    {
+                        if (e->moving_on_head) entity_on_head_hit_something = true;
+                    }
+
+                    if (entity_pack_decoupled)
+                    {
+                        // entity with root pack should disregard what pack is doing
                         bool close_to_target = fabs(getComponentAlongDirection(e->moving_direction, vec3Subtract(e->position, vec3FromInt3(e->coords)))) < 0.1;
                         if (test_movement_towards_direction > 0.0 || close_to_target)
                         {
@@ -3639,7 +3643,7 @@ void doPhysicsTick()
                             interpolateDecoupledTowardsCoords(e);
                         }
                     }
-                    else if (test_movement_towards_direction < -0.5)
+                    else if (entity_on_head_hit_something)
                     {
                         // case where object should keep moving, but is offset by one unit because root entity has changed coords, but object on head / on stack will stop here, so isn't pushed by pushAll, but should still continue to end coords
                         test_position = vec3AddFloatAlongDirection(e->moving_direction, 1.0f, test_position);
@@ -3653,6 +3657,18 @@ void doPhysicsTick()
                             e->position = vec3FromInt3(e->coords);
                             e->velocity = (Vec3){0};
                             clearMovementState(e);
+                        }
+                    }
+                    else
+                    {
+                        // normal behavior
+                        e->position = test_position;
+                        e->velocity = vec3AddFloatAlongDirection(e->moving_direction, getComponentAlongDirection(e->moving_direction, root_e->velocity), (Vec3){0});
+
+                        if (e->moving_on_head)
+                        {
+                            // apply player rotation too, in case player isn't done rotating when this move happens.
+                            mimicRotationalOffset(player, e);
                         }
                     }
                 }
