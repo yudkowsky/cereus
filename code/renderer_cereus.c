@@ -1211,7 +1211,7 @@ int32 loadAsset(char* path, VkFormat format)
     vulkan_state.asset_cache[vulkan_state.asset_cache_count].image = texture_image;
     vulkan_state.asset_cache[vulkan_state.asset_cache_count].memory = texture_image_memory;
     vulkan_state.asset_cache[vulkan_state.asset_cache_count].view = texture_image_view;
-    strcpy(vulkan_state.asset_cache[vulkan_state.asset_cache_count].path, path);
+    snprintf(vulkan_state.asset_cache[vulkan_state.asset_cache_count].path, 256, "%s", path);
 
     vulkan_state.asset_cache_count++;
 
@@ -1333,7 +1333,7 @@ int32 loadDdsArray(char* path)
     vkBindImageMemory(vulkan_state.logical_device_handle, texture_image, texture_image_memory, 0);
 
     // copy regions
-    VkBufferImageCopy* regions = malloc(sizeof(VkBufferImageCopy) * levels * layers);
+    VkBufferImageCopy* regions = calloc((size_t)levels * layers, sizeof(VkBufferImageCopy));
     uint32 region_count = 0;
     VkDeviceSize offset = 0;
     for (uint32 layer = 0; layer < layers; layer++)
@@ -1450,7 +1450,7 @@ int32 loadDdsArray(char* path)
     vulkan_state.asset_cache[vulkan_state.asset_cache_count].image  = texture_image;
     vulkan_state.asset_cache[vulkan_state.asset_cache_count].memory = texture_image_memory;
     vulkan_state.asset_cache[vulkan_state.asset_cache_count].view   = texture_image_view;
-    strcpy(vulkan_state.asset_cache[vulkan_state.asset_cache_count].path, path);
+    snprintf(vulkan_state.asset_cache[vulkan_state.asset_cache_count].path, 256, "%s", path);
 
     vulkan_state.asset_cache_count++;
     return (int32)(vulkan_state.asset_cache_count - 1);
@@ -1620,8 +1620,8 @@ LoadedModel loadModel(char* path)
         return result;
     }
 
-    Vertex* vertices = malloc(sizeof(Vertex) * total_verts);
-    uint32* indices = malloc(sizeof(uint32) * total_indices);
+    Vertex* vertices = calloc(total_verts, sizeof(Vertex));
+    uint32* indices = calloc(total_indices, sizeof(uint32));
 
     cgltf_size vert_offset = 0;
     cgltf_size index_offset = 0;
