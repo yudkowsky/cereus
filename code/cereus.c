@@ -78,7 +78,7 @@ typedef struct Entity
 
     // movement state
     Vec3 velocity; // not reliably used except for player
-    Direction moving_direction; // could be encoded in velocity, i guess? but used for different things...
+    Direction moving_direction; // deliberate movement: does not include falling.
     bool falling;
     bool fall_handled; // reset each frame
     bool moving_on_head;
@@ -1848,7 +1848,7 @@ bool canPush(Int3 coords, Direction direction)
 
         // NOTE: there might be some reason i got rid of this check before? or did i just never have this check
         TrailingHitbox th;
-        if (trailingHitboxAtCoords(current_coords, &th)) return false;
+        if (trailingHitboxAtCoords(current_coords, &th) && th.id != e->id) return false;
 
         current_tile = getTileType(current_coords);
         if (current_tile == TILE_TYPE_NONE) return true;
@@ -3041,7 +3041,7 @@ void doPhysicsTick()
     }
 
     // reset fall_handled for all falling_entities 
-    Entity* falling_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
+    Entity* falling_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources }; // TODO: can declare these with player and pack pointers?
     FOR(group_index, 3) FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) falling_entity_group[group_index][entity_index].fall_handled = false;
     player->fall_handled = false;
     pack->fall_handled = false;
@@ -3055,7 +3055,7 @@ void doPhysicsTick()
 
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            if (entity_index > 0 && group_index > 2) break; // lets me continue in player or pack case
+            if (entity_index > 0 && group_index > 2) break; // allow continue in player or pack case
 
             Entity* e;
             if (is_player) e = player;
@@ -3090,6 +3090,7 @@ void doPhysicsTick()
 
                 if (e_in_stack->fall_handled) break; // another fall_handled check: entity above may have fallen such that they now form one stack (from getNextCoords pov), so guard on already fallen this frame
                 if (e_in_stack->id == PACK_ID && temp_state.pack_attached && stack_index != 0) break; // stack split because pack should not fall if attached
+                if (e_in_stack->moving_direction != NO_DIRECTION) break;
 
                 e_in_stack->fall_handled = true;
                 current_coords = getNextCoords(current_coords, UP);
@@ -3142,7 +3143,7 @@ void doPhysicsTick()
                 // anything here will complete the fall
                 if (e_in_stack->id == PLAYER_ID)
                 {
-                    if (!temp_state.player_hit_by_red)
+                    if (!temp_state.player_hit_by_red && player->moving_direction == NO_DIRECTION)
                     {
                         createTrailingHitbox(PLAYER_ID, player->coords, FALL_TRAILING_HITBOX_TIME);
                         player->position.y = test_y_position;
@@ -3160,7 +3161,6 @@ void doPhysicsTick()
                         else
                         {
                             player->falling = true;
-                            //player->moving_direction == DOWN; TODO: if can do this, then just set moving_dir to DOWN in either case 
                         }
 
                         if (temp_state.pack_attached)
@@ -3170,7 +3170,6 @@ void doPhysicsTick()
                                 createTrailingHitbox(PACK_ID, pack->coords, FALL_TRAILING_HITBOX_TIME);
                                 pack->position.y = test_y_position;
                                 pack->velocity.y = test_y_velocity;
-                                //pack->moving_direction == DOWN; TODO
                                 Int3 pack_next_coords = getNextCoords(pack->coords, DOWN);
                                 moveEntityInBufferAndState(pack, pack_next_coords, pack->direction);
                             }
@@ -3179,7 +3178,6 @@ void doPhysicsTick()
                                 // pack will detach
                                 pack->position.y = (float)pack->coords.y;
                                 pack->velocity.y = 0;
-                                //pack->moving_direction == NO_DIRECTION; TODO
                                 temp_state.pack_attached = false;
                             }
                         }
@@ -3202,7 +3200,6 @@ void doPhysicsTick()
                         {
                             e_in_stack->position.y = test_y_position;
                             e_in_stack->velocity.y = test_y_velocity;
-                            //e_in_stack->moving_direction = DOWN; TODO
                             e_in_stack->falling = true;
                             moveEntityInBufferAndState(e_in_stack, coords_below, e_in_stack->direction);
                         }
@@ -3214,7 +3211,7 @@ void doPhysicsTick()
 
     // climb logic
     // NOTE: UP and DOWN climb cases are different enough that they're still in separate scopes. think about if is worth being smarter here, or if this is clearest
-    // NOTE: currently not allowing pushing of objects down if try to climb down, and you are blue. will find out in level design if this is something I want to actually add.
+    // NOTE: currently not allowing pushing of objects down if player is above pushable object and she is blue. will find out in level design if this is something I want to actually add.
     if (player->moving_direction == UP || player->moving_direction == DOWN)
     {
         float y_coord_difference = getSignedComponentAlongDirection(player->moving_direction, vec3Subtract(vec3FromInt3(player->coords), player->position));
@@ -3357,16 +3354,10 @@ void doPhysicsTick()
 
                 if (type_below_player == TILE_TYPE_NONE) 
                 {
-                    /*
                     // capture head stack
                     Int3 head_stack_bottom = getNextCoords(player->coords, UP);
                     int32 head_stack_size = 0;
                     if (isPushable(getTileType(head_stack_bottom)) && temp_state.player_hit_by_blue_timer == 0) head_stack_size = getPushableStackSize(head_stack_bottom, UP);
-
-                    char debug[64];
-                    snprintf(debug, sizeof(debug), "head_stack_size: %d", head_stack_size);
-                    createDebugPopup(debug, 12091);
-                    */
 
                     if (!temp_state.pack_attached)
                     {
@@ -3408,8 +3399,7 @@ void doPhysicsTick()
                     player->position.y -= CLIMBING_SPEED;
                     player->velocity.y = -CLIMBING_SPEED;
 
-                    /*
-                    // shift head stack down one tile into space player vacatee
+                    // shift head stack down one tile into space player vacated
                     Int3 current_coords = head_stack_bottom;
                     FOR(stack_index, head_stack_size)
                     {
@@ -3423,7 +3413,6 @@ void doPhysicsTick()
 
                         current_coords = getNextCoords(current_coords, UP);
                     }
-                    */
 
                     Int3 new_coords_ahead = getNextCoords(player->coords, player->direction);
                     if (getTileType(new_coords_ahead) != TILE_TYPE_LADDER)
@@ -3619,6 +3608,7 @@ void doPhysicsTick()
                     if (test_movement_towards_direction > 0) do_standard_entity_move = true; // prevents negative snapping of an object-to-be-pushed towards player
                     if (test_movement_towards_direction > 0.5) do_standard_entity_move = false; // prevents too large a jump (happens if pack rotation not done before root_e moves by one tile)
                     if (e->tied_to_pack_and_decoupled) do_standard_entity_move = false;
+                    if (e->moving_on_head) do_standard_entity_move = true;
 
                     if (do_standard_entity_move)
                     {
@@ -4649,6 +4639,7 @@ GameResult gameFrame(double delta_time, Input* input)
                         if (allow_down_climb)
                         {
                             recordActionForUndo(&world_state);
+
                             // just move back. when move is done, player will start to fall for 0 frames. she will be 
                             // caught by the ladder by a special case in the falling logic (set climbing direction to DOWN, etc.)
 
