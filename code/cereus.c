@@ -11,18 +11,6 @@ __declspec(dllimport) void __stdcall OutputDebugStringA(const char* lpOutputStri
 
 typedef enum
 {
-    NO_DIRECTION = -1,
-    NORTH,
-    WEST,
-    SOUTH,
-    EAST,
-    UP,
-    DOWN,
-}
-Direction;
-
-typedef enum
-{
     TILE_TYPE_NONE = 0,
     TILE_TYPE_VOID,
     TILE_TYPE_GRID,
@@ -49,20 +37,32 @@ TileType;
 
 typedef enum
 {
+    MIRROR_SIDE = 0,
+    MIRROR_UP,
+    MIRROR_DOWN,
+}
+MirrorOrientation;
+
+typedef enum
+{
+    NO_DIRECTION = 0,
+    NORTH,
+    WEST,
+    SOUTH,
+    EAST,
+    UP,
+    DOWN,
+}
+Direction;
+
+typedef enum
+{
     COLOR_NONE = 0,
     COLOR_RED,
     COLOR_BLUE,
     COLOR_MAGENTA,
 }
 Color;
-
-typedef enum
-{
-    MIRROR_SIDE,
-    MIRROR_UP,
-    MIRROR_DOWN,
-}
-MirrorOrientation;
 
 typedef struct Entity
 {
@@ -139,7 +139,18 @@ typedef struct
 }
 PackTurnState;
 
-// assumes 0 width
+typedef struct TemporaryState
+{
+    TrailingHitbox trailing_hitboxes[32]; 
+    PackTurnState pack_turn_state;
+    int32 allow_movement_timer; // if > 0, decrements every frame towards 0, and then able to move. if -1, movement is permanently stopped until some other action resets it.
+    bool pack_attached;
+    int32 player_hit_by_red;
+    int32 player_hit_by_blue_timer;
+}
+TemporaryState;
+
+// assumes 0 width TODO: should this be in temp state?
 typedef struct
 {
     Vec3 start_coords;
@@ -158,18 +169,6 @@ typedef enum
     WORLD_2,
 }
 GameProgress;
-
-typedef struct TemporaryState
-{
-    TrailingHitbox trailing_hitboxes[32]; 
-
-    int32 allow_movement_timer; // if > 0, decrements every frame towards 0, and then able to move. if -1, movement is permanently stopped until some other action resets it.
-    bool pack_attached;
-    int32 player_hit_by_red;
-    int32 player_hit_by_blue_timer;
-    PackTurnState pack_turn_state;
-}
-TemporaryState;
 
 // EDITOR STRUCTS
 
@@ -231,7 +230,7 @@ typedef struct
 }
 RaycastHit;
 
-typedef enum // TODO: prefix enum
+typedef enum
 {
     POPUP_NO_TYPE = 0,
     POPUP_GAMEPLAY_MODE_CHANGE,
@@ -746,7 +745,7 @@ void setTileType(TileType type, Int3 coords)
 
 void setTileDirection(Direction direction, Int3 coords, MirrorOrientation mirror_orientation)
 {
-    world_state.buffer[coordsToBufferIndexDirection(coords)] = (uint8)(direction + 4*mirror_orientation);
+    world_state.buffer[coordsToBufferIndexDirection(coords)] = (uint8)(direction + 8*mirror_orientation);
 }
 
 TileType getTileType(Int3 coords) 
@@ -2090,35 +2089,35 @@ void updateLaserBuffer()
                             {
                                 if (current_direction != UP && current_direction != DOWN) // check first because modulo arithmetic assumes 4-way dir
                                 {
-                                    if (mirror->direction == current_direction) next_laser_direction = (current_direction + 1) % 4;
-                                    else if (current_direction == (mirror->direction + 3) % 4) next_laser_direction = (mirror->direction + 2) % 4;
+                                    if (mirror->direction == current_direction) next_laser_direction = (current_direction - NORTH + 1) % 4 + NORTH;
+                                    else if (current_direction == (mirror->direction - NORTH + 3) % 4 + NORTH) next_laser_direction = (mirror->direction - NORTH + 2) % 4 + NORTH;
                                     else backside_clip_plane = true;
                                 }
 
                                 Direction front_axis = oppositeDirection(mirror->direction);
-                                Direction side_axis = (mirror->direction + 1) % 4;
+                                Direction side_axis = (mirror->direction - NORTH + 1) % 4 + NORTH;
                                 mirror_normal = vec3Normalize(vec3Add(directionToVector(front_axis), directionToVector(side_axis)));
                                 break;
                             }
                             case MIRROR_UP:
                             {
-                                if (current_direction == DOWN) next_laser_direction = (mirror->direction + 1) % 4;
+                                if (current_direction == DOWN) next_laser_direction = (mirror->direction - NORTH + 1) % 4 + NORTH;
                                 else if (current_direction == UP) backside_clip_plane = true;
-                                else if (mirror->direction == (current_direction + 1) % 4) next_laser_direction = UP;
-                                else if (mirror->direction == (current_direction + 3) % 4) backside_clip_plane = true;
+                                else if (mirror->direction == (current_direction - NORTH + 1) % 4 + NORTH) next_laser_direction = UP;
+                                else if (mirror->direction == (current_direction - NORTH + 3) % 4 + NORTH) backside_clip_plane = true;
 
-                                Direction horizontal_axis = (mirror->direction + 1) % 4;
+                                Direction horizontal_axis = (mirror->direction - NORTH + 1) % 4 + NORTH;
                                 mirror_normal = vec3Normalize(vec3Add(directionToVector(horizontal_axis), directionToVector(UP)));
                                 break;
                             }
                             case MIRROR_DOWN:
                             {
-                                if (current_direction == UP) next_laser_direction = (mirror->direction + 1) % 4;
+                                if (current_direction == UP) next_laser_direction = (mirror->direction - NORTH + 1) % 4 + NORTH;
                                 else if (current_direction == DOWN) backside_clip_plane = true;
-                                else if (mirror->direction == (current_direction + 1) % 4) next_laser_direction = DOWN;
-                                else if (mirror->direction == (current_direction + 3) % 4) backside_clip_plane = true;
+                                else if (mirror->direction == (current_direction - NORTH + 1) % 4 + NORTH) next_laser_direction = DOWN;
+                                else if (mirror->direction == (current_direction - NORTH + 3) % 4 + NORTH) backside_clip_plane = true;
 
-                                Direction horizontal_axis = (mirror->direction + 1) % 4;
+                                Direction horizontal_axis = (mirror->direction - NORTH + 1) % 4 + NORTH;
                                 mirror_normal = vec3Normalize(vec3Add(directionToVector(horizontal_axis), directionToVector(DOWN)));
                                 break;
                             }
@@ -2378,8 +2377,8 @@ void gameInitializeState(char* level_name)
             e->position = vec3FromInt3(e->coords);
             if (entity_group == world_state.mirrors)
             {
-                e->direction = world_state.buffer[buffer_index + 1] % 4;
-                e->mirror_orientation = world_state.buffer[buffer_index + 1] / 4;
+                e->direction = world_state.buffer[buffer_index + 1] % 8;
+                e->mirror_orientation = world_state.buffer[buffer_index + 1] / 8;
                 e->rotation = mirrorRotation(e->direction, e->mirror_orientation);
             }
             else
@@ -2687,24 +2686,21 @@ void recordLevelChangeForUndo(char* current_level_name, bool level_was_just_solv
 void zeroAnimations()
 {
     // set all entities velocity to zero, and rotation to equal their direction
-    Entity* moving_entity_group[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
     FOR(group_index, 3)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            Entity* e = &moving_entity_group[group_index][entity_index];
+            Entity* e = &interactible_entity_groups[group_index][entity_index];
             e->velocity = (Vec3){0};
             e->rotation = directionToQuaternion(e->direction);
         }
     }
-
     player->rotation = directionToQuaternion(player->direction);
     player->velocity = (Vec3){0};
     pack->rotation = directionToQuaternion(pack->direction);
     pack->velocity = (Vec3){0};
 
     memset(&temp_state, 0, sizeof(TemporaryState));
-    player->moving_direction = NO_DIRECTION; // okay, i see what Anton meant here. maybe consider having 0 as NO_DIRECTION if this becomes annoying elsewhere
 }
 
 // returns false only if already at oldest action
@@ -2934,7 +2930,7 @@ void revertHeadStackRotation()
     FOR(_, stack_size)
     {
         Entity* e = getEntityAtCoords(current_coords);
-        e->direction = (e->direction + reverse_add) % 4;
+        e->direction = (e->direction + reverse_add - NORTH) % 4 + NORTH;
         current_coords = getNextCoords(current_coords, UP);
     }
 }
@@ -3438,7 +3434,7 @@ void doPhysicsTick()
     // player movement
 
     // handle directional movement
-    FOR(direction_index, 4)
+    for (Direction direction_index = NORTH; direction_index < UP; direction_index++) 
     {
         // only handle velocity / position if offset from the coords
         Vec3 difference_in_player_position = vec3Subtract(vec3FromInt3(player->coords), player->position);
@@ -4554,7 +4550,7 @@ GameResult gameFrame(double delta_time, Input* input)
                                 FOR(stack_index, stack_size)
                                 {
                                     Entity* e = getEntityAtCoords(current_coords);
-                                    e->direction = (e->direction + direction_add) % 4;
+                                    e->direction = (e->direction + direction_add - NORTH) % 4 + NORTH;
                                     e->moving_direction = NO_DIRECTION;
                                     e->moving_on_head = true;
                                     e->root_entity_id = PLAYER_ID;
@@ -4721,7 +4717,7 @@ GameResult gameFrame(double delta_time, Input* input)
         FOR(mirror_index, MAX_ENTITY_INSTANCE_COUNT)
         {
             Entity* mirror = &world_state.mirrors[mirror_index];
-            if (mirror->direction >= 4) 
+            if (mirror->direction >= UP) 
             {
                 mirror->direction -= 4;
                 mirror->mirror_orientation += 1;
