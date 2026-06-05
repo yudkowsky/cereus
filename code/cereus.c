@@ -2294,7 +2294,7 @@ void loadUndoBufferFromFile()
 
 // GAME INIT
 
-void gameInitializeState(char* level_name)
+void gameInitializeState(char* level_name) // TODO: rename
 {
     if (level_name == 0) strcpy(world_state.level_name, debug_level_name);
     else strcpy(world_state.level_name, level_name);
@@ -2677,6 +2677,7 @@ void clearMovementState(Entity* e)
     e->moving_on_head = false;
     e->root_entity_id = 0;
     e->tied_to_pack_and_decoupled = false;
+    e->falling = false;
 }
 
 void zeroAnimations()
@@ -3077,7 +3078,7 @@ void doPhysicsTick()
                     continue;
                 }
 
-                // anything here wants to fall across a tile boundary
+                // anything here wants to fall across a tile boundary NOTE: red / blue stopping fall relies on calculating landing to true every frame, ard resetting position/velocity/falling to 0.
                 bool landing = false;
                 if (!canFall(e_in_stack)) landing = true;
                 if (undo_press_timer > 0) landing = true;
@@ -3089,9 +3090,15 @@ void doPhysicsTick()
                 if (landing)
                 {
                     e_in_stack->position.y = (float)e_in_stack->coords.y;
-                    e_in_stack->velocity.y = 0;
-                    e_in_stack->moving_direction = NO_DIRECTION;
+                    e_in_stack->velocity.y = 0.0f;
                     e_in_stack->falling = false;
+
+                    if (e_in_stack == player && temp_state.pack_attached)
+                    {
+                        pack->position.y = (float)pack->coords.y;
+                        pack->velocity.y = 0.0f;
+                        pack->falling = false;
+                    }
                     continue;
                 }
 
@@ -3396,9 +3403,8 @@ void doPhysicsTick()
                 }
                 else // tile below isn't NONE: land
                 {
-                    player->moving_direction = NO_DIRECTION;
-                    player->position = vec3FromInt3(player->coords);
-                    player->velocity = (Vec3){0};
+                    clearMovementState(player);
+                    if (temp_state.pack_attached) clearMovementState(pack);
                 }
             }
         }
@@ -4664,7 +4670,9 @@ GameResult gameFrame(double delta_time, Input* input)
                 }
             }
         }
-        
+
+        updateLaserBuffer();
+
         // handle all physics that doesn't have to do with player input on this frame
         doPhysicsTick();
 
@@ -4741,19 +4749,6 @@ GameResult gameFrame(double delta_time, Input* input)
         if (temp_state.allow_movement_timer > 0) temp_state.allow_movement_timer--;
         if (temp_state.pack_turn_state.half_failed_turn_timer > 0) temp_state.pack_turn_state.half_failed_turn_timer--;
         if (temp_state.player_hit_by_blue_timer > 0) temp_state.player_hit_by_blue_timer--;
-
-        // all mirrors with direction >=UP are moved to the next orientation with direction NORTH.
-        FOR(mirror_index, MAX_ENTITY_INSTANCE_COUNT)
-        {
-            Entity* mirror = &world_state.mirrors[mirror_index];
-            if (mirror->direction >= UP) 
-            {
-                mirror->direction -= 4;
-                mirror->mirror_orientation += 1;
-                if (mirror->mirror_orientation > MIRROR_DOWN) mirror->mirror_orientation = MIRROR_SIDE;
-                setTileDirection(mirror->direction, mirror->coords, mirror->mirror_orientation); // keep buffer in sync
-            }
-        }
 
         // update overworld player coords for camera offset if player not removed
         if (in_overworld)
