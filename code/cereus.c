@@ -1832,9 +1832,12 @@ bool canPush(Int3 coords, Direction direction)
         current_coords = getNextCoords(current_coords, direction);
         if (!intCoordsWithinLevelBounds(current_coords)) return false;
 
-        // NOTE: there might be some reason i got rid of this check before? or did i just never have this check
+        /*
+        // NOTE: this causes edge case in climb up-down-up, go forward, and then try go back again, within trailing hitbox time, when at least 2 tiles are on the players head.
+        //       if this check is needed, could try to only allow one trailing hitbox per coordinate - this could have other adverse effects, am not sure.
         TrailingHitbox th;
         if (trailingHitboxAtCoords(current_coords, &th) && th.id != e->id) return false;
+        */
 
         current_tile = getTileType(current_coords);
         if (current_tile == TILE_TYPE_NONE) return true;
@@ -3044,6 +3047,7 @@ void doPhysicsTick()
             {
                 Entity* e_in_stack = getEntityAtCoords(current_coords);
 
+                if (!e_in_stack) break; // this shouldn't strictly be needed, but upper bound sometimes overshoots on downclimb.
                 if (e_in_stack->fall_handled) break; // another fall_handled check: entity above may have fallen such that they now form one stack (from getNextCoords pov), so guard on already fallen this frame
                 if (e_in_stack->id == PACK_ID && temp_state.pack_attached && stack_index != 0) break; // stack split because pack should not fall if attached
                 if (e_in_stack->moving_direction != NO_DIRECTION) break;
