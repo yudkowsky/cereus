@@ -730,7 +730,6 @@ int32 coordsToBufferIndexDirection(Int3 coords)
 Int3 bufferIndexToCoords(int32 buffer_index)
 {
     int32 tile_index = buffer_index / 2; // TODO: probably redo this with a struct instead of always dealing with "two bytes"?
-
     return (Int3){
         (tile_index % level_dim.x) + level_origin.x,
         tile_index / (level_dim.x*level_dim.z) + level_origin.y,
@@ -962,34 +961,30 @@ Vec3 directionToVector(Direction direction)
     }
 }
 
-// these rotations could be hardcoded
-Vec4 directionToQuaternion(Direction direction) 
+Vec4 directionToRotation(Direction direction, MirrorOrientation orientation)
 {
+    // TODO: these rotations could be hardcoded
+    Vec4 rotation = IDENTITY_QUATERNION;
     switch (direction)
     {
-        case NORTH: return IDENTITY_QUATERNION;
-        case WEST:  return quaternionFromAxis(vec3FromInt3(AXIS_Y),  0.25f * TAU);
-        case SOUTH: return quaternionFromAxis(vec3FromInt3(AXIS_Y),  0.50f * TAU);
-        case EAST:  return quaternionFromAxis(vec3FromInt3(AXIS_Y), -0.25f * TAU);
-        case UP:    return quaternionFromAxis(vec3FromInt3(AXIS_X),  0.25f * TAU);
-        case DOWN:  return quaternionFromAxis(vec3FromInt3(AXIS_X), -0.25f * TAU);
-        default: return (Vec4){ 0, 0, 0, 1 };
+        case NORTH: rotation = IDENTITY_QUATERNION;                                    break;
+        case WEST:  rotation = quaternionFromAxis(vec3FromInt3(AXIS_Y),  0.25f * TAU); break;
+        case SOUTH: rotation = quaternionFromAxis(vec3FromInt3(AXIS_Y),  0.50f * TAU); break;
+        case EAST:  rotation = quaternionFromAxis(vec3FromInt3(AXIS_Y), -0.25f * TAU); break;
+        case UP:    rotation = quaternionFromAxis(vec3FromInt3(AXIS_X),  0.25f * TAU); break;
+        case DOWN:  rotation = quaternionFromAxis(vec3FromInt3(AXIS_X), -0.25f * TAU); break;
+        default:    rotation = IDENTITY_QUATERNION;                                    break;
     }
-}
-
-Vec4 mirrorRotation(Direction direction, MirrorOrientation orientation)
-{
-    Vec4 direction_as_quaternion = directionToQuaternion(direction);
-    switch (orientation)
+    if (orientation > 0)
     {
-        case MIRROR_SIDE: return direction_as_quaternion; 
-        case MIRROR_UP:   return quaternionMultiply(direction_as_quaternion, quaternionFromAxis(vec3FromInt3(AXIS_X), -0.25f * TAU));
-        case MIRROR_DOWN: return quaternionMultiply(direction_as_quaternion, quaternionFromAxis(vec3FromInt3(AXIS_X),  0.25f * TAU));
-        default: return IDENTITY_QUATERNION;
+        if (orientation == MIRROR_UP) rotation = quaternionMultiply(rotation, quaternionFromAxis(vec3FromInt3(AXIS_X), -0.25f * TAU));
+        else                          rotation = quaternionMultiply(rotation, quaternionFromAxis(vec3FromInt3(AXIS_X),  0.25f * TAU));
     }
+
+    return rotation;
 }
 
-int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction direction, Color color) 
+int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction direction, MirrorOrientation orientation, Color color) 
 {
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
     {
@@ -997,7 +992,7 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
         entity_group[entity_index].coords = coords;
         entity_group[entity_index].position= vec3FromInt3(coords); 
         entity_group[entity_index].direction = direction;
-        entity_group[entity_index].rotation= directionToQuaternion(direction);
+        entity_group[entity_index].rotation = directionToRotation(direction, orientation);
         entity_group[entity_index].color = color;
         entity_group[entity_index].id = entity_index + entityIdOffset(entity_group, color);
         entity_group[entity_index].unlocked_by[0] = '\0';
@@ -1007,11 +1002,45 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
     return 0;
 }
 
-// updates position and rotation to be float/quaternion versions of integer coords/direction enum
-void setEntityVecsFromInts(Entity* e)
+Int3 getNextCoords(Int3 coords, Direction direction)
 {
-    e->position= vec3FromInt3(e->coords);
-    e->rotation = directionToQuaternion(e->direction);
+    switch (direction)
+    {
+        case NORTH: return int3Add(coords, int3Negate(AXIS_Z)); 
+        case WEST:  return int3Add(coords, int3Negate(AXIS_X));
+        case SOUTH: return int3Add(coords, AXIS_Z);
+        case EAST:  return int3Add(coords, AXIS_X);
+        case UP:    return int3Add(coords, AXIS_Y);
+        case DOWN:  return int3Add(coords, int3Negate(AXIS_Y));
+        default: return (Int3){0};
+    }
+}
+
+// the fact that y is checked last here matters sometimes
+Direction getDirectionFromCoordDiff(Int3 to_coords, Int3 from_coords)
+{
+    Int3 diff = int3Subtract(from_coords, to_coords);
+    if      (diff.x ==  1) return EAST;
+    else if (diff.x == -1) return WEST;
+    else if (diff.z ==  1) return SOUTH;
+    else if (diff.z == -1) return NORTH;
+    else if (diff.y ==  1) return UP;
+    else if (diff.y == -1) return DOWN;
+    return NO_DIRECTION;
+}
+
+int32 getPushableStackSize(Int3 first_coords, Direction seek_direction)
+{
+    Int3 current_stack_coords = first_coords;
+    int32 stack_size = 0;
+    FOR(find_stack_size_index, MAX_PUSHABLE_STACK_SIZE)
+    {
+        TileType next_tile_type = getTileType(current_stack_coords);
+        if (!isPushable(next_tile_type)) break;
+        stack_size++;
+        current_stack_coords = getNextCoords(current_stack_coords, seek_direction);
+    }
+    return stack_size;
 }
 
 // FILE I/O
@@ -1679,50 +1708,6 @@ void editorPlaceOnlyInstanceOfTile(Entity* entity, Int3 coords, TileType tile, i
     setTileDirection(NORTH, coords, 0);
 }
 
-// ANIMATION HELPER 
-
-Int3 getNextCoords(Int3 coords, Direction direction)
-{
-    switch (direction)
-    {
-        case NORTH: return int3Add(coords, int3Negate(AXIS_Z)); 
-        case WEST:  return int3Add(coords, int3Negate(AXIS_X));
-        case SOUTH: return int3Add(coords, AXIS_Z);
-        case EAST:  return int3Add(coords, AXIS_X);
-        case UP:    return int3Add(coords, AXIS_Y);
-        case DOWN:  return int3Add(coords, int3Negate(AXIS_Y));
-
-        default: return (Int3){0};
-    }
-}
-
-// the fact that y is checked last here matters sometimes, notably in the performUndo interpolations.
-Direction getDirectionFromCoordDiff(Int3 to_coords, Int3 from_coords)
-{
-    Int3 diff = int3Subtract(from_coords, to_coords);
-    if      (diff.x ==  1) return EAST;
-    else if (diff.x == -1) return WEST;
-    else if (diff.z ==  1) return SOUTH;
-    else if (diff.z == -1) return NORTH;
-    else if (diff.y ==  1) return UP;
-    else if (diff.y == -1) return DOWN;
-    return NO_DIRECTION;
-}
-
-int32 getPushableStackSize(Int3 first_coords, Direction seek_direction)
-{
-    Int3 current_stack_coords = first_coords;
-    int32 stack_size = 0;
-    FOR(find_stack_size_index, MAX_PUSHABLE_STACK_SIZE)
-    {
-        TileType next_tile_type = getTileType(current_stack_coords);
-        if (!isPushable(next_tile_type)) break;
-        stack_size++;
-        current_stack_coords = getNextCoords(current_stack_coords, seek_direction);
-    }
-    return stack_size;
-}
-
 // TRAILING HITBOXES
 
 void createTrailingHitbox(int32 id, Int3 coords, int32 frames)
@@ -2379,13 +2364,13 @@ void gameInitializeState(char* level_name)
             {
                 e->direction = world_state.buffer[buffer_index + 1] % 8;
                 e->mirror_orientation = world_state.buffer[buffer_index + 1] / 8;
-                e->rotation = mirrorRotation(e->direction, e->mirror_orientation);
+                e->rotation = directionToRotation(e->direction, e->mirror_orientation);
             }
             else
             {
                 e->direction = world_state.buffer[buffer_index + 1];
                 e->mirror_orientation = 0;
-                e->rotation = directionToQuaternion(e->direction);
+                e->rotation = directionToRotation(e->direction, e->mirror_orientation);
             }
             e->color = getEntityColor(e->coords);
             e->id = count + entityIdOffset(entity_group, e->color);
@@ -2397,7 +2382,7 @@ void gameInitializeState(char* level_name)
             player->coords = bufferIndexToCoords(buffer_index);
             player->position = vec3FromInt3(player->coords);
             player->direction = world_state.buffer[buffer_index + 1];
-            player->rotation = directionToQuaternion(player->direction);
+            player->rotation = directionToRotation(player->direction, MIRROR_SIDE);
             player->id = PLAYER_ID;
         }
         else if (world_state.buffer[buffer_index] == TILE_TYPE_PACK)
@@ -2405,7 +2390,7 @@ void gameInitializeState(char* level_name)
             pack->coords = bufferIndexToCoords(buffer_index);
             pack->position = vec3FromInt3(pack->coords);
             pack->direction = world_state.buffer[buffer_index + 1];
-            pack->rotation = directionToQuaternion(pack->direction);
+            pack->rotation = directionToRotation(pack->direction, MIRROR_SIDE);
             pack->id = PACK_ID;
         }
     }
@@ -2685,6 +2670,9 @@ void recordLevelChangeForUndo(char* current_level_name, bool level_was_just_solv
 
 void clearMovementState(Entity* e)
 {
+    e->position = vec3FromInt3(e->coords);
+    e->rotation = directionToRotation(e->direction, e->mirror_orientation);
+    e->velocity = (Vec3){0};
     e->moving_direction = NO_DIRECTION;
     e->moving_on_head = false;
     e->root_entity_id = 0;
@@ -2699,16 +2687,10 @@ void zeroAnimations()
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
             Entity* e = &interactible_entity_groups[group_index][entity_index];
-            e->velocity = (Vec3){0};
-            e->rotation = directionToQuaternion(e->direction);
             clearMovementState(e);
         }
     }
-    player->rotation = directionToQuaternion(player->direction);
-    player->velocity = (Vec3){0};
     clearMovementState(player);
-    pack->rotation = directionToQuaternion(pack->direction);
-    pack->velocity = (Vec3){0};
     clearMovementState(pack);
 
     memset(&temp_state, 0, sizeof(TemporaryState));
@@ -2772,8 +2754,8 @@ bool performUndo()
             e->position = vec3FromInt3(e->coords);
             e->direction = delta->old_direction;
             e->mirror_orientation = delta->old_mirror_orientation;
-            if (type == TILE_TYPE_MIRROR) e->rotation = mirrorRotation(e->direction, e->mirror_orientation);
-            else e->rotation = directionToQuaternion(e->direction);
+            if (type == TILE_TYPE_MIRROR) e->rotation = directionToRotation(e->direction, e->mirror_orientation);
+            else e->rotation = directionToRotation(e->direction, e->mirror_orientation);
             e->removed = delta->was_removed;
 
             if (!delta->was_removed)
@@ -2895,12 +2877,12 @@ bool wouldOvershoot(float speculative_velocity_along_direction, float position_a
 
 void mimicRotationalOffset(Entity* copied_e, Entity* e)
 {
-    float rotation_direction_delta = getAngleOfYAxisRotation(directionToQuaternion(copied_e->direction), copied_e->rotation);
+    float rotation_direction_delta = getAngleOfYAxisRotation(directionToRotation(copied_e->direction, copied_e->mirror_orientation), copied_e->rotation);
     Vec4 transform = quaternionFromAxis(vec3FromInt3(AXIS_Y), rotation_direction_delta);
 
     Vec4 base_rotation = IDENTITY_QUATERNION;
-    if (getTileTypeFromId(e->id) == TILE_TYPE_MIRROR) base_rotation = mirrorRotation(e->direction, e->mirror_orientation);
-    else base_rotation = directionToQuaternion(e->direction);
+    if (getTileTypeFromId(e->id) == TILE_TYPE_MIRROR) base_rotation = directionToRotation(e->direction, e->mirror_orientation);
+    else base_rotation = directionToRotation(e->direction, e->mirror_orientation);
 
     e->rotation = quaternionMultiply(transform, base_rotation);
 }
@@ -2911,8 +2893,6 @@ void interpolateDecoupledTowardsCoords(Entity* e)
     float difference = getSignedComponentAlongDirection(e->moving_direction, vec3Subtract(vec3FromInt3(e->coords), e->position));
     if (difference < interpolation_distance_per_frame)
     {
-        e->position = vec3FromInt3(e->coords);
-        e->velocity = (Vec3){0};
         clearMovementState(e);
     }
     else
@@ -3498,11 +3478,11 @@ void doPhysicsTick()
     if (vec3IsZero(player->velocity)) player->moving_direction = NO_DIRECTION;
 
     // player rotation
-    float total_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
+    float total_angle = getAngleOfYAxisRotation(player->rotation, directionToRotation(player->direction, MIRROR_SIDE));
     float frame_count = ceilf((float)fabs(total_angle) / MAX_ANGULAR_VELOCITY - 1e-3f);
     if (frame_count <= 1)
     {
-        player->rotation = directionToQuaternion(player->direction);
+        player->rotation = directionToRotation(player->direction, MIRROR_SIDE);
     }
     else
     {
@@ -3514,7 +3494,7 @@ void doPhysicsTick()
     // pack rotation and movement
     bool do_pack_swing = false;
     bool do_pack_swing_without_y = false;
-    bool pack_is_stationary = vec4IsEqual(pack->rotation, directionToQuaternion(pack->direction));
+    bool pack_is_stationary = vec4IsEqual(pack->rotation, directionToRotation(pack->direction, MIRROR_SIDE));
 
     if (temp_state.pack_attached)
     {
@@ -3564,7 +3544,7 @@ void doPhysicsTick()
                 if (e->moving_direction == NO_DIRECTION && e->moving_on_head) 
                 {
                     mimicRotationalOffset(player, e);
-                    if (vec4IsEqual(e->rotation, directionToQuaternion(e->direction))) 
+                    if (vec4IsEqual(e->rotation, directionToRotation(e->direction, e->mirror_orientation)))
                     {
                         clearMovementState(e);
                         continue;
@@ -3590,8 +3570,6 @@ void doPhysicsTick()
                     if (player->moving_direction == NO_DIRECTION)
                     {
                         // reset
-                        e->position = vec3FromInt3(e->coords);
-                        e->velocity = (Vec3){0};
                         clearMovementState(e);
                     }
                     else
@@ -3654,8 +3632,6 @@ void doPhysicsTick()
                         }
                         else
                         {
-                            e->position = vec3FromInt3(e->coords);
-                            e->velocity = (Vec3){0};
                             clearMovementState(e);
                         }
                     }
@@ -3682,8 +3658,6 @@ void doPhysicsTick()
                     }
                     else
                     {
-                        e->position = vec3FromInt3(e->coords);
-                        e->velocity = (Vec3){0};
                         clearMovementState(e);
                     }
                 }
@@ -3888,7 +3862,7 @@ GameResult gameFrame(double delta_time, Input* input)
                     {
                         setTileType(editor_state.picked_tile, raycast_output.place_coords); 
                         setTileDirection(NORTH, raycast_output.place_coords, 0);
-                        setEntityInstanceInGroup(world_state.sources, raycast_output.place_coords, NORTH, getEntityColor(raycast_output.place_coords)); 
+                        setEntityInstanceInGroup(world_state.sources, raycast_output.place_coords, NORTH, MIRROR_SIDE, getEntityColor(raycast_output.place_coords)); 
                     }
                     else
                     {
@@ -3906,7 +3880,7 @@ GameResult gameFrame(double delta_time, Input* input)
                         }
                         if (entity_group != 0) 
                         {
-                            setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, COLOR_NONE);
+                            setEntityInstanceInGroup(entity_group, raycast_output.place_coords, NORTH, MIRROR_SIDE, COLOR_NONE);
                             setTileDirection(NORTH, raycast_output.place_coords, 0);
                         }
                         else 
@@ -3938,7 +3912,7 @@ GameResult gameFrame(double delta_time, Input* input)
                             if (mirror->mirror_orientation > MIRROR_DOWN) mirror->mirror_orientation = MIRROR_SIDE;
                         }
                         setTileDirection(mirror->direction, raycast_output.hit_coords, mirror->mirror_orientation);
-                        mirror->rotation = mirrorRotation(mirror->direction, mirror->mirror_orientation);
+                        mirror->rotation = directionToRotation(mirror->direction, mirror->mirror_orientation);
                     }
                 }
                 else if (isEntity(type))
@@ -3946,12 +3920,12 @@ GameResult gameFrame(double delta_time, Input* input)
                     Direction direction = getTileDirection(raycast_output.hit_coords);
                     if (direction == DOWN) direction = NORTH;
                     else direction++;
-                    setTileDirection(direction, raycast_output.hit_coords, 0); // mirror rotation case is handled later
+                    setTileDirection(direction, raycast_output.hit_coords, 0);
                     Entity* e = getEntityAtCoords(raycast_output.hit_coords);
                     if (e != 0)
                     {
                         e->direction = direction;
-                        e->rotation = directionToQuaternion(direction);
+                        e->rotation = directionToRotation(direction, MIRROR_SIDE);
                     }
                 }
                 else if (type == TILE_TYPE_LADDER)
@@ -4360,9 +4334,11 @@ GameResult gameFrame(double delta_time, Input* input)
                     memcpy(&world_state.level_name, "overworld", sizeof(char) * 64);
 
                     moveEntityInBufferAndState(player, restart_position, NORTH);
-                    setEntityVecsFromInts(player);
+                    player->rotation = directionToRotation(player->direction, MIRROR_SIDE);
+                    player->position = vec3FromInt3(player->coords);
                     moveEntityInBufferAndState(pack, getNextCoords(player->coords, SOUTH), NORTH);
-                    setEntityVecsFromInts(pack);
+                    pack->rotation = directionToRotation(pack->direction, MIRROR_SIDE);
+                    pack->position = vec3FromInt3(pack->coords);
                 }
                 camera = save_camera; 
                 restart_last_turn = true;
@@ -4378,7 +4354,7 @@ GameResult gameFrame(double delta_time, Input* input)
             if (temp_state.allow_movement_timer != 0) allow_input = false;
 
             // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
-            float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
+            float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToRotation(player->direction, MIRROR_SIDE));
             if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) allow_input = false;
 
             // if able to fall then don't allow movement
@@ -4577,7 +4553,7 @@ GameResult gameFrame(double delta_time, Input* input)
 
                         if (temp_state.pack_attached)
                         {
-                            float turn_angle = getAngleOfYAxisRotation(player->rotation, directionToQuaternion(player->direction));
+                            float turn_angle = getAngleOfYAxisRotation(player->rotation, directionToRotation(player->direction, MIRROR_SIDE));
                             int32 rotation_frames = (int32)ceilf((float)fabs(turn_angle) / MAX_ANGULAR_VELOCITY - 1e-3f);
                             temp_state.pack_turn_state.pack_intermediate_states_timer = rotation_frames;
                             temp_state.pack_turn_state.turn_total_frames = rotation_frames;
@@ -5091,7 +5067,7 @@ GameResult gameFrame(double delta_time, Input* input)
 
         float length = vec3Length(diff);
         Vec3 scale = { LASER_WIDTH, LASER_WIDTH, length };
-        Vec4 rotation = directionToQuaternion(lb.direction);
+        Vec4 rotation = directionToRotation(lb.direction, MIRROR_SIDE);
 
         Vec3 color_without_alpha = {0};
         switch (lb.color)
@@ -5122,7 +5098,7 @@ GameResult gameFrame(double delta_time, Input* input)
             if (e->locked) draw_tile = TILE_TYPE_LOCKED_BLOCK;
             if (draw_tile == TILE_TYPE_LOCKED_BLOCK)
             {
-                drawAsset(CUBE_3D_LOCKED_BLOCK, CUBE_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
+                drawAsset(CUBE_3D_LOCKED_BLOCK, CUBE_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToRotation(world_state.buffer[tile_index + 1], MIRROR_SIDE), (Vec4){0}, (Vec4){0}, (Vec4){0});
             }
             if (draw_tile == TILE_TYPE_PLAYER)
             {
@@ -5139,9 +5115,9 @@ GameResult gameFrame(double delta_time, Input* input)
             if (getCube3DId(draw_tile) == CUBE_3D_WATER) 
             {
                 if (next_water_plane_y == NO_WATER_PLANE_LOW_VALUE) next_water_plane_y = getComponentAlongDirection(UP, vec3FromInt3(bufferIndexToCoords(tile_index))) + 1.2f;
-                drawAsset(MODEL_3D_WATER, WATER_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
+                drawAsset(MODEL_3D_WATER, WATER_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToRotation(world_state.buffer[tile_index + 1], MIRROR_SIDE), (Vec4){0}, (Vec4){0}, (Vec4){0});
             }
-            drawAsset(getCube3DId(draw_tile), CUBE_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToQuaternion(world_state.buffer[tile_index + 1]), (Vec4){0}, (Vec4){0}, (Vec4){0});
+            drawAsset(getCube3DId(draw_tile), CUBE_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToRotation(world_state.buffer[tile_index + 1], MIRROR_SIDE), (Vec4){0}, (Vec4){0}, (Vec4){0});
         }
     }
 
