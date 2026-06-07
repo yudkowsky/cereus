@@ -1079,18 +1079,22 @@ int32 getCountAndPositionOfChunk(FILE* file, char tag[3], int32 positions[64])
     uint8 version = 0;
     fread(&version, 1, 1, file);
     int32 chunk_start = 0;
-    if (version == 0)
+    if (version >= 1)
     {
-        chunk_start = 4 + (level_dim.x*level_dim.y*level_dim.z * 2);
-    }
-    else if (version == 1 || version == 2)
-    {
-        int32 tile_count_offset = (version == 1) ? 4 : 8;
+        int32 tile_count_offset = 0;
+        if (version == 1) tile_count_offset = 4;
+        else if (version == 2) tile_count_offset = 8;
+        else tile_count_offset = 32;
         fseek(file, tile_count_offset, SEEK_SET);
         int32 tile_count = 0;
         fread(&tile_count, 4, 1, file);
         chunk_start = tile_count_offset + 4 + (tile_count * 6);
     }
+    else
+    {
+        chunk_start = 4 + (level_dim.x*level_dim.y*level_dim.z * 2);
+    }
+
     fseek(file, chunk_start, SEEK_SET);
 
     while (true)
@@ -1123,17 +1127,40 @@ void loadBufferInfo(FILE* file)
     fread(&version, 1, 1, file);
 
     // get level dimensions
-    uint8 x, y, z;
-    fread(&x, 1, 1, file);
-    fread(&y, 1, 1, file);
-    fread(&z, 1, 1, file);
-    level_dim.x = x;
-    level_dim.y = y;
-    level_dim.z = z;
-    
-    level_origin = (Int3){0};
-    if (version == 2)
+    if (version >= 3)
     {
+        int32 x, y, z;
+        fread(&x, 4, 1, file);
+        fread(&y, 4, 1, file);
+        fread(&z, 4, 1, file);
+        level_dim.x = x;
+        level_dim.y = y;
+        level_dim.z = z;
+    }
+    else
+    {
+        uint8 x, y, z;
+        fread(&x, 1, 1, file);
+        fread(&y, 1, 1, file);
+        fread(&z, 1, 1, file);
+        level_dim.x = x;
+        level_dim.y = y;
+        level_dim.z = z;
+    }
+    
+    if (version >= 3)
+    {
+        int32 x, y, z;
+        fread(&x, 4, 1, file);
+        fread(&y, 4, 1, file);
+        fread(&z, 4, 1, file);
+        level_origin.x = x;
+        level_origin.y = y;
+        level_origin.z = z;
+    }
+    else if (version == 2)
+    {
+        uint8 x, y, z;
         fread(&x, 1, 1, file);
         fread(&y, 1, 1, file);
         fread(&z, 1, 1, file);
@@ -1141,6 +1168,10 @@ void loadBufferInfo(FILE* file)
         level_origin.y = y;
         level_origin.z = z;
         fseek(file, 8, SEEK_SET);
+    }
+    else
+    {
+        level_origin = (Int3){0};
     }
 
     if (version == 0)
@@ -1250,19 +1281,16 @@ void loadLockedInfoPaths(FILE* file)
     }
 }
 
-// keep level_dim in later versions also. can then just write buffer_index rather than the full coords and backsolve on load.
 void writeBufferToFile(FILE* file, int32 version)
 {
-    if (version == 0)
+    if (version >= 1)
     {
-        fwrite(world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
-    }
-    else if (version == 1 || version == 2)
-    {
-        int32 maybe_extra_4_bytes_for_v2 = version == 1 ? 0 : 4;
+        int32 prefix_bytes = 4;
+        if (version == 2) prefix_bytes = 8;
+        else if (version >= 3) prefix_bytes = 25;
         int32 tile_count = 0;
         // leave space for dims, (origin), and tile_count
-        fseek(file, 8 + maybe_extra_4_bytes_for_v2, SEEK_SET);
+        fseek(file, prefix_bytes, SEEK_SET);
 
         for (int32 buffer_index = 0; buffer_index < level_dim.x*level_dim.y*level_dim.z * 2; buffer_index += 2)
         {
@@ -1275,10 +1303,14 @@ void writeBufferToFile(FILE* file, int32 version)
             tile_count++;
         }
         // seek back to after level_dim (and origin)
-        fseek(file, 4 + maybe_extra_4_bytes_for_v2, SEEK_SET);
+        fseek(file, prefix_bytes, SEEK_SET);
 
         fwrite(&tile_count, 4, 1, file);
-        fseek(file, (8 + maybe_extra_4_bytes_for_v2 + (tile_count * 6)), SEEK_SET); // set seek to end of tiles
+        fseek(file, (prefix_bytes + 4 + (tile_count * 6)), SEEK_SET); // set seek to end of tiles
+    }
+    else
+    {
+        fwrite(world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
     }
 }
 
@@ -1330,16 +1362,16 @@ bool saveLevelRewrite(char* path)
 
     fwrite(&SAVE_WRITE_VERSION, 1, 1, file);
 
-    uint8 level_x = (uint8)level_dim.x;
-    uint8 level_y = (uint8)level_dim.y;
-    uint8 level_z = (uint8)level_dim.z;
-    fwrite(&level_x, 1, 1, file);
-    fwrite(&level_y, 1, 1, file);
-    fwrite(&level_z, 1, 1, file);
+    int32 level_x = level_dim.x;
+    int32 level_y = level_dim.y;
+    int32 level_z = level_dim.z;
+    fwrite(&level_x, 4, 1, file);
+    fwrite(&level_y, 4, 1, file);
+    fwrite(&level_z, 4, 1, file);
 
-    uint8 origin_x = (uint8)level_origin.x;
-    uint8 origin_y = (uint8)level_origin.y;
-    uint8 origin_z = (uint8)level_origin.z;
+    int32 origin_x = level_origin.x;
+    int32 origin_y = level_origin.y;
+    int32 origin_z = level_origin.z;
     fwrite(&origin_x, 1, 1, file);
     fwrite(&origin_y, 1, 1, file);
     fwrite(&origin_z, 1, 1, file);
