@@ -72,6 +72,7 @@ typedef struct Entity
     Direction direction;
     Vec4 rotation;
     bool removed;
+    bool in_use;
 
     // for mirrors
     MirrorOrientation mirror_orientation;
@@ -990,13 +991,15 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
 {
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
     {
-        if (entity_group[entity_index].id != -1) continue;
+        if (entity_group[entity_index].in_use) continue;
         entity_group[entity_index].coords = coords;
         entity_group[entity_index].position= vec3FromInt3(coords); 
         entity_group[entity_index].direction = direction;
         entity_group[entity_index].rotation = directionToRotation(direction, orientation);
         entity_group[entity_index].color = color;
         entity_group[entity_index].id = entity_index + entityIdOffset(entity_group, color);
+        entity_group[entity_index].removed = false;
+        entity_group[entity_index].in_use = true;
         entity_group[entity_index].unlocked_by[0] = '\0';
         entity_group[entity_index].next_level[0] = '\0';
         return entity_group[entity_index].id;
@@ -2360,17 +2363,8 @@ void initializeLevel(char* level_name)
 
     fclose(file);
 
-    // clear entity data TODO: do a better flag instead of that id = -1 system that's still hanging around.
+    // clear entity data
     memset(world_state.boxes, 0, sizeof(world_state.boxes) * ENTITY_TYPES); 
-    FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) // NOTE: id -1 distinguishes between 'slot was never used' and removed which means was once used, 
-    {                                            // now free. this is important for locked_blocks, so if want to change this, need slot_ever_used bool or something
-        world_state.boxes[entity_index].id          = -1;
-        world_state.mirrors[entity_index].id        = -1;
-        world_state.glass_blocks[entity_index].id   = -1;
-        world_state.sources[entity_index].id        = -1;
-        world_state.win_blocks[entity_index].id     = -1;
-        world_state.locked_blocks[entity_index].id  = -1;
-    }
 
     // rebuild entity array
     Entity* entity_group = 0;
@@ -2387,7 +2381,7 @@ void initializeLevel(char* level_name)
         if (entity_group != 0)
         {
             int32 count = 0;
-            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) if (entity_group[entity_index].id != -1 && !entity_group[entity_index].removed) count++;
+            FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) if (entity_group[entity_index].in_use && !entity_group[entity_index].removed) count++;
 
             Entity* e = &entity_group[count];
             e->coords = bufferIndexToCoords(buffer_index);
@@ -2407,6 +2401,7 @@ void initializeLevel(char* level_name)
             e->color = getEntityColor(e->coords);
             e->id = count + entityIdOffset(entity_group, e->color);
             e->removed = false;
+            e->in_use = true;
             entity_group = 0;
         }
         else if (world_state.buffer[buffer_index] == TILE_TYPE_PLAYER)
@@ -2416,6 +2411,7 @@ void initializeLevel(char* level_name)
             player->direction = world_state.buffer[buffer_index + 1];
             player->rotation = directionToRotation(player->direction, MIRROR_SIDE);
             player->id = PLAYER_ID;
+            player->in_use = true;
         }
         else if (world_state.buffer[buffer_index] == TILE_TYPE_PACK)
         {
@@ -2424,6 +2420,7 @@ void initializeLevel(char* level_name)
             pack->direction = world_state.buffer[buffer_index + 1];
             pack->rotation = directionToRotation(pack->direction, MIRROR_SIDE);
             pack->id = PACK_ID;
+            pack->in_use = true;
         }
     }
 
@@ -2509,7 +2506,7 @@ void updateLockedTiles()
     FOR(locked_block_index, MAX_ENTITY_INSTANCE_COUNT)
     {
         Entity* lb = &world_state.locked_blocks[locked_block_index];
-        if (lb->id == -1) continue;
+        if (!lb->in_use) continue;
         int32 find_result = findInSolvedLevels(lb->unlocked_by);
         if (find_result == INT32_MAX) continue;
         if (find_result != -1 && !lb->removed)
@@ -2609,7 +2606,7 @@ void recordActionForUndo(WorldState* old_state)
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
             Entity* e = &groups[group_index][entity_index];
-            if (e->id == -1) continue;
+            if (!e->in_use) continue;
             recordEntityDelta(e);
             entity_count++;
         }
@@ -2673,7 +2670,7 @@ void recordLevelChangeForUndo(char* current_level_name, bool level_was_just_solv
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
             Entity* e = &groups[group_index][entity_index];
-            if (e->id == -1) continue;
+            if (!e->in_use) continue;
             recordEntityDelta(e);
             entity_count++;
         }
@@ -3050,7 +3047,7 @@ void doPhysicsTick()
             else if (is_pack) e = pack;
             else e = &interactible_entity_groups[group_index][entity_index];
 
-            if (e->id == -1) continue; // TODO: remove this as a thing, and make 'removed' 0 by default, so can zero all arrays in init
+            if (!e->in_use) continue;
             if (e->removed) continue;
             if (e->fall_handled) continue; // happens when entity below is removed due to void, so this would look like bottom, even though already handled
 
@@ -3151,14 +3148,12 @@ void doPhysicsTick()
                             setTileType(TILE_TYPE_NONE, player->coords);
                             setTileDirection(NO_DIRECTION, player->coords, 0);
                             player->removed = true;
-
                             if (temp_state.pack_attached)
                             {
                                 setTileType(TILE_TYPE_NONE, pack->coords);
                                 setTileDirection(NO_DIRECTION, pack->coords, 0);
                                 pack->removed = true;
                             }
-
                             continue;
                         }
 
@@ -3880,8 +3875,8 @@ GameResult gameFrame(double delta_time, Input* input)
                     // not an empty level
                     Int3 actual_level_dim = int3Add(int3Subtract(level_max, level_min), (Int3){1,1,1});
                     actual_level_dim.y = actual_level_dim.y > 16 ? actual_level_dim.y : 16; // TODO: fix min y coord for now; later change this per-level
-                    reindexBuffer(level_min, actual_level_dim); // TODO: should check here if actually need to reindex, mostly won't need to. 
-                }                                               // but this is good way to get all levels to be correct dimension anyway, for now
+                    reindexBuffer(level_min, actual_level_dim);
+                }
 
                 time_until_allow_meta_input = PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT;
             }
