@@ -394,6 +394,10 @@ typedef struct VulkanState
     VkPipeline editor_outline_pipeline;
     VkPipelineLayout editor_outline_pipeline_layout;
 
+    VkPipeline editor_box_fill_pipeline;
+    VkPipeline editor_box_edge_pipeline;
+    VkPipelineLayout editor_box_pipeline_layout;
+
     VkPipeline laser_reflection_pipeline;
     VkPipelineLayout laser_reflection_pipeline_layout;
 
@@ -465,18 +469,28 @@ typedef struct VulkanState
 
     bool paint_image_first_upload;
 
-    // geometry buffers
+    // baked geometry 
+
+    // 2d square
 	VkBuffer sprite_vertex_buffer;
     VkDeviceMemory sprite_vertex_memory;
     VkBuffer sprite_index_buffer;
     VkDeviceMemory sprite_index_memory;
     uint32 sprite_index_count;
 
+    // cubes
     VkBuffer cube_vertex_buffer;
     VkDeviceMemory cube_vertex_memory;
     VkBuffer cube_index_buffer;
     VkDeviceMemory cube_index_memory;
     uint32 cube_index_count;
+
+    // cubes without cross edge 
+    VkBuffer cube_edge_vertex_buffer;
+    VkDeviceMemory cube_edge_vertex_memory;
+    VkBuffer cube_edge_index_buffer;
+    VkDeviceMemory cube_edge_index_memory;
+    uint32 cube_edge_index_count;
 
     // instanced buffers
     VkBuffer cube_instance_buffers[2];
@@ -527,6 +541,12 @@ const Vertex SPRITE_VERTICES[] =
     { -0.5f,  0.5f, 0.0f,  0.0f, 0.0f,  0,0,1 },
 };
 
+const uint32 SPRITE_INDICES[6] =
+{
+    0, 1, 2,
+    0, 2, 3,
+};
+
 const Vertex CUBE_VERTICES[] = 
 {
     { -0.5f, -0.5f,  0.5f,  U0, V1,  0,0,1 },
@@ -567,13 +587,26 @@ const uint32 CUBE_INDICES[36] =
     8, 9,10,  8,10,11,
    12,13,14, 12,14,15,
    16,17,18, 16,18,19,
-   20,21,22, 20,22,23
+   20,21,22, 20,22,23,
 };
 
-const uint32 SPRITE_INDICES[6] =
+const Vertex CUBE_EDGE_VERTICES[8] =
 {
-    0, 1, 2,
-    0, 2, 3
+    { -0.5f, -0.5f, -0.5f,  0,0, 0,0,0,  0,0,0 },
+    {  0.5f, -0.5f, -0.5f,  0,0, 0,0,0,  0,0,0 },
+    {  0.5f,  0.5f, -0.5f,  0,0, 0,0,0,  0,0,0 },
+    { -0.5f,  0.5f, -0.5f,  0,0, 0,0,0,  0,0,0 },
+    { -0.5f, -0.5f,  0.5f,  0,0, 0,0,0,  0,0,0 },
+    {  0.5f, -0.5f,  0.5f,  0,0, 0,0,0,  0,0,0 },
+    {  0.5f,  0.5f,  0.5f,  0,0, 0,0,0,  0,0,0 },
+    { -0.5f,  0.5f,  0.5f,  0,0, 0,0,0,  0,0,0 },
+};
+
+const uint32 CUBE_EDGE_INDICES[24] =
+{
+    0,1, 1,2, 2,3, 3,0,
+    4,5, 5,6, 6,7, 7,4,
+    0,4, 1,5, 2,6, 3,7,
 };
 
 const uint32 CUBE_INSTANCE_CAPACITY = 8192;
@@ -3304,7 +3337,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 	uploadBufferToLocalDevice(CUBE_VERTICES, sizeof(CUBE_VERTICES), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &vulkan_state.cube_vertex_buffer, &vulkan_state.cube_vertex_memory);
 	uploadBufferToLocalDevice(CUBE_INDICES,  sizeof(CUBE_INDICES),  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,  &vulkan_state.cube_index_buffer,  &vulkan_state.cube_index_memory);
 
-    //vulkan_state.images_in_flight = calloc(vulkan_state.swapchain_image_count, sizeof(VkFence)); // calloc because we want these to start at VK_NULL_HANDLE, i.e. 0.
+    vulkan_state.cube_edge_index_count = 24;
+    uploadBufferToLocalDevice(CUBE_EDGE_VERTICES, sizeof(CUBE_EDGE_VERTICES), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &vulkan_state.cube_edge_vertex_buffer, &vulkan_state.cube_edge_vertex_memory);
+    uploadBufferToLocalDevice(CUBE_EDGE_INDICES,  sizeof(CUBE_EDGE_INDICES),  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,  &vulkan_state.cube_edge_index_buffer,  &vulkan_state.cube_edge_index_memory);
 
     // TODO: this isnt in createSwapchainResources because it needs to exist before then... is this the best place for it, though?
     // shadow map image

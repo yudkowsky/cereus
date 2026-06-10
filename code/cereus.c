@@ -98,11 +98,11 @@ typedef struct Entity
 Entity;
 
 #define MAX_ENTITY_INSTANCE_COUNT 64
+#define ENTITY_TYPES 6
 
 // the approx. 2MB buffer is dense representation of the level encoded by coords
 typedef struct
 {
-    uint8 buffer[2000000]; // 2 bytes info per tile 
     Entity player;
     Entity pack;
     Entity boxes[MAX_ENTITY_INSTANCE_COUNT];
@@ -111,6 +111,8 @@ typedef struct
     Entity glass_blocks[MAX_ENTITY_INSTANCE_COUNT];
     Entity win_blocks[MAX_ENTITY_INSTANCE_COUNT];
     Entity locked_blocks[MAX_ENTITY_INSTANCE_COUNT];
+
+    uint8 buffer[2000000]; // 2 bytes info per tile 
 
     char level_name[64];
 
@@ -433,7 +435,7 @@ LaserBuffer laser_buffer[512] = {0}; // 512 = 64 max sources * 16 max laser turn
 GameProgress game_progress = WORLD_0;
 Int3 level_dim = {0};
 Int3 level_origin = {0};
-Int3 restart_position = {0};
+Int3 restart_coords = {0};
 bool in_overworld = true;
 float water_plane_y = 0.0f;
 
@@ -2329,7 +2331,7 @@ void loadUndoBufferFromFile()
 
 // GAME INIT
 
-void gameInitializeState(char* level_name) // TODO: rename
+void initializeLevel(char* level_name)
 {
     if (level_name == 0) strcpy(world_state.level_name, debug_level_name);
     else strcpy(world_state.level_name, level_name);
@@ -2358,13 +2360,8 @@ void gameInitializeState(char* level_name) // TODO: rename
 
     fclose(file);
 
-    // clear entity data TODO: do all in one memset. also, do a better flag instead of that id = -1 system that's still hanging around.
-    memset(world_state.boxes,         0, sizeof(world_state.boxes)); 
-    memset(world_state.mirrors,       0, sizeof(world_state.mirrors));
-    memset(world_state.glass_blocks,  0, sizeof(world_state.glass_blocks));
-    memset(world_state.sources,       0, sizeof(world_state.sources));
-    memset(world_state.win_blocks,    0, sizeof(world_state.win_blocks));
-    memset(world_state.locked_blocks, 0, sizeof(world_state.locked_blocks));
+    // clear entity data TODO: do a better flag instead of that id = -1 system that's still hanging around.
+    memset(world_state.boxes, 0, sizeof(world_state.boxes) * ENTITY_TYPES); 
     FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) // NOTE: id -1 distinguishes between 'slot was never used' and removed which means was once used, 
     {                                            // now free. this is important for locked_blocks, so if want to change this, need slot_ever_used bool or something
         world_state.boxes[entity_index].id          = -1;
@@ -2469,7 +2466,7 @@ void gameInitializeState(char* level_name) // TODO: rename
     water_paint_texture.dirty = true;
 }
 
-void recalculateDebugStartCoords()
+void recalculateTextStartCoords()
 {
     debug_text_start_coords = (Vec2){ 50.0f, game_display.client_height - 50.0f };
     debug_popup_start_coords = (Vec2){ game_display.client_width / 2.0f, 80.0f };
@@ -2478,22 +2475,22 @@ void recalculateDebugStartCoords()
 void gameInitialize(char* level_name, DisplayInfo display_from_platform)
 {   
     game_display = display_from_platform;
-    recalculateDebugStartCoords();
+    recalculateTextStartCoords();
 
     initUndoBuffer();
 
     // read overworld-zero's world state from file on startup, so it's kept in memory. this is used on restart in the overworld.
-    gameInitializeState("overworld-zero");
+    initializeLevel("overworld-zero");
     memcpy(&overworld_zero_state, &world_state, sizeof(WorldState));
 
-    gameInitializeState(level_name);
+    initializeLevel(level_name);
 }
 
 void gameRedraw(DisplayInfo display_from_platform)
 {
     if (draw_command_count == 0) return;
     game_display = display_from_platform;
-    recalculateDebugStartCoords();
+    recalculateTextStartCoords();
     vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, water_plane_y, camera_with_ow_offset, game_shader_mode, &water_paint_texture);
     vulkanDraw(false);
 }
@@ -2751,7 +2748,7 @@ bool performUndo()
         UndoLevelChange* level_change = &undo_buffer.level_changes[level_change_index];
 
         // reinitialize previous
-        gameInitializeState(level_change->from_level);
+        initializeLevel(level_change->from_level);
 
         // remove from solved levels if the level was just completed
         if (level_change->remove_from_solved)
@@ -3148,6 +3145,23 @@ void doPhysicsTick()
                         player->velocity.y = test_y_velocity;
                         Int3 coords_below = getNextCoords(player->coords, DOWN);
                         Int3 coords_above = getNextCoords(player->coords, UP);
+
+                        if (getTileType(coords_below) == TILE_TYPE_VOID)
+                        {
+                            setTileType(TILE_TYPE_NONE, player->coords);
+                            setTileDirection(NO_DIRECTION, player->coords, 0);
+                            player->removed = true;
+
+                            if (temp_state.pack_attached)
+                            {
+                                setTileType(TILE_TYPE_NONE, pack->coords);
+                                setTileDirection(NO_DIRECTION, pack->coords, 0);
+                                pack->removed = true;
+                            }
+
+                            continue;
+                        }
+
                         moveEntityInBufferAndState(player, coords_below, player->direction);
 
                         // special case: if falling onto block where tile ahead is ladder (pointing right direction), then player catches the ladder and starts climbing down, and stops falling.
@@ -3157,7 +3171,6 @@ void doPhysicsTick()
                             player->falling = false;
                             player->moving_direction = DOWN;
 
-                            // doing "push down" manually because player being pushable causes problems. not very hard, but maybe should be doing this differently, or at least differentiate isFallable vs isPushable
                             Int3 stack_coords = coords_above;
                             int32 stack_on_head_size = getPushableStackSize(coords_above, UP);
                             FOR(stack_on_head_index, stack_on_head_size)
@@ -3209,7 +3222,7 @@ void doPhysicsTick()
                         {
                             // fell onto void: remove
                             setTileType(TILE_TYPE_NONE, e_in_stack->coords);
-                            setTileDirection(NO_DIRECTION, e_in_stack->coords, e_in_stack->mirror_orientation);
+                            setTileDirection(NO_DIRECTION, e_in_stack->coords, 0);
                             e_in_stack->removed = true;
                         }
                         else
@@ -4027,7 +4040,7 @@ GameResult gameFrame(double delta_time, Input* input)
                     if (wb->next_level[0] != 0)
                     {
                         levelChangePrep(wb->next_level, false);
-                        gameInitializeState(wb->next_level);
+                        initializeLevel(wb->next_level);
                         writeSolvedLevelsToFile();
                         time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                     }
@@ -4302,7 +4315,7 @@ GameResult gameFrame(double delta_time, Input* input)
         {
             // NOTE: used to persist solved levels over level change and game init, but appears unnecessary
             levelChangePrep("overworld", false);
-            gameInitializeState("overworld");
+            initializeLevel("overworld");
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             temp_state.allow_movement_timer = 0;
         }
@@ -4364,7 +4377,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 zeroAnimations();
                 Camera save_camera = camera;
 
-                gameInitializeState(world_state.level_name);
+                initializeLevel(world_state.level_name);
 
                 if (in_overworld)
                 {
@@ -4375,7 +4388,7 @@ GameResult gameFrame(double delta_time, Input* input)
                     memcpy(&world_state.solved_levels, &persist_solved_levels, sizeof(char) * 64 * 64);
                     memcpy(&world_state.level_name, "overworld", sizeof(char) * 64);
 
-                    moveEntityInBufferAndState(player, restart_position, NORTH);
+                    moveEntityInBufferAndState(player, restart_coords, NORTH);
                     player->rotation = directionToRotation(player->direction, MIRROR_SIDE);
                     player->position = vec3FromInt3(player->coords);
                     moveEntityInBufferAndState(pack, getNextCoords(player->coords, SOUTH), NORTH);
@@ -4394,6 +4407,7 @@ GameResult gameFrame(double delta_time, Input* input)
             // HANDLE INPUT
             bool allow_input = true;
             if (temp_state.allow_movement_timer != 0) allow_input = false;
+            if (player->removed) allow_input = false;
 
             // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
             float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToRotation(player->direction, MIRROR_SIDE));
@@ -4746,7 +4760,7 @@ GameResult gameFrame(double delta_time, Input* input)
 
                     zeroAnimations();
                     levelChangePrep(wb->next_level, true);
-                    gameInitializeState(wb->next_level);
+                    initializeLevel(wb->next_level);
                     time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 }
             }
@@ -4799,20 +4813,20 @@ GameResult gameFrame(double delta_time, Input* input)
         // update restart coords based on current coords of the player, and also update game progress if this is relevant
         if (player->coords.z > 204) 
         {
-            restart_position = (Int3){ 37, 2, 225 };
+            restart_coords = (Int3){ 37, 258, 225 };
         }
         else if (player->coords.z > 189)
         {
-            restart_position = (Int3){ 58, 2, 197 };
+            restart_coords = (Int3){ 58, 258, 197 };
             if (game_progress < WORLD_1) game_progress = WORLD_1;
         }
         else if (player->coords.z > 174) 
         {
-            restart_position = (Int3){ 58, 2, 188 };
+            restart_coords = (Int3){ 58, 258, 188 };
         }
         else
         {
-            restart_position = (Int3){ 58, 2, 170 };
+            restart_coords = (Int3){ 58, 258, 170 };
             if (game_progress < WORLD_2) game_progress = WORLD_2;
         }
 
@@ -5186,19 +5200,17 @@ GameResult gameFrame(double delta_time, Input* input)
         if (in_overworld)
         {
             // draw camera screen lines TODO: will want to do this for some levels too, probably?
-
-            Vec3 x_wall_scale = { 0.01f, (float)level_dim.y, 1.0f  };
-            Vec3 z_wall_scale = { 1.0f,  (float)level_dim.y, 0.01f };
             int32 x_wall_length = ((level_dim.z - 2) / OVERWORLD_SCREEN_SIZE_Z + 2) * OVERWORLD_SCREEN_SIZE_Z; // constant x: depends on z len
             int32 z_wall_length = ((level_dim.x - 2) / OVERWORLD_SCREEN_SIZE_X + 2) * OVERWORLD_SCREEN_SIZE_X; // constant z: depends on x len
-            float y = (float)(level_origin.y + level_dim.y / 2);
 
             int32 start_coords_x = OVERWORLD_CAMERA_CENTER_START.x - (OVERWORLD_SCREEN_SIZE_X / 2);
             while (start_coords_x > level_origin.x) start_coords_x -= OVERWORLD_SCREEN_SIZE_X;
             int32 start_coords_z = OVERWORLD_CAMERA_CENTER_START.z - (OVERWORLD_SCREEN_SIZE_Z / 2);
             while (start_coords_z > level_origin.z) start_coords_z -= OVERWORLD_SCREEN_SIZE_Z;
+            float y = (float)(level_origin.y + level_dim.y / 2);
 
             // walls with internal constant x
+            Vec3 x_wall_scale = { 0, (float)level_dim.y, 1.0f };
             FOR(x_wall_x_index, z_wall_length / OVERWORLD_SCREEN_SIZE_X + 1)
             {
                 float x = (float)(start_coords_x + x_wall_x_index * OVERWORLD_SCREEN_SIZE_X) - 0.5f;
@@ -5210,6 +5222,7 @@ GameResult gameFrame(double delta_time, Input* input)
             }
 
             // walls with internal constant z
+            Vec3 z_wall_scale = { 1.0f, (float)level_dim.y, 0 };
             FOR(z_wall_z_index, x_wall_length / OVERWORLD_SCREEN_SIZE_Z + 1)
             {
                 float z = (float)(start_coords_z + z_wall_z_index * OVERWORLD_SCREEN_SIZE_Z) - 0.5f;
@@ -5219,53 +5232,14 @@ GameResult gameFrame(double delta_time, Input* input)
                     drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, (Vec3){ x, y, z }, z_wall_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
                 }
             }
-
-            /*
-            int32 x_draw_offset = 0;
-            int32 z_draw_offset = 0;
-
-            Vec3 x_wall_scale = { (float)OVERWORLD_SCREEN_SIZE_X, (float)level_dim.y, 0.01f };
-            Vec3 z_wall_scale = { 0.01f, (float)level_dim.y, (float)OVERWORLD_SCREEN_SIZE_Z };
-
-            FOR(z_index, 18)
-            {
-                FOR(x_index, 12)
-                {
-                    Vec3 x_draw_coords = (Vec3)
-                    { 
-                        (float)(x_draw_offset + OVERWORLD_CAMERA_CENTER_START.x),
-                        (float)level_origin.y + level_dim.y / 2,
-                        (float)(z_draw_offset + OVERWORLD_CAMERA_CENTER_START.z) + ((float)OVERWORLD_SCREEN_SIZE_Z / 2)
-                    }; 
-                    Vec3 z_draw_coords = (Vec3)
-                    { 
-                        (float)(x_draw_offset + OVERWORLD_CAMERA_CENTER_START.x) - ((float)OVERWORLD_SCREEN_SIZE_X / 2),
-                        (float)level_origin.y + level_dim.y / 2,
-                        (float)(z_draw_offset + OVERWORLD_CAMERA_CENTER_START.z)
-                    }; 
-
-                    Vec3 outline_offset = (Vec3){ (float)(-2 * OVERWORLD_SCREEN_SIZE_X), 0, (float)(-14 * OVERWORLD_SCREEN_SIZE_Z) };
-                    x_draw_coords = vec3Add(x_draw_coords, outline_offset);
-                    z_draw_coords = vec3Add(z_draw_coords, outline_offset);
-
-                    drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, x_draw_coords, x_wall_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
-                    drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, z_draw_coords, z_wall_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
-                    x_draw_offset += OVERWORLD_SCREEN_SIZE_X;
-                }
-                x_draw_offset = 0;
-                z_draw_offset += OVERWORLD_SCREEN_SIZE_Z;
-            }
-            */
-
-
         }
 
         // draw level boundary
         {
             Vec3 level_origin_as_vec = vec3Subtract(vec3FromInt3(level_origin), (Vec3){ 0.5f, 0.5f, 0.5f } );
             Vec3 level_dim_as_vec = vec3FromInt3(level_dim);
-            Vec3 x_draw_coords_near = (Vec3){ level_origin_as_vec.x, level_origin_as_vec.y + (level_dim_as_vec.y / 2), level_origin_as_vec.z + (level_dim_as_vec.z / 2) };
-            Vec3 x_draw_coords_far  = (Vec3){ level_origin_as_vec.x + level_dim_as_vec.x, level_origin_as_vec.y + (level_dim_as_vec.y / 2), level_origin_as_vec.z + (level_dim_as_vec.z / 2) };
+            Vec3 x_draw_coords_near = (Vec3){ level_origin_as_vec.x,                            level_origin_as_vec.y + (level_dim_as_vec.y / 2), level_origin_as_vec.z + (level_dim_as_vec.z / 2) };
+            Vec3 x_draw_coords_far  = (Vec3){ level_origin_as_vec.x + level_dim_as_vec.x,       level_origin_as_vec.y + (level_dim_as_vec.y / 2), level_origin_as_vec.z + (level_dim_as_vec.z / 2) };
             Vec3 z_draw_coords_near = (Vec3){ level_origin_as_vec.x + (level_dim_as_vec.x / 2), level_origin_as_vec.y + (level_dim_as_vec.y / 2), level_origin_as_vec.z };
             Vec3 z_draw_coords_far  = (Vec3){ level_origin_as_vec.x + (level_dim_as_vec.x / 2), level_origin_as_vec.y + (level_dim_as_vec.y / 2), level_origin_as_vec.z + level_dim_as_vec.z };
             Vec3 x_draw_scale = (Vec3){ 0, level_dim_as_vec.y, level_dim_as_vec.z };
