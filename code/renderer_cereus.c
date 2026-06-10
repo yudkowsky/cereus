@@ -621,7 +621,7 @@ uint32 model_instance_count = 0;
 Water water_instances[8192];
 uint32 water_instance_count = 0;
 
-Model model_editor_outline_instances[1024];
+Model model_editor_outline_instances[8192];
 uint32 model_editor_outline_instance_count = 0;
 
 Laser laser_instances[1024];
