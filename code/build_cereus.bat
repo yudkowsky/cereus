@@ -1,6 +1,5 @@
 @echo off
 
-set "VULKAN_SDK=C:\VulkanSDK\1.4.321.1"
 set "VK_SDK_PATH=%VULKAN_SDK%"
 
 pushd ..\data\shaders\src

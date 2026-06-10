@@ -366,7 +366,7 @@ const int32 FONT_CELL_WIDTH_PX = 6;
 const int32 FONT_CELL_HEIGHT_PX = 10;
 const float DEFAULT_TEXT_SCALE = 30.0f;
 
-const int32 SAVE_WRITE_VERSION = 2;
+const int32 SAVE_WRITE_VERSION = 3;
 
 const int32 CAMERA_CHUNK_SIZE = 24;
 const char MAIN_CAMERA_CHUNK_TAG[4] = "CMRA";
@@ -1084,7 +1084,7 @@ int32 getCountAndPositionOfChunk(FILE* file, char tag[3], int32 positions[64])
         int32 tile_count_offset = 0;
         if (version == 1) tile_count_offset = 4;
         else if (version == 2) tile_count_offset = 8;
-        else tile_count_offset = 32;
+        else tile_count_offset = 25;
         fseek(file, tile_count_offset, SEEK_SET);
         int32 tile_count = 0;
         fread(&tile_count, 4, 1, file);
@@ -1178,7 +1178,7 @@ void loadBufferInfo(FILE* file)
     {
         fread(&world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
     }
-    else if (version == 1 || version == 2)
+    else
     {
         int32 tile_count = 0;
         fread(&tile_count, 4, 1, file);
@@ -1290,7 +1290,7 @@ void writeBufferToFile(FILE* file, int32 version)
         else if (version >= 3) prefix_bytes = 25;
         int32 tile_count = 0;
         // leave space for dims, (origin), and tile_count
-        fseek(file, prefix_bytes, SEEK_SET);
+        fseek(file, prefix_bytes + 4, SEEK_SET);
 
         for (int32 buffer_index = 0; buffer_index < level_dim.x*level_dim.y*level_dim.z * 2; buffer_index += 2)
         {
@@ -1372,9 +1372,9 @@ bool saveLevelRewrite(char* path)
     int32 origin_x = level_origin.x;
     int32 origin_y = level_origin.y;
     int32 origin_z = level_origin.z;
-    fwrite(&origin_x, 1, 1, file);
-    fwrite(&origin_y, 1, 1, file);
-    fwrite(&origin_z, 1, 1, file);
+    fwrite(&origin_x, 4, 1, file);
+    fwrite(&origin_y, 4, 1, file);
+    fwrite(&origin_z, 4, 1, file);
 
     writeBufferToFile(file, SAVE_WRITE_VERSION);
     writeCameraToFile(file, &saved_main_camera, false);
@@ -4574,7 +4574,7 @@ GameResult gameFrame(double delta_time, Input* input)
                     if (fabs(difference_in_player_position_along_direction) > 0.3) allow_turn = false;
 
                     if (temp_state.pack_attached)
-                    {
+                   {
                         // check if would cause half-failed case, and if so check if we already had one of those, and if so disallow turn
                         // this defeats half the point of how i handle failed case later... but need to know now!
                         Int3 orthogonal_coords = getNextCoords(player->coords, oppositeDirection(input_direction));
@@ -4849,6 +4849,11 @@ GameResult gameFrame(double delta_time, Input* input)
         {
             // display level name
             createDebugText(world_state.level_name);
+
+            // level origin and dim
+            char level_text[256] = {0};
+            snprintf(level_text, sizeof(level_text), "level origin: %i, %i, %i; level dim: %i, %i, %i", level_origin.x, level_origin.y, level_origin.z, level_dim.x, level_dim.y, level_dim.z);
+            createDebugText(level_text);
 
             // player info
             char player_text[256] = {0};
@@ -5175,17 +5180,52 @@ GameResult gameFrame(double delta_time, Input* input)
         if (selected_e) drawAsset(selected_id, OUTLINE_3D, selected_e->position, DEFAULT_SCALE, selected_e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
     }
 
-    // draw camera boundary lines TODO: draw also in overworld, and differentiate by color - and make better graphics for them anyway
+    // draw camera boundary lines
     if (draw_level_boundary)
     {
         if (in_overworld)
         {
-            // draw camera screen lines
+            // draw camera screen lines TODO: will want to do this for some levels too, probably?
+
+            Vec3 x_wall_scale = { 0.01f, (float)level_dim.y, 1.0f  };
+            Vec3 z_wall_scale = { 1.0f,  (float)level_dim.y, 0.01f };
+            int32 x_wall_length = ((level_dim.z - 2) / OVERWORLD_SCREEN_SIZE_Z + 2) * OVERWORLD_SCREEN_SIZE_Z; // constant x: depends on z len
+            int32 z_wall_length = ((level_dim.x - 2) / OVERWORLD_SCREEN_SIZE_X + 2) * OVERWORLD_SCREEN_SIZE_X; // constant z: depends on x len
+            float y = (float)(level_origin.y + level_dim.y / 2);
+
+            int32 start_coords_x = OVERWORLD_CAMERA_CENTER_START.x - (OVERWORLD_SCREEN_SIZE_X / 2);
+            while (start_coords_x > level_origin.x) start_coords_x -= OVERWORLD_SCREEN_SIZE_X;
+            int32 start_coords_z = OVERWORLD_CAMERA_CENTER_START.z - (OVERWORLD_SCREEN_SIZE_Z / 2);
+            while (start_coords_z > level_origin.z) start_coords_z -= OVERWORLD_SCREEN_SIZE_Z;
+
+            // walls with internal constant x
+            FOR(x_wall_x_index, z_wall_length / OVERWORLD_SCREEN_SIZE_X + 1)
+            {
+                float x = (float)(start_coords_x + x_wall_x_index * OVERWORLD_SCREEN_SIZE_X) - 0.5f;
+                FOR(x_wall_z_index, x_wall_length)
+                {
+                    float z = (float)(start_coords_z + x_wall_z_index);
+                    drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, (Vec3){ x, y, z }, x_wall_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                }
+            }
+
+            // walls with internal constant z
+            FOR(z_wall_z_index, x_wall_length / OVERWORLD_SCREEN_SIZE_Z + 1)
+            {
+                float z = (float)(start_coords_z + z_wall_z_index * OVERWORLD_SCREEN_SIZE_Z) - 0.5f;
+                FOR(z_wall_x_index, z_wall_length)
+                {
+                    float x = (float)(start_coords_x + z_wall_x_index);
+                    drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, (Vec3){ x, y, z }, z_wall_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                }
+            }
+
+            /*
             int32 x_draw_offset = 0;
             int32 z_draw_offset = 0;
 
-            Vec3 x_wall_scale = { (float)OVERWORLD_SCREEN_SIZE_X, 5, 0.01f };
-            Vec3 z_wall_scale = { 0.01f, 5, (float)OVERWORLD_SCREEN_SIZE_Z };
+            Vec3 x_wall_scale = { (float)OVERWORLD_SCREEN_SIZE_X, (float)level_dim.y, 0.01f };
+            Vec3 z_wall_scale = { 0.01f, (float)level_dim.y, (float)OVERWORLD_SCREEN_SIZE_Z };
 
             FOR(z_index, 18)
             {
@@ -5193,12 +5233,14 @@ GameResult gameFrame(double delta_time, Input* input)
                 {
                     Vec3 x_draw_coords = (Vec3)
                     { 
-                        (float)(x_draw_offset + OVERWORLD_CAMERA_CENTER_START.x), 3,
+                        (float)(x_draw_offset + OVERWORLD_CAMERA_CENTER_START.x),
+                        (float)level_origin.y + level_dim.y / 2,
                         (float)(z_draw_offset + OVERWORLD_CAMERA_CENTER_START.z) + ((float)OVERWORLD_SCREEN_SIZE_Z / 2)
                     }; 
                     Vec3 z_draw_coords = (Vec3)
                     { 
-                        (float)(x_draw_offset + OVERWORLD_CAMERA_CENTER_START.x) - ((float)OVERWORLD_SCREEN_SIZE_X / 2), 3,
+                        (float)(x_draw_offset + OVERWORLD_CAMERA_CENTER_START.x) - ((float)OVERWORLD_SCREEN_SIZE_X / 2),
+                        (float)level_origin.y + level_dim.y / 2,
                         (float)(z_draw_offset + OVERWORLD_CAMERA_CENTER_START.z)
                     }; 
 
@@ -5213,11 +5255,14 @@ GameResult gameFrame(double delta_time, Input* input)
                 x_draw_offset = 0;
                 z_draw_offset += OVERWORLD_SCREEN_SIZE_Z;
             }
+            */
+
+
         }
-        else
+
+        // draw level boundary
         {
-            // draw level boundary
-            Vec3 level_origin_as_vec = vec3Subtract(vec3FromInt3(level_origin), (Vec3){ 0.5f, 0.5f, 0.5f } ); // TODO: rename vec3FromInt3
+            Vec3 level_origin_as_vec = vec3Subtract(vec3FromInt3(level_origin), (Vec3){ 0.5f, 0.5f, 0.5f } );
             Vec3 level_dim_as_vec = vec3FromInt3(level_dim);
             Vec3 x_draw_coords_near = (Vec3){ level_origin_as_vec.x, level_origin_as_vec.y + (level_dim_as_vec.y / 2), level_origin_as_vec.z + (level_dim_as_vec.z / 2) };
             Vec3 x_draw_coords_far  = (Vec3){ level_origin_as_vec.x + level_dim_as_vec.x, level_origin_as_vec.y + (level_dim_as_vec.y / 2), level_origin_as_vec.z + (level_dim_as_vec.z / 2) };
