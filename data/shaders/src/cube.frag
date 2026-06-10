@@ -42,9 +42,15 @@ void main()
 
     vec4 tex = texture(input_texture, uv);
 
-    float shadow = computeShadow(shadow_map, view_constants.light_view_proj, frag_world_pos, normalize(normal), normalize(view_constants.light_direction.xyz));
-    float light = mix(0.2, 1.0, shadow);
+    vec3 N = normalize(normal);
+    vec3 L = normalize(-view_constants.light_direction.xyz);
 
-    out_color = vec4(tex.rgb * light, tex.a);
-    out_normal = vec4(normalize(normal), 0.0);
+    float n_dot_l = max(dot(N, L), 0.0);
+    float shadow = computeShadow(shadow_map, view_constants.light_view_proj, frag_world_pos, N, L);
+
+    float direct = n_dot_l * shadow;
+    float light  = mix(0.2, 1.0, direct);
+
+    out_color  = vec4(tex.rgb * light, tex.a);
+    out_normal = vec4(N, 0.0);
 }

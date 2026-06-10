@@ -2301,8 +2301,7 @@ void initUndoBuffer()
 }
 
 // TODO:
-// i want to write undo buffer to a file on every movement, because if player closes the game, and undo buffer is not up to date, then bad things happen.
-// but the write function takes >10ms, for some reason? maybe fwrite is just really slow, or i should thread it? 
+// write function takes >10ms, for some reason? maybe fwrite is just really slow, or i should thread it? 
 // either way, i'm not writing undo buffer to a file at all right now, because it causes noticeable lag.
 //
 // before i decide how to handle this, think about what I actually want the experience to be when closing the game. Should you automatically go back to where you were in a level,

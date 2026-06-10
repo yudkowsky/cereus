@@ -4811,6 +4811,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
         depth_stencil_state_creation_info.stencilTestEnable = VK_FALSE;
 
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_FRONT_BIT;
         rasterization_state_creation_info.depthBiasEnable = VK_TRUE;
         rasterization_state_creation_info.depthBiasConstantFactor = 1.0f;
         rasterization_state_creation_info.depthBiasSlopeFactor = 2.0f;
@@ -4840,6 +4841,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         depth_stencil_state_creation_info.depthCompareOp = VK_COMPARE_OP_LESS;
         depth_stencil_state_creation_info.stencilTestEnable = VK_FALSE;
 
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_FRONT_BIT;
         rasterization_state_creation_info.depthBiasEnable = VK_TRUE;
         rasterization_state_creation_info.depthBiasConstantFactor = 1.0f;
         rasterization_state_creation_info.depthBiasSlopeFactor = 2.0f;

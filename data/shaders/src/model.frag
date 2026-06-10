@@ -46,13 +46,15 @@ void main()
     }
 
     vec3 N = normalize(normal);
-    vec3 light_direction = normalize(vec3(0.3, 1.0, 0.5));
-    float lighting = dot(N, light_direction) * 0.5 + 0.5;
+    vec3 L = normalize(-view_constants.light_direction.xyz);
 
-    float shadow = computeShadow(shadow_map, view_constants.light_view_proj, frag_world_pos, normalize(normal), normalize(view_constants.light_direction.xyz));
-    lighting *= mix(0.5, 1.0, shadow);
+    float n_dot_l  = max(dot(N, L), 0.0);
+    float shadow   = computeShadow(shadow_map, view_constants.light_view_proj, frag_world_pos, N, L);
+
+    float direct   = n_dot_l * shadow;
+    float lighting = mix(0.2, 1.0, direct);
 
     float tint_amount = 0.3;
-    out_color = vec4(color * lighting + (pc.tint.xyz * tint_amount), 1.0);
+    out_color  = vec4(color * lighting + (pc.tint.xyz * tint_amount), 1.0);
     out_normal = vec4(N, 0.0);
 }
