@@ -78,7 +78,7 @@ typedef struct Entity
     MirrorOrientation mirror_orientation;
 
     // movement state
-    Vec3 velocity; // not reliably used except for player
+    Vec3 velocity;
     Direction moving_direction; // deliberate movement: does not include falling.
     bool falling;
     bool fall_handled; // reset each frame
@@ -1072,7 +1072,7 @@ void buildLevelPathFromName(char level_name[64], char (*level_path)[64], bool ov
 }
 
 // gets position and count of some chunk tag. cursor placed right before chunk tag
-int32 getCountAndPositionOfChunk(FILE* file, char tag[3], int32 positions[64])
+int32 getCountAndPositionOfChunk(FILE* file, char tag[4], int32 positions[64])
 {
     char chunk[4] = {0};
     int32 chunk_size = 0;
