@@ -170,16 +170,6 @@ typedef struct DrawCommand
 }
 DrawCommand;
 
-typedef struct Camera 
-{
-    Vec3 coords;
-    Vec4 rotation;
-    float fov;
-    float yaw;
-    float pitch;
-}
-Camera;
-
 typedef struct TextInput
 {
     uint32 codepoints[64];
@@ -250,13 +240,6 @@ typedef struct Input
 }
 Input;
 
-typedef enum ShaderMode
-{
-    SHADER_MODE_DEFAULT,
-    SHADER_MODE_OUTLINE_TEST,
-}
-ShaderMode;
-
 #define WATER_PLANE_Y 1.2f
 
 #define WATER_PAINT_TILE_COUNT 64
@@ -272,6 +255,34 @@ typedef struct WaterPaintTexture
 }
 WaterPaintTexture;
 
+typedef struct Camera 
+{
+    Vec3 coords;
+    Vec4 rotation;
+    float fov;
+    float yaw;
+    float pitch;
+}
+Camera;
+
+typedef enum ShaderMode
+{
+    SHADER_MODE_DEFAULT,
+    SHADER_MODE_OUTLINE_TEST,
+}
+ShaderMode;
+
+typedef struct RendererInfo
+{
+    Camera camera;
+    float time;
+    float water_plane_y;
+    ShaderMode shader_mode;
+    WaterPaintTexture* water_paint_texture;
+    Vec3 sun_direction;
+}
+RendererInfo;
+
 // FUCNTIONS
 
 void gameInitialize(char* level_name, DisplayInfo);
@@ -280,5 +291,5 @@ void gameRedraw(DisplayInfo);
 
 void vulkanInitialize(RendererPlatformHandles, DisplayInfo);
 void vulkanResize(uint32 width, uint32 height);
-void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, float global_time, float water_plane, Camera camera, ShaderMode shader_mode, WaterPaintTexture* water_paint_texture);
+void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, RendererInfo renderer_info);
 void vulkanDraw(bool do_profiling_output);

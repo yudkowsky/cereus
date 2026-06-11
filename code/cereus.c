@@ -67,11 +67,11 @@ Color;
 typedef enum
 {
     EDITOR_MODE_NONE = 0,
-    EDITOR_MODE_PLACE_BREAK = 1,
-    EDITOR_MODE_SELECT = 2,
-    EDITOR_MODE_SELECT_WRITE = 3,
-    EDITOR_MODE_WATER_PAINT = 4,
-    EDITOR_MODE_ENVIRONMENT = 5,
+    EDITOR_MODE_PLACE_BREAK,
+    EDITOR_MODE_SELECT,
+    EDITOR_MODE_SELECT_WRITE,
+    EDITOR_MODE_WATER_PAINT,
+    EDITOR_MODE_ENVIRONMENT,
 }
 EditorMode;
 
@@ -2465,7 +2465,8 @@ void gameRedraw(DisplayInfo display_from_platform)
     if (draw_command_count == 0) return;
     game_display = display_from_platform;
     recalculateTextStartCoords();
-    vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, water_plane_y, camera_with_ow_offset, game_shader_mode, &water_paint_texture);
+    RendererInfo renderer_info = { .camera = camera_with_ow_offset, .time = (float)global_time, .water_plane_y = water_plane_y, .shader_mode = game_shader_mode, .water_paint_texture = &water_paint_texture, .sun_direction = sun_direction };
+    vulkanSubmitFrame(draw_commands, draw_command_count, renderer_info);
     vulkanDraw(false);
 }
 
@@ -4071,7 +4072,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 }
                 water_paint_texture.dirty = true;
             }
-            if (input->keys_held & KEY_4)
+            if (input->keys_held & KEY_R)
             {
                 // reset
                 FOR(i, WATER_PAINT_SIDE * WATER_PAINT_SIDE) water_paint_texture.values[i] = (Vec4){ 0.0f, 0.0f, 0.0f, 1.0f };
@@ -4108,7 +4109,7 @@ GameResult gameFrame(double delta_time, Input* input)
             editor_state.editor_mode = EDITOR_MODE_WATER_PAINT;
             createDebugPopup("paint mode", POPUP_GAMEPLAY_MODE_CHANGE);
         }
-        if (input->keys_held & KEY_5)
+        if (input->keys_held & KEY_4)
         {
             editor_state.editor_mode = EDITOR_MODE_ENVIRONMENT;
             createDebugPopup("environment mode", POPUP_GAMEPLAY_MODE_CHANGE);
@@ -4138,6 +4139,7 @@ GameResult gameFrame(double delta_time, Input* input)
         }
 
         // per-mode handling
+        // this organisation is kind of bad: already have some 'per mode handling' for select and for painting above, they just happen to do some more 'stuff'
 
         if (editor_state.editor_mode == EDITOR_MODE_PLACE_BREAK)
         {
@@ -4975,6 +4977,7 @@ GameResult gameFrame(double delta_time, Input* input)
         char overworld_zero_relative_path[64];
         buildLevelPathFromName(overworld_zero_name, &overworld_zero_relative_path, false);
 
+        // TODO: save camera only in place/break, maybe?
         // write camera to file on c press, alternative camera on v press
         if (time_until_allow_meta_input == 0 && (editor_state.editor_mode == EDITOR_MODE_PLACE_BREAK || editor_state.editor_mode == EDITOR_MODE_SELECT) && (input->keys_held & KEY_C || input->keys_held & KEY_V))
         {
@@ -5060,7 +5063,7 @@ GameResult gameFrame(double delta_time, Input* input)
         }
 
         // write level to file on i press
-        if (time_until_allow_meta_input == 0 && (editor_state.editor_mode == EDITOR_MODE_PLACE_BREAK || editor_state.editor_mode == EDITOR_MODE_SELECT) && input->keys_held & KEY_I) 
+        if (time_until_allow_meta_input == 0 && editor_state.editor_mode != EDITOR_MODE_SELECT_WRITE && input->keys_held & KEY_I) 
         {
             saveLevelRewrite(level_path);
             saveLevelRewrite(relative_level_path);
@@ -5308,7 +5311,8 @@ GameResult gameFrame(double delta_time, Input* input)
     bool do_profiling_output = frame_counter++ >= 60;
 
     QueryPerformanceCounter(&t1);
-    vulkanSubmitFrame(draw_commands, draw_command_count, (float)global_time, water_plane_y, camera_with_ow_offset, game_shader_mode, &water_paint_texture);
+    RendererInfo renderer_info = { .camera = camera_with_ow_offset, .time = (float)global_time, .water_plane_y = water_plane_y, .shader_mode = game_shader_mode, .water_paint_texture = &water_paint_texture, .sun_direction = sun_direction };
+    vulkanSubmitFrame(draw_commands, draw_command_count, renderer_info);
     QueryPerformanceCounter(&t2);
     vulkanDraw(do_profiling_output);
     QueryPerformanceCounter(&t3);

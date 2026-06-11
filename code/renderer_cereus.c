@@ -216,6 +216,14 @@ ModelMeshInfo;
 
 typedef struct VulkanState
 {
+    // stuff passed from game layer
+    Camera camera;
+    float time;
+    float water_plane_y;
+    ShaderMode shader_mode;
+    WaterPaintTexture* water_paint_texture;
+    Vec3 sun_direction;
+
     // platform and instance
     RendererPlatformHandles platform_handles;
     VkInstance vulkan_instance_handle;
@@ -223,7 +231,7 @@ typedef struct VulkanState
 	VkPhysicalDevice physical_device_handle;
 
     // profiling
-    VkQueryPool timestamp_query_pools[3]; // will add more in-flight frames soon, maybe
+    VkQueryPool timestamp_query_pools[3];
     uint32 timestamp_query_count;
     uint32 timestamp_query_counts[3];
     float timestamp_period;
@@ -368,8 +376,6 @@ typedef struct VulkanState
     VkRenderPass reflection_render_pass;
     VkFramebuffer reflection_framebuffer; // just 1
 
-    float water_plane_y; // set every frame TODO: this is now hardcoded, stop using this?
-
     // PIPELINES AND LAYOUTS
 
     VkPipelineLayout default_graphics_pipeline_layout;
@@ -449,9 +455,6 @@ typedef struct VulkanState
     uint32 view_constants_stride;
     VkDescriptorSetLayout view_constants_set_layout;
     VkDescriptorSet view_constants_descriptor_sets[2];
-
-    // water paint texture
-    WaterPaintTexture* water_paint_texture;
 
     VkImage paint_image;
     VkDeviceMemory paint_image_memory;
@@ -600,11 +603,8 @@ const char* WATER_GRID_NORMAL_PATH = "data/assets/maps/water-grid/water-grid-nor
 
 VulkanState vulkan_state;
 DisplayInfo vulkan_display = {0};
-Camera vulkan_camera = {0};
-ShaderMode shader_mode = SHADER_MODE_DEFAULT;
 
 // water
-float water_time = 0.0f;
 const float water_tile_length = 10.0f;
 const float water_amplitude = 2e-4f;
 
@@ -5284,15 +5284,16 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     vulkan_state.paint_image_first_upload = true;
 }
 
-void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, float water_time_from_game, float water_plane_from_game, Camera camera_from_game, ShaderMode shader_mode_from_game, WaterPaintTexture* paint_from_game)
+void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, RendererInfo vulkan_info)
 {  
     vkWaitForFences(vulkan_state.logical_device_handle, 1, &vulkan_state.in_flight_fences[vulkan_state.current_frame], VK_TRUE, UINT64_MAX);
 
-    vulkan_camera = camera_from_game;
-    shader_mode = shader_mode_from_game;
-    water_time = water_time_from_game;
-    vulkan_state.water_paint_texture = paint_from_game;
-    vulkan_state.water_plane_y = water_plane_from_game;
+    vulkan_state.camera = vulkan_info.camera;
+    vulkan_state.time = vulkan_info.time;
+    vulkan_state.water_plane_y = vulkan_info.water_plane_y;
+    vulkan_state.shader_mode = vulkan_info.shader_mode;
+    vulkan_state.water_paint_texture = vulkan_info.water_paint_texture;
+    vulkan_state.sun_direction = vulkan_info.sun_direction;
 
     sprite_instance_count = 0;
     cube_instance_count = 0;
@@ -5469,7 +5470,7 @@ void vulkanDraw(bool do_profiling_output)
         pc.texture_size = FFT_SIZE;
         pc.water_tile_length = water_tile_length;
         pc.gravity = 9.81f;
-        pc.time = water_time;
+        pc.time = vulkan_state.time;
 
         vkCmdPushConstants(command_buffer, vulkan_state.fft_evolved_pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(FFTEvolvedPushConstants), &pc);
         vkCmdDispatch(command_buffer, FFT_SIZE / 16, FFT_SIZE / 16, 1);
@@ -5632,11 +5633,11 @@ void vulkanDraw(bool do_profiling_output)
     float aspect = target_aspect;
     float projection_matrix[16];
     float view_matrix[16];
-    mat4BuildPerspective(projection_matrix, vulkan_camera.fov * (6.283185f / 360.0f), aspect, 1.0f, 300.0f);
-    mat4BuildViewFromQuat(view_matrix, vulkan_camera.coords, vulkan_camera.rotation);
+    mat4BuildPerspective(projection_matrix, vulkan_state.camera.fov * (6.283185f / 360.0f), aspect, 1.0f, 300.0f);
+    mat4BuildViewFromQuat(view_matrix, vulkan_state.camera.coords, vulkan_state.camera.rotation);
 
     float reflected_view_matrix[16];
-    mat4BuildReflectedView(reflected_view_matrix, vulkan_camera.coords, vulkan_camera.rotation, vulkan_state.water_plane_y);
+    mat4BuildReflectedView(reflected_view_matrix, vulkan_state.camera.coords, vulkan_state.camera.rotation, vulkan_state.water_plane_y);
 
     // fill view constants for this frame
     {
@@ -5650,7 +5651,7 @@ void vulkanDraw(bool do_profiling_output)
         float identity_matrix[16];
         mat4Identity(identity_matrix);
 
-        float focal_length = (float)vulkan_state.swapchain_extent.height / (TAU * tanf(vulkan_camera.fov / 360.0f));
+        float focal_length = (float)vulkan_state.swapchain_extent.height / (TAU * tanf(vulkan_state.camera.fov / 360.0f));
 
         float orthographic_matrix[16];
         mat4BuildOrtho(orthographic_matrix, 0.0f, (float)vulkan_state.swapchain_extent.width, 0.0f, (float)vulkan_state.swapchain_extent.height, 0.0f, 1.0f);
@@ -5661,11 +5662,10 @@ void vulkanDraw(bool do_profiling_output)
         mat4Multiply(main_view_projection, projection_matrix, view_matrix);
         mat4Inverse(main_inverse_view_projection, main_view_projection);
 
-        Vec3 sun_direction = { -0.5f, -1.0f, -0.15f };
         float covered_tiles_from_zero = 50.0f;
         Vec3 coverage_center = { covered_tiles_from_zero / 2.0f, 0.0f, covered_tiles_from_zero / 2.0f };
         float light_view_projection[16];
-        mat4BuildDirectionalLight(light_view_projection, sun_direction, coverage_center, covered_tiles_from_zero / 2.0f);
+        mat4BuildDirectionalLight(light_view_projection, vulkan_state.sun_direction, coverage_center, covered_tiles_from_zero / 2.0f);
 
         memcpy(main_view_constants->view,            view_matrix,                  sizeof(float) * 16);
         memcpy(main_view_constants->proj,            projection_matrix,            sizeof(float) * 16);
@@ -5673,11 +5673,11 @@ void vulkanDraw(bool do_profiling_output)
         memcpy(main_view_constants->inv_view_proj,   main_inverse_view_projection, sizeof(float) * 16);
         memcpy(main_view_constants->light_view_proj, light_view_projection,        sizeof(float) * 16);
 
-        main_view_constants->camera_position           = (Vec4){ vulkan_camera.coords.x, vulkan_camera.coords.y, vulkan_camera.coords.z, 0.0f };
-        main_view_constants->light_direction           = (Vec4){ sun_direction.x, sun_direction.y, sun_direction.z, 0.0 };
+        main_view_constants->camera_position           = (Vec4){ vulkan_state.camera.coords.x, vulkan_state.camera.coords.y, vulkan_state.camera.coords.z, 0.0f };
+        main_view_constants->light_direction           = (Vec4){ vulkan_state.sun_direction.x, vulkan_state.sun_direction.y, vulkan_state.sun_direction.z, 0.0 };
         main_view_constants->water_plane_y             = vulkan_state.water_plane_y;
         main_view_constants->discard_below_water_plane = false;
-        main_view_constants->time                      = water_time;
+        main_view_constants->time                      = vulkan_state.time;
         main_view_constants->water_tile_length         = water_tile_length;
         main_view_constants->focal_length              = focal_length;
 
@@ -6006,7 +6006,7 @@ void vulkanDraw(bool do_profiling_output)
     VkDescriptorSet post_sets[2] = { vulkan_state.depth_descriptor_set, vulkan_state.normal_descriptor_set };
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline_layout, 0, 2, post_sets, 0, 0);
 
-    float focal_length = (float)vulkan_state.swapchain_extent.height / (TAU * tanf(vulkan_camera.fov / 360.0f));
+    float focal_length = (float)vulkan_state.swapchain_extent.height / (TAU * tanf(vulkan_state.camera.fov / 360.0f));
 
     float post_pc[6] = 
     {
@@ -6015,7 +6015,7 @@ void vulkanDraw(bool do_profiling_output)
         depth_threshold, 
         normal_threshold, 
         focal_length,
-        (shader_mode == SHADER_MODE_OUTLINE_TEST) ? 1.0f : 0.0f
+        (vulkan_state.shader_mode == SHADER_MODE_OUTLINE_TEST) ? 1.0f : 0.0f
     };
     vkCmdPushConstants(command_buffer, vulkan_state.outline_post_pipeline_layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(float) * 6, post_pc);
 
@@ -6259,7 +6259,7 @@ void vulkanDraw(bool do_profiling_output)
 
     // LASER PASS
     LoadedModel* laser_mesh = &vulkan_state.laser_cylinder_model;
-    if (laser_mesh->index_count > 0 && laser_instance_count > 0 && shader_mode != SHADER_MODE_OUTLINE_TEST)
+    if (laser_mesh->index_count > 0 && laser_instance_count > 0 && vulkan_state.shader_mode != SHADER_MODE_OUTLINE_TEST)
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.laser_pipeline);
 
