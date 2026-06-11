@@ -102,22 +102,23 @@ CameraMode;
 
 typedef enum
 {
-    POPUP_NO_TYPE = 0, // TODO: rename, i guess?
-    POPUP_GAMEPLAY_MODE_CHANGE,
-    POPUP_GAMEPLAY_SPEED_CHANGE,
-    POPUP_DEBUG_STATE_VISIBILITY_TOGGLE,
-    POPUP_LEVEL_BOUNDARY_VISIBILITY_TOGGLE,
-    POPUP_LEVEL_SAVE,
-    POPUP_MAIN_CAMERA_SAVE,
-    POPUP_ALT_CAMERA_SAVE,
-    POPUP_PHYSICS_TIMESTEP_CHANGE,
-    POPUP_CHEAT_MODE_TOGGLE,
-    POPUP_SHADER_MODE_CHANGE,
-    POPUP_DRAW_TRAILING_HITBOX_TOGGLE,
-    POPUP_STEP_THROUGH_TOGGLE,
-    POPUP_PAINT_BRUSH_RADIUS_CHANGE,
-    POPUP_EDITOR_BLOCK_PLACE_OOB,
-    POPUP_SUN_DIRECTION_CHANGE,
+    POPUP_TYPE_NONE = 0,
+    POPUP_TYPE_GAMEPLAY_MODE_CHANGE,
+    POPUP_TYPE_GAMEPLAY_SPEED_CHANGE,
+    POPUP_TYPE_DEBUG_STATE_VISIBILITY_TOGGLE,
+    POPUP_TYPE_LEVEL_BOUNDARY_VISIBILITY_TOGGLE,
+    POPUP_TYPE_LEVEL_SAVE,
+    POPUP_TYPE_MAIN_CAMERA_SAVE,
+    POPUP_TYPE_ALT_CAMERA_SAVE,
+    POPUP_TYPE_PHYSICS_TIMESTEP_CHANGE,
+    POPUP_TYPE_CHEAT_MODE_TOGGLE,
+    POPUP_TYPE_SHADER_MODE_CHANGE,
+    POPUP_TYPE_DRAW_TRAILING_HITBOX_TOGGLE,
+    POPUP_TYPE_STEP_THROUGH_TOGGLE,
+    POPUP_TYPE_PAINT_BRUSH_RADIUS_CHANGE,
+    POPUP_TYPE_EDITOR_BLOCK_PLACE_OOB,
+    POPUP_TYPE_SUN_DIRECTION_CHANGE,
+    POPUP_TYPE_LEVEL_Y_CHANGE,
 }
 PopupType;
 
@@ -349,7 +350,7 @@ const int32 MAX_LASER_TURNS_ALLOWED = 16;
 const int32 MAX_PUSHABLE_STACK_SIZE = 32;
 const int32 MAX_TRAILING_HITBOX_COUNT = 32;
 const int32 MAX_LEVEL_COUNT = 64;
-const int32 MAX_DEBUG_POPUP_COUNT = 32;
+const int32 MAX_DEBUG_POPUP_TYPE_COUNT = 32;
 
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
@@ -487,8 +488,8 @@ int32 debug_text_count = 0;
 bool do_debug_text = false;
 
 // debug popups
-const float DEBUG_POPUP_STEP_SIZE = 30.0f;
-const int32 DEFAULT_POPUP_TIME = 100;
+const float DEBUG_POPUP_TYPE_STEP_SIZE = 30.0f;
+const int32 DEFAULT_POPUP_TYPE_TIME = 100;
 Vec2 debug_popup_start_coords = {0};
 DebugPopup debug_popups[32];
 
@@ -1569,9 +1570,9 @@ void createDebugText(char* string)
 void createDebugPopup(char* string, PopupType popup_type)
 {
     // check if such a type already exists, and if so just overwrite it with renewed timer. recalculate x coord but not y
-    if (popup_type != POPUP_NO_TYPE)
+    if (popup_type != POPUP_TYPE_NONE)
     {
-        FOR(popup_index, MAX_DEBUG_POPUP_COUNT)
+        FOR(popup_index, MAX_DEBUG_POPUP_TYPE_COUNT)
         {
             if (debug_popups[popup_index].frames_left == 0) continue;
             if (debug_popups[popup_index].type == popup_type)
@@ -1581,7 +1582,7 @@ void createDebugPopup(char* string, PopupType popup_type)
                     debug_popups[popup_index].coords.x = debug_popup_start_coords.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
                     break;
                 }
-                debug_popups[popup_index].frames_left = DEFAULT_POPUP_TIME;
+                debug_popups[popup_index].frames_left = DEFAULT_POPUP_TYPE_TIME;
                 memcpy(debug_popups[popup_index].text, string, 64 * sizeof(char));
                 return;
             }
@@ -1590,7 +1591,7 @@ void createDebugPopup(char* string, PopupType popup_type)
 
     // no such type exists, or it has no type, so proceed with looking up into next free
     int32 next_free_in_popups = 0;
-    FOR(popup_index, MAX_DEBUG_POPUP_COUNT) if (debug_popups[popup_index].frames_left == 0)
+    FOR(popup_index, MAX_DEBUG_POPUP_TYPE_COUNT) if (debug_popups[popup_index].frames_left == 0)
     {
         next_free_in_popups = popup_index;
         break;
@@ -1601,8 +1602,8 @@ void createDebugPopup(char* string, PopupType popup_type)
         debug_popups[next_free_in_popups].coords.x = debug_popup_start_coords.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
         break;
     }
-    debug_popups[next_free_in_popups].coords.y = debug_popup_start_coords.y + (next_free_in_popups * DEBUG_POPUP_STEP_SIZE);
-    debug_popups[next_free_in_popups].frames_left = DEFAULT_POPUP_TIME;
+    debug_popups[next_free_in_popups].coords.y = debug_popup_start_coords.y + (next_free_in_popups * DEBUG_POPUP_TYPE_STEP_SIZE);
+    debug_popups[next_free_in_popups].frames_left = DEFAULT_POPUP_TYPE_TIME;
     debug_popups[next_free_in_popups].type = popup_type;
     memcpy(debug_popups[next_free_in_popups].text, string, 64 * sizeof(char));
 }
@@ -2496,7 +2497,7 @@ void updateLockedTiles()
                 setTileType(TILE_TYPE_NONE, lb->coords);
                 setTileDirection(NORTH, lb->coords, 0);
             }
-            if (!silence_unlocks_due_to_restart_or_undo) createDebugPopup("something was unlocked!", POPUP_NO_TYPE);
+            if (!silence_unlocks_due_to_restart_or_undo) createDebugPopup("something was unlocked!", POPUP_TYPE_NONE);
         }
         else if (find_result == -1 && lb->removed)
         {
@@ -3842,8 +3843,11 @@ GameResult gameFrame(double delta_time, Input* input)
                 if (level_min.x <= level_max.x)
                 {
                     // not an empty level
-                    Int3 actual_level_dim = int3Add(int3Subtract(level_max, level_min), (Int3){1,1,1});
-                    actual_level_dim.y = actual_level_dim.y > 16 ? actual_level_dim.y : 16; // TODO: fix min y coord for now; later change this per-level
+                    Int3 actual_level_dim = {0};
+                    actual_level_dim.x = level_max.x - level_min.x + 1;
+                    actual_level_dim.z = level_max.z - level_min.z + 1;
+                    int32 content_height = level_max.y - level_min.y + 1;
+                    actual_level_dim.y = level_dim.y > content_height ? level_dim.y : content_height;
                     reindexBuffer(level_min, actual_level_dim);
                     recalculateWaterPlane();
                 }
@@ -3912,7 +3916,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 }
                 else
                 {
-                    createDebugPopup("block placement OOB", POPUP_EDITOR_BLOCK_PLACE_OOB);
+                    createDebugPopup("block placement OOB", POPUP_TYPE_EDITOR_BLOCK_PLACE_OOB);
                 }
 
                 time_until_allow_meta_input = PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT;
@@ -4028,7 +4032,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 {
                     char paint_text[256] = {0};
                     snprintf(paint_text, sizeof(paint_text), "new brush size: %i", paint_radius);
-                    createDebugPopup(paint_text, POPUP_PAINT_BRUSH_RADIUS_CHANGE);
+                    createDebugPopup(paint_text, POPUP_TYPE_PAINT_BRUSH_RADIUS_CHANGE);
                 }
 
                 float paint_magnitude = 0.1f;
@@ -4080,7 +4084,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 water_paint_texture.dirty = true;
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
 
-                createDebugPopup("reset water texture", POPUP_NO_TYPE);
+                createDebugPopup("reset water texture", POPUP_TYPE_NONE);
             }
         }
     }
@@ -4092,27 +4096,27 @@ GameResult gameFrame(double delta_time, Input* input)
         if (input->keys_held & KEY_0) 
         {
             editor_state.editor_mode = EDITOR_MODE_NONE;
-            createDebugPopup("game mode", POPUP_GAMEPLAY_MODE_CHANGE);
+            createDebugPopup("game mode", POPUP_TYPE_GAMEPLAY_MODE_CHANGE);
         }
         if (input->keys_held & KEY_1) 
         {
             editor_state.editor_mode = EDITOR_MODE_PLACE_BREAK;
-            createDebugPopup("place / break mode", POPUP_GAMEPLAY_MODE_CHANGE);
+            createDebugPopup("place / break mode", POPUP_TYPE_GAMEPLAY_MODE_CHANGE);
         }
         if (input->keys_held & KEY_2) 
         {
             editor_state.editor_mode = EDITOR_MODE_SELECT;
-            createDebugPopup("select mode", POPUP_GAMEPLAY_MODE_CHANGE);
+            createDebugPopup("select mode", POPUP_TYPE_GAMEPLAY_MODE_CHANGE);
         }
         if (input->keys_held & KEY_3)
         {
             editor_state.editor_mode = EDITOR_MODE_WATER_PAINT;
-            createDebugPopup("paint mode", POPUP_GAMEPLAY_MODE_CHANGE);
+            createDebugPopup("paint mode", POPUP_TYPE_GAMEPLAY_MODE_CHANGE);
         }
         if (input->keys_held & KEY_4)
         {
             editor_state.editor_mode = EDITOR_MODE_ENVIRONMENT;
-            createDebugPopup("environment mode", POPUP_GAMEPLAY_MODE_CHANGE);
+            createDebugPopup("environment mode", POPUP_TYPE_GAMEPLAY_MODE_CHANGE);
         }
 
         // change shader mode
@@ -4120,21 +4124,31 @@ GameResult gameFrame(double delta_time, Input* input)
         {
             game_shader_mode = SHADER_MODE_OUTLINE_TEST;
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            createDebugPopup("shader mode: testing outlines", POPUP_SHADER_MODE_CHANGE);
+            createDebugPopup("shader mode: testing outlines", POPUP_TYPE_SHADER_MODE_CHANGE);
         }
         if (input->keys_held & KEY_8)
         {
             game_shader_mode = SHADER_MODE_DEFAULT;
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            createDebugPopup("shader mode: outlines", POPUP_SHADER_MODE_CHANGE);
+            createDebugPopup("shader mode: outlines", POPUP_TYPE_SHADER_MODE_CHANGE);
         }
 
         // toggle cheating
         if (input->keys_held & KEY_9)
         {
             cheating = !cheating;
-            if (cheating) createDebugPopup("cheating", POPUP_CHEAT_MODE_TOGGLE);
-            else createDebugPopup("not cheating", POPUP_CHEAT_MODE_TOGGLE);
+            if (cheating) createDebugPopup("cheating", POPUP_TYPE_CHEAT_MODE_TOGGLE);
+            else createDebugPopup("not cheating", POPUP_TYPE_CHEAT_MODE_TOGGLE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
+
+        if (input->keys_held & KEY_BACKSPACE)
+        {
+            camera = saved_main_camera;
+            camera.rotation = buildCameraQuaternion(camera);
+            camera_mode = MAIN_WAITING;
+            camera_lerp_t = 0.0f;
+            createDebugPopup("returned camera to saved position", POPUP_TYPE_NONE);
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
 
@@ -4194,7 +4208,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 camera.rotation = buildCameraQuaternion(camera);
                 char yaw_text[256] = {0};
                 snprintf(yaw_text, sizeof(yaw_text), "camera yaw snapped to: %.3f", camera_snap_yaw);
-                createDebugPopup(yaw_text, POPUP_NO_TYPE);
+                createDebugPopup(yaw_text, POPUP_TYPE_NONE);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 
@@ -4205,7 +4219,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 if (physics_timestep_multiplier < 1.0) physics_timestep_multiplier = 1.0;
                 char timestep_text[256] = {0};
                 snprintf(timestep_text, sizeof(timestep_text), "physics speed decreased: %.4f (%.6fs per tick)", 1.0 / physics_timestep_multiplier, physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
-                createDebugPopup(timestep_text, POPUP_PHYSICS_TIMESTEP_CHANGE);
+                createDebugPopup(timestep_text, POPUP_TYPE_PHYSICS_TIMESTEP_CHANGE);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
             else if (input->keys_held & KEY_COMMA)
@@ -4213,7 +4227,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 physics_timestep_multiplier *= 2;
                 char timestep_text[256] = {0};
                 snprintf(timestep_text, sizeof(timestep_text), "physics speed increased: %.4f (%.6fs per tick)", 1.0 / physics_timestep_multiplier, physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
-                createDebugPopup(timestep_text, POPUP_PHYSICS_TIMESTEP_CHANGE);
+                createDebugPopup(timestep_text, POPUP_TYPE_PHYSICS_TIMESTEP_CHANGE);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 
@@ -4221,24 +4235,14 @@ GameResult gameFrame(double delta_time, Input* input)
             if (input->keys_held & KEY_6)
             {
                 step_mode = !step_mode;
-                if (step_mode) createDebugPopup("step through physics on", POPUP_STEP_THROUGH_TOGGLE);
-                else           createDebugPopup("step through physics off", POPUP_STEP_THROUGH_TOGGLE);
+                if (step_mode) createDebugPopup("step through physics on", POPUP_TYPE_STEP_THROUGH_TOGGLE);
+                else           createDebugPopup("step through physics off", POPUP_TYPE_STEP_THROUGH_TOGGLE);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
             if (input->keys_held & KEY_K)
             {
                 step_to_next_tick = true;
-                createDebugPopup("stepped to next tick", POPUP_NO_TYPE);
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            }
-
-            if (input->keys_held & KEY_BACKSPACE)
-            {
-                camera = saved_main_camera;
-                camera.rotation = buildCameraQuaternion(camera);
-                camera_mode = MAIN_WAITING;
-                camera_lerp_t = 0.0f;
-                createDebugPopup("returned camera to saved position", POPUP_NO_TYPE);
+                createDebugPopup("stepped to next tick", POPUP_TYPE_NONE);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 
@@ -4246,8 +4250,8 @@ GameResult gameFrame(double delta_time, Input* input)
             if (input->keys_held & KEY_Y)
             {
                 do_debug_text = !do_debug_text;
-                if (do_debug_text) createDebugPopup("debug state visibility on", POPUP_DEBUG_STATE_VISIBILITY_TOGGLE);
-                else               createDebugPopup("debug state visibility off", POPUP_DEBUG_STATE_VISIBILITY_TOGGLE);
+                if (do_debug_text) createDebugPopup("debug state visibility on", POPUP_TYPE_DEBUG_STATE_VISIBILITY_TOGGLE);
+                else               createDebugPopup("debug state visibility off", POPUP_TYPE_DEBUG_STATE_VISIBILITY_TOGGLE);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 
@@ -4255,8 +4259,8 @@ GameResult gameFrame(double delta_time, Input* input)
             if (time_until_allow_meta_input == 0 && input->keys_held & KEY_T && !(editor_state.editor_mode == EDITOR_MODE_SELECT_WRITE))
             {
                 draw_level_boundary = !draw_level_boundary;
-                if (draw_level_boundary) createDebugPopup("level / camera boundary visibility on", POPUP_LEVEL_BOUNDARY_VISIBILITY_TOGGLE);
-                else                     createDebugPopup("level / camera boundary visibility off", POPUP_LEVEL_BOUNDARY_VISIBILITY_TOGGLE);
+                if (draw_level_boundary) createDebugPopup("level / camera boundary visibility on", POPUP_TYPE_LEVEL_BOUNDARY_VISIBILITY_TOGGLE);
+                else                     createDebugPopup("level / camera boundary visibility off", POPUP_TYPE_LEVEL_BOUNDARY_VISIBILITY_TOGGLE);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 
@@ -4264,8 +4268,8 @@ GameResult gameFrame(double delta_time, Input* input)
             if (input->keys_held & KEY_O)
             {
                 draw_trailing_hitboxes = !draw_trailing_hitboxes;
-                if (draw_trailing_hitboxes) createDebugPopup("showing trailing hitboxes", POPUP_DRAW_TRAILING_HITBOX_TOGGLE);
-                else createDebugPopup("not showing trailing hitboxes", POPUP_DRAW_TRAILING_HITBOX_TOGGLE);
+                if (draw_trailing_hitboxes) createDebugPopup("showing trailing hitboxes", POPUP_TYPE_DRAW_TRAILING_HITBOX_TOGGLE);
+                else createDebugPopup("not showing trailing hitboxes", POPUP_TYPE_DRAW_TRAILING_HITBOX_TOGGLE);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 
@@ -4281,18 +4285,52 @@ GameResult gameFrame(double delta_time, Input* input)
             if (input->keys_held & KEY_M)
             {
                 clearSolvedLevels();
-                createDebugPopup("solved levels cleared", POPUP_NO_TYPE);
+                createDebugPopup("solved levels cleared", POPUP_TYPE_NONE);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
         }
         else if (editor_state.editor_mode == EDITOR_MODE_ENVIRONMENT)
         {
+            // change light direction
             if (input->keys_held & KEY_L)
             {
                 sun_direction = vec3Normalize(vec3RotateByQuaternion(vec3Negate(vec3FromInt3(AXIS_Z)), camera.rotation));
                 char sun_text[256] = {0}; // TODO: really need some sort of macro for this logging
                 snprintf(sun_text, sizeof(sun_text), "sun direction set: %.3f, %.3f, %.3f", sun_direction.x, sun_direction.y, sun_direction.z);
-                createDebugPopup(sun_text, POPUP_SUN_DIRECTION_CHANGE);
+                createDebugPopup(sun_text, POPUP_TYPE_SUN_DIRECTION_CHANGE);
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            }
+
+            // change y max
+            if (input->keys_held & KEY_DOT)
+            {
+                Int3 new_dim = (Int3){ level_dim.x, level_dim.y + 1, level_dim.z };
+                char dim_text[256] = {0};
+                if (reindexBuffer(level_origin, new_dim)) snprintf(dim_text, sizeof(dim_text), "level y dim: %i", level_dim.y);
+                else snprintf(dim_text, sizeof(dim_text), "level too large to grow");
+                createDebugPopup(dim_text, POPUP_TYPE_LEVEL_Y_CHANGE);
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            }
+            else if (input->keys_held & KEY_COMMA)
+            {
+                Int3 level_min, level_max;
+                getLevelMinAndMax(&level_min, &level_max);
+                bool empty_level = level_min.x > level_max.x;
+                int32 current_top = level_origin.y + level_dim.y - 1;
+                bool top_row_empty = empty_level || current_top > level_max.y;
+
+                char dim_text[256] = {0};
+                if (level_dim.y > 1 && top_row_empty)
+                {
+                    Int3 new_dim = (Int3){ level_dim.x, level_dim.y - 1, level_dim.z };
+                    reindexBuffer(level_origin, new_dim);
+                    snprintf(dim_text, sizeof(dim_text), "level y dim: %i", level_dim.y);
+                }
+                else
+                {
+                    snprintf(dim_text, sizeof(dim_text), "can't shrink: there is tile on top row");
+                }
+                createDebugPopup(dim_text, POPUP_TYPE_LEVEL_Y_CHANGE);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
         }
@@ -4369,7 +4407,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 {
                     recordActionForUndo(&world_state);
                 }
-                createDebugPopup("level restarted", POPUP_NO_TYPE);
+                createDebugPopup("level restarted", POPUP_TYPE_NONE);
                 zeroAnimations();
                 Camera save_camera = camera;
 
@@ -4775,7 +4813,7 @@ GameResult gameFrame(double delta_time, Input* input)
                         strcpy(world_state.solved_levels[next_free], wb->next_level);
                     }
                     writeSolvedLevelsToFile();
-                    createDebugPopup("level solved!", POPUP_NO_TYPE);
+                    createDebugPopup("level solved!", POPUP_TYPE_NONE);
                     time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 }
             }
@@ -4977,21 +5015,20 @@ GameResult gameFrame(double delta_time, Input* input)
         char overworld_zero_relative_path[64];
         buildLevelPathFromName(overworld_zero_name, &overworld_zero_relative_path, false);
 
-        // TODO: save camera only in place/break, maybe?
         // write camera to file on c press, alternative camera on v press
-        if (time_until_allow_meta_input == 0 && (editor_state.editor_mode == EDITOR_MODE_PLACE_BREAK || editor_state.editor_mode == EDITOR_MODE_SELECT) && (input->keys_held & KEY_C || input->keys_held & KEY_V))
+        if (time_until_allow_meta_input == 0 && editor_state.editor_mode == EDITOR_MODE_PLACE_BREAK && (input->keys_held & KEY_C || input->keys_held & KEY_V))
         {
             char tag[4] = {0};
             bool write_alt_camera = false;
             if (input->keys_held & KEY_C) 
             {
                 memcpy(&tag, &MAIN_CAMERA_CHUNK_TAG, sizeof(tag));
-                createDebugPopup("main camera saved", POPUP_MAIN_CAMERA_SAVE);
+                createDebugPopup("main camera saved", POPUP_TYPE_MAIN_CAMERA_SAVE);
             }
             else                    
             {
                 memcpy(&tag, &ALT_CAMERA_CHUNK_TAG, sizeof(tag));
-                createDebugPopup("alt camera saved", POPUP_ALT_CAMERA_SAVE);
+                createDebugPopup("alt camera saved", POPUP_TYPE_ALT_CAMERA_SAVE);
                 write_alt_camera = true;
             }
 
@@ -5075,7 +5112,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 // overwrite overworld_zero's world state with the new saved one
                 memcpy(&overworld_zero_state, &world_state, sizeof(WorldState));
             }
-            createDebugPopup("level saved", POPUP_LEVEL_SAVE);
+            createDebugPopup("level saved", POPUP_TYPE_LEVEL_SAVE);
             writeSolvedLevelsToFile();
         }
     }
@@ -5267,7 +5304,7 @@ GameResult gameFrame(double delta_time, Input* input)
         global_time += (delta_time / physics_timestep_multiplier);
         while (timer_accumulator >= 1.0/60.0)
         {
-            FOR(popup_index, MAX_DEBUG_POPUP_COUNT) if (debug_popups[popup_index].frames_left > 0) debug_popups[popup_index].frames_left--;
+            FOR(popup_index, MAX_DEBUG_POPUP_TYPE_COUNT) if (debug_popups[popup_index].frames_left > 0) debug_popups[popup_index].frames_left--;
             if (time_until_allow_meta_input > 0) time_until_allow_meta_input--;
             if (time_until_allow_undo_or_restart_input > 0) time_until_allow_undo_or_restart_input--; // doesn't really need to be consistent across timesteps; could be above
 
@@ -5294,7 +5331,7 @@ GameResult gameFrame(double delta_time, Input* input)
         }
 
         // draw debug popup
-        FOR(popup_index, MAX_DEBUG_POPUP_COUNT)
+        FOR(popup_index, MAX_DEBUG_POPUP_TYPE_COUNT)
         {
             DebugPopup* popup = &debug_popups[popup_index];
             if (popup->frames_left > 0)
