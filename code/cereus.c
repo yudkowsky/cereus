@@ -369,15 +369,17 @@ const int32 FONT_CELL_WIDTH_PX = 6;
 const int32 FONT_CELL_HEIGHT_PX = 10;
 const float DEFAULT_TEXT_SCALE = 30.0f;
 
-const int32 SAVE_WRITE_VERSION = 3;
+const char TILE_BUFFER_CHUNK_TAG[4] = "TILE";
 
-const int32 CAMERA_CHUNK_SIZE = 24;
 const char MAIN_CAMERA_CHUNK_TAG[4] = "CMRA";
 const char ALT_CAMERA_CHUNK_TAG[4] = "CAM2";
-const int32 WIN_BLOCK_CHUNK_SIZE = 76;
+const int32 CAMERA_CHUNK_SIZE = 24;
+
 const char WIN_BLOCK_CHUNK_TAG[4] = "WINB";
-const int32 LOCKED_INFO_CHUNK_SIZE = 76;
+const int32 WIN_BLOCK_CHUNK_SIZE = 76;
+
 const char LOCKED_INFO_CHUNK_TAG[4] = "LOKB";
+const int32 LOCKED_INFO_CHUNK_SIZE = 76;
 
 const int32 OVERWORLD_SCREEN_SIZE_X = 21;
 const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
@@ -436,7 +438,7 @@ LaserBuffer laser_buffer[512] = {0}; // 512 = 64 max sources * 16 max laser turn
 GameProgress game_progress = WORLD_0;
 Int3 level_dim = {0};
 Int3 level_origin = {0};
-Int3 restart_coords = {0};
+Int3 overworld_restart_coords = {0};
 bool in_overworld = true;
 float water_plane_y = 0.0f;
 
@@ -1050,18 +1052,19 @@ int32 getPushableStackSize(Int3 first_coords, Direction seek_direction)
 
 // FILE I/O
 
-// .level file structure: 
+// .level file structure:
 //
-// first byte is version. version 0 is a dense representation, like the buffer i have in memory. 
-// version 1 encodes buffer index, tile type, direction for every object, in a sparse representation, and so is much smaller, large % of a level is air
-// version 2 adds level_origin in 3 bytes after level_dim, so bumps everything up by 4 extra bytes. (this means there is one empty byte)
-// then 3 + 3 bytes: x,y,z of level dimensions (stride), and x,y,z of level origin
-// then sparse representation of level, 6 bytes per tile: buffer_index, tile type (and orientation), and direction
-
-// then chunking starts: 4 bytes for tag, 4 bytes for size (not including tag or size), and then data
-// camera:          tag: CMRA,  size: 24 (6 * 4b),          data: x, y, z, fov, yaw, pitch (as floats)
-// win block:       tag: WINB,  size: 76 (3 * 4b + 64b),    data: x, y, z (as int32), char[64] path
-// locked block:    tag: LOKB,  size: 76 (3 * 4b + 64b),    data: x, y, z (as int32), char[64] path
+// entire file is flat sequence of chunks. each chunk is:
+// 4 byte tag
+// 4 byte size (not including tag or size)
+// then some data
+//
+// current chunks:
+// TILE; size 24 + 6*N; dims and origin int32 x, y, z, then per tile: int32 buffer_index, uint8 type, uint8 direction
+// CMRA; size 24;  float x, y, z, fov, yaw, pitch
+// CAM2; size 24;  float x, y, z, fov, yaw, pitch
+// WINB; size 76;  int32 x, y, z, char[64] next_level
+// LOKB; size 76;  int32 x, y, z, char[64] unlocked_by
 
 void buildLevelPathFromName(char level_name[64], char (*level_path)[64], bool overwrite_source)
 {
@@ -1071,134 +1074,57 @@ void buildLevelPathFromName(char level_name[64], char (*level_path)[64], bool ov
     snprintf(*level_path, sizeof(*level_path), "%s%s.level", prefix, level_name);
 }
 
-// gets position and count of some chunk tag. cursor placed right before chunk tag
+// gets count and byte offsets of every matching tag
 int32 getCountAndPositionOfChunk(FILE* file, char tag[4], int32 positions[64])
 {
     char chunk[4] = {0};
     int32 chunk_size = 0;
-    int32 tag_pos = 0;
     int32 count = 0;
 
-    // go to start of chunking
     fseek(file, 0, SEEK_SET);
-    uint8 version = 0;
-    fread(&version, 1, 1, file);
-    int32 chunk_start = 0;
-    if (version >= 1)
-    {
-        int32 tile_count_offset = 0;
-        if (version == 1) tile_count_offset = 4;
-        else if (version == 2) tile_count_offset = 8;
-        else tile_count_offset = 25;
-        fseek(file, tile_count_offset, SEEK_SET);
-        int32 tile_count = 0;
-        fread(&tile_count, 4, 1, file);
-        chunk_start = tile_count_offset + 4 + (tile_count * 6);
-    }
-    else
-    {
-        chunk_start = 4 + (level_dim.x*level_dim.y*level_dim.z * 2);
-    }
-
-    fseek(file, chunk_start, SEEK_SET);
-
     while (true)
     {
-        tag_pos = ftell(file);
-
-        if (fread(chunk, 4, 1, file) != 1)
-        {
-            // eof
-            return count;
-        }
+        int32 tag_pos = ftell(file);
+        if (fread(chunk, 4, 1, file) != 1) return count; // eof
+        if (fread(&chunk_size, 4, 1, file) != 1) return count; // some truncation
         if (memcmp(chunk, tag, 4) == 0)
         {
-            // found tag
-            positions[count] = tag_pos; 
+            positions[count] = tag_pos;
             count++;
+            if (count >= 64) return count;
         }
-        fread(&chunk_size, 4, 1, file);
         fseek(file, chunk_size, SEEK_CUR);
     }
 }
 
-// reads version nr directly from file
 void loadBufferInfo(FILE* file)
 {
-    fseek(file, 0, SEEK_SET); // seek to start of file
+    fseek(file, 0, SEEK_SET);
 
-    // get version
-    int32 version = 0;
-    fread(&version, 1, 1, file);
+    int32 positions[64] = {0};
+    if (getCountAndPositionOfChunk(file, TILE_BUFFER_CHUNK_TAG, positions) != 1) return;
+    fseek(file, positions[0] + 4, SEEK_SET);
 
-    // get level dimensions
-    if (version >= 3)
-    {
-        int32 x, y, z;
-        fread(&x, 4, 1, file);
-        fread(&y, 4, 1, file);
-        fread(&z, 4, 1, file);
-        level_dim.x = x;
-        level_dim.y = y;
-        level_dim.z = z;
-    }
-    else
-    {
-        uint8 x, y, z;
-        fread(&x, 1, 1, file);
-        fread(&y, 1, 1, file);
-        fread(&z, 1, 1, file);
-        level_dim.x = x;
-        level_dim.y = y;
-        level_dim.z = z;
-    }
-    
-    if (version >= 3)
-    {
-        int32 x, y, z;
-        fread(&x, 4, 1, file);
-        fread(&y, 4, 1, file);
-        fread(&z, 4, 1, file);
-        level_origin.x = x;
-        level_origin.y = y;
-        level_origin.z = z;
-    }
-    else if (version == 2)
-    {
-        uint8 x, y, z;
-        fread(&x, 1, 1, file);
-        fread(&y, 1, 1, file);
-        fread(&z, 1, 1, file);
-        level_origin.x = x;
-        level_origin.y = y;
-        level_origin.z = z;
-        fseek(file, 8, SEEK_SET);
-    }
-    else
-    {
-        level_origin = (Int3){0};
-    }
+    int32 size = 0;
+    fread(&size, 4, 1, file);
+    fread(&level_dim.x, 4, 1, file);
+    fread(&level_dim.y, 4, 1, file);
+    fread(&level_dim.z, 4, 1, file);
+    fread(&level_origin.x, 4, 1, file);
+    fread(&level_origin.y, 4, 1, file);
+    fread(&level_origin.z, 4, 1, file);
 
-    if (version == 0)
+    int32 tile_count = (size - 24) / 6;
+    FOR(tile_index, tile_count)
     {
-        fread(&world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
-    }
-    else
-    {
-        int32 tile_count = 0;
-        fread(&tile_count, 4, 1, file);
-        FOR(tile_index, tile_count)
-        {
-            int32 buffer_index = 0;
-            TileType type = TILE_TYPE_NONE;
-            Direction direction = NO_DIRECTION;
-            fread(&buffer_index, 4, 1, file);
-            fread(&type, 1, 1, file);
-            fread(&direction, 1, 1, file);
-
-            world_state.buffer[buffer_index] = (uint8)type;
-            world_state.buffer[buffer_index + 1] = (uint8)direction;
-        }
+        int32 buffer_index = 0;
+        uint8 type = TILE_TYPE_NONE;
+        uint8 direction = NO_DIRECTION;
+        fread(&buffer_index, 4, 1, file);
+        fread(&type, 1, 1, file);
+        fread(&direction, 1, 1, file);
+        world_state.buffer[buffer_index] = type;
+        world_state.buffer[buffer_index + 1] = direction;
     }
 }
 
@@ -1209,10 +1135,9 @@ Camera loadCameraInfo(FILE* file, bool use_alt_camera)
     int32 positions[64] = {0};
     char tag[4] = {0}; 
     if (use_alt_camera) memcpy(&tag, &ALT_CAMERA_CHUNK_TAG, sizeof(tag));
-    else            memcpy(&tag, &MAIN_CAMERA_CHUNK_TAG, sizeof(tag));
+    else                memcpy(&tag, &MAIN_CAMERA_CHUNK_TAG, sizeof(tag));
 
-    int32 count = getCountAndPositionOfChunk(file, tag, positions);
-    if (count != 1) return out_camera;
+    if (getCountAndPositionOfChunk(file, tag, positions) != 1) return out_camera;
 
     fseek(file, positions[0] + 8, SEEK_SET);
     fread(&out_camera.coords.x, 4, 1, file);
@@ -1286,37 +1211,37 @@ void loadLockedInfoPaths(FILE* file)
     }
 }
 
-void writeBufferToFile(FILE* file, int32 version)
+void writeTileChunkToFile(FILE* file)
 {
-    if (version >= 1)
-    {
-        int32 prefix_bytes = 4;
-        if (version == 2) prefix_bytes = 8;
-        else if (version >= 3) prefix_bytes = 25;
-        int32 tile_count = 0;
-        // leave space for dims, (origin), and tile_count
-        fseek(file, prefix_bytes + 4, SEEK_SET);
+    fwrite(TILE_BUFFER_CHUNK_TAG, 4, 1, file);
+    int32 size = 0;
+    int32 size_pos = ftell(file); // will backsolve size at this point later
+    fseek(file, 4, SEEK_CUR);
 
-        for (int32 buffer_index = 0; buffer_index < level_dim.x*level_dim.y*level_dim.z * 2; buffer_index += 2)
-        {
-            if (world_state.buffer[buffer_index] == TILE_TYPE_NONE) continue;
-            TileType type = (int8)world_state.buffer[buffer_index];
-            Direction direction = (int8)world_state.buffer[buffer_index + 1];
-            fwrite(&buffer_index, 4, 1, file); // write buffer_index, backsolve coords from level dims on decompression
-            fwrite(&type, 1, 1, file);
-            fwrite(&direction, 1, 1, file);
-            tile_count++;
-        }
-        // seek back to after level_dim (and origin)
-        fseek(file, prefix_bytes, SEEK_SET);
+    fwrite(&level_dim.x, 4, 1, file);
+    fwrite(&level_dim.y, 4, 1, file);
+    fwrite(&level_dim.z, 4, 1, file);
+    fwrite(&level_origin.x, 4, 1, file);
+    fwrite(&level_origin.y, 4, 1, file);
+    fwrite(&level_origin.z, 4, 1, file);
 
-        fwrite(&tile_count, 4, 1, file);
-        fseek(file, (prefix_bytes + 4 + (tile_count * 6)), SEEK_SET); // set seek to end of tiles
-    }
-    else
+    int32 tile_count = 0;
+    for (int buffer_index = 0; buffer_index < level_dim.x*level_dim.y*level_dim.z * 2; buffer_index += 2)
     {
-        fwrite(world_state.buffer, 1, level_dim.x*level_dim.y*level_dim.z * 2, file);
+        if (world_state.buffer[buffer_index] == TILE_TYPE_NONE) continue;
+        uint8 type = world_state.buffer[buffer_index];
+        uint8 direction = world_state.buffer[buffer_index + 1];
+        fwrite(&buffer_index, 4, 1, file);
+        fwrite(&type, 1, 1, file);
+        fwrite(&direction, 1, 1, file);
+        tile_count++;
     }
+
+    int32 end_pos = ftell(file); // maintain cursor pos at end of write TODO: is this important?
+    size = 24 + tile_count * 6;
+    fseek(file, size_pos, SEEK_SET);
+    fwrite(&size, 4, 1, file);
+    fseek(file, end_pos, SEEK_SET);
 }
 
 void writeCameraToFile(FILE* file, Camera* in_camera, bool write_alt_camera)
@@ -1365,31 +1290,15 @@ bool saveLevelRewrite(char* path)
     FILE* file = fopen(path, "wb");
     if (!file) return false;
 
-    fwrite(&SAVE_WRITE_VERSION, 1, 1, file);
-
-    int32 level_x = level_dim.x;
-    int32 level_y = level_dim.y;
-    int32 level_z = level_dim.z;
-    fwrite(&level_x, 4, 1, file);
-    fwrite(&level_y, 4, 1, file);
-    fwrite(&level_z, 4, 1, file);
-
-    int32 origin_x = level_origin.x;
-    int32 origin_y = level_origin.y;
-    int32 origin_z = level_origin.z;
-    fwrite(&origin_x, 4, 1, file);
-    fwrite(&origin_y, 4, 1, file);
-    fwrite(&origin_z, 4, 1, file);
-
-    writeBufferToFile(file, SAVE_WRITE_VERSION);
+    writeTileChunkToFile(file);
     writeCameraToFile(file, &saved_main_camera, false);
     if (saved_alt_camera.fov != 0) writeCameraToFile(file, &saved_alt_camera, true);
 
     FOR(win_block_index, MAX_ENTITY_INSTANCE_COUNT)
     {
         Entity* wb = &world_state.win_blocks[win_block_index];
-        if (wb->removed) continue;
         if (wb->next_level[0] == '\0') continue;
+        if (wb->removed) continue;
         writeWinBlockToFile(file, wb);
     }
 
@@ -4382,7 +4291,7 @@ GameResult gameFrame(double delta_time, Input* input)
                     memcpy(&world_state.solved_levels, &persist_solved_levels, sizeof(char) * 64 * 64);
                     memcpy(&world_state.level_name, "overworld", sizeof(char) * 64);
 
-                    moveEntityInBufferAndState(player, restart_coords, NORTH);
+                    moveEntityInBufferAndState(player, overworld_restart_coords, NORTH);
                     player->rotation = directionToRotation(player->direction, MIRROR_SIDE);
                     player->position = vec3FromInt3(player->coords);
                     moveEntityInBufferAndState(pack, getNextCoords(player->coords, SOUTH), NORTH);
@@ -4807,20 +4716,20 @@ GameResult gameFrame(double delta_time, Input* input)
         // update restart coords based on current coords of the player, and also update game progress if this is relevant
         if (player->coords.z > 204) 
         {
-            restart_coords = (Int3){ 37, 258, 225 };
+            overworld_restart_coords = (Int3){ 37, 258, 225 };
         }
         else if (player->coords.z > 189)
         {
-            restart_coords = (Int3){ 58, 258, 197 };
+            overworld_restart_coords = (Int3){ 58, 258, 197 };
             if (game_progress < WORLD_1) game_progress = WORLD_1;
         }
         else if (player->coords.z > 174) 
         {
-            restart_coords = (Int3){ 58, 258, 188 };
+            overworld_restart_coords = (Int3){ 58, 258, 188 };
         }
         else
         {
-            restart_coords = (Int3){ 58, 258, 170 };
+            overworld_restart_coords = (Int3){ 58, 258, 170 };
             if (game_progress < WORLD_2) game_progress = WORLD_2;
         }
 
