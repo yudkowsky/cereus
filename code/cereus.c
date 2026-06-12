@@ -409,15 +409,14 @@ Input prev_input = {0}; // copied from previous frame input to generate keys_pre
 DrawCommand draw_commands[8192] = {0};
 int32 draw_command_count = 0;
 
-// TODO: these should be capitalized
-const char debug_level_name[64] = "testing";
-const char relative_start_level_path_buffer[64] = "data/levels/";
-const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
-const char level_base_file_name[64] = "base.level";
-const char water_texture_file_name[64] = "water.texture";
-const char solved_level_path[64] = "data/meta/solved-levels.meta";
-const char undo_meta_path[64] = "data/meta/undo-buffer.meta";
-const char overworld_zero_name[64] = "overworld-zero";
+const char DEBUG_LEVEL_NAME[64] = "testing";
+const char RELATIVE_LEVEL_FOLDER_PATH[64] = "data/levels/";
+const char SOURCE_LEVEL_FOLDER_PATH[64] = "../cereus/data/levels/";
+const char LEVEL_BASE_FILE_NAME[64] = "base.level";
+const char WATER_TEXTURE_FILE_NAME[64] = "water.texture";
+const char SOLVED_LEVELS_PATH[64] = "data/meta/solved-levels.meta";
+const char UNDO_DATA_PATH[64] = "data/meta/undo-buffer.meta";
+const char OVERWORLD_ZERO_NAME[64] = "overworld-zero";
 
 // camera
 const float CAMERA_SENSITIVITY = 0.0005f;
@@ -1097,8 +1096,8 @@ int32 getPushableStackSize(Int3 first_coords, Direction seek_direction)
 void buildLevelFolderPath(char (*out_path)[64], char level_name[64], bool overwrite_source)
 {
     char prefix[64];
-    if (overwrite_source) memcpy(prefix, source_start_level_path_buffer, sizeof(prefix));
-    else                  memcpy(prefix, relative_start_level_path_buffer, sizeof(prefix));
+    if (overwrite_source) memcpy(prefix, SOURCE_LEVEL_FOLDER_PATH, sizeof(prefix));
+    else                  memcpy(prefix, RELATIVE_LEVEL_FOLDER_PATH, sizeof(prefix));
     snprintf(*out_path, sizeof(*out_path), "%s%s", prefix, level_name);
 }
 
@@ -1291,7 +1290,7 @@ void writeTileChunkToFile(FILE* file)
         tile_count++;
     }
 
-    int32 end_pos = ftell(file); // maintain cursor pos at end of write TODO: is this important?
+    int32 end_pos = ftell(file); // maintain cursor pos at end of write
     size = 24 + tile_count * 6;
     fseek(file, size_pos, SEEK_SET);
     fwrite(&size, 4, 1, file);
@@ -1355,10 +1354,10 @@ void writeWaterInfoToFile(FILE* file)
 }
 
 // doesn't change the camera
-void saveLevelRewrite(char* folder_path) // TODO: rename to something to do with 'write base.level but not the other stuff in level folder'
+void writeBaseLevelInfo(char* folder_path)
 {
     char level_path[64];
-    snprintf(level_path, sizeof(level_path), "%s/%s", folder_path, level_base_file_name);
+    snprintf(level_path, sizeof(level_path), "%s/%s", folder_path, LEVEL_BASE_FILE_NAME);
     FILE* file = fopen(level_path, "wb");
     if (!file) return;
 
@@ -1399,7 +1398,7 @@ void loadWaterTexture(char* folder_path)
     FOR(pixel, WATER_PAINT_SIDE * WATER_PAINT_SIDE) water_paint_texture.values[pixel] = (Vec4){ 0.0f, 0.0f, 0.0f, 1.0f };
 
     char texture_path[64];
-    snprintf(texture_path, sizeof(texture_path), "%s/%s", folder_path, water_texture_file_name);
+    snprintf(texture_path, sizeof(texture_path), "%s/%s", folder_path, WATER_TEXTURE_FILE_NAME);
     FILE* file = fopen(texture_path, "rb");
     if (!file) return;
     fread(water_texture_io_buffer, 1, WATER_PAINT_SIDE * WATER_PAINT_SIDE, file);
@@ -1407,11 +1406,14 @@ void loadWaterTexture(char* folder_path)
     fclose(file);
 }
 
-// TODO: here translating from Vec4s to single uint8 byte. do i want to keep Vec4s in the first place? i should at least keep it as 4 uint8s, instead of 16 bytes?
+// TODO:
+// right now: storing 1024*1024 uint8s on disk, and converting to Vec4 per pixel used in renderer.
+// insead, want to store 4 byte RGBA color (1 byte each), and use that in renderer, so I don't need any for loops, just the memcpy.
+// Then I want have the size of the texture be dynamic based on level_dim (still 16 pixels per tile, but dynamic size)
 void writeWaterTexture(char folder_path[64])
 {
     char texture_path[64];
-    snprintf(texture_path, sizeof(texture_path), "%s/%s", folder_path, water_texture_file_name);
+    snprintf(texture_path, sizeof(texture_path), "%s/%s", folder_path, WATER_TEXTURE_FILE_NAME);
 
     if (water_plane_y == NO_WATER_PLANE_LOW_VALUE)
     {
@@ -1422,7 +1424,7 @@ void writeWaterTexture(char folder_path[64])
     FOR(pixel, WATER_PAINT_SIDE * WATER_PAINT_SIDE)
     {
         float value = water_paint_texture.values[pixel].x;
-        water_texture_io_buffer[pixel] = (uint8)(value * 255.0f + 0.5f); // TODO: weird stuff is temp
+        water_texture_io_buffer[pixel] = (uint8)(value * 255.0f + 0.5f);
     }
 
     FILE* file = fopen(texture_path, "wb");
@@ -1463,7 +1465,7 @@ void removeFromSolvedLevels(char level[64])
 void loadSolvedLevelsFromFile()
 {
     memset(world_state.solved_levels, 0, sizeof(world_state.solved_levels));
-    FILE* file = fopen(solved_level_path, "rb+");
+    FILE* file = fopen(SOLVED_LEVELS_PATH, "rb+");
     FOR(level_index, MAX_LEVEL_COUNT)
     {
         if (fread(world_state.solved_levels[level_index], 64, 1, file) != 1) break;
@@ -1474,7 +1476,7 @@ void loadSolvedLevelsFromFile()
 
 void writeSolvedLevelsToFile()
 {
-    FILE* file = fopen(solved_level_path, "wb");
+    FILE* file = fopen(SOLVED_LEVELS_PATH, "wb");
     if (!file) return;
     FOR(level_index, MAX_LEVEL_COUNT)
     {
@@ -1486,7 +1488,7 @@ void writeSolvedLevelsToFile()
 
 void clearSolvedLevels()
 {
-    FILE* file = fopen(solved_level_path, "wb");
+    FILE* file = fopen(SOLVED_LEVELS_PATH, "wb");
     fclose(file);
     memset(world_state.solved_levels, 0, sizeof(world_state.solved_levels));
 }
@@ -2337,7 +2339,7 @@ void initUndoBuffer()
 /*
 void writeUndoBufferToFile()
 {
-    FILE* file = fopen(undo_meta_path, "wb");
+    FILE* file = fopen(UNDO_DATA_PATH, "wb");
     if (!file) return;
     fwrite(&undo_buffer, sizeof(UndoBuffer), 1, file);
     fclose(file);
@@ -2361,7 +2363,7 @@ void loadUndoBufferFromFile()
 
 void initializeLevel(char* level_name)
 {
-    if (level_name == 0) strcpy(world_state.level_name, debug_level_name);
+    if (level_name == 0) strcpy(world_state.level_name, DEBUG_LEVEL_NAME);
     else strcpy(world_state.level_name, level_name);
 
     memset(laser_buffer, 0, sizeof(laser_buffer));
@@ -2384,7 +2386,7 @@ void initializeLevel(char* level_name)
     char folder_path[64];
     char level_path[64];
     buildLevelFolderPath(&folder_path, world_state.level_name, false);
-    snprintf(level_path, sizeof(level_path), "%s/%s", folder_path, level_base_file_name);
+    snprintf(level_path, sizeof(level_path), "%s/%s", folder_path, LEVEL_BASE_FILE_NAME);
     FILE* file = fopen(level_path, "rb+");
     loadBufferInfo(file);
     fclose(file);
@@ -4835,7 +4837,7 @@ GameResult gameFrame(double delta_time, Input* input)
                     {
                         char folder_path[64] = {0};
                         buildLevelFolderPath(&folder_path, world_state.level_name, false);
-                        saveLevelRewrite(folder_path);
+                        writeBaseLevelInfo(folder_path);
                         if (camera_mode == ALT_WAITING) 
                         {
                             saved_overworld_camera = saved_alt_camera;
@@ -5067,15 +5069,15 @@ GameResult gameFrame(double delta_time, Input* input)
 
         // only used if saving in overworld
         char overworld_zero_path[64];
-        buildLevelFolderPath(&overworld_zero_path, overworld_zero_name, true);
+        buildLevelFolderPath(&overworld_zero_path, OVERWORLD_ZERO_NAME, true);
         char overworld_zero_relative_path[64];
-        buildLevelFolderPath(&overworld_zero_relative_path, overworld_zero_name, false);
+        buildLevelFolderPath(&overworld_zero_relative_path, OVERWORLD_ZERO_NAME, false);
 
         // create paths to .level from folder
         char level_path[64];
-        snprintf(level_path, sizeof(level_path), "%s/%s", folder_path, level_base_file_name);
+        snprintf(level_path, sizeof(level_path), "%s/%s", folder_path, LEVEL_BASE_FILE_NAME);
         char relative_level_path[64];
-        snprintf(relative_level_path, sizeof(relative_level_path), "%s/%s", relative_folder_path, level_base_file_name);
+        snprintf(relative_level_path, sizeof(relative_level_path), "%s/%s", relative_folder_path, LEVEL_BASE_FILE_NAME);
 
         // write camera to file on c press, alternative camera on v press
         if (time_until_allow_meta_input == 0 && editor_state.editor_mode == EDITOR_MODE_PLACE_BREAK && (input->keys_held & KEY_C || input->keys_held & KEY_V))
@@ -5165,14 +5167,14 @@ GameResult gameFrame(double delta_time, Input* input)
         // write base.level and water.texture to file on i press
         if (time_until_allow_meta_input == 0 && editor_state.editor_mode != EDITOR_MODE_SELECT_WRITE && input->keys_held & KEY_I) 
         {
-            saveLevelRewrite(folder_path);
-            saveLevelRewrite(relative_folder_path);
+            writeBaseLevelInfo(folder_path);
+            writeBaseLevelInfo(relative_folder_path);
             writeWaterTexture(folder_path);
             writeWaterTexture(relative_folder_path);
             if (in_overworld)
             {
-                saveLevelRewrite(overworld_zero_path);
-                saveLevelRewrite(overworld_zero_relative_path);
+                writeBaseLevelInfo(overworld_zero_path);
+                writeBaseLevelInfo(overworld_zero_relative_path);
                 writeWaterTexture(overworld_zero_path);
                 writeWaterTexture(overworld_zero_relative_path);
 
@@ -5279,7 +5281,7 @@ GameResult gameFrame(double delta_time, Input* input)
     {
         if (in_overworld)
         {
-            // draw camera screen lines TODO: will want to do this for some levels too, probably?
+            // draw camera screen lines NOTE: if/when levels want to have multiple screens, will want to do this for levels also
             int32 x_wall_length = ((level_dim.z - 2) / OVERWORLD_SCREEN_SIZE_Z + 2) * OVERWORLD_SCREEN_SIZE_Z; // constant x: depends on z len
             int32 z_wall_length = ((level_dim.x - 2) / OVERWORLD_SCREEN_SIZE_X + 2) * OVERWORLD_SCREEN_SIZE_X; // constant z: depends on x len
 
