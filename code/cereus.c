@@ -409,9 +409,12 @@ Input prev_input = {0}; // copied from previous frame input to generate keys_pre
 DrawCommand draw_commands[8192] = {0};
 int32 draw_command_count = 0;
 
+// TODO: these should be capitalized
 const char debug_level_name[64] = "testing";
 const char relative_start_level_path_buffer[64] = "data/levels/";
 const char source_start_level_path_buffer[64] = "../cereus/data/levels/";
+const char level_base_file_name[64] = "base.level";
+const char water_texture_file_name[64] = "water.texture";
 const char solved_level_path[64] = "data/meta/solved-levels.meta";
 const char undo_meta_path[64] = "data/meta/undo-buffer.meta";
 const char overworld_zero_name[64] = "overworld-zero";
@@ -452,6 +455,8 @@ bool in_overworld = true;
 
 float water_plane_y = 0.0f;
 Vec3 sun_direction = {0};
+
+uint8 water_texture_io_buffer[WATER_PAINT_SIDE * WATER_PAINT_SIDE] = {0};
 
 Entity* player = &world_state.player;
 Entity* pack = &world_state.pack;
@@ -1089,12 +1094,12 @@ int32 getPushableStackSize(Int3 first_coords, Direction seek_direction)
 // WINB; size 76;  int32 x, y, z, char[64] next_level
 // LOKB; size 76;  int32 x, y, z, char[64] unlocked_by
 
-void buildLevelPathFromName(char level_name[64], char (*level_path)[64], bool overwrite_source)
+void buildLevelFolderPath(char (*out_path)[64], char level_name[64], bool overwrite_source)
 {
     char prefix[64];
     if (overwrite_source) memcpy(prefix, source_start_level_path_buffer, sizeof(prefix));
     else                  memcpy(prefix, relative_start_level_path_buffer, sizeof(prefix));
-    snprintf(*level_path, sizeof(*level_path), "%s%s.level", prefix, level_name);
+    snprintf(*out_path, sizeof(*out_path), "%s%s", prefix, level_name);
 }
 
 // gets count and byte offsets of every matching tag
@@ -1350,10 +1355,12 @@ void writeWaterInfoToFile(FILE* file)
 }
 
 // doesn't change the camera
-bool saveLevelRewrite(char* path)
+void saveLevelRewrite(char* folder_path) // TODO: rename to something to do with 'write base.level but not the other stuff in level folder'
 {
-    FILE* file = fopen(path, "wb");
-    if (!file) return false;
+    char level_path[64];
+    snprintf(level_path, sizeof(level_path), "%s/%s", folder_path, level_base_file_name);
+    FILE* file = fopen(level_path, "wb");
+    if (!file) return;
 
     writeTileChunkToFile(file);
     writeSunDirectionToFile(file);
@@ -1380,8 +1387,51 @@ bool saveLevelRewrite(char* path)
         }
     }
     fclose(file);
-    return true;
 }
+
+// water texture (separate file)
+
+void loadWaterTexture(char* folder_path)
+{
+    water_paint_texture.dirty = true;
+
+    // default empty so a level with no texture file doesn't inherit from previous... shouldn't actually matter, i guess
+    FOR(pixel, WATER_PAINT_SIDE * WATER_PAINT_SIDE) water_paint_texture.values[pixel] = (Vec4){ 0.0f, 0.0f, 0.0f, 1.0f };
+
+    char texture_path[64];
+    snprintf(texture_path, sizeof(texture_path), "%s/%s", folder_path, water_texture_file_name);
+    FILE* file = fopen(texture_path, "rb");
+    if (!file) return;
+    fread(water_texture_io_buffer, 1, WATER_PAINT_SIDE * WATER_PAINT_SIDE, file);
+    FOR(pixel, WATER_PAINT_SIDE * WATER_PAINT_SIDE) water_paint_texture.values[pixel].x = (float)water_texture_io_buffer[pixel] / 255.0f;
+    fclose(file);
+}
+
+// TODO: here translating from Vec4s to single uint8 byte. do i want to keep Vec4s in the first place? i should at least keep it as 4 uint8s, instead of 16 bytes?
+void writeWaterTexture(char folder_path[64])
+{
+    char texture_path[64];
+    snprintf(texture_path, sizeof(texture_path), "%s/%s", folder_path, water_texture_file_name);
+
+    if (water_plane_y == NO_WATER_PLANE_LOW_VALUE)
+    {
+        remove(texture_path); // delete this file (if it exists)
+        return;
+    }
+
+    FOR(pixel, WATER_PAINT_SIDE * WATER_PAINT_SIDE)
+    {
+        float value = water_paint_texture.values[pixel].x;
+        water_texture_io_buffer[pixel] = (uint8)(value * 255.0f + 0.5f); // TODO: weird stuff is temp
+    }
+
+    FILE* file = fopen(texture_path, "wb");
+    if (!file) return;
+    fwrite(water_texture_io_buffer, 1, WATER_PAINT_SIDE * WATER_PAINT_SIDE, file);
+    fclose(file);
+}
+
+// solved levels (separate file)
 
 int32 findInSolvedLevels(char level[64])
 {
@@ -2330,12 +2380,13 @@ void initializeLevel(char* level_name)
     if (strcmp(world_state.level_name, "overworld") == 0) in_overworld = true;
     else in_overworld = false;
 
-    // build level_path from level_name
-    char level_path[64] = {0};
-    buildLevelPathFromName(world_state.level_name, &level_path, false);
+    // level_name to folder_path to level_path, use to build buffer
+    char folder_path[64];
+    char level_path[64];
+    buildLevelFolderPath(&folder_path, world_state.level_name, false);
+    snprintf(level_path, sizeof(level_path), "%s/%s", folder_path, level_base_file_name);
     FILE* file = fopen(level_path, "rb+");
     loadBufferInfo(file);
-
     fclose(file);
 
     // clear entity data
@@ -2412,6 +2463,8 @@ void initializeLevel(char* level_name)
     loadLockedInfoPaths(file);
     fclose(file);
 
+    loadWaterTexture(folder_path);
+
     loadSolvedLevelsFromFile();
 
     // use correct camera when entering overworld
@@ -2437,8 +2490,6 @@ void initializeLevel(char* level_name)
     if (in_overworld) ow_player_coords_for_offset = player->coords;
 
     updateLaserBuffer();
-
-    water_paint_texture.dirty = true;
 }
 
 void recalculateTextStartCoords()
@@ -4157,7 +4208,7 @@ GameResult gameFrame(double delta_time, Input* input)
         // this organisation is kind of bad: already have some 'per mode handling' for select and for painting above, they just happen to do some more 'stuff'
         // first, edge case on either game or place break for gameplay speed stuff
 
-        if (editor_state.editor_mode == EDITOR_MODE_NONE || editor_state.editor_mode == EDITOR_MODE_PLACE_BREAK);
+        if (editor_state.editor_mode == EDITOR_MODE_NONE || editor_state.editor_mode == EDITOR_MODE_PLACE_BREAK)
         {
             // speed up / slow down physics tick
             if (input->keys_held & KEY_DOT)
@@ -4782,9 +4833,9 @@ GameResult gameFrame(double delta_time, Input* input)
                 {
                     if (in_overworld) 
                     {
-                        char level_path[64] = {0};
-                        buildLevelPathFromName(world_state.level_name, &level_path, false);
-                        saveLevelRewrite(level_path);
+                        char folder_path[64] = {0};
+                        buildLevelFolderPath(&folder_path, world_state.level_name, false);
+                        saveLevelRewrite(folder_path);
                         if (camera_mode == ALT_WAITING) 
                         {
                             saved_overworld_camera = saved_alt_camera;
@@ -5009,16 +5060,22 @@ GameResult gameFrame(double delta_time, Input* input)
     // SAVING STUFF (depends on changed state, so after loop)
     {
         // paths for saving data both to source and to inside build
-        char level_path[64];
-        buildLevelPathFromName(world_state.level_name, &level_path, true);
-        char relative_level_path[64];
-        buildLevelPathFromName(world_state.level_name, &relative_level_path, false);
+        char folder_path[64];
+        buildLevelFolderPath(&folder_path, world_state.level_name, true);
+        char relative_folder_path[64];
+        buildLevelFolderPath(&relative_folder_path, world_state.level_name, false);
 
         // only used if saving in overworld
         char overworld_zero_path[64];
-        buildLevelPathFromName(overworld_zero_name, &overworld_zero_path, true);
+        buildLevelFolderPath(&overworld_zero_path, overworld_zero_name, true);
         char overworld_zero_relative_path[64];
-        buildLevelPathFromName(overworld_zero_name, &overworld_zero_relative_path, false);
+        buildLevelFolderPath(&overworld_zero_relative_path, overworld_zero_name, false);
+
+        // create paths to .level from folder
+        char level_path[64];
+        snprintf(level_path, sizeof(level_path), "%s/%s", folder_path, level_base_file_name);
+        char relative_level_path[64];
+        snprintf(relative_level_path, sizeof(relative_level_path), "%s/%s", relative_folder_path, level_base_file_name);
 
         // write camera to file on c press, alternative camera on v press
         if (time_until_allow_meta_input == 0 && editor_state.editor_mode == EDITOR_MODE_PLACE_BREAK && (input->keys_held & KEY_C || input->keys_held & KEY_V))
@@ -5076,6 +5133,7 @@ GameResult gameFrame(double delta_time, Input* input)
             else saved_alt_camera = camera;
         }
 
+        // clear alt camera on x
         if (time_until_allow_meta_input == 0 && editor_state.editor_mode != EDITOR_MODE_SELECT_WRITE && input->keys_held & KEY_X) 
         {
             if (saved_alt_camera.fov > 0) // if there is a saved alt camera
@@ -5086,7 +5144,7 @@ GameResult gameFrame(double delta_time, Input* input)
 
                 Camera empty_camera = {0};
                 {
-                    FILE* file = fopen(relative_level_path, "rb+");
+                    FILE* file = fopen(level_path, "rb+");
                     int32 positions[64] = {0};
                     getCountAndPositionOfChunk(file, ALT_CAMERA_CHUNK_TAG, positions);
                     fseek(file, positions[0], SEEK_SET);
@@ -5094,7 +5152,7 @@ GameResult gameFrame(double delta_time, Input* input)
                     fclose(file);
                 }
                 {
-                    FILE* file = fopen(level_path, "rb+");
+                    FILE* file = fopen(relative_level_path, "rb+");
                     int32 positions[64] = {0};
                     getCountAndPositionOfChunk(file, ALT_CAMERA_CHUNK_TAG, positions);
                     fseek(file, positions[0], SEEK_SET);
@@ -5104,15 +5162,19 @@ GameResult gameFrame(double delta_time, Input* input)
             }
         }
 
-        // write level to file on i press
+        // write base.level and water.texture to file on i press
         if (time_until_allow_meta_input == 0 && editor_state.editor_mode != EDITOR_MODE_SELECT_WRITE && input->keys_held & KEY_I) 
         {
-            saveLevelRewrite(level_path);
-            saveLevelRewrite(relative_level_path);
+            saveLevelRewrite(folder_path);
+            saveLevelRewrite(relative_folder_path);
+            writeWaterTexture(folder_path);
+            writeWaterTexture(relative_folder_path);
             if (in_overworld)
             {
                 saveLevelRewrite(overworld_zero_path);
                 saveLevelRewrite(overworld_zero_relative_path);
+                writeWaterTexture(overworld_zero_path);
+                writeWaterTexture(overworld_zero_relative_path);
 
                 // overwrite overworld_zero's world state with the new saved one
                 memcpy(&overworld_zero_state, &world_state, sizeof(WorldState));
