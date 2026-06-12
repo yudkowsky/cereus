@@ -4152,8 +4152,47 @@ GameResult gameFrame(double delta_time, Input* input)
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
 
+
         // per-mode handling
         // this organisation is kind of bad: already have some 'per mode handling' for select and for painting above, they just happen to do some more 'stuff'
+        // first, edge case on either game or place break for gameplay speed stuff
+
+        if (editor_state.editor_mode == EDITOR_MODE_NONE || editor_state.editor_mode == EDITOR_MODE_PLACE_BREAK);
+        {
+            // speed up / slow down physics tick
+            if (input->keys_held & KEY_DOT)
+            {
+                physics_timestep_multiplier /= 2;
+                if (physics_timestep_multiplier < 1.0) physics_timestep_multiplier = 1.0;
+                char timestep_text[256] = {0};
+                snprintf(timestep_text, sizeof(timestep_text), "physics speed decreased: %.4f (%.6fs per tick)", 1.0 / physics_timestep_multiplier, physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
+                createDebugPopup(timestep_text, POPUP_TYPE_PHYSICS_TIMESTEP_CHANGE);
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            }
+            else if (input->keys_held & KEY_COMMA)
+            {
+                physics_timestep_multiplier *= 2;
+                char timestep_text[256] = {0};
+                snprintf(timestep_text, sizeof(timestep_text), "physics speed increased: %.4f (%.6fs per tick)", 1.0 / physics_timestep_multiplier, physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
+                createDebugPopup(timestep_text, POPUP_TYPE_PHYSICS_TIMESTEP_CHANGE);
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            }
+
+            // handle step through physics mode
+            if (input->keys_held & KEY_6)
+            {
+                step_mode = !step_mode;
+                if (step_mode) createDebugPopup("step through physics on", POPUP_TYPE_STEP_THROUGH_TOGGLE);
+                else           createDebugPopup("step through physics off", POPUP_TYPE_STEP_THROUGH_TOGGLE);
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            }
+            if (input->keys_held & KEY_K)
+            {
+                step_to_next_tick = true;
+                createDebugPopup("stepped to next tick", POPUP_TYPE_NONE);
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            }
+        }
 
         if (editor_state.editor_mode == EDITOR_MODE_PLACE_BREAK)
         {
@@ -4209,40 +4248,6 @@ GameResult gameFrame(double delta_time, Input* input)
                 char yaw_text[256] = {0};
                 snprintf(yaw_text, sizeof(yaw_text), "camera yaw snapped to: %.3f", camera_snap_yaw);
                 createDebugPopup(yaw_text, POPUP_TYPE_NONE);
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            }
-
-            // speed up / slow down physics tick
-            if (input->keys_held & KEY_DOT)
-            {
-                physics_timestep_multiplier /= 2;
-                if (physics_timestep_multiplier < 1.0) physics_timestep_multiplier = 1.0;
-                char timestep_text[256] = {0};
-                snprintf(timestep_text, sizeof(timestep_text), "physics speed decreased: %.4f (%.6fs per tick)", 1.0 / physics_timestep_multiplier, physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
-                createDebugPopup(timestep_text, POPUP_TYPE_PHYSICS_TIMESTEP_CHANGE);
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            }
-            else if (input->keys_held & KEY_COMMA)
-            {
-                physics_timestep_multiplier *= 2;
-                char timestep_text[256] = {0};
-                snprintf(timestep_text, sizeof(timestep_text), "physics speed increased: %.4f (%.6fs per tick)", 1.0 / physics_timestep_multiplier, physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
-                createDebugPopup(timestep_text, POPUP_TYPE_PHYSICS_TIMESTEP_CHANGE);
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            }
-
-            // handle step through physics mode
-            if (input->keys_held & KEY_6)
-            {
-                step_mode = !step_mode;
-                if (step_mode) createDebugPopup("step through physics on", POPUP_TYPE_STEP_THROUGH_TOGGLE);
-                else           createDebugPopup("step through physics off", POPUP_TYPE_STEP_THROUGH_TOGGLE);
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            }
-            if (input->keys_held & KEY_K)
-            {
-                step_to_next_tick = true;
-                createDebugPopup("stepped to next tick", POPUP_TYPE_NONE);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 
