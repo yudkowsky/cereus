@@ -4205,6 +4205,13 @@ GameResult gameFrame(double delta_time, Input* input)
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
 
+        // TODO: temp testing of reloading models
+        if (input->keys_held & KEY_E)
+        {
+            vulkanReloadModel(MODEL_3D_BOX, "data/assets/models/rock.glb");
+            createDebugPopup("reloaded model", POPUP_TYPE_NONE);
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+        }
 
         // per-mode handling
         // this organisation is kind of bad: already have some 'per mode handling' for select and for painting above, they just happen to do some more 'stuff'

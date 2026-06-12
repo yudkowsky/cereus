@@ -1721,6 +1721,24 @@ LoadedModel loadModel(char* path)
     return result;
 }
 
+// TODO: probably expose the entity models' paths as constants in everything.h? can backsolve the path here from game layer based on level_name, so that part is fine
+void vulkanReloadModel(int32 model_id, char* path)
+{
+    int32 slot = model_id - MODEL_3D_VOID;
+    if (slot < 0 || slot >= 64) return;
+
+    vkDeviceWaitIdle(vulkan_state.logical_device_handle); // one frame slowness
+
+    LoadedModel* old_model = &vulkan_state.loaded_models[slot];
+    if (old_model->vertex_buffer) vkDestroyBuffer(vulkan_state.logical_device_handle, old_model->vertex_buffer, 0);
+    if (old_model->vertex_memory) vkFreeMemory(vulkan_state.logical_device_handle, old_model->vertex_memory, 0);
+    if (old_model->index_buffer)  vkDestroyBuffer(vulkan_state.logical_device_handle, old_model->index_buffer, 0);
+    if (old_model->index_memory)  vkFreeMemory(vulkan_state.logical_device_handle, old_model->index_memory, 0);
+    if (old_model->data)          cgltf_free(old_model->data); // TODO: loadModel keeps this around, i think?
+
+    vulkan_state.loaded_models[slot] = loadModel(path);
+}
+
 void loadAllEntities()
 {
     vulkan_state.loaded_models[MODEL_3D_BOX - MODEL_3D_VOID] = loadModel("data/assets/models/rock.glb");
@@ -1732,6 +1750,7 @@ void loadAllEntities()
 
     vulkan_state.loaded_models[MODEL_3D_WATER - MODEL_3D_VOID] = loadModel("data/assets/models/water.glb");
 
+    // TODO: these are basically the same model, can i do something smarter here than fully loading 3 of them?
     vulkan_state.loaded_models[MODEL_3D_SOURCE_RED     - MODEL_3D_VOID] = loadModel("data/assets/models/red-source.glb");
     vulkan_state.loaded_models[MODEL_3D_SOURCE_BLUE    - MODEL_3D_VOID] = loadModel("data/assets/models/blue-source.glb");
     vulkan_state.loaded_models[MODEL_3D_SOURCE_MAGENTA - MODEL_3D_VOID] = loadModel("data/assets/models/magenta-source.glb");
