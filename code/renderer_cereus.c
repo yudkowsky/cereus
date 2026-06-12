@@ -10,6 +10,9 @@
 // TEMP: for profiling
 #include <windows.h>
 
+// TEMP: for editor reloading stuff
+#include <sys/stat.h>
+
 typedef struct 
 {
     float x, y, z;
@@ -578,6 +581,28 @@ const uint32 CUBE_INDICES[36] =
    16,17,18, 16,18,19,
    20,21,22, 20,22,23
 };
+
+typedef struct
+{
+    int32 model_id;
+    char* path;
+    int64 last_write_time;
+}
+ModelAsset;
+
+ModelAsset model_assets[] =
+{
+    { MODEL_3D_BOX,            "data/assets/models/rock.glb",           0 },
+    { MODEL_3D_PLAYER,         "data/assets/models/player.glb",         0 },
+    { MODEL_3D_MIRROR,         "data/assets/models/mirror.glb",         0 },
+    { MODEL_3D_PACK,           "data/assets/models/pack.glb",           0 },
+    { MODEL_3D_WIN_BLOCK,      "data/assets/models/flower.glb",         0 },
+    { MODEL_3D_WATER,          "data/assets/models/water.glb",          0 },
+    { MODEL_3D_SOURCE_RED,     "data/assets/models/red-source.glb",     0 },
+    { MODEL_3D_SOURCE_BLUE,    "data/assets/models/blue-source.glb",    0 },
+    { MODEL_3D_SOURCE_MAGENTA, "data/assets/models/magenta-source.glb", 0 },
+};
+int32 model_asset_count = sizeof(model_assets) / sizeof(model_assets[0]);
 
 const uint32 CUBE_INSTANCE_CAPACITY = 8192;
 const uint32 WATER_INSTANCE_CAPACITY = 8192;
@@ -1721,40 +1746,50 @@ LoadedModel loadModel(char* path)
     return result;
 }
 
-// TODO: probably expose the entity models' paths as constants in everything.h? can backsolve the path here from game layer based on level_name, so that part is fine
-void vulkanReloadModel(int32 model_id, char* path)
+int32 getFileLastWriteTime(char* path)
 {
-    int32 slot = model_id - MODEL_3D_VOID;
-    if (slot < 0 || slot >= 64) return;
+    struct stat file_info;
+    if (stat(path, &file_info) != 0) return 0;
+    return (int32)file_info.st_mtime;
+}
 
-    vkDeviceWaitIdle(vulkan_state.logical_device_handle); // one frame slowness
+void vulkanReloadChangedModels()
+{
+    for (int asset_index = 0; asset_index < model_asset_count; asset_index++)
+    {
+        ModelAsset* asset = &model_assets[asset_index];
 
-    LoadedModel* old_model = &vulkan_state.loaded_models[slot];
-    if (old_model->vertex_buffer) vkDestroyBuffer(vulkan_state.logical_device_handle, old_model->vertex_buffer, 0);
-    if (old_model->vertex_memory) vkFreeMemory(vulkan_state.logical_device_handle, old_model->vertex_memory, 0);
-    if (old_model->index_buffer)  vkDestroyBuffer(vulkan_state.logical_device_handle, old_model->index_buffer, 0);
-    if (old_model->index_memory)  vkFreeMemory(vulkan_state.logical_device_handle, old_model->index_memory, 0);
-    if (old_model->data)          cgltf_free(old_model->data); // TODO: loadModel keeps this around, i think?
+        int64 write_time = getFileLastWriteTime(asset->path);
+        if (write_time == 0 || write_time == asset->last_write_time) continue;
+        asset->last_write_time = write_time;
 
-    vulkan_state.loaded_models[slot] = loadModel(path);
+        int32 slot = asset->model_id - MODEL_3D_VOID;
+        if (slot < 0 || slot >= 64) continue;
+
+        vkDeviceWaitIdle(vulkan_state.logical_device_handle); // nothing in flight may reference the old buffers
+
+        LoadedModel* old_model = &vulkan_state.loaded_models[slot];
+        if (old_model->vertex_buffer) vkDestroyBuffer(vulkan_state.logical_device_handle, old_model->vertex_buffer, 0);
+        if (old_model->vertex_memory) vkFreeMemory(vulkan_state.logical_device_handle, old_model->vertex_memory, 0);
+        if (old_model->index_buffer)  vkDestroyBuffer(vulkan_state.logical_device_handle, old_model->index_buffer, 0);
+        if (old_model->index_memory)  vkFreeMemory(vulkan_state.logical_device_handle, old_model->index_memory, 0);
+        if (old_model->data)          cgltf_free(old_model->data);
+
+        vulkan_state.loaded_models[slot] = loadModel(asset->path);
+    }
 }
 
 void loadAllEntities()
 {
-    vulkan_state.loaded_models[MODEL_3D_BOX - MODEL_3D_VOID] = loadModel("data/assets/models/rock.glb");
-    vulkan_state.loaded_models[MODEL_3D_PLAYER - MODEL_3D_VOID] = loadModel("data/assets/models/player.glb");
-	vulkan_state.loaded_models[MODEL_3D_MIRROR 	- MODEL_3D_VOID] = loadModel("data/assets/models/mirror.glb");
-    //vulkan_state.loaded_models[MODEL_3D_GLASS - MODEL_3D_VOID] = loadModel("data/assets/models/glass.glb");
-    vulkan_state.loaded_models[MODEL_3D_PACK - MODEL_3D_VOID] = loadModel("data/assets/models/pack.glb");
-    vulkan_state.loaded_models[MODEL_3D_WIN_BLOCK - MODEL_3D_VOID] = loadModel("data/assets/models/flower.glb");
+    for (int asset_index = 0; asset_index < model_asset_count; asset_index++)
+    {
+        ModelAsset* asset = &model_assets[asset_index];
+        int32 slot = asset->model_id - MODEL_3D_VOID;
+        vulkan_state.loaded_models[slot] = loadModel(asset->path);
+        asset->last_write_time = getFileLastWriteTime(asset->path);
+    }
 
-    vulkan_state.loaded_models[MODEL_3D_WATER - MODEL_3D_VOID] = loadModel("data/assets/models/water.glb");
-
-    // TODO: these are basically the same model, can i do something smarter here than fully loading 3 of them?
-    vulkan_state.loaded_models[MODEL_3D_SOURCE_RED     - MODEL_3D_VOID] = loadModel("data/assets/models/red-source.glb");
-    vulkan_state.loaded_models[MODEL_3D_SOURCE_BLUE    - MODEL_3D_VOID] = loadModel("data/assets/models/blue-source.glb");
-    vulkan_state.loaded_models[MODEL_3D_SOURCE_MAGENTA - MODEL_3D_VOID] = loadModel("data/assets/models/magenta-source.glb");
-
+    // TODO: add these to the main array
     vulkan_state.laser_cylinder_model = loadModel("data/assets/models/laser-cylinder.glb");
     vulkan_state.dummy_cube_model = loadModel("data/assets/models/dummy-cube.glb");
 }

@@ -483,6 +483,8 @@ ShaderMode game_shader_mode = SHADER_MODE_DEFAULT;
 bool draw_trailing_hitboxes = false;
 bool cheating = false;
 
+int32 rock_model_last_write_time = 0;
+
 // debug text
 const int32 MAX_DEBUG_TEXT_COUNT = 32;
 const float DEBUG_TEXT_Y_DIFF = 40.0f;
@@ -3768,6 +3770,9 @@ GameResult gameFrame(double delta_time, Input* input)
     QueryPerformanceFrequency(&frequency);
     QueryPerformanceCounter(&t0);
 
+    // reload all models changed on disk
+    vulkanReloadChangedModels();
+
     if (delta_time > 0.1) delta_time = 0.1;
     physics_accumulator += delta_time;
 
@@ -4202,14 +4207,6 @@ GameResult gameFrame(double delta_time, Input* input)
             camera_mode = MAIN_WAITING;
             camera_lerp_t = 0.0f;
             createDebugPopup("returned camera to saved position", POPUP_TYPE_NONE);
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-        }
-
-        // TODO: temp testing of reloading models
-        if (input->keys_held & KEY_E)
-        {
-            vulkanReloadModel(MODEL_3D_BOX, "data/assets/models/rock.glb");
-            createDebugPopup("reloaded model", POPUP_TYPE_NONE);
             time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
 

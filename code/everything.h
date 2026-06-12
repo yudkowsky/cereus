@@ -293,4 +293,4 @@ void vulkanInitialize(RendererPlatformHandles, DisplayInfo);
 void vulkanResize(uint32 width, uint32 height);
 void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, RendererInfo renderer_info);
 void vulkanDraw(bool do_profiling_output);
-void vulkanReloadModel(int32 model_id, char* path);
+void vulkanReloadChangedModels();
