@@ -7,6 +7,18 @@ __declspec(dllimport) int __stdcall QueryPerformanceCounter(long long* lpPerform
 __declspec(dllimport) int __stdcall QueryPerformanceFrequency(long long* lpFrequency);
 __declspec(dllimport) void __stdcall OutputDebugStringA(const char* lpOutputString);
 
+#define DEBUG_TEXT(...) do {                                    \
+    char debug_buffer[256] = {0};                               \
+    snprintf(debug_buffer, sizeof(debug_buffer), __VA_ARGS__);  \
+    createDebugText(debug_buffer);                              \
+} while (false)
+
+#define DEBUG_POPUP(popup_type, ...) do {                       \
+    char debug_buffer[256] = {0};                               \
+    snprintf(debug_buffer, sizeof(debug_buffer), __VA_ARGS__);  \
+    createDebugPopup(debug_buffer, (popup_type));               \
+} while (false)
+
 // GLOBAL STATE
 
 typedef enum
@@ -160,7 +172,7 @@ Entity;
 #define ENTITY_TYPES 6
 
 // the approx. 2MB buffer is dense representation of the level encoded by coords
-typedef struct
+typedef struct WorldState
 {
     Entity player;
     Entity pack;
@@ -179,7 +191,7 @@ typedef struct
 }
 WorldState;
 
-typedef struct
+typedef struct TrailingHitbox
 {
     int32 id;
     Int3 coords;
@@ -189,7 +201,7 @@ typedef struct
 TrailingHitbox;
 
 // a bunch of state to do with handling what gets pushed when during when the player is turning
-typedef struct
+typedef struct PackTurnState
 {
     int32 pack_intermediate_states_timer;
     Int3 pack_intermediate_coords;
@@ -200,19 +212,7 @@ typedef struct
 }
 PackTurnState;
 
-typedef struct TemporaryState
-{
-    TrailingHitbox trailing_hitboxes[32]; 
-    PackTurnState pack_turn_state;
-    int32 allow_movement_timer; // if > 0, decrements every frame towards 0, and then able to move. if -1, movement is permanently stopped until some other action resets it.
-    bool pack_attached;
-    int32 player_hit_by_red;
-    int32 player_hit_by_blue_timer;
-}
-TemporaryState;
-
-// assumes 0 width TODO: should this be in temp state?
-typedef struct
+typedef struct LaserBuffer
 {
     Vec3 start_coords;
     Vec3 end_coords;
@@ -223,16 +223,28 @@ typedef struct
 }
 LaserBuffer;
 
+typedef struct TemporaryState
+{
+    TrailingHitbox trailing_hitboxes[32]; 
+    PackTurnState pack_turn_state;
+    LaserBuffer laser_buffer[512]; // 512 = 64 max sources * 16 max laser turns
+    int32 allow_movement_timer; // if > 0, decrements every frame towards 0, and then able to move. if -1, movement is permanently stopped until some other action resets it.
+    bool pack_attached;
+    int32 player_hit_by_red;
+    int32 player_hit_by_blue_timer;
+}
+TemporaryState;
+
 // EDITOR STRUCTS
 
-typedef struct
+typedef struct EditBuffer
 {
     char string[64];
     int32 length;
 }
 EditBuffer;
 
-typedef struct
+typedef struct EditorState
 {
     EditorMode editor_mode;
     bool do_wide_camera;
@@ -248,7 +260,7 @@ typedef struct
 }
 EditorState;
 
-typedef struct
+typedef struct RaycastHit
 {
     bool hit;
     Int3 hit_coords;
@@ -256,10 +268,10 @@ typedef struct
 }
 RaycastHit;
 
-typedef struct
+typedef struct DebugPopup
 {
     int32 frames_left;
-    char text[64];
+    char text[256];
     Vec2 coords;
     PopupType type;
 }
@@ -267,7 +279,7 @@ DebugPopup;
 
 // UNDO BUFFER STRUCTS
 
-typedef struct
+typedef struct UndoEntityDelta
 {
     int32 id;
     Int3 old_coords;
@@ -277,7 +289,7 @@ typedef struct
 }
 UndoEntityDelta;
 
-typedef struct
+typedef struct UndoActionHeader
 {
     uint8 entity_count;
     uint32 delta_start_pos;
@@ -285,7 +297,7 @@ typedef struct
 }
 UndoActionHeader;
 
-typedef struct
+typedef struct UndoLevelChange
 {
     char from_level[64];
     bool remove_from_solved;
@@ -445,7 +457,6 @@ int32 camera_target_plane = 0; // y level of xz plane which calculates targeted 
 // general state
 WorldState world_state = {0};
 TemporaryState temp_state = {0};
-LaserBuffer laser_buffer[512] = {0}; // 512 = 64 max sources * 16 max laser turns
 GameProgress game_progress = WORLD_0;
 Int3 level_dim = {0};
 Int3 level_origin = {0};
@@ -997,7 +1008,7 @@ Vec3 directionToVector(Direction direction)
 
 Vec4 directionToRotation(Direction direction, MirrorOrientation orientation)
 {
-    // TODO: these rotations could be hardcoded
+    // NOTE: these rotations could be hardcoded
     Vec4 rotation = IDENTITY_QUATERNION;
     switch (direction)
     {
@@ -1631,13 +1642,13 @@ void createDebugPopup(char* string, PopupType popup_type)
             if (debug_popups[popup_index].frames_left == 0) continue;
             if (debug_popups[popup_index].type == popup_type)
             {
-                FOR(string_index, 64) if (string[string_index] == '\0') 
+                FOR(string_index, 256) if (string[string_index] == '\0') 
                 {
                     debug_popups[popup_index].coords.x = debug_popup_start_coords.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
                     break;
                 }
                 debug_popups[popup_index].frames_left = DEFAULT_POPUP_TYPE_TIME;
-                memcpy(debug_popups[popup_index].text, string, 64 * sizeof(char));
+                memcpy(debug_popups[popup_index].text, string, 256 * sizeof(char));
                 return;
             }
         }
@@ -1651,7 +1662,7 @@ void createDebugPopup(char* string, PopupType popup_type)
         break;
     }
 
-    FOR(string_index, 64) if (string[string_index] == '\0') 
+    FOR(string_index, 256) if (string[string_index] == '\0') 
     {
         debug_popups[next_free_in_popups].coords.x = debug_popup_start_coords.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
         break;
@@ -1659,7 +1670,7 @@ void createDebugPopup(char* string, PopupType popup_type)
     debug_popups[next_free_in_popups].coords.y = debug_popup_start_coords.y + (next_free_in_popups * DEBUG_POPUP_TYPE_STEP_SIZE);
     debug_popups[next_free_in_popups].frames_left = DEFAULT_POPUP_TYPE_TIME;
     debug_popups[next_free_in_popups].type = popup_type;
-    memcpy(debug_popups[next_free_in_popups].text, string, 64 * sizeof(char));
+    memcpy(debug_popups[next_free_in_popups].text, string, 256 * sizeof(char));
 }
 
 void createTutorialPopup()
@@ -1998,7 +2009,7 @@ Vec3 getNormCoordsWithEntityCoordAlongAxis(Direction direction, Vec3 current_nor
 
 void updateLaserBuffer()
 {
-    FOR(laser_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED) laser_buffer[laser_index].color = COLOR_NONE;
+    FOR(laser_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED) temp_state.laser_buffer[laser_index].color = COLOR_NONE;
     temp_state.player_hit_by_red   = false;
 
     // if a source is magenta, create entry in sources as primary of it as both red and blue
@@ -2042,7 +2053,7 @@ void updateLaserBuffer()
         {
             bool no_more_turns = true;
 
-            LaserBuffer* lb = &laser_buffer[source_index * MAX_LASER_TURNS_ALLOWED + laser_turn_index];
+            LaserBuffer* lb = &temp_state.laser_buffer[source_index * MAX_LASER_TURNS_ALLOWED + laser_turn_index];
 
             // start of some segment: always move one tile forward from where we are before we start checking for anything
             float laser_source_start_offset = 0.4f;
@@ -2050,7 +2061,7 @@ void updateLaserBuffer()
             else lb->start_coords = current_norm_coords;
             lb->direction = current_direction;
             lb->color = source->color;
-            if (laser_turn_index > 0) lb->start_clip_plane = laser_buffer[source_index * MAX_LASER_TURNS_ALLOWED + laser_turn_index - 1].end_clip_plane;
+            if (laser_turn_index > 0) lb->start_clip_plane = temp_state.laser_buffer[source_index * MAX_LASER_TURNS_ALLOWED + laser_turn_index - 1].end_clip_plane;
             else lb->start_clip_plane = (Vec4){ 0, 0, 0, 1 };
             lb->end_clip_plane = (Vec4){ 0, 0, 0, 1 };
 
@@ -2368,7 +2379,7 @@ void initializeLevel(char* level_name)
     if (level_name == 0) strcpy(world_state.level_name, DEBUG_LEVEL_NAME);
     else strcpy(world_state.level_name, level_name);
 
-    memset(laser_buffer, 0, sizeof(laser_buffer));
+    memset(temp_state.laser_buffer, 0, sizeof(temp_state.laser_buffer));
 
     // memset worldstate to 0 (with persistant level_name, and solved levels)
     char persist_level_name[256] = {0};
@@ -4079,6 +4090,7 @@ GameResult gameFrame(double delta_time, Input* input)
         // paint onto water texture
         if (editor_state.editor_mode == EDITOR_MODE_WATER_PAINT)
         {
+            // TODO: mouse scroll should have other case
             if ((input->keys_held & KEY_LEFT_MOUSE || input->keys_held & KEY_F ||
                 input->keys_held & KEY_RIGHT_MOUSE || input->keys_held & KEY_H || 
                 input->mouse_scroll_this_frame != 0) && camera.pitch < 0)
@@ -4086,12 +4098,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 editor_state.brush_radius_modifier += input->mouse_scroll_this_frame; // does nothing on most frames
                 int32 paint_radius = (int32)(16.0f + editor_state.brush_radius_modifier);
                 int32 erase_radius = (int32)(32.0f + editor_state.brush_radius_modifier);
-                if (input->mouse_scroll_this_frame != 0)
-                {
-                    char paint_text[256] = {0};
-                    snprintf(paint_text, sizeof(paint_text), "new brush size: %i", paint_radius);
-                    createDebugPopup(paint_text, POPUP_TYPE_PAINT_BRUSH_RADIUS_CHANGE);
-                }
+                if (input->mouse_scroll_this_frame != 0) DEBUG_POPUP(POPUP_TYPE_PAINT_BRUSH_RADIUS_CHANGE, "new brush size: %i", paint_radius);
 
                 float paint_magnitude = 0.1f;
                 int32 brush_radius = 0;
@@ -4140,9 +4147,8 @@ GameResult gameFrame(double delta_time, Input* input)
                 FOR(i, WATER_PAINT_SIDE * WATER_PAINT_SIDE) water_paint_texture.values[i] = (Vec4){ 0.0f, 0.0f, 0.0f, 1.0f };
 
                 water_paint_texture.dirty = true;
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-
                 createDebugPopup("reset water texture", POPUP_TYPE_NONE);
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
         }
     }
@@ -4221,17 +4227,13 @@ GameResult gameFrame(double delta_time, Input* input)
             {
                 physics_timestep_multiplier /= 2;
                 if (physics_timestep_multiplier < 1.0) physics_timestep_multiplier = 1.0;
-                char timestep_text[256] = {0};
-                snprintf(timestep_text, sizeof(timestep_text), "physics speed decreased: %.4f (%.6fs per tick)", 1.0 / physics_timestep_multiplier, physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
-                createDebugPopup(timestep_text, POPUP_TYPE_PHYSICS_TIMESTEP_CHANGE);
+                DEBUG_POPUP(POPUP_TYPE_PHYSICS_TIMESTEP_CHANGE, "physics speed decreased: %.4f (%.6fs per tick)", 1.0 / physics_timestep_multiplier, physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
             else if (input->keys_held & KEY_COMMA)
             {
                 physics_timestep_multiplier *= 2;
-                char timestep_text[256] = {0};
-                snprintf(timestep_text, sizeof(timestep_text), "physics speed increased: %.4f (%.6fs per tick)", 1.0 / physics_timestep_multiplier, physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
-                createDebugPopup(timestep_text, POPUP_TYPE_PHYSICS_TIMESTEP_CHANGE);
+                DEBUG_POPUP(POPUP_TYPE_PHYSICS_TIMESTEP_CHANGE, "physics speed increased: %.4f (%.6fs per tick)", 1.0 / physics_timestep_multiplier, physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 
@@ -4302,9 +4304,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 else if (camera.yaw >= TAU *  0.375f || camera.yaw < TAU * -0.375f) camera_snap_yaw = TAU * 0.5f;
                 camera.yaw = camera_snap_yaw;
                 camera.rotation = buildCameraQuaternion(camera);
-                char yaw_text[256] = {0};
-                snprintf(yaw_text, sizeof(yaw_text), "camera yaw snapped to: %.3f", camera_snap_yaw);
-                createDebugPopup(yaw_text, POPUP_TYPE_NONE);
+                DEBUG_POPUP(POPUP_TYPE_NONE, "camera yaw snapped to: %.3f", camera_snap_yaw);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 
@@ -4357,9 +4357,7 @@ GameResult gameFrame(double delta_time, Input* input)
             if (input->keys_held & KEY_L)
             {
                 sun_direction = vec3Normalize(vec3RotateByQuaternion(vec3Negate(vec3FromInt3(AXIS_Z)), camera.rotation));
-                char sun_text[256] = {0}; // TODO: really need some sort of macro for this logging
-                snprintf(sun_text, sizeof(sun_text), "sun direction set: %.3f, %.3f, %.3f", sun_direction.x, sun_direction.y, sun_direction.z);
-                createDebugPopup(sun_text, POPUP_TYPE_SUN_DIRECTION_CHANGE);
+                DEBUG_POPUP(POPUP_TYPE_SUN_DIRECTION_CHANGE, "sun direction set: %.3f, %.3f, %.3f", sun_direction.x, sun_direction.y, sun_direction.z);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 
@@ -4961,61 +4959,20 @@ GameResult gameFrame(double delta_time, Input* input)
             createDebugText(world_state.level_name);
 
             // level origin and dim
-            char level_text[256] = {0};
-            snprintf(level_text, sizeof(level_text), "level origin: %i, %i, %i; level dim: %i, %i, %i", level_origin.x, level_origin.y, level_origin.z, level_dim.x, level_dim.y, level_dim.z);
-            createDebugText(level_text);
+            DEBUG_TEXT("level origin: %i, %i, %i; level dim: %i, %i, %i", level_origin.x, level_origin.y, level_origin.z, level_dim.x, level_dim.y, level_dim.z);
 
             // player info
-            char player_text[256] = {0};
-            snprintf(player_text, sizeof(player_text), "player info: coords: %i, %i, %i, pos norm: %.2f, %.2f, %.2f, velocity: %.2f, %.2f, %.2f", player->coords.x, player->coords.y, player->coords.z, player->position.x, player->position.y, player->position.z, player->velocity.x, player->velocity.y, player->velocity.z);
-            createDebugText(player_text);
-            
+            DEBUG_TEXT("player info: coords: %i, %i, %i, pos norm: %.2f, %.2f, %.2f, velocity: %.2f, %.2f, %.2f", 
+                player->coords.x, player->coords.y, player->coords.z, player->position.x, player->position.y, player->position.z, player->velocity.x, player->velocity.y, player->velocity.z);
+
             // pack info
-            char pack_text[256] = {0};
-            snprintf(pack_text, sizeof(pack_text), "pack info: coords: %i, %i, %i, pos norm: %.2f, %.2f, %.2f, velocity: %.2f, %.2f, %.2f, attached: %i, timer: %i", pack->coords.x, pack->coords.y, pack->coords.z, pack->position.x, pack->position.y, pack->position.z, pack->velocity.x, pack->velocity.y, pack->velocity.z, temp_state.pack_attached, temp_state.pack_turn_state.pack_intermediate_states_timer);
-            createDebugText(pack_text);
+            DEBUG_TEXT("pack info: coords: %i, %i, %i, pos norm: %.2f, %.2f, %.2f, velocity: %.2f, %.2f, %.2f, attached: %i, timer: %i", 
+                pack->coords.x, pack->coords.y, pack->coords.z, pack->position.x, pack->position.y, pack->position.z, pack->velocity.x, pack->velocity.y, pack->velocity.z, temp_state.pack_attached, temp_state.pack_turn_state.pack_intermediate_states_timer);
 
             // boxes
-            char box_text[256] = {0};
             Entity box1 = world_state.boxes[0];
             Entity box2 = world_state.boxes[1];
-            snprintf(box_text, sizeof(box_text), "box 1: moving dir: %i, on_head: %i; box 2: moving dir: %i, on_head: %i", box1.moving_direction, box1.moving_on_head, box2.moving_direction, box2.moving_on_head);
-            createDebugText(box_text);
-
-            /*
-            // show undo deltas in buffer
-            char undo_buffer_text[256] = {0};
-            snprintf(undo_buffer_text, sizeof(undo_buffer_text), "undo deltas in buffer: %d", undo_buffer.delta_count);
-            createDebugText(undo_buffer_text);, 
-            */
-
-            char plane_text[256] = {0};
-            snprintf(plane_text, sizeof(plane_text), "water plane: %f", water_plane_y);
-            createDebugText(plane_text);
-
-            // trailing hitbox info
-            /*
-            char th_text[256] = {0};
-            int32 th_count = 0;
-            FOR(th_index, MAX_TRAILING_HITBOX_COUNT) if (temp_state.trailing_hitboxes[th_index].id != 0) th_count++;
-            TrailingHitbox th1 = temp_state.trailing_hitboxes[0];
-            TrailingHitbox th2 = temp_state.trailing_hitboxes[1];
-            TrailingHitbox th3 = temp_state.trailing_hitboxes[2];
-            snprintf(th_text, sizeof(th_text), "trailing hitboxes: 1: %d %d %d; 2: %d %d %d; 3: %d %d %d; count: %i", th1.type, th1.id, th1.frames, th2.type, th2.id, th2.frames, th3.type, th3.id, th3.frames, th_count);
-            createDebugText(th_text);
-            */
-
-            /*
-            // debug lasers
-            FOR(lb_index, 64)
-            {
-                LaserBuffer lb = laser_buffer[lb_index];
-                if (vec3IsEqual(lb.start_coords, (Vec3){0})) continue;
-                char lb_text[256] = {0};
-                snprintf(lb_text, sizeof(lb_text), "laser start coords: %.2f, %.2f, %.2f, laser end coords: %.2f, %.2f, %.2f", lb.start_coords.x, lb.start_coords.y, lb.start_coords.z, lb.end_coords.x, lb.end_coords.y, lb.end_coords.z);
-                if (do_debug_text) createDebugText(lb_text);
-            }
-            */
+            DEBUG_TEXT("box 1: moving dir: %i, on_head: %i; box 2: moving dir: %i, on_head: %i", box1.moving_direction, box1.moving_on_head, box2.moving_direction, box2.moving_on_head);
 
             // draw selected id info
             if (editor_state.editor_mode == EDITOR_MODE_SELECT || editor_state.editor_mode == EDITOR_MODE_SELECT_WRITE)
@@ -5025,28 +4982,16 @@ GameResult gameFrame(double delta_time, Input* input)
                     Entity* e = getEntityFromId(editor_state.selected_id);
                     if (e)
                     {
-                        char selected_id_text[256] = {0};
-                        snprintf(selected_id_text, sizeof(selected_id_text), "    selected id: %d, coords: %d, %d, %d, direction: %i, mirror_orientation: %i", editor_state.selected_id, e->coords.x, e->coords.y, e->coords.z, e->direction, e->mirror_orientation);
-                        createDebugText(selected_id_text);
-
-                        char more_info_text[256] = {0};
-                        snprintf(more_info_text, sizeof(more_info_text), "    falling: %i, velocity: %f, %f, %f", e->falling, e->velocity.x, e->velocity.y, e->velocity.z);
-                        createDebugText(more_info_text);
-
+                        DEBUG_TEXT("    selected id: %d, coords: %d, %d, %d, direction: %i, mirror_orientation: %i", editor_state.selected_id, e->coords.x, e->coords.y, e->coords.z, e->direction, e->mirror_orientation);
+                        DEBUG_TEXT("    falling: %i, velocity: %f, %f, %f", e->falling, e->velocity.x, e->velocity.y, e->velocity.z);
                         switch (editor_state.writing_field)
                         {
                             case WRITING_FIELD_NONE:        createDebugText("    writing field: no writing field"); break;
                             case WRITING_FIELD_NEXT_LEVEL:  createDebugText("    writing field: next level");       break;
                             case WRITING_FIELD_UNLOCKED_BY: createDebugText("    writing field: unlocked by");      break;
                         }
-
-                        char next_level_text[256] = {0};
-                        snprintf(next_level_text, sizeof(next_level_text), "    next_level: %s", e->next_level);
-                        createDebugText(next_level_text);
-
-                        char unlocked_by_text[256] = {0};
-                        snprintf(unlocked_by_text, sizeof(unlocked_by_text), "    unlocked_by: %s", e->unlocked_by);
-                        createDebugText(unlocked_by_text);
+                        DEBUG_TEXT("    next_level: %s", e->next_level);
+                        DEBUG_TEXT("    unlocked_by: %s", e->unlocked_by);
                     }
                     else
                     {
@@ -5216,7 +5161,7 @@ GameResult gameFrame(double delta_time, Input* input)
     // draw lasers
     FOR(laser_buffer_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED)
     {
-        LaserBuffer lb = laser_buffer[laser_buffer_index];
+        LaserBuffer lb = temp_state.laser_buffer[laser_buffer_index];
         if (lb.color == COLOR_NONE) continue; // laser buffer is not dense - this is check that there is actually something here
 
         Vec3 diff = vec3Subtract(lb.end_coords, lb.start_coords);
