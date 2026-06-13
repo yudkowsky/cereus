@@ -5705,7 +5705,8 @@ void vulkanDraw(bool do_profiling_output)
         float identity_matrix[16];
         mat4Identity(identity_matrix);
 
-        float focal_length = (float)vulkan_state.swapchain_extent.height / (TAU * tanf(vulkan_state.camera.fov / 360.0f));
+        float fov_y_radians = vulkan_state.camera.fov * (TAU / 360.0f);
+        float focal_length  = 0.5f * (float)vulkan_state.swapchain_extent.height / tanf(0.5f * fov_y_radians);
 
         float orthographic_matrix[16];
         mat4BuildOrtho(orthographic_matrix, 0.0f, (float)vulkan_state.swapchain_extent.width, 0.0f, (float)vulkan_state.swapchain_extent.height, 0.0f, 1.0f);
@@ -6060,7 +6061,8 @@ void vulkanDraw(bool do_profiling_output)
     VkDescriptorSet post_sets[2] = { vulkan_state.depth_descriptor_set, vulkan_state.normal_descriptor_set };
     vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.outline_post_pipeline_layout, 0, 2, post_sets, 0, 0);
 
-    float focal_length = (float)vulkan_state.swapchain_extent.height / (TAU * tanf(vulkan_state.camera.fov / 360.0f));
+    float fov_y_radians = vulkan_state.camera.fov * (TAU / 360.0f);
+    float focal_length  = 0.5f * (float)vulkan_state.swapchain_extent.height / tanf(0.5f * fov_y_radians);
 
     float post_pc[6] = 
     {

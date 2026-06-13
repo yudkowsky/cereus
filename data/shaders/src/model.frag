@@ -42,7 +42,7 @@ void main()
         vec2 displacement_uv = frag_world_pos.xz / view_constants.water_tile_length;
         float wave_displacement = texture(water_texture, displacement_uv).w;
         float water_surface_y = view_constants.water_plane_y - wave_displacement;
-        if (frag_world_pos.y < water_surface_y) discard;
+        if (frag_world_pos.y < water_surface_y - 0.1) discard;
     }
 
     vec3 N = normalize(normal);

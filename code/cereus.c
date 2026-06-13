@@ -842,7 +842,7 @@ void recalculateWaterPlane()
     for (int32 buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
     {
         if (world_state.buffer[buffer_index] != TILE_TYPE_WATER) continue;
-        water_plane_y = bufferIndexToCoords(buffer_index).y + 1.2f;
+        water_plane_y = bufferIndexToCoords(buffer_index).y + 1.3f;
         return;
     }
 }

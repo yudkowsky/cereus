@@ -57,12 +57,14 @@ const float grid_push_by_normal = 0.5;
 
 // grid line graphics
 //const vec3 grid_line_tint = { 0.2, 0.4, 0.6 };
-const float grid_opacity = 0.05;
+const float grid_opacity = 0.1;
 
 // reflections
 const float reflection_distortion_strength = 0.0001;
 const float min_reflection = 0.1;
 const float fresnel_exponent = 4.0;
+const float min_reflection_on_grid = 0.5;
+const float grid_line_normal_offset_strength = 0.75;
 
 void main() 
 {
@@ -127,18 +129,16 @@ void main()
         texture(grid_normal_texture, vec3(tile_uv, float(frame_b))).rgb,
         frame_blend) * 2.0 - 1.0;
 
-    float ridge_strength = 0.5;
-    vec2 peturb = ridge_texture.xy * paint_value * ridge_strength;
+    vec2 peturb = ridge_texture.xy * paint_value * grid_line_normal_offset_strength;
     vec3 normal = normalize(vec3(
         unmodified_normal.x + peturb.x,
         unmodified_normal.y,
         unmodified_normal.z + peturb.y
     ));
 
-    // reflection based on fresnel strength and grid stuff
+    // reflection based on fresnel strength, dampen if on grid foam
     vec3 view_dir = normalize(view_constants.camera_position.xyz - frag_world_pos);
     float cos_theta = max(dot(view_dir, normal), 0.0);
-    const float min_reflection_on_grid = 0.5;
     float reflection_dampen_on_foam = mix(1.0, min_reflection_on_grid, clamp(grid * paint_value, 0.0, 1.0));
     float fresnel = (min_reflection + (1.0 - min_reflection) * pow(1.0 - cos_theta, fresnel_exponent)) * reflection_dampen_on_foam;
 
@@ -150,7 +150,7 @@ void main()
     vec2 reflection_uv = screen_uv + reflection_uv_offset;
 
     // offset reflection uv by wave height
-    float reflection_height_strength = 1.0;
+    float reflection_height_strength = 0.5;
     float wave_height = frag_world_pos.y - view_constants.water_plane_y;
     float grazing = sqrt(max(1.0 - cos_theta * cos_theta, 0.0));
     float height_shift = wave_height * grazing / pixel_world_size * texel.y * reflection_height_strength;
