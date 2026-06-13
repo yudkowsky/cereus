@@ -51,13 +51,8 @@ const float max_depth_difference = 0.02;
 // push grid lines by normal
 const float grid_push_by_normal = 0.5;
 
-// grid line dimensions
-//const float half_grid_line_width = 0.02;
-//const float corner_size = 0.025;
-
 // grid line graphics
-//const vec3 grid_line_tint = { 0.2, 0.4, 0.6 };
-const float grid_opacity = 0.1;
+const float grid_opacity = 0.05;
 
 // reflections
 const float reflection_distortion_strength = 0.0001;
@@ -121,7 +116,13 @@ void main()
         texture(grid_texture, vec3(tile_uv, float(frame_b))).r,
         frame_blend);
 
-    base_color += vec3(grid) * grid_opacity * paint_value;
+    // thinner (and dimmer) lines with lower paint
+    const float grid_thinning = 0.4;
+    float grid_mult = grid * paint_value;
+    float grid_sub = max(grid - (1.0 - paint_value), 0.0);
+    float grid_shaped = mix(grid_mult, grid_sub, grid_thinning);
+
+    base_color += vec3(grid_shaped) * grid_opacity * paint_value;
 
     // normal is dual channel in xz
     vec3 ridge_texture = mix(
