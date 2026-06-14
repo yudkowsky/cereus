@@ -275,6 +275,8 @@ ShaderMode;
 typedef struct RendererInfo
 {
     Camera camera;
+    Vec3 scene_aabb_min;
+    Vec3 scene_aabb_max;
     float time;
     float water_plane_y;
     ShaderMode shader_mode;

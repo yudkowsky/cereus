@@ -2527,13 +2527,26 @@ void gameInitialize(char* level_name, DisplayInfo display_from_platform)
     initializeLevel(level_name);
 }
 
+RendererInfo getRendererInfo()
+{
+    RendererInfo info = {0};
+    info.camera = camera_with_ow_offset;
+    info.scene_aabb_min = (Vec3){ level_origin.x - 0.5f, level_origin.y - 0.5f, level_origin.z - 0.5f };
+    info.scene_aabb_max = (Vec3){ level_origin.x + level_dim.x - 0.5f, level_origin.y + level_dim.y - 0.5f, level_origin.z + level_dim.z - 0.5f };
+    info.time = (float)global_time;
+    info.water_plane_y = water_plane_y;
+    info.shader_mode = game_shader_mode;
+    info.water_paint_texture = &water_paint_texture;
+    info.sun_direction = sun_direction;
+    return info;
+}
+
 void gameRedraw(DisplayInfo display_from_platform)
 {
     if (draw_command_count == 0) return;
     game_display = display_from_platform;
     recalculateTextStartCoords();
-    RendererInfo renderer_info = { .camera = camera_with_ow_offset, .time = (float)global_time, .water_plane_y = water_plane_y, .shader_mode = game_shader_mode, .water_paint_texture = &water_paint_texture, .sun_direction = sun_direction };
-    vulkanSubmitFrame(draw_commands, draw_command_count, renderer_info);
+    vulkanSubmitFrame(draw_commands, draw_command_count, getRendererInfo());
     vulkanDraw(false);
 }
 
@@ -5366,8 +5379,7 @@ GameResult gameFrame(double delta_time, Input* input)
     bool do_profiling_output = frame_counter++ >= 60;
 
     QueryPerformanceCounter(&t1);
-    RendererInfo renderer_info = { .camera = camera_with_ow_offset, .time = (float)global_time, .water_plane_y = water_plane_y, .shader_mode = game_shader_mode, .water_paint_texture = &water_paint_texture, .sun_direction = sun_direction };
-    vulkanSubmitFrame(draw_commands, draw_command_count, renderer_info);
+    vulkanSubmitFrame(draw_commands, draw_command_count, getRendererInfo());
     QueryPerformanceCounter(&t2);
     vulkanDraw(do_profiling_output);
     QueryPerformanceCounter(&t3);

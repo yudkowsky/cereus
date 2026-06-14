@@ -221,6 +221,8 @@ typedef struct VulkanState
 {
     // stuff passed from game layer
     Camera camera;
+    Vec3 scene_aabb_min;
+    Vec3 scene_aabb_max;
     float time;
     float water_plane_y;
     ShaderMode shader_mode;
@@ -610,7 +612,7 @@ const uint32 LASER_INSTANCE_CAPACITY = 1024;
 
 const int32 REFLECTION_DOWNSCALE = 2;
 
-const uint32 SHADOW_MAP_RESOLUTION = 4096;
+const uint32 SHADOW_MAP_RESOLUTION = 2048;
 
 // TODO: set these in loadAsset where stb_image gives me width / height. store in CachedAsset.
 const int32 ATLAS_2D_WIDTH = 128;
@@ -878,6 +880,66 @@ void mat4BuildPerspective(float output_matrix[16], float fov_y_radians, float as
 	output_matrix[14] = (z_near * z_far) / (z_near - z_far);
 }
 
+void mat4BuildDirectionalLight(float out[16], Vec3 light_direction, Vec3 aabb_min, Vec3 aabb_max)
+{
+    float direction_length = sqrtf(light_direction.x*light_direction.x + light_direction.y*light_direction.y + light_direction.z*light_direction.z);
+    Vec3 forward = { light_direction.x/direction_length, light_direction.y/direction_length, light_direction.z/direction_length };
+    Vec3 up_reference = { 0.0f, 1.0f, 0.0f };
+
+    Vec3 right =
+    {
+        (forward.y*up_reference.z - forward.z*up_reference.y),
+        (forward.z*up_reference.x - forward.x*up_reference.z),
+        (forward.x*up_reference.y - forward.y*up_reference.x)
+    };
+    float right_length = sqrtf(right.x*right.x + right.y*right.y + right.z*right.z);
+    right.x /= right_length;
+    right.y /= right_length;
+    right.z /= right_length;
+
+    Vec3 true_up =
+    {
+        right.y*forward.z - right.z*forward.y,
+        right.z*forward.x - right.x*forward.z,
+        right.x*forward.y - right.y*forward.x
+    };
+
+    float min_x =  1e30f, min_y =  1e30f, min_z =  1e30f;
+    float max_x = -1e30f, max_y = -1e30f, max_z = -1e30f;
+    for (int corner = 0; corner < 8; corner++)
+    {
+        Vec3 point = (Vec3)
+        {
+            (corner & 1) ? aabb_max.x : aabb_min.x,
+            (corner & 2) ? aabb_max.y : aabb_min.y,
+            (corner & 4) ? aabb_max.z : aabb_min.z,
+        };
+        float length_x = right.x*point.x   + right.y*point.y   + right.z*point.z;
+        float length_y = true_up.x*point.x + true_up.y*point.y + true_up.z*point.z;
+        float length_z = forward.x*point.x + forward.y*point.y + forward.z*point.z;
+        if (length_x < min_x) min_x = length_x;  if (length_x > max_x) max_x = length_x;
+        if (length_y < min_y) min_y = length_y;  if (length_y > max_y) max_y = length_y;
+        if (length_z < min_z) min_z = length_z;  if (length_z > max_z) max_z = length_z;
+
+        // small margin
+        float margin = 1.0f;
+        min_x -= margin; min_y -= margin; min_z -= margin;
+        max_x += margin; max_y += margin; max_z += margin;
+
+        float light_view[16];
+        mat4Identity(light_view);
+        light_view[0] = right.x;    light_view[4] = right.y;    light_view[8]  = right.z;
+        light_view[1] = true_up.x;  light_view[5] = true_up.y;  light_view[9]  = true_up.z;
+        light_view[2] = forward.x;  light_view[6] = forward.y;  light_view[10] = forward.z;
+
+        float light_projection[16];
+        mat4BuildOrtho(light_projection, min_x, max_x, min_y, max_y, min_z, max_z);
+
+        mat4Multiply(out, light_projection, light_view);
+    }
+}
+
+/*
 void mat4BuildDirectionalLight(float output_matrix[16], Vec3 light_direction, Vec3 coverage_center, float coverage_radius)
 {
     // TODO: set up some sort of maths include with functions from game layer
@@ -926,6 +988,7 @@ void mat4BuildDirectionalLight(float output_matrix[16], Vec3 light_direction, Ve
 
     mat4Multiply(output_matrix, light_projection, light_view);
 }
+*/
 
 int32 reflectionExtent(uint32 full)
 {
@@ -5343,7 +5406,10 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Ren
 {  
     vkWaitForFences(vulkan_state.logical_device_handle, 1, &vulkan_state.in_flight_fences[vulkan_state.current_frame], VK_TRUE, UINT64_MAX);
 
+    // TODO: maybe there should just be a renderer_info in vulkan_state
     vulkan_state.camera = vulkan_info.camera;
+    vulkan_state.scene_aabb_min = vulkan_info.scene_aabb_min;
+    vulkan_state.scene_aabb_max = vulkan_info.scene_aabb_max;
     vulkan_state.time = vulkan_info.time;
     vulkan_state.water_plane_y = vulkan_info.water_plane_y;
     vulkan_state.shader_mode = vulkan_info.shader_mode;
@@ -5718,10 +5784,8 @@ void vulkanDraw(bool do_profiling_output)
         mat4Multiply(main_view_projection, projection_matrix, view_matrix);
         mat4Inverse(main_inverse_view_projection, main_view_projection);
 
-        float covered_tiles_from_zero = 50.0f;
-        Vec3 coverage_center = { covered_tiles_from_zero / 2.0f, 0.0f, covered_tiles_from_zero / 2.0f };
         float light_view_projection[16];
-        mat4BuildDirectionalLight(light_view_projection, vulkan_state.sun_direction, coverage_center, covered_tiles_from_zero / 2.0f);
+        mat4BuildDirectionalLight(light_view_projection, vulkan_state.sun_direction, vulkan_state.scene_aabb_min, vulkan_state.scene_aabb_max);
 
         memcpy(main_view_constants->view,            view_matrix,                  sizeof(float) * 16);
         memcpy(main_view_constants->proj,            projection_matrix,            sizeof(float) * 16);
