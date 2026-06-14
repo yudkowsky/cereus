@@ -49,7 +49,7 @@ const float outline_radius_px = 2.0;
 const float max_depth_difference = 0.02;
 
 // push grid lines by normal
-const float grid_push_by_normal = 0.5;
+const float grid_push_by_normal = 0.3;
 
 // grid line graphics
 const float grid_opacity = 0.05;

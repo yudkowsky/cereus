@@ -5309,10 +5309,11 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         FFTSpectrumPushConstants pc = {0};
         pc.texture_size = FFT_SIZE;
+
         pc.water_tile_length = water_tile_length;
         pc.wind_direction_x = -0.5f;
         pc.wind_direction_z = -1.0f;
-        pc.peak_frequency = 2.0f;
+        pc.peak_frequency = 4.0f;
         pc.peak_enhancement = 10.0f;
         pc.depth = 2.0f; // TODO: should i actually put this it 1m or whatever my actual depth is? maybe a paint input for depth, even if the depth is the same everywhere?
         pc.amplitude = water_amplitude;
