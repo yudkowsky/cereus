@@ -4103,15 +4103,16 @@ GameResult gameFrame(double delta_time, Input* input)
         // paint onto water texture
         if (editor_state.editor_mode == EDITOR_MODE_WATER_PAINT)
         {
-            // TODO: mouse scroll should have other case
-            if ((input->keys_held & KEY_LEFT_MOUSE || input->keys_held & KEY_F ||
-                input->keys_held & KEY_RIGHT_MOUSE || input->keys_held & KEY_H || 
-                input->mouse_scroll_this_frame != 0) && camera.pitch < 0)
+            if (input->mouse_scroll_this_frame != 0)
             {
                 editor_state.brush_radius_modifier += input->mouse_scroll_this_frame; // does nothing on most frames
                 int32 paint_radius = (int32)(16.0f + editor_state.brush_radius_modifier);
-                int32 erase_radius = (int32)(32.0f + editor_state.brush_radius_modifier);
                 if (input->mouse_scroll_this_frame != 0) DEBUG_POPUP(POPUP_TYPE_PAINT_BRUSH_RADIUS_CHANGE, "new brush size: %i", paint_radius);
+            }
+            else if ((input->keys_held & KEY_LEFT_MOUSE || input->keys_held & KEY_F || input->keys_held & KEY_RIGHT_MOUSE || input->keys_held & KEY_H) && camera.pitch < 0)
+            {
+                int32 paint_radius = (int32)(16.0f + editor_state.brush_radius_modifier);
+                int32 erase_radius = (int32)(32.0f + editor_state.brush_radius_modifier);
 
                 float paint_magnitude = 0.1f;
                 int32 brush_radius = 0;

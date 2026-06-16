@@ -880,6 +880,7 @@ void mat4BuildPerspective(float output_matrix[16], float fov_y_radians, float as
 	output_matrix[14] = (z_near * z_far) / (z_near - z_far);
 }
 
+// TODO: maybe possible to be more intelligent in selecting which corners will have max/min values, rather than looping over all and checking
 void mat4BuildDirectionalLight(float out[16], Vec3 light_direction, Vec3 aabb_min, Vec3 aabb_max)
 {
     float direction_length = sqrtf(light_direction.x*light_direction.x + light_direction.y*light_direction.y + light_direction.z*light_direction.z);
@@ -938,57 +939,6 @@ void mat4BuildDirectionalLight(float out[16], Vec3 light_direction, Vec3 aabb_mi
         mat4Multiply(out, light_projection, light_view);
     }
 }
-
-/*
-void mat4BuildDirectionalLight(float output_matrix[16], Vec3 light_direction, Vec3 coverage_center, float coverage_radius)
-{
-    // TODO: set up some sort of maths include with functions from game layer
-    float direction_length = sqrtf(light_direction.x*light_direction.x + light_direction.y*light_direction.y + light_direction.z*light_direction.z);
-    Vec3 forward = { light_direction.x/direction_length, light_direction.y/direction_length, light_direction.z/direction_length };
-    Vec3 up_reference = { 0.0f, 1.0f, 0.0f };
-
-    // fabricate viewpoint by stepping back from coverage center against light dir
-    Vec3 eye =
-    {
-        coverage_center.x - forward.x * coverage_radius,
-        coverage_center.y - forward.y * coverage_radius,
-        coverage_center.z - forward.z * coverage_radius,
-    };
-
-    Vec3 right = { 
-        (forward.y*up_reference.z - forward.z*up_reference.y),
-        (forward.z*up_reference.x - forward.x*up_reference.z),
-        (forward.x*up_reference.y - forward.y*up_reference.x)
-    };
-    float right_length = sqrtf(right.x*right.x + right.y*right.y + right.z*right.z);
-    right.x /= right_length;
-    right.y /= right_length;
-    right.z /= right_length;
-
-    Vec3 true_up =
-    {
-        right.y*forward.z - right.z*forward.y,
-        right.z*forward.x - right.x*forward.z,
-        right.x*forward.y - right.y*forward.x
-    };
-
-    // rotate world into light space, slide eye to origin
-    float light_view[16];
-    mat4Identity(light_view);
-    light_view[0] = right.x;    light_view[4] = right.y;    light_view[8]  = right.z;
-    light_view[1] = true_up.x;  light_view[5] = true_up.y;  light_view[9]  = true_up.z;
-    light_view[2] = forward.x;  light_view[6] = forward.y;  light_view[10] = forward.z;
-    light_view[12] = -(right.x*eye.x   + right.y*eye.y   + right.z*eye.z);
-    light_view[13] = -(true_up.x*eye.x + true_up.y*eye.y + true_up.z*eye.z);
-    light_view[14] = -(forward.x*eye.x + forward.y*eye.y + forward.z*eye.z);
-
-    // ortho box sized to the coverage region
-    float light_projection[16];
-    mat4BuildOrtho(light_projection, -coverage_radius, coverage_radius, -coverage_radius, coverage_radius, 0.0f, 2.0f * coverage_radius);
-
-    mat4Multiply(output_matrix, light_projection, light_view);
-}
-*/
 
 int32 reflectionExtent(uint32 full)
 {
