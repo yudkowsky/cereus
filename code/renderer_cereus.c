@@ -5635,6 +5635,24 @@ void vulkanDraw(bool do_profiling_output)
             vulkan_state.paint_image_first_upload ? 0 : VK_ACCESS_SHADER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
             VK_IMAGE_ASPECT_COLOR_BIT);
 
+        // clear entire image to black
+        VkClearColorValue paint_clear = {0};
+        paint_clear.float32[0] = 0.0f;
+        paint_clear.float32[1] = 0.0f;
+        paint_clear.float32[2] = 0.0f;
+        paint_clear.float32[3] = 1.0f;
+
+        VkImageSubresourceRange paint_clear_range = {0};
+        paint_clear_range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        paint_clear_range.levelCount = 1;
+        paint_clear_range.layerCount = 1;
+
+        vkCmdClearColorImage(command_buffer, vulkan_state.paint_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &paint_clear, 1, &paint_clear_range);
+
+        memoryBarrier(command_buffer,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+
         // copy staging to image
         VkBufferImageCopy paint_copy = {0};
         paint_copy.bufferOffset = 0;
