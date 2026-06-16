@@ -33,61 +33,58 @@ layout(location = 0) in vec3 frag_world_pos;
 layout(location = 0) out vec4 out_color;
 layout(location = 1) out float out_water_depth;
 
-// paint texture definitions
-// TODO: these are same as in everything.h, but can't include that file... a bit messy
-#define WATER_PAINT_TILE_COUNT 64
-#define WATER_PAINT_RESOLUTION 16
-#define WATER_PAINT_SIDE (WATER_PAINT_TILE_COUNT * WATER_PAINT_RESOLUTION)
+// TODO: annoying and bad to define twice (and now outdated)
+const float WATER_PAINT_TILE_COUNT = 64;
+const float WATER_PAINT_SIDE = 64 * 16;
 
-// water tint
+// depth tinting
 const float max_tint_depth = 1.0;
-const vec3 water_depth_tint = vec3(0.00, 0.01, 0.04);
+const vec3 water_depth_tint = vec3(0.0, 0.01, 0.04);
 const float tint_min = 0.5;
 const float tint_max = 0.9;
 
-// outlines
-const float outline_radius_px = 2.0;
-const float max_depth_difference = 0.02;
-
-// push grid lines by normal
-const float grid_push_by_normal = 0.3;
-
-// grid line graphics
+// grid
+const float grid_push_by_normal = 0.2;
+const float grid_thinning = 0.4;
 const float grid_opacity = 0.05;
-
-// reflections
-const float reflection_distortion_strength = 0.0001;
-const float min_reflection = 0.1;
-const float fresnel_exponent = 4.0;
-const float min_reflection_on_grid = 0.5;
 const float grid_line_normal_offset_strength = 0.75;
+const float min_reflection_on_grid = 0.5;
+
+// reflection shenanigans
+const float reflection_distortion_strength = 0.0001;
+const float min_reflection = 0.1; // looking straight down should still have some amount of reflection
+const float fresnel_exponent = 4.0;
 
 void main() 
 {
-    // write water depth for use in waterline detection
+    vec2 texel = 1.0 / vec2(textureSize(depth_texture, 0));
+    vec2 screen_uv = gl_FragCoord.xy * texel;
+
+    // write waterline depth for every water fragment (even occluded ones)
     out_water_depth = gl_FragCoord.z;
 
-    // idea here is to only do water.vert once, so all vertices get to fragment shader, even ones behind geometry.
-    // so now i instead blend out all geometry we don't want to actually render; can't discard because that wouldn't
-    // output the water depth to texture.
-    float scene_depth = texture(depth_texture, gl_FragCoord.xy * (1.0/vec2(textureSize(depth_texture, 0)))).r;
-    if (gl_FragCoord.z >= scene_depth)
+    // manual occlusion: can't discard because skips depth write above, so emit transparent fragment and bail
+    // TODO: try to figure out something smarter here. or not, because want to be able to manage >90% of screen
+    //       as water, so might as well just do it for everything?
+    float scene_ndc = texture(depth_texture, screen_uv).r;
+    if (gl_FragCoord.z >= scene_ndc)
     {
-        out_color = vec4(0.0); // water is behind scene geometry: blend out
+        out_color = vec4(0.0);
         return;
     }
 
-    vec2 texel = 1.0 / vec2(textureSize(depth_texture, 0));
-    vec2 screen_uv = gl_FragCoord.xy * texel;
     vec3 scene = texture(scene_texture, screen_uv).rgb;
 
-    // tint underwater scene based on depth
+    // TINT
+
     float water_surface_linear_depth = linearizeDepth(gl_FragCoord.z);
     float scene_center_linear_depth = linearizeDepth(texture(depth_texture, screen_uv).r);
     float underwater_distance = max(scene_center_linear_depth - water_surface_linear_depth, 0.0);
     float tint_amount = clamp(underwater_distance / max_tint_depth, tint_min, tint_max);
     vec3 base_color = mix(scene, water_depth_tint, tint_amount);
 
+    // GRID
+    
     // sample unmodified normal in order to figure out if should be grid here
     vec2 fft_uv = frag_world_pos.xz / view_constants.water_tile_length;
     vec3 unmodified_normal = normalize(texture(water_texture, fft_uv).xyz);
@@ -137,6 +134,8 @@ void main()
         unmodified_normal.y,
         unmodified_normal.z + peturb.y
     ));
+
+    // REFLECTION
 
     // reflection based on fresnel strength, dampen if on grid foam
     vec3 view_dir = normalize(view_constants.camera_position.xyz - frag_world_pos);

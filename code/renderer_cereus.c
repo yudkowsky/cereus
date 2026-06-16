@@ -326,7 +326,7 @@ typedef struct VulkanState
     VkDescriptorSet fft_buffer_b_descriptor_set;
     VkDescriptorSet fft_buffer_b_sampled_descriptor_set;
 
-    // real valued heightfield for water vertex shader TODO: rename water_
+    // real valued heightfield for water vertex shader TODO: rename water_ TODO: maybe still use this? u
     VkImage displacement_image;
     VkDeviceMemory displacement_image_memory;
     VkImageView displacement_image_view;
@@ -4739,6 +4739,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     {
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_FRONT_BIT;
+        rasterization_state_creation_info.frontFace = VK_FRONT_FACE_CLOCKWISE;
+
         color_blend_attachment_state.blendEnable = VK_FALSE;
 
         blend_attachments[0] = color_blend_attachment_state;
@@ -6437,6 +6440,7 @@ void vulkanDraw(bool do_profiling_output)
     }
 
     // debug quad
+    /*
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline);
 
@@ -6472,6 +6476,7 @@ void vulkanDraw(bool do_profiling_output)
         vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SpritePushConstants), &debug_pc);
         vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
     }
+    */
 
     vkCmdEndRenderPass(command_buffer);
 

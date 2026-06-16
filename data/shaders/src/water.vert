@@ -34,6 +34,9 @@ void main()
     vec4 grid_world = instance_model * vec4(in_position, 1.0);
     vec2 fft_uv = grid_world.xz / view_constants.water_tile_length;
     float height = textureLod(water_texture, fft_uv, 0.0).w;
+
+    height = 0.0;
+
     grid_world.y += height;
     frag_world_pos = grid_world.xyz;
     gl_Position = view_constants.view_proj * grid_world;
