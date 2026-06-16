@@ -240,17 +240,15 @@ typedef struct Input
 }
 Input;
 
-#define WATER_PLANE_Y 1.2f
-
-#define WATER_PAINT_TILE_COUNT 64
+#define WATER_PAINT_MAX_TILE_COUNT 64
 #define WATER_PAINT_RESOLUTION 16
-#define WATER_PAINT_SIDE (WATER_PAINT_TILE_COUNT * WATER_PAINT_RESOLUTION)
+#define WATER_PAINT_MAX_SIDE (WATER_PAINT_MAX_TILE_COUNT * WATER_PAINT_RESOLUTION)
 
 #define FFT_SIZE 256
 
 typedef struct WaterPaintTexture
 {
-    Vec4 values[WATER_PAINT_SIDE * WATER_PAINT_SIDE];
+    Vec4 values[WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE];
     bool dirty;
 }
 WaterPaintTexture;
@@ -275,8 +273,8 @@ ShaderMode;
 typedef struct RendererInfo
 {
     Camera camera;
-    Vec3 scene_aabb_min;
-    Vec3 scene_aabb_max;
+    Vec3 level_aabb_min;
+    Vec3 level_aabb_max;
     float time;
     float water_plane_y;
     ShaderMode shader_mode;

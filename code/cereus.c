@@ -466,7 +466,9 @@ bool in_overworld = true;
 float water_plane_y = 0.0f;
 Vec3 sun_direction = {0};
 
-uint8 water_texture_io_buffer[WATER_PAINT_SIDE * WATER_PAINT_SIDE] = {0};
+// TODO: at least one of these is disappearing. the scratch buffer might have to stay but might have a better solution
+uint8 water_texture_io_buffer[WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE] = {0};
+Vec4 water_texture_scratch[WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE] = {0};
 
 Entity* player = &world_state.player;
 Entity* pack = &world_state.pack;
@@ -841,6 +843,35 @@ bool reindexBuffer(Int3 new_origin, Int3 new_dim)
     }
     memcpy(world_state.buffer, temp_buffer_array, new_total_tiles * 2);
     memset(temp_buffer_array, 0, new_total_tiles*2);
+
+    // reindex water texture
+    int32 old_width  = level_dim.x * WATER_PAINT_RESOLUTION;
+    int32 old_height = level_dim.z * WATER_PAINT_RESOLUTION;
+    if (old_width  > WATER_PAINT_MAX_SIDE) old_width  = WATER_PAINT_MAX_SIDE;
+    if (old_height > WATER_PAINT_MAX_SIDE) old_height = WATER_PAINT_MAX_SIDE;
+    int32 new_width  = new_dim.x * WATER_PAINT_RESOLUTION;
+    int32 new_height = new_dim.z * WATER_PAINT_RESOLUTION;
+    if (new_width  > WATER_PAINT_MAX_SIDE) new_width  = WATER_PAINT_MAX_SIDE;
+    if (new_height > WATER_PAINT_MAX_SIDE) new_height = WATER_PAINT_MAX_SIDE;
+
+    int32 shift_x = (new_origin.x - level_origin.x) * WATER_PAINT_RESOLUTION;
+    int32 shift_z = (new_origin.z - level_origin.z) * WATER_PAINT_RESOLUTION;
+
+    FOR(scratch_index, new_width * new_height) water_texture_scratch[scratch_index] = (Vec4){ 0.0f, 0.0f, 0.0f, 1.0f };
+
+    FOR(new_z, new_height)
+    {
+        int32 old_z = new_z + shift_z;
+        if (old_z < 0 || old_z >= old_height) continue;
+        FOR(new_x, new_width)
+        {
+            int32 old_x = new_x + shift_x;
+            if (old_x < 0 || old_x >= old_width) continue;
+            water_texture_scratch[new_z * new_width + new_x] = water_paint_texture.values[old_z * old_width + old_x];
+        }
+    }
+    memcpy(water_paint_texture.values, water_texture_scratch, sizeof(Vec4) * new_width * new_height);
+    water_paint_texture.dirty = true;
 
     level_origin = new_origin;
     level_dim = new_dim;
@@ -1408,33 +1439,46 @@ void loadWaterTexture(char* folder_path)
     water_paint_texture.dirty = true;
 
     // default empty so a level with no texture file doesn't inherit from previous... shouldn't actually matter, i guess
-    FOR(pixel, WATER_PAINT_SIDE * WATER_PAINT_SIDE) water_paint_texture.values[pixel] = (Vec4){ 0.0f, 0.0f, 0.0f, 1.0f };
+    FOR(pixel, WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE) water_paint_texture.values[pixel] = (Vec4){ 0.0f, 0.0f, 0.0f, 1.0f };
 
     char texture_path[64];
     snprintf(texture_path, sizeof(texture_path), "%s/%s", folder_path, WATER_TEXTURE_FILE_NAME);
     FILE* file = fopen(texture_path, "rb");
     if (!file) return;
-    fread(water_texture_io_buffer, 1, WATER_PAINT_SIDE * WATER_PAINT_SIDE, file);
-    FOR(pixel, WATER_PAINT_SIDE * WATER_PAINT_SIDE) water_paint_texture.values[pixel].x = (float)water_texture_io_buffer[pixel] / 255.0f;
+
+    int32 texture_width  = level_dim.x * WATER_PAINT_RESOLUTION;
+    int32 texture_height = level_dim.z * WATER_PAINT_RESOLUTION;
+    if (texture_width  > WATER_PAINT_MAX_SIDE) texture_width  = WATER_PAINT_MAX_SIDE;
+    if (texture_height > WATER_PAINT_MAX_SIDE) texture_height = WATER_PAINT_MAX_SIDE;
+
+    fread(water_texture_io_buffer, 1, texture_width * texture_height, file);
+    FOR(pixel, texture_width * texture_height) water_paint_texture.values[pixel].x = (float)water_texture_io_buffer[pixel] / 255.0f;
     fclose(file);
 }
 
 // TODO:
 // right now: storing 1024*1024 uint8s on disk, and converting to Vec4 per pixel used in renderer.
 // insead, want to store 4 byte RGBA color (1 byte each), and use that in renderer, so I don't need any for loops, just the memcpy.
-// Then I want have the size of the texture be dynamic based on level_dim (still 16 pixels per tile, but dynamic size)
+
+// TODO: the size of the texture be dynamic based on level_dim (still 16 pixels per tile, but dynamic size)
+
 void writeWaterTexture(char folder_path[64])
 {
     char texture_path[64];
     snprintf(texture_path, sizeof(texture_path), "%s/%s", folder_path, WATER_TEXTURE_FILE_NAME);
 
+    // TODO: this should be based off of anything being present in the paint texture; some levels with water won't need a paint texture.
     if (water_plane_y == NO_WATER_PLANE_LOW_VALUE)
     {
         remove(texture_path); // delete this file (if it exists)
         return;
     }
 
-    FOR(pixel, WATER_PAINT_SIDE * WATER_PAINT_SIDE)
+    int32 texture_width  = level_dim.x * WATER_PAINT_RESOLUTION;
+    int32 texture_height = level_dim.z * WATER_PAINT_RESOLUTION;
+    if (texture_width  > WATER_PAINT_MAX_SIDE) texture_width  = WATER_PAINT_MAX_SIDE;
+    if (texture_height > WATER_PAINT_MAX_SIDE) texture_height = WATER_PAINT_MAX_SIDE;
+    FOR(pixel, texture_width * texture_height)
     {
         float value = water_paint_texture.values[pixel].x;
         water_texture_io_buffer[pixel] = (uint8)(value * 255.0f + 0.5f);
@@ -1442,7 +1486,7 @@ void writeWaterTexture(char folder_path[64])
 
     FILE* file = fopen(texture_path, "wb");
     if (!file) return;
-    fwrite(water_texture_io_buffer, 1, WATER_PAINT_SIDE * WATER_PAINT_SIDE, file);
+    fwrite(water_texture_io_buffer, 1, texture_width * texture_height, file);
     fclose(file);
 }
 
@@ -2531,8 +2575,8 @@ RendererInfo getRendererInfo()
 {
     RendererInfo info = {0};
     info.camera = camera_with_ow_offset;
-    info.scene_aabb_min = (Vec3){ level_origin.x - 0.5f, level_origin.y - 0.5f, level_origin.z - 0.5f };
-    info.scene_aabb_max = (Vec3){ level_origin.x + level_dim.x - 0.5f, level_origin.y + level_dim.y - 0.5f, level_origin.z + level_dim.z - 0.5f };
+    info.level_aabb_min = (Vec3){ level_origin.x - 0.5f, level_origin.y - 0.5f, level_origin.z - 0.5f };
+    info.level_aabb_max = (Vec3){ level_origin.x + level_dim.x - 0.5f, level_origin.y + level_dim.y - 0.5f, level_origin.z + level_dim.z - 0.5f };
     info.time = (float)global_time;
     info.water_plane_y = water_plane_y;
     info.shader_mode = game_shader_mode;
@@ -4126,31 +4170,32 @@ GameResult gameFrame(double delta_time, Input* input)
                     brush_radius = erase_radius;
                 }
 
-                Vec3 point_on_plane = cameraLookingAtPointOnPlane(camera, WATER_PLANE_Y);
+                Vec3 point_on_plane = cameraLookingAtPointOnPlane(camera_with_ow_offset, water_plane_y); // TODO: have camera be correct, make camera -> camera_without_overworld_offset or something.
                 Int2 center = {0};
-                center.x = (int32)((point_on_plane.x + (0.5 / WATER_PAINT_RESOLUTION) + 0.5f) * WATER_PAINT_RESOLUTION);
-                center.y = (int32)((point_on_plane.z + (0.5 / WATER_PAINT_RESOLUTION) + 0.5f) * WATER_PAINT_RESOLUTION);
+                center.x = (int32)((point_on_plane.x - level_origin.x + (0.5 / WATER_PAINT_RESOLUTION) + 0.5f) * WATER_PAINT_RESOLUTION);
+                center.y = (int32)((point_on_plane.z - level_origin.z + (0.5 / WATER_PAINT_RESOLUTION) + 0.5f) * WATER_PAINT_RESOLUTION);
                 Int2 top_left = { center.x - brush_radius, center.y - brush_radius };
+                int32 texture_width  = level_dim.x * WATER_PAINT_RESOLUTION;
+                int32 texture_height = level_dim.z * WATER_PAINT_RESOLUTION;
+                if (texture_width  > WATER_PAINT_MAX_SIDE) texture_width  = WATER_PAINT_MAX_SIDE;
+                if (texture_height > WATER_PAINT_MAX_SIDE) texture_height = WATER_PAINT_MAX_SIDE;
 
                 FOR(y_index, 2 * brush_radius - 1)
                 {
                     FOR(x_index, 2 * brush_radius - 1)
                     {
                         Int2 draw_pos = { top_left.x + x_index, top_left.y + y_index };
-                        if (draw_pos.x >= 0 && draw_pos.y >= 0 && draw_pos.x < WATER_PAINT_SIDE && draw_pos.y < WATER_PAINT_SIDE)
-                        {
-                            float draw_multiplier = 1.0f;
-                            float unnormalized_multiplier = (float)(brush_radius*brush_radius - ((x_index - brush_radius)*(x_index - brush_radius) + (y_index - brush_radius)*(y_index - brush_radius)));
+                        if (draw_pos.x < 0 || draw_pos.y < 0 || draw_pos.x >= texture_width || draw_pos.y >= texture_height ) continue;
+                        float draw_multiplier = 1.0f;
+                        float unnormalized_multiplier = (float)(brush_radius*brush_radius - ((x_index - brush_radius)*(x_index - brush_radius) + (y_index - brush_radius)*(y_index - brush_radius)));
+                        if (unnormalized_multiplier <= 0) continue;
+                        draw_multiplier = unnormalized_multiplier / (brush_radius*brush_radius);
 
-                            if (unnormalized_multiplier < 0) draw_multiplier = 0.0f;
-                            else draw_multiplier = unnormalized_multiplier / (brush_radius*brush_radius);
-
-                            int32 in_array = draw_pos.y * WATER_PAINT_SIDE + draw_pos.x;
-                            float speculative_value = water_paint_texture.values[in_array].x + (paint_magnitude * draw_multiplier);
-                            if      (speculative_value > 1.0f) water_paint_texture.values[in_array].x = 1.0f;
-                            else if (speculative_value < 0.0f) water_paint_texture.values[in_array].x = 0.0f;
-                            else                               water_paint_texture.values[in_array].x = speculative_value;
-                        }
+                        int32 in_array = draw_pos.y * texture_width + draw_pos.x;
+                        float speculative_value = water_paint_texture.values[in_array].x + (paint_magnitude * draw_multiplier);
+                        if      (speculative_value > 1.0f) water_paint_texture.values[in_array].x = 1.0f;
+                        else if (speculative_value < 0.0f) water_paint_texture.values[in_array].x = 0.0f;
+                        else                               water_paint_texture.values[in_array].x = speculative_value;
                     }
                 }
                 water_paint_texture.dirty = true;
@@ -4158,7 +4203,7 @@ GameResult gameFrame(double delta_time, Input* input)
             if (input->keys_held & KEY_R)
             {
                 // reset
-                FOR(i, WATER_PAINT_SIDE * WATER_PAINT_SIDE) water_paint_texture.values[i] = (Vec4){ 0.0f, 0.0f, 0.0f, 1.0f };
+                FOR(i, WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE) water_paint_texture.values[i] = (Vec4){ 0.0f, 0.0f, 0.0f, 1.0f };
 
                 water_paint_texture.dirty = true;
                 createDebugPopup("reset water texture", POPUP_TYPE_NONE);
@@ -4379,10 +4424,8 @@ GameResult gameFrame(double delta_time, Input* input)
             if (input->keys_held & KEY_DOT)
             {
                 Int3 new_dim = (Int3){ level_dim.x, level_dim.y + 1, level_dim.z };
-                char dim_text[256] = {0};
-                if (reindexBuffer(level_origin, new_dim)) snprintf(dim_text, sizeof(dim_text), "level y dim: %i", level_dim.y);
-                else snprintf(dim_text, sizeof(dim_text), "level too large to grow");
-                createDebugPopup(dim_text, POPUP_TYPE_LEVEL_Y_CHANGE);
+                if (reindexBuffer(level_origin, new_dim)) DEBUG_POPUP(POPUP_TYPE_NONE, "level y dim: %i", level_dim.y);
+                else DEBUG_POPUP(POPUP_TYPE_LEVEL_Y_CHANGE, "level too large to grow");
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
             else if (input->keys_held & KEY_COMMA)
@@ -4392,19 +4435,16 @@ GameResult gameFrame(double delta_time, Input* input)
                 bool empty_level = level_min.x > level_max.x;
                 int32 current_top = level_origin.y + level_dim.y - 1;
                 bool top_row_empty = empty_level || current_top > level_max.y;
-
-                char dim_text[256] = {0};
                 if (level_dim.y > 1 && top_row_empty)
                 {
                     Int3 new_dim = (Int3){ level_dim.x, level_dim.y - 1, level_dim.z };
                     reindexBuffer(level_origin, new_dim);
-                    snprintf(dim_text, sizeof(dim_text), "level y dim: %i", level_dim.y);
+                    DEBUG_POPUP(POPUP_TYPE_LEVEL_Y_CHANGE, "level y dim: %i", level_dim.y);
                 }
                 else
                 {
-                    snprintf(dim_text, sizeof(dim_text), "can't shrink: there is tile on top row");
+                    DEBUG_POPUP(POPUP_TYPE_LEVEL_Y_CHANGE, "can't shrink: there is tile on top row");
                 }
-                createDebugPopup(dim_text, POPUP_TYPE_LEVEL_Y_CHANGE);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
         }
@@ -4976,8 +5016,8 @@ GameResult gameFrame(double delta_time, Input* input)
             DEBUG_TEXT("level origin: %i, %i, %i; level dim: %i, %i, %i", level_origin.x, level_origin.y, level_origin.z, level_dim.x, level_dim.y, level_dim.z);
 
             // player info
-            DEBUG_TEXT("player info: coords: %i, %i, %i, pos norm: %.2f, %.2f, %.2f, velocity: %.2f, %.2f, %.2f", 
-                player->coords.x, player->coords.y, player->coords.z, player->position.x, player->position.y, player->position.z, player->velocity.x, player->velocity.y, player->velocity.z);
+            DEBUG_TEXT("player info: coords: %i, %i, %i, pos norm: %.2f, %.2f, %.2f, velocity: %.2f, %.2f, %.2f, falling: %i, move dir: %i",
+                player->coords.x, player->coords.y, player->coords.z, player->position.x, player->position.y, player->position.z, player->velocity.x, player->velocity.y, player->velocity.z, player->falling, player->moving_direction);
 
             // pack info
             DEBUG_TEXT("pack info: coords: %i, %i, %i, pos norm: %.2f, %.2f, %.2f, velocity: %.2f, %.2f, %.2f, attached: %i, timer: %i", 

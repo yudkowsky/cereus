@@ -115,11 +115,13 @@ typedef struct ViewConstants
     float light_view_proj[16];
     Vec4 camera_position;
     Vec4 light_direction;
+    Vec4 level_aabb_min;
     float water_plane_y;
     bool discard_below_water_plane;
     float time;
     float water_tile_length;
     float focal_length;
+    
 }
 ViewConstants;
 
@@ -221,8 +223,8 @@ typedef struct VulkanState
 {
     // stuff passed from game layer
     Camera camera;
-    Vec3 scene_aabb_min;
-    Vec3 scene_aabb_max;
+    Vec3 level_aabb_min;
+    Vec3 level_aabb_max;
     float time;
     float water_plane_y;
     ShaderMode shader_mode;
@@ -5193,8 +5195,8 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         VkImageCreateInfo paint_image_ci = {0};
         paint_image_ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         paint_image_ci.imageType = VK_IMAGE_TYPE_2D;
-        paint_image_ci.extent.width = WATER_PAINT_SIDE;
-        paint_image_ci.extent.height = WATER_PAINT_SIDE;
+        paint_image_ci.extent.width = WATER_PAINT_MAX_SIDE;
+        paint_image_ci.extent.height = WATER_PAINT_MAX_SIDE;
         paint_image_ci.extent.depth = 1;
         paint_image_ci.mipLevels = 1;
         paint_image_ci.arrayLayers = 1;
@@ -5234,7 +5236,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     // persistent staging buffer
     {
-        VkDeviceSize paint_size_bytes = (VkDeviceSize)WATER_PAINT_SIDE * WATER_PAINT_SIDE * sizeof(Vec4);
+        VkDeviceSize paint_size_bytes = (VkDeviceSize)WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE * sizeof(Vec4);
 
         VkBufferCreateInfo staging_buffer_ci = {0};
         staging_buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -5358,8 +5360,8 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Ren
 
     // TODO: maybe there should just be a renderer_info in vulkan_state
     vulkan_state.camera = vulkan_info.camera;
-    vulkan_state.scene_aabb_min = vulkan_info.scene_aabb_min;
-    vulkan_state.scene_aabb_max = vulkan_info.scene_aabb_max;
+    vulkan_state.level_aabb_min = vulkan_info.level_aabb_min;
+    vulkan_state.level_aabb_max = vulkan_info.level_aabb_max;
     vulkan_state.time = vulkan_info.time;
     vulkan_state.water_plane_y = vulkan_info.water_plane_y;
     vulkan_state.shader_mode = vulkan_info.shader_mode;
@@ -5621,7 +5623,11 @@ void vulkanDraw(bool do_profiling_output)
     if (vulkan_state.water_paint_texture && vulkan_state.water_paint_texture->dirty)
     {
         // TODO: slow... will want to either expose this mapped memory to game, and handle like that, or only write affected pixels on any given frame
-        memcpy(vulkan_state.paint_staging_mapped, vulkan_state.water_paint_texture->values, sizeof(Vec4) * WATER_PAINT_SIDE * WATER_PAINT_SIDE);
+        int32 paint_texture_width  = (int32)roundf(vulkan_state.level_aabb_max.x - vulkan_state.level_aabb_min.x) * WATER_PAINT_RESOLUTION;
+        int32 paint_texture_height = (int32)roundf(vulkan_state.level_aabb_max.z - vulkan_state.level_aabb_min.z) * WATER_PAINT_RESOLUTION;
+        if (paint_texture_width  > WATER_PAINT_MAX_SIDE) paint_texture_width  = WATER_PAINT_MAX_SIDE;
+        if (paint_texture_height > WATER_PAINT_MAX_SIDE) paint_texture_height = WATER_PAINT_MAX_SIDE;
+        memcpy(vulkan_state.paint_staging_mapped, vulkan_state.water_paint_texture->values, sizeof(Vec4) * paint_texture_width * paint_texture_height);
 
         imageBarrier(command_buffer, vulkan_state.paint_image,
             vulkan_state.paint_image_first_upload ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -5639,7 +5645,7 @@ void vulkanDraw(bool do_profiling_output)
         paint_copy.imageSubresource.baseArrayLayer = 0;
         paint_copy.imageSubresource.layerCount = 1;
         paint_copy.imageOffset = (VkOffset3D){ 0, 0, 0 };
-        paint_copy.imageExtent = (VkExtent3D){ WATER_PAINT_SIDE, WATER_PAINT_SIDE, 1 };
+        paint_copy.imageExtent = (VkExtent3D){ (uint32)paint_texture_width, (uint32)paint_texture_height, 1 };
 
         vkCmdCopyBufferToImage(command_buffer, vulkan_state.paint_staging_buffer, vulkan_state.paint_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &paint_copy);
 
@@ -5735,7 +5741,7 @@ void vulkanDraw(bool do_profiling_output)
         mat4Inverse(main_inverse_view_projection, main_view_projection);
 
         float light_view_projection[16];
-        mat4BuildDirectionalLight(light_view_projection, vulkan_state.sun_direction, vulkan_state.scene_aabb_min, vulkan_state.scene_aabb_max);
+        mat4BuildDirectionalLight(light_view_projection, vulkan_state.sun_direction, vulkan_state.level_aabb_min, vulkan_state.level_aabb_max);
 
         memcpy(main_view_constants->view,            view_matrix,                  sizeof(float) * 16);
         memcpy(main_view_constants->proj,            projection_matrix,            sizeof(float) * 16);
@@ -5744,7 +5750,8 @@ void vulkanDraw(bool do_profiling_output)
         memcpy(main_view_constants->light_view_proj, light_view_projection,        sizeof(float) * 16);
 
         main_view_constants->camera_position           = (Vec4){ vulkan_state.camera.coords.x, vulkan_state.camera.coords.y, vulkan_state.camera.coords.z, 0.0f };
-        main_view_constants->light_direction           = (Vec4){ vulkan_state.sun_direction.x, vulkan_state.sun_direction.y, vulkan_state.sun_direction.z, 0.0 };
+        main_view_constants->light_direction           = (Vec4){ vulkan_state.sun_direction.x, vulkan_state.sun_direction.y, vulkan_state.sun_direction.z, 0.0f };
+        main_view_constants->level_aabb_min            = (Vec4){ vulkan_state.level_aabb_min.x, vulkan_state.level_aabb_min.y, vulkan_state.level_aabb_min.z, 0.0f };
         main_view_constants->water_plane_y             = vulkan_state.water_plane_y;
         main_view_constants->discard_below_water_plane = false;
         main_view_constants->time                      = vulkan_state.time;
@@ -6412,7 +6419,6 @@ void vulkanDraw(bool do_profiling_output)
     }
 
     // debug quad
-    /*
     {
         vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline);
 
@@ -6423,7 +6429,8 @@ void vulkanDraw(bool do_profiling_output)
         uint32 debug_view_constants_offset = VIEW_SPRITE * vulkan_state.view_constants_stride;
         vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 0, 1, &vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame], 1, &debug_view_constants_offset);
 
-        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 1, 1, &vulkan_state.shadow_map_descriptor_set, 0, 0);
+        //vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 1, 1, &vulkan_state.shadow_map_descriptor_set, 0, 0);
+        vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.sprite_pipeline_layout, 1, 1, &vulkan_state.paint_descriptor_set, 0, 0);
 
         float debug_size = 300.0f;
         float debug_margin = 10.0f;
@@ -6447,7 +6454,6 @@ void vulkanDraw(bool do_profiling_output)
         vkCmdPushConstants(command_buffer, vulkan_state.sprite_pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(SpritePushConstants), &debug_pc);
         vkCmdDrawIndexed(command_buffer, vulkan_state.sprite_index_count, 1, 0, 0, 0);
     }
-    */
 
     vkCmdEndRenderPass(command_buffer);
 

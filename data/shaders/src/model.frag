@@ -1,4 +1,5 @@
 #version 450
+
 #include "shadow.glsl"
 
 layout(set = 0, binding = 0) uniform ViewConstants 
@@ -10,6 +11,7 @@ layout(set = 0, binding = 0) uniform ViewConstants
     mat4 light_view_proj;
     vec4 camera_position;
     vec4 light_direction;
+    vec4 level_aabb_min;
     float water_plane_y;
     bool discard_below_water_plane;
     float time;

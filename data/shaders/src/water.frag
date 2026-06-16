@@ -11,6 +11,7 @@ layout(set = 0, binding = 0) uniform ViewConstants
     mat4 light_view_proj;
     vec4 camera_position;
     vec4 light_direction;
+    vec4 level_aabb_min;
     float water_plane_y;
     bool discard_below_water_plane;
     float time;
@@ -96,7 +97,7 @@ void main()
     vec2 pushed_xz = frag_world_pos.xz + normal_push;
 
     // sample paint texture given movement by unmodified normal
-    vec2 paint_uv = (pushed_xz + 0.5) / WATER_PAINT_TILE_COUNT;
+    vec2 paint_uv = (pushed_xz - view_constants.level_aabb_min.xz) / WATER_PAINT_TILE_COUNT;
     vec2 snapped = (floor(paint_uv * WATER_PAINT_SIDE) + 0.5) / WATER_PAINT_SIDE;
     float paint_value = texture(paint_texture, snapped).r;
     float effective_opacity = grid_opacity * paint_value;
