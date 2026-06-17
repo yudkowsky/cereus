@@ -31,7 +31,6 @@ layout(set = 7, binding = 0) uniform sampler2DArray grid_normal_texture;
 layout(location = 0) in vec3 frag_world_pos;
 
 layout(location = 0) out vec4 out_color;
-layout(location = 1) out float out_water_depth;
 
 // TODO: annoying and bad to define twice (and now outdated)
 const float WATER_PAINT_TILE_COUNT = 64;
@@ -52,13 +51,13 @@ const float grid_reflection_scaling = 4.0;
 
 // reflection shenanigans
 const float reflection_distortion_strength = 0.0001;
-const float min_reflection = 0.1; // looking straight down should still have some amount of reflection
+const float min_reflection = 0.02; // looking straight down should still have some amount of reflection
 const float fresnel_exponent = 4.0;
 //const float reflection_edge_fade = 0.5; // TODO: go back and look at this - didn't solve the problem i wanted, but might be a nice effect regardless?
 
-const vec3 sky_horizon = vec3(0.50, 0.12, 0.00);
-const vec3 sky_mid     = vec3(0.60, 0.15, 0.30);
-const vec3 sky_zenith  = vec3(0.03, 0.08, 0.16);
+const vec3 sky_horizon = vec3(0.06, 0.70, 0.50);
+const vec3 sky_mid     = vec3(0.06, 0.45, 0.60);
+const vec3 sky_zenith  = vec3(0.06, 0.30, 0.40);
 
 // specular
 const float glint_half_angle_deg = 0.8;
@@ -69,20 +68,6 @@ void main()
 {
     vec2 texel = 1.0 / vec2(textureSize(depth_texture, 0));
     vec2 screen_uv = gl_FragCoord.xy * texel;
-
-    // write waterline depth for every water fragment (even occluded ones)
-    out_water_depth = gl_FragCoord.z;
-
-    // manual occlusion: can't discard because skips depth write above, so emit transparent fragment and bail
-    // TODO: try to figure out something smarter here. or not, because want to be able to manage >90% of screen
-    //       as water, so might as well just do it for everything?
-    float scene_ndc = texture(depth_texture, screen_uv).r;
-    if (gl_FragCoord.z >= scene_ndc)
-    {
-        out_color = vec4(0.0);
-        return;
-    }
-
     vec3 scene = texture(scene_texture, screen_uv).rgb;
 
     // TINT
