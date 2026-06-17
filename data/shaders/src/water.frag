@@ -61,7 +61,7 @@ const vec3 sky_mid     = vec3(0.60, 0.15, 0.30);
 const vec3 sky_zenith  = vec3(0.03, 0.08, 0.16);
 
 // specular
-const float glint_half_angle_deg = 1.0;
+const float glint_half_angle_deg = 0.8;
 const float glint_intensity = 1.5;
 const vec3 glint_color = vec3(1.0, 0.65, 0.40);
 
@@ -180,7 +180,7 @@ void main()
     float glint_inner = cos(radians(glint_half_angle_deg));
     float glint = smoothstep(glint_inner, 1.0, sun_align);
 
-    base_color += glint_color * glint * glint_intensity;
+    base_color += glint_color * glint * glint_intensity * (1.0 - reflected_geometry.a);
 
     out_color = vec4(base_color, 1.0);
 }
