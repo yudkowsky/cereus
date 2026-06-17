@@ -44,16 +44,26 @@ const float tint_min = 0.5;
 const float tint_max = 0.9;
 
 // grid
-const float grid_push_by_normal = 0.2;
+const float grid_push_by_normal = 0.1;
 const float grid_thinning = 0.4;
-const float grid_opacity = 0.05;
-const float grid_line_normal_offset_strength = 0.75;
-const float min_reflection_on_grid = 0.5;
+const float grid_opacity = 0.1;
+const float grid_line_normal_offset_strength = 0.5;
+const float grid_reflection_scaling = 4.0;
 
 // reflection shenanigans
 const float reflection_distortion_strength = 0.0001;
 const float min_reflection = 0.1; // looking straight down should still have some amount of reflection
 const float fresnel_exponent = 4.0;
+//const float reflection_edge_fade = 0.5; // TODO: go back and look at this - didn't solve the problem i wanted, but might be a nice effect regardless?
+
+const vec3 sky_horizon = vec3(0.50, 0.12, 0.00);
+const vec3 sky_mid     = vec3(0.60, 0.15, 0.30);
+const vec3 sky_zenith  = vec3(0.03, 0.08, 0.16);
+
+// specular
+const float glint_half_angle_deg = 1.0;
+const float glint_intensity = 1.5;
+const vec3 glint_color = vec3(1.0, 0.65, 0.40);
 
 void main() 
 {
@@ -97,7 +107,6 @@ void main()
     vec2 paint_uv = (pushed_xz - view_constants.level_aabb_min.xz) / WATER_PAINT_TILE_COUNT;
     vec2 snapped = (floor(paint_uv * WATER_PAINT_SIDE) + 0.5) / WATER_PAINT_SIDE;
     float paint_value = texture(paint_texture, snapped).r;
-    float effective_opacity = grid_opacity * paint_value;
 
     // water grid animation sampling
     float time_per_frame = 0.125;
@@ -115,12 +124,11 @@ void main()
         frame_blend);
 
     // thinner (and dimmer) lines with lower paint
-    const float grid_thinning = 0.4;
     float grid_mult = grid * paint_value;
     float grid_sub = max(grid - (1.0 - paint_value), 0.0);
     float grid_shaped = mix(grid_mult, grid_sub, grid_thinning);
 
-    base_color += vec3(grid_shaped) * grid_opacity * paint_value;
+    base_color += vec3(grid_shaped) * grid_opacity;
 
     // normal is dual channel in xz
     vec3 ridge_texture = mix(
@@ -137,39 +145,42 @@ void main()
 
     // REFLECTION
 
-    // reflection based on fresnel strength, dampen if on grid foam
     vec3 view_dir = normalize(view_constants.camera_position.xyz - frag_world_pos);
-    float cos_theta = max(dot(view_dir, normal), 0.0);
-    float reflection_dampen_on_foam = mix(1.0, min_reflection_on_grid, clamp(grid * paint_value, 0.0, 1.0));
-    float fresnel = (min_reflection + (1.0 - min_reflection) * pow(1.0 - cos_theta, fresnel_exponent)) * reflection_dampen_on_foam;
 
-    // reflection distortion based on normals and distance to camera
+    // direction surface reflects towards
+    vec3 reflect_dir = reflect(-view_dir, normal);
+
+    float t = clamp(reflect_dir.y, 0.0, 1.0);
+    //vec3 reflection_color = mix(sky_horizon, sky_zenith, t);
+    vec3 reflection_color = (t < 0.5)
+        ? mix(sky_horizon, sky_mid,    t * 2.0)
+        : mix(sky_mid,     sky_zenith, (t - 0.5) * 2.0);
+
+    // alpha 0 means no scene rendered here, so do the fancy sky
     float dist_to_camera = distance(view_constants.camera_position.xyz, frag_world_pos);
     float pixel_world_size = dist_to_camera / view_constants.focal_length;
     float distortion_strength = reflection_distortion_strength / pixel_world_size;
-    vec2 reflection_uv_offset = normal.xz * distortion_strength;
-    vec2 reflection_uv = screen_uv + reflection_uv_offset;
+    vec2 reflection_uv = screen_uv + normal.xz * distortion_strength;
+    vec4 reflected_geometry = texture(reflection_texture, reflection_uv);
+    reflection_color = mix(reflection_color, reflected_geometry.rgb, reflected_geometry.a);
 
-    // offset reflection uv by wave height
-    float reflection_height_strength = 0.5;
-    float wave_height = frag_world_pos.y - view_constants.water_plane_y;
-    float grazing = sqrt(max(1.0 - cos_theta * cos_theta, 0.0));
-    float height_shift = wave_height * grazing / pixel_world_size * texel.y * reflection_height_strength;
-    reflection_uv.y += height_shift;
+    // amount of reflection from fresnel
+    float cos_theta = max(dot(view_dir, normal), 0.0);
+    float reflection_dampen_on_foam = mix(1.0, grid_reflection_scaling, clamp(grid * paint_value, 0.0, 1.0));
+    float fresnel = (min_reflection + (1.0 - min_reflection) * pow(1.0 - cos_theta, fresnel_exponent)) * reflection_dampen_on_foam;
 
-    vec3 reflection_color = texture(reflection_texture, reflection_uv).rgb;
+    //float edge_mask = smoothstep(0.0, reflection_edge_fade, underwater_distance);
+    base_color = mix(base_color, reflection_color, fresnel); // * edge_mask);
 
-    // specular reflection
-    /*
-    vec3 light_dir = normalize(vec3(0.3, 1.0, 0.2)); // TODO: revisit this, with real sun direction
-    vec3 halfway = normalize(view_dir + light_dir);
-    float spec_dot = max(dot(normal, halfway), 0.0);
-    float specular = step(0.95, pow(spec_dot, 400.0));
-    vec3 sun_color = vec3(1.0, 0.95, 0.8);
-    base_color += specular * sun_color;
-    */
+    // SPECULAR REFLECTION
 
-    base_color = mix(base_color, reflection_color, fresnel);
+    vec3 to_sun = normalize(-view_constants.light_direction.xyz);
+    float sun_align = dot(reflect_dir, to_sun);
+
+    float glint_inner = cos(radians(glint_half_angle_deg));
+    float glint = smoothstep(glint_inner, 1.0, sun_align);
+
+    base_color += glint_color * glint * glint_intensity;
 
     out_color = vec4(base_color, 1.0);
 }

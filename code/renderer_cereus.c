@@ -635,7 +635,7 @@ DisplayInfo vulkan_display = {0};
 
 // water
 const float water_tile_length = 10.0f;
-const float water_amplitude = 2e-4f;
+const float water_amplitude = 1e-5f;
 
 // outlines
 const float depth_threshold = 1.5f;
@@ -3585,29 +3585,29 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     VkShaderModule sprite_vert_smh = {0};
     VkShaderModule sprite_frag_smh = {0};
 
-    VkPipelineShaderStageCreateInfo fft_spectrum_stage_ci           = loadShaderStage("data/shaders/spirv/fft-spectrum.comp.spv",   &fft_spectrum_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
-    VkPipelineShaderStageCreateInfo fft_evolved_stage_ci            = loadShaderStage("data/shaders/spirv/fft-evolved.comp.spv",    &fft_evolved_smh,           VK_SHADER_STAGE_COMPUTE_BIT);
-    VkPipelineShaderStageCreateInfo fft_pass_stage_ci               = loadShaderStage("data/shaders/spirv/fft-pass.comp.spv",       &fft_pass_smh,              VK_SHADER_STAGE_COMPUTE_BIT);
-    VkPipelineShaderStageCreateInfo fft_finalize_stage_ci           = loadShaderStage("data/shaders/spirv/fft-finalize.comp.spv",   &fft_finalize_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
-    VkPipelineShaderStageCreateInfo cube_vert_stage_ci 	 	        = loadShaderStage("data/shaders/spirv/cube.vert.spv", 	  	  	&cube_vert_smh, 	  	    VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo cube_frag_stage_ci 	 	        = loadShaderStage("data/shaders/spirv/cube.frag.spv", 	  	  	&cube_frag_smh, 	  		VK_SHADER_STAGE_FRAGMENT_BIT);
-	VkPipelineShaderStageCreateInfo model_vert_stage_ci 	 	    = loadShaderStage("data/shaders/spirv/model.vert.spv",   	  	&model_vert_smh,   		    VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo model_frag_stage_ci 	 	    = loadShaderStage("data/shaders/spirv/model.frag.spv",   	  	&model_frag_smh,   		    VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo outline_post_vert_stage_ci      = loadShaderStage("data/shaders/spirv/outline-post.vert.spv",   &outline_post_vert_smh,     VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo outline_post_frag_stage_ci      = loadShaderStage("data/shaders/spirv/outline-post.frag.spv",   &outline_post_frag_smh,     VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo water_vert_stage_ci             = loadShaderStage("data/shaders/spirv/water.vert.spv",          &water_vert_smh,            VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo water_frag_stage_ci             = loadShaderStage("data/shaders/spirv/water.frag.spv",          &water_frag_smh,            VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo waterline_frag_stage_ci         = loadShaderStage("data/shaders/spirv/waterline.frag.spv",      &waterline_frag_smh,        VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo shadow_cube_vert_stage_ci       = loadShaderStage("data/shaders/spirv/shadow-cube.vert.spv",    &shadow_cube_vert_smh,      VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo shadow_model_vert_stage_ci      = loadShaderStage("data/shaders/spirv/shadow-model.vert.spv",   &shadow_model_vert_smh,     VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo laser_vert_stage_ci             = loadShaderStage("data/shaders/spirv/laser.vert.spv",          &laser_vert_smh,            VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo laser_frag_stage_ci             = loadShaderStage("data/shaders/spirv/laser.frag.spv",          &laser_frag_smh,            VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo oit_resolve_vert_stage_ci       = loadShaderStage("data/shaders/spirv/oit-resolve.vert.spv",    &oit_resolve_vert_smh,      VK_SHADER_STAGE_VERTEX_BIT);
-    VkPipelineShaderStageCreateInfo oit_resolve_frag_stage_ci       = loadShaderStage("data/shaders/spirv/oit-resolve.frag.spv",    &oit_resolve_frag_smh,      VK_SHADER_STAGE_FRAGMENT_BIT);
-    VkPipelineShaderStageCreateInfo outline_select_vert_stage_ci    = loadShaderStage("data/shaders/spirv/outline-select.vert.spv", &outline_select_vert_smh, 	VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo outline_select_frag_stage_ci    = loadShaderStage("data/shaders/spirv/outline-select.frag.spv", &outline_select_frag_smh, 	VK_SHADER_STAGE_FRAGMENT_BIT);
-	VkPipelineShaderStageCreateInfo sprite_vert_stage_ci  	        = loadShaderStage("data/shaders/spirv/sprite.vert.spv",  	  	&sprite_vert_smh,  		    VK_SHADER_STAGE_VERTEX_BIT);
-	VkPipelineShaderStageCreateInfo sprite_frag_stage_ci  	        = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  	&sprite_frag_smh,  		    VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo fft_spectrum_stage_ci           = loadShaderStage("data/shaders/spirv/fft-spectrum.comp.spv",           &fft_spectrum_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo fft_evolved_stage_ci            = loadShaderStage("data/shaders/spirv/fft-evolved.comp.spv",            &fft_evolved_smh,           VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo fft_pass_stage_ci               = loadShaderStage("data/shaders/spirv/fft-pass.comp.spv",               &fft_pass_smh,              VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo fft_finalize_stage_ci           = loadShaderStage("data/shaders/spirv/fft-finalize.comp.spv",           &fft_finalize_smh,          VK_SHADER_STAGE_COMPUTE_BIT);
+    VkPipelineShaderStageCreateInfo cube_vert_stage_ci 	 	        = loadShaderStage("data/shaders/spirv/cube.vert.spv", 	  	  	        &cube_vert_smh, 	  	    VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo cube_frag_stage_ci 	 	        = loadShaderStage("data/shaders/spirv/cube.frag.spv", 	  	  	        &cube_frag_smh, 	  		VK_SHADER_STAGE_FRAGMENT_BIT);
+	VkPipelineShaderStageCreateInfo model_vert_stage_ci 	 	    = loadShaderStage("data/shaders/spirv/model.vert.spv",   	  	        &model_vert_smh,   		    VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo model_frag_stage_ci 	 	    = loadShaderStage("data/shaders/spirv/model.frag.spv",   	  	        &model_frag_smh,   		    VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo outline_post_vert_stage_ci      = loadShaderStage("data/shaders/spirv/outline-post.vert.spv",           &outline_post_vert_smh,     VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo outline_post_frag_stage_ci      = loadShaderStage("data/shaders/spirv/outline-post.frag.spv",           &outline_post_frag_smh,     VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo water_vert_stage_ci             = loadShaderStage("data/shaders/spirv/water.vert.spv",                  &water_vert_smh,            VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo water_frag_stage_ci             = loadShaderStage("data/shaders/spirv/water.frag.spv",                  &water_frag_smh,            VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo waterline_frag_stage_ci         = loadShaderStage("data/shaders/spirv/waterline.frag.spv",              &waterline_frag_smh,        VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo shadow_cube_vert_stage_ci       = loadShaderStage("data/shaders/spirv/shadow-cube.vert.spv",            &shadow_cube_vert_smh,      VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo shadow_model_vert_stage_ci      = loadShaderStage("data/shaders/spirv/shadow-model.vert.spv",           &shadow_model_vert_smh,     VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo laser_vert_stage_ci             = loadShaderStage("data/shaders/spirv/laser.vert.spv",                  &laser_vert_smh,            VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo laser_frag_stage_ci             = loadShaderStage("data/shaders/spirv/laser.frag.spv",                  &laser_frag_smh,            VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo oit_resolve_vert_stage_ci       = loadShaderStage("data/shaders/spirv/oit-resolve.vert.spv",            &oit_resolve_vert_smh,      VK_SHADER_STAGE_VERTEX_BIT);
+    VkPipelineShaderStageCreateInfo oit_resolve_frag_stage_ci       = loadShaderStage("data/shaders/spirv/oit-resolve.frag.spv",            &oit_resolve_frag_smh,      VK_SHADER_STAGE_FRAGMENT_BIT);
+    VkPipelineShaderStageCreateInfo outline_select_vert_stage_ci    = loadShaderStage("data/shaders/spirv/outline-select.vert.spv",         &outline_select_vert_smh, 	VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo outline_select_frag_stage_ci    = loadShaderStage("data/shaders/spirv/outline-select.frag.spv",         &outline_select_frag_smh, 	VK_SHADER_STAGE_FRAGMENT_BIT);
+	VkPipelineShaderStageCreateInfo sprite_vert_stage_ci  	        = loadShaderStage("data/shaders/spirv/sprite.vert.spv",  	  	        &sprite_vert_smh,  		    VK_SHADER_STAGE_VERTEX_BIT);
+	VkPipelineShaderStageCreateInfo sprite_frag_stage_ci  	        = loadShaderStage("data/shaders/spirv/sprite.frag.spv",  	  	        &sprite_frag_smh,  		    VK_SHADER_STAGE_FRAGMENT_BIT);
 
     VkPipelineShaderStageCreateInfo cube_shader_stages[2]  	 	    = { cube_vert_stage_ci,    	        cube_frag_stage_ci }; 
    	VkPipelineShaderStageCreateInfo model_shader_stages[2]   	    = { model_vert_stage_ci,   	        model_frag_stage_ci };
@@ -5897,10 +5897,10 @@ void vulkanDraw(bool do_profiling_output)
         uint32 reflection_height = reflectionExtent(vulkan_state.swapchain_extent.height);
 
         VkClearValue reflection_clears[2] = {0};
-        reflection_clears[0].color.float32[0] = 0.1f; // much brighter clear values
-        reflection_clears[0].color.float32[1] = 0.2f;
-        reflection_clears[0].color.float32[2] = 0.4f;
-        reflection_clears[0].color.float32[3] = 1.0f;
+        reflection_clears[0].color.float32[0] = 0.0f; // empty, sky is produced in water shader
+        reflection_clears[0].color.float32[1] = 0.0f;
+        reflection_clears[0].color.float32[2] = 0.0f;
+        reflection_clears[0].color.float32[3] = 0.0f;
         reflection_clears[1].depthStencil.depth = 1.0f;
         reflection_clears[1].depthStencil.stencil = 0;
 
