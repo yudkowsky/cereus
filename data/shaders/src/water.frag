@@ -59,6 +59,9 @@ const vec3 sky_horizon = vec3(0.06, 0.70, 0.50);
 const vec3 sky_mid     = vec3(0.06, 0.45, 0.60);
 const vec3 sky_zenith  = vec3(0.06, 0.30, 0.40);
 
+const float refraction_fade_range = 0.5;
+const float refraction_strength = 0.0005;
+
 // specular
 const float glint_half_angle_deg = 0.8;
 const float glint_intensity = 1.5;
@@ -68,15 +71,11 @@ void main()
 {
     vec2 texel = 1.0 / vec2(textureSize(depth_texture, 0));
     vec2 screen_uv = gl_FragCoord.xy * texel;
-    vec3 scene = texture(scene_texture, screen_uv).rgb;
 
-    // TINT
-
+    // depths
     float water_surface_linear_depth = linearizeDepth(gl_FragCoord.z);
     float scene_center_linear_depth = linearizeDepth(texture(depth_texture, screen_uv).r);
     float underwater_distance = max(scene_center_linear_depth - water_surface_linear_depth, 0.0);
-    float tint_amount = clamp(underwater_distance / max_tint_depth, tint_min, tint_max);
-    vec3 base_color = mix(scene, water_depth_tint, tint_amount);
 
     // GRID
     
@@ -102,20 +101,11 @@ void main()
 
     vec2 tile_uv = (pushed_xz + 0.5) / 4.0; // reapeat sampler handles
 
-    // grid is single channel
     float grid = mix(
         texture(grid_texture, vec3(tile_uv, float(frame_a))).r,
         texture(grid_texture, vec3(tile_uv, float(frame_b))).r,
         frame_blend);
 
-    // thinner (and dimmer) lines with lower paint
-    float grid_mult = grid * paint_value;
-    float grid_sub = max(grid - (1.0 - paint_value), 0.0);
-    float grid_shaped = mix(grid_mult, grid_sub, grid_thinning);
-
-    base_color += vec3(grid_shaped) * grid_opacity;
-
-    // normal is dual channel in xz
     vec3 ridge_texture = mix(
         texture(grid_normal_texture, vec3(tile_uv, float(frame_a))).rgb,
         texture(grid_normal_texture, vec3(tile_uv, float(frame_b))).rgb,
@@ -127,6 +117,31 @@ void main()
         unmodified_normal.y,
         unmodified_normal.z + peturb.y
     ));
+
+    // REFRACTION
+
+    float dist_to_camera = distance(view_constants.camera_position.xyz, frag_world_pos);
+    float pixel_world_size = dist_to_camera / view_constants.focal_length;
+
+    float refraction_fade = clamp(underwater_distance / refraction_fade_range, 0.0, 1.0);
+    vec2 refraction_offset = (normal.xz * refraction_strength * refraction_fade) / pixel_world_size;
+    vec2 refraction_uv = screen_uv + refraction_offset;
+
+    float refracted_scene_depth = linearizeDepth(texture(depth_texture, refraction_uv).r);
+    if (refracted_scene_depth < water_surface_linear_depth) refraction_uv = screen_uv;
+
+    vec3 scene = texture(scene_texture, refraction_uv).rgb;
+
+    // TINT 
+
+    float tint_amount = clamp(underwater_distance / max_tint_depth, tint_min, tint_max);
+    vec3 base_color = mix(scene, water_depth_tint, tint_amount);
+
+    // grid color contribution
+    float grid_mult = grid * paint_value;
+    float grid_sub = max(grid - (1.0 - paint_value), 0.0);
+    float grid_shaped = mix(grid_mult, grid_sub, grid_thinning);
+    base_color += vec3(grid_shaped) * grid_opacity;
 
     // REFLECTION
 
@@ -142,8 +157,6 @@ void main()
         : mix(sky_mid,     sky_zenith, (t - 0.5) * 2.0);
 
     // alpha 0 means no scene rendered here, so do the fancy sky
-    float dist_to_camera = distance(view_constants.camera_position.xyz, frag_world_pos);
-    float pixel_world_size = dist_to_camera / view_constants.focal_length;
     float distortion_strength = reflection_distortion_strength / pixel_world_size;
     vec2 reflection_uv = screen_uv + normal.xz * distortion_strength;
     vec4 reflected_geometry = texture(reflection_texture, reflection_uv);
