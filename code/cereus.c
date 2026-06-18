@@ -466,9 +466,7 @@ bool in_overworld = true;
 float water_plane_y = 0.0f;
 Vec3 sun_direction = {0};
 
-// TODO: at least one of these is disappearing. the scratch buffer might have to stay but might have a better solution
-uint8 water_texture_io_buffer[WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE] = {0};
-Vec4 water_texture_scratch[WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE] = {0};
+Rgba8 water_texture_scratch[WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE] = {0};
 
 Entity* player = &world_state.player;
 Entity* pack = &world_state.pack;
@@ -857,7 +855,7 @@ bool reindexBuffer(Int3 new_origin, Int3 new_dim)
     int32 shift_x = (new_origin.x - level_origin.x) * WATER_PAINT_RESOLUTION;
     int32 shift_z = (new_origin.z - level_origin.z) * WATER_PAINT_RESOLUTION;
 
-    FOR(scratch_index, new_width * new_height) water_texture_scratch[scratch_index] = (Vec4){ 0.0f, 0.0f, 0.0f, 1.0f };
+    FOR(scratch_index, new_width * new_height) water_texture_scratch[scratch_index] = (Rgba8){ 0, 0, 0, 255 };
 
     FOR(new_z, new_height)
     {
@@ -870,7 +868,7 @@ bool reindexBuffer(Int3 new_origin, Int3 new_dim)
             water_texture_scratch[new_z * new_width + new_x] = water_paint_texture.values[old_z * old_width + old_x];
         }
     }
-    memcpy(water_paint_texture.values, water_texture_scratch, sizeof(Vec4) * new_width * new_height);
+    memcpy(water_paint_texture.values, water_texture_scratch, sizeof(Rgba8) * new_width * new_height);
     water_paint_texture.dirty = true;
 
     level_origin = new_origin;
@@ -1439,7 +1437,7 @@ void loadWaterTexture(char* folder_path)
     water_paint_texture.dirty = true;
 
     // default empty so a level with no texture file doesn't inherit from previous... shouldn't actually matter, i guess
-    FOR(pixel, WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE) water_paint_texture.values[pixel] = (Vec4){ 0.0f, 0.0f, 0.0f, 1.0f };
+    FOR(pixel, WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE) water_paint_texture.values[pixel] = (Rgba8){ 0, 0, 0, 255 };
 
     char texture_path[64];
     snprintf(texture_path, sizeof(texture_path), "%s/%s", folder_path, WATER_TEXTURE_FILE_NAME);
@@ -1451,16 +1449,9 @@ void loadWaterTexture(char* folder_path)
     if (texture_width  > WATER_PAINT_MAX_SIDE) texture_width  = WATER_PAINT_MAX_SIDE;
     if (texture_height > WATER_PAINT_MAX_SIDE) texture_height = WATER_PAINT_MAX_SIDE;
 
-    fread(water_texture_io_buffer, 1, texture_width * texture_height, file);
-    FOR(pixel, texture_width * texture_height) water_paint_texture.values[pixel].x = (float)water_texture_io_buffer[pixel] / 255.0f;
+    fread(water_paint_texture.values, sizeof(Rgba8), texture_width * texture_height, file);
     fclose(file);
 }
-
-// TODO:
-// right now: storing 1024*1024 uint8s on disk, and converting to Vec4 per pixel used in renderer.
-// insead, want to store 4 byte RGBA color (1 byte each), and use that in renderer, so I don't need any for loops, just the memcpy.
-
-// TODO: the size of the texture be dynamic based on level_dim (still 16 pixels per tile, but dynamic size)
 
 void writeWaterTexture(char folder_path[64])
 {
@@ -1478,15 +1469,10 @@ void writeWaterTexture(char folder_path[64])
     int32 texture_height = level_dim.z * WATER_PAINT_RESOLUTION;
     if (texture_width  > WATER_PAINT_MAX_SIDE) texture_width  = WATER_PAINT_MAX_SIDE;
     if (texture_height > WATER_PAINT_MAX_SIDE) texture_height = WATER_PAINT_MAX_SIDE;
-    FOR(pixel, texture_width * texture_height)
-    {
-        float value = water_paint_texture.values[pixel].x;
-        water_texture_io_buffer[pixel] = (uint8)(value * 255.0f + 0.5f);
-    }
 
     FILE* file = fopen(texture_path, "wb");
     if (!file) return;
-    fwrite(water_texture_io_buffer, 1, texture_width * texture_height, file);
+    fwrite(water_paint_texture.values, sizeof(Rgba8), texture_width * texture_height, file);
     fclose(file);
 }
 
@@ -4192,10 +4178,10 @@ GameResult gameFrame(double delta_time, Input* input)
                         draw_multiplier = unnormalized_multiplier / (brush_radius*brush_radius);
 
                         int32 in_array = draw_pos.y * texture_width + draw_pos.x;
-                        float speculative_value = water_paint_texture.values[in_array].x + (paint_magnitude * draw_multiplier);
-                        if      (speculative_value > 1.0f) water_paint_texture.values[in_array].x = 1.0f;
-                        else if (speculative_value < 0.0f) water_paint_texture.values[in_array].x = 0.0f;
-                        else                               water_paint_texture.values[in_array].x = speculative_value;
+                        float speculative_value = (water_paint_texture.values[in_array].r / 255.0f) + (paint_magnitude * draw_multiplier);
+                        if      (speculative_value > 1.0f) speculative_value = 1.0f;
+                        else if (speculative_value < 0.0f) speculative_value = 0.0f;
+                        water_paint_texture.values[in_array].r = (uint8)(speculative_value * 255.0f + 0.5f);
                     }
                 }
                 water_paint_texture.dirty = true;
@@ -4203,7 +4189,7 @@ GameResult gameFrame(double delta_time, Input* input)
             if (input->keys_held & KEY_R)
             {
                 // reset
-                FOR(i, WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE) water_paint_texture.values[i] = (Vec4){ 0.0f, 0.0f, 0.0f, 1.0f };
+                FOR(i, WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE) water_paint_texture.values[i] = (Rgba8){ 0, 0, 0, 255 };
 
                 water_paint_texture.dirty = true;
                 createDebugPopup("reset water texture", POPUP_TYPE_NONE);

@@ -2088,7 +2088,7 @@ void createSwapchainResources(void)
     // OIT fragment pool SSBO
     {
         const float max_screen_covered_in_laser = 1.0f/16.0f;
-        VkDeviceSize pool_size = (VkDeviceSize)vulkan_state.swapchain_extent.width * vulkan_state.swapchain_extent.height * 8 * 16 * max_screen_covered_in_laser; // 8 frags per pixel, 16 bytes each (uvec4)
+        VkDeviceSize pool_size = (VkDeviceSize)(vulkan_state.swapchain_extent.width * vulkan_state.swapchain_extent.height * 8 * 16 * max_screen_covered_in_laser); // 8 frags per pixel, 16 bytes each (uvec4)
 
         VkBufferCreateInfo buffer_ci = {0};
         buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -4999,7 +4999,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         paint_image_ci.extent.depth = 1;
         paint_image_ci.mipLevels = 1;
         paint_image_ci.arrayLayers = 1;
-        paint_image_ci.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        paint_image_ci.format = VK_FORMAT_R8G8B8A8_UNORM;
         paint_image_ci.tiling = VK_IMAGE_TILING_OPTIMAL;
         paint_image_ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         paint_image_ci.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -5023,7 +5023,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         paint_view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         paint_view_ci.image = vulkan_state.paint_image;
         paint_view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        paint_view_ci.format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        paint_view_ci.format = VK_FORMAT_R8G8B8A8_UNORM;
         paint_view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         paint_view_ci.subresourceRange.baseMipLevel = 0;
         paint_view_ci.subresourceRange.levelCount = 1;
@@ -5035,7 +5035,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     // persistent staging buffer
     {
-        VkDeviceSize paint_size_bytes = (VkDeviceSize)WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE * sizeof(Vec4);
+        VkDeviceSize paint_size_bytes = (VkDeviceSize)(WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE * sizeof(Rgba8));
 
         VkBufferCreateInfo staging_buffer_ci = {0};
         staging_buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -5426,7 +5426,7 @@ void vulkanDraw(bool do_profiling_output)
         int32 paint_texture_height = (int32)roundf(vulkan_state.level_aabb_max.z - vulkan_state.level_aabb_min.z) * WATER_PAINT_RESOLUTION;
         if (paint_texture_width  > WATER_PAINT_MAX_SIDE) paint_texture_width  = WATER_PAINT_MAX_SIDE;
         if (paint_texture_height > WATER_PAINT_MAX_SIDE) paint_texture_height = WATER_PAINT_MAX_SIDE;
-        memcpy(vulkan_state.paint_staging_mapped, vulkan_state.water_paint_texture->values, sizeof(Vec4) * paint_texture_width * paint_texture_height);
+        memcpy(vulkan_state.paint_staging_mapped, vulkan_state.water_paint_texture->values, sizeof(Rgba8) * paint_texture_width * paint_texture_height);
 
         imageBarrier(command_buffer, vulkan_state.paint_image,
             vulkan_state.paint_image_first_upload ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,

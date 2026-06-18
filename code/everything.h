@@ -51,6 +51,12 @@ typedef struct Int3
 }
 Int3;
 
+typedef struct Rgba8
+{
+    uint8 r, g, b, a;
+}
+Rgba8;
+
 // WORLDSTATE STRUCTS
 
 typedef struct RendererPlatformHandles
@@ -248,7 +254,7 @@ Input;
 
 typedef struct WaterPaintTexture
 {
-    Vec4 values[WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE];
+    Rgba8 values[WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE];
     bool dirty;
 }
 WaterPaintTexture;
