@@ -33,7 +33,7 @@ layout(set = 3, binding = 0) buffer AtomicCounter { uint counter; };
 
 const float beam_radius = 0.5;
 const float falloff_exponent = 1.5;
-const float outline_intensity_boundary = 0.87;
+const float outline_intensity_boundary = 0.86;
 
 void main()
 {

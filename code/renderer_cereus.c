@@ -599,7 +599,7 @@ const uint32 CUBE_INSTANCE_CAPACITY = 8192;
 const uint32 WATER_INSTANCE_CAPACITY = 8192;
 const uint32 LASER_INSTANCE_CAPACITY = 1024;
 
-const int32 REFLECTION_DOWNSCALE = 2;
+const int32 REFLECTION_DOWNSCALE = 3;
 
 const uint32 SHADOW_MAP_RESOLUTION = 2048;
 
@@ -1738,7 +1738,8 @@ LoadedModel loadModel(char* path)
     uploadBufferToLocalDevice(indices, sizeof(uint32) * total_indices, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, &result.index_buffer, &result.index_memory);
 
     result.index_count = (uint32)total_indices;
-    result.data = data;
+    cgltf_free(data);
+    result.data = 0;
 
     free(vertices);
     free(indices);
@@ -6281,10 +6282,9 @@ void vulkanDraw(bool do_profiling_output)
             uint32 count = vulkan_state.timestamp_query_counts[read_pool_index];
             vkGetQueryPoolResults(vulkan_state.logical_device_handle, vulkan_state.timestamp_query_pools[read_pool_index], 0, count, sizeof(uint64) * count, vulkan_state.timestamp_results[read_pool_index], sizeof(uint64), VK_QUERY_RESULT_64_BIT);
             uint64* t = vulkan_state.timestamp_results[read_pool_index];
-            char* region_names[] = 
-            {
-                "fft", "setup", "shadow", "reflection", "scene", "outline", "scene copy", "water", "overlay"
-            };
+            char* region_names[] = { "fft", "setup", "shadow", "reflection", "scene", "outline", "scene copy", "water", "overlay" };
+
+            OutputDebugStringA("RENDERER:\n");
             for (uint32 i = 0; i + 1 < count; i += 2)
             {
                 double ns = (double)(t[i+1] - t[i]) * vulkan_state.timestamp_period;
@@ -6293,6 +6293,7 @@ void vulkanDraw(bool do_profiling_output)
                 snprintf(line, sizeof(line), "%s: %.3f ms\n", region_names[i/2], ms);
                 OutputDebugStringA(line);
             }
+            OutputDebugStringA("\n");
         }
     }
 

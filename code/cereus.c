@@ -356,13 +356,13 @@ const int32 HIT_BY_BLUE_TIME = 3;
 
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
 const int32 MAX_ENTITIES_TIED_TO_MOVEMENT = 32;
-const int32 MAX_SOURCE_COUNT = 32;
 const int32 MAX_LASER_TRAVEL_DISTANCE = 256;
 const int32 MAX_LASER_TURNS_ALLOWED = 16;
 const int32 MAX_PUSHABLE_STACK_SIZE = 32;
 const int32 MAX_TRAILING_HITBOX_COUNT = 32;
 const int32 MAX_LEVEL_COUNT = 64;
 const int32 MAX_DEBUG_POPUP_TYPE_COUNT = 32;
+#define MAX_SOURCE_COUNT 32
 
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
@@ -493,8 +493,6 @@ EditorState editor_state = {0};
 ShaderMode game_shader_mode = SHADER_MODE_DEFAULT;
 bool draw_trailing_hitboxes = false;
 bool cheating = false;
-
-int32 rock_model_last_write_time = 0;
 
 // debug text
 const int32 MAX_DEBUG_TEXT_COUNT = 32;
@@ -2040,10 +2038,10 @@ Vec3 getNormCoordsWithEntityCoordAlongAxis(Direction direction, Vec3 current_nor
 void updateLaserBuffer()
 {
     FOR(laser_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED) temp_state.laser_buffer[laser_index].color = COLOR_NONE;
-    temp_state.player_hit_by_red   = false;
+    temp_state.player_hit_by_red = false;
 
     // if a source is magenta, create entry in sources as primary of it as both red and blue
-    Entity sources_as_primary[256] = {0};
+    Entity sources_as_primary[MAX_SOURCE_COUNT * 2] = {0};
     int32 primary_index = 0;
     FOR(source_index, MAX_ENTITY_INSTANCE_COUNT)
     {
@@ -3820,12 +3818,14 @@ void doPhysicsTick()
 GameResult gameFrame(double delta_time, Input* input)
 {   
     // TEMP: for profiling
-    long long frequency, t0, t1, t2, t3;
+    long long frequency;
+    long long t_start, t_after_game, t_after_submit, t_after_draw, t_after_reload, t_after_input, t_after_physics, t_after_saving;
     QueryPerformanceFrequency(&frequency);
-    QueryPerformanceCounter(&t0);
+    QueryPerformanceCounter(&t_start);
 
     // reload all models changed on disk
     vulkanReloadChangedModels();
+    QueryPerformanceCounter(&t_after_reload);
 
     if (delta_time > 0.1) delta_time = 0.1;
     physics_accumulator += delta_time;
@@ -4455,6 +4455,8 @@ GameResult gameFrame(double delta_time, Input* input)
         }
     }
 
+    QueryPerformanceCounter(&t_after_input);
+
     ///////////////////////
     // MAIN PHYSICS LOOP //
     ///////////////////////
@@ -5048,6 +5050,8 @@ GameResult gameFrame(double delta_time, Input* input)
         physics_accumulator -= physics_timestep_multiplier * DEFAULT_PHYSICS_TIMESTEP;
     }
 
+    QueryPerformanceCounter(&t_after_physics);
+
     // SAVING STUFF (depends on changed state, so after loop)
     {
         // paths for saving data both to source and to inside build
@@ -5174,6 +5178,8 @@ GameResult gameFrame(double delta_time, Input* input)
             writeSolvedLevelsToFile();
         }
     }
+
+    QueryPerformanceCounter(&t_after_saving);
 
     // update camera for drawing. after loop because depends on in_overworld
     camera_with_ow_offset = camera;
@@ -5401,25 +5407,40 @@ GameResult gameFrame(double delta_time, Input* input)
         }
     }
 
+    QueryPerformanceCounter(&t_after_game);
+
     // TEMP: profiling
-    static int frame_counter = 0; // local persist
+    static int frame_counter = 0; // TODO: local persist 
     bool do_profiling_output = frame_counter++ >= 60;
-
-    QueryPerformanceCounter(&t1);
-    vulkanSubmitFrame(draw_commands, draw_command_count, getRendererInfo());
-    QueryPerformanceCounter(&t2);
-    vulkanDraw(do_profiling_output);
-    QueryPerformanceCounter(&t3);
-
-    double game_logic_ms = 1000.0 * (double)(t1 - t0) / (double)frequency;
-    double submit_ms     = 1000.0 * (double)(t2 - t1) / (double)frequency;
-    double draw_ms       = 1000.0 * (double)(t3 - t2) / (double)frequency;
 
     if (do_profiling_output)
     {
-        char buffer[256];
-        snprintf(buffer, sizeof(buffer), "game: %.2f ms; submit: %.2f ms; draw: %.2f ms; total: %.2f ms\n", game_logic_ms, submit_ms, draw_ms, game_logic_ms + submit_ms + draw_ms);
-        OutputDebugStringA(buffer);
+        double reload_ms    = 1000.0 * (double)(t_after_reload  - t_start)         / (double)frequency;
+        double input_ms     = 1000.0 * (double)(t_after_input   - t_after_reload)  / (double)frequency;
+        double physics_ms   = 1000.0 * (double)(t_after_physics - t_after_input)   / (double)frequency;
+        double saving_ms    = 1000.0 * (double)(t_after_saving  - t_after_physics) / (double)frequency;
+        double game_draw_ms = 1000.0 * (double)(t_after_game    - t_after_saving)  / (double)frequency;
+
+        char game[256];
+        snprintf(game, sizeof(game), "GAME:\nreload: %.2f ms\ninput: %.2f ms\nphysics: %.2f ms\nsaving: %.2f ms\ngame draw: %.2f ms\n\n", reload_ms, input_ms, physics_ms, saving_ms, game_draw_ms);
+        OutputDebugStringA(game);
+    }
+
+    vulkanSubmitFrame(draw_commands, draw_command_count, getRendererInfo());
+    QueryPerformanceCounter(&t_after_submit);
+    vulkanDraw(do_profiling_output);
+    QueryPerformanceCounter(&t_after_draw);
+
+    if (do_profiling_output)
+    {
+        double game_logic_ms = 1000.0 * (double)(t_after_game   - t_start)        / (double)frequency;
+        double submit_ms     = 1000.0 * (double)(t_after_submit - t_after_game)   / (double)frequency;
+        double draw_ms       = 1000.0 * (double)(t_after_draw   - t_after_submit) / (double)frequency;
+
+        char overview[256];
+        snprintf(overview, sizeof(overview), "OVERVIEW:\ngame: %.2f ms; submit: %.2f ms; draw: %.2f ms; total: %.2f ms\n\n", game_logic_ms, submit_ms, draw_ms, game_logic_ms + submit_ms + draw_ms);
+        OutputDebugStringA(overview);
+
         frame_counter = 0;
     }
 

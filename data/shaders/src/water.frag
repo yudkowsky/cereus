@@ -37,15 +37,15 @@ const float WATER_PAINT_TILE_COUNT = 64;
 const float WATER_PAINT_SIDE = 64 * 16;
 
 // depth tinting
-const float max_tint_depth = 1.0;
+const float max_tint_depth = 2.0;
 const vec3 water_depth_tint = vec3(0.0, 0.01, 0.04);
-const float tint_min = 0.5;
+const float tint_min = 0.1;
 const float tint_max = 0.9;
 
 // grid
 const float grid_push_by_normal = 0.1;
 const float grid_thinning = 0.4;
-const float grid_opacity = 0.1;
+const float grid_opacity = 0.07;
 const float grid_line_normal_offset_strength = 0.5;
 const float grid_reflection_scaling = 4.0;
 
@@ -63,9 +63,9 @@ const float refraction_fade_range = 0.5;
 const float refraction_strength = 0.0005;
 
 // specular
-const float glint_half_angle_deg = 0.8;
-const float glint_intensity = 1.5;
-const vec3 glint_color = vec3(1.0, 0.65, 0.40);
+const float glint_half_angle_deg = 0.7;
+const float glint_intensity = 5.0;
+const vec3 glint_color = vec3(0.15, 0.10, 0.05);
 
 void main() 
 {
