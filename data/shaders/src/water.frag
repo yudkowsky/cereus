@@ -2,6 +2,13 @@
 
 #include "linearize-depth.glsl"
 
+struct LaserLight
+{
+    vec4 point_0;
+    vec4 point_1;
+    vec4 color;
+};
+
 layout(set = 0, binding = 0) uniform ViewConstants 
 {
     mat4 view;
@@ -27,6 +34,13 @@ layout(set = 4, binding = 0) uniform sampler2D water_texture;
 layout(set = 5, binding = 0) uniform sampler2D reflection_texture;
 layout(set = 6, binding = 0) uniform sampler2DArray grid_texture;
 layout(set = 7, binding = 0) uniform sampler2DArray grid_normal_texture;
+layout(set = 8, binding = 0) readonly buffer LaserLights
+{
+    int laser_light_count;
+    LaserLight laser_lights[];
+}
+laser_data;
+layout(set = 9, binding = 0) uniform sampler2D reflection_distance_texture;
 
 layout(location = 0) in vec3 frag_world_pos;
 
@@ -53,7 +67,6 @@ const float grid_reflection_scaling = 4.0;
 const float reflection_distortion_strength = 0.0001;
 const float min_reflection = 0.02; // looking straight down should still have some amount of reflection
 const float fresnel_exponent = 4.0;
-//const float reflection_edge_fade = 0.5; // TODO: go back and look at this - didn't solve the problem i wanted, but might be a nice effect regardless?
 
 const vec3 sky_horizon = vec3(0.06, 0.70, 0.50);
 const vec3 sky_mid     = vec3(0.06, 0.45, 0.60);
@@ -66,6 +79,34 @@ const float refraction_strength = 0.0005;
 const float glint_half_angle_deg = 0.7;
 const float glint_intensity = 5.0;
 const vec3 glint_color = vec3(0.15, 0.10, 0.05);
+
+// TODO: inline
+float rayToSegmentDistance(vec3 ray_origin, vec3 ray_direction, vec3 segment_start, vec3 segment_end, out vec3 segment_closest_point)
+{
+    vec3 segment_vector  = segment_end - segment_start;
+    vec3 origin_to_start = ray_origin - segment_start;
+
+    float ray_dot_ray                  = dot(ray_direction, ray_direction);
+    float ray_dot_segment              = dot(ray_direction, segment_vector);
+    float segment_dot_segment          = dot(segment_vector, segment_vector);
+    float ray_dot_origin_to_start      = dot(ray_direction, origin_to_start);
+    float segment_dot_origin_to_start  = dot(segment_vector, origin_to_start);
+
+    float denominator = ray_dot_ray * segment_dot_segment - ray_dot_segment * ray_dot_segment;
+
+    float segment_param = (denominator > 1e-6)
+        ? (ray_dot_ray * segment_dot_origin_to_start - ray_dot_segment * ray_dot_origin_to_start) / denominator
+        : segment_dot_origin_to_start / max(segment_dot_segment, 1e-6);
+    segment_param = clamp(segment_param, 0.0, 1.0);
+
+    float ray_param = (ray_dot_segment * segment_param - ray_dot_origin_to_start) / ray_dot_ray;
+    ray_param = max(ray_param, 0.0);
+
+    segment_param = clamp((ray_dot_segment * ray_param + segment_dot_origin_to_start) / max(segment_dot_segment, 1e-6), 0.0, 1.0);
+
+    segment_closest_point = segment_start + segment_param * segment_vector;
+    return distance(ray_origin + ray_param * ray_direction, segment_closest_point);
+}
 
 void main() 
 {
@@ -167,7 +208,6 @@ void main()
     float reflection_dampen_on_foam = mix(1.0, grid_reflection_scaling, clamp(grid * paint_value, 0.0, 1.0));
     float fresnel = (min_reflection + (1.0 - min_reflection) * pow(1.0 - cos_theta, fresnel_exponent)) * reflection_dampen_on_foam;
 
-    //float edge_mask = smoothstep(0.0, reflection_edge_fade, underwater_distance);
     base_color = mix(base_color, reflection_color, fresnel); // * edge_mask);
 
     // SPECULAR REFLECTION
@@ -179,6 +219,33 @@ void main()
     float glint = smoothstep(glint_inner, 1.0, sun_align);
 
     base_color += glint_color * glint * glint_intensity * (1.0 - reflected_geometry.a);
+
+    // LASER REFLECTIONS
+
+    vec3 reflected_camera_pos = vec3(
+        view_constants.camera_position.x,
+        2.0 * view_constants.water_plane_y - view_constants.camera_position.y,
+        view_constants.camera_position.y);
+
+    float reflected_distance = texture(reflection_distance_texture, reflection_uv).r;
+
+    vec3 laser_glow = vec3(0.0);
+    for (int laser_index = 0; laser_index < laser_data.laser_light_count; laser_index++)
+    {
+        LaserLight laser = laser_data.laser_lights[laser_index];
+        vec3 segment_closest_point;
+        float distance_to_segment = rayToSegmentDistance(frag_world_pos, reflect_dir, laser.point_0.xyz, laser.point_1.xyz, segment_closest_point);
+        if (segment_closest_point.y < view_constants.water_plane_y) continue;
+
+        float laser_distance = distance(reflected_camera_pos, segment_closest_point);
+        if (reflected_distance < laser_distance) continue;
+
+        float laser_radius = laser.point_0.w;
+        float core_radius = laser_radius * 0.25;
+        float laser_reflection_amount = smoothstep(laser_radius, core_radius, distance_to_segment);
+        laser_glow += laser.color.rgb * laser_reflection_amount * laser.point_1.w;
+    }
+    base_color += laser_glow;
 
     out_color = vec4(base_color, 1.0);
 }

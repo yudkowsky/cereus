@@ -69,6 +69,27 @@ typedef struct
 }
 Laser;
 
+typedef struct
+{
+    float point_0[3];
+    float radius;
+    float point_1[3];
+    float intensity;
+    float color[3];
+    float _;
+}
+GpuLaserLight;
+
+#define MAX_LASER_LIGHTS 32
+
+typedef struct
+{
+    int32 count;
+    int32 _[3];
+    GpuLaserLight lights[MAX_LASER_LIGHTS];
+}
+LaserLightsBuffer;
+
 // for instancing of cubes. not required in main build
 typedef struct 
 {
@@ -320,7 +341,7 @@ typedef struct VulkanState
     VkDescriptorSet fft_buffer_b_descriptor_set;
     VkDescriptorSet fft_buffer_b_sampled_descriptor_set;
 
-    // real valued heightfield for water vertex shader TODO: rename water_ TODO: maybe still use this? u
+    // real valued heightfield for water vertex shader TODO: rename water_ TODO: maybe still use this?
     VkImage displacement_image;
     VkDeviceMemory displacement_image_memory;
     VkImageView displacement_image_view;
@@ -341,6 +362,15 @@ typedef struct VulkanState
     VkDeviceMemory reflection_msaa_depth_image_memory;
     VkImageView reflection_msaa_depth_image_view;
 
+    VkImage reflection_distance_image;
+    VkDeviceMemory reflection_distance_image_memory;
+    VkImageView reflection_distance_image_view;
+    VkDescriptorSet reflection_distance_descriptor_set;
+
+    VkImage reflection_distance_msaa_image;
+    VkDeviceMemory reflection_distance_msaa_image_memory;
+    VkImageView reflection_distance_msaa_image_view;
+
     // shadow map for directional light
     VkImage shadow_map_image;
     VkDeviceMemory shadow_map_image_memory;
@@ -353,19 +383,19 @@ typedef struct VulkanState
     VkRenderPass shadow_render_pass;
     VkFramebuffer shadow_framebuffer;
 
-    // scene pass (cubes, models, select outlines)
+    // scene pass
     VkRenderPass render_pass_handle;
     VkFramebuffer* swapchain_framebuffers;
 
-    // outline post pass (black outlines on everything)
+    // outline post pass
     VkRenderPass outline_post_render_pass;
     VkFramebuffer* outline_post_framebuffers;
  
-    // overlay pass (lasers, which color the outlines, and sprites, which go over the outlines)
+    // overlay pass
     VkRenderPass overlay_render_pass;
     VkFramebuffer* overlay_framebuffers;
 
-    // water pass (also writes depth to a buffer)
+    // water pass
     VkRenderPass water_render_pass;
     VkFramebuffer* water_framebuffers;
 
@@ -491,6 +521,12 @@ typedef struct VulkanState
     void* laser_instance_mappeds[2];
     uint32 laser_instance_capacity;
 
+    // laser lights resources
+    VkBuffer laser_lights_buffers[2];
+    VkDeviceMemory laser_lights_memories[2];
+    void* laser_lights_mappeds[2];
+    VkDescriptorSet laser_lights_descriptor_sets[2];
+
     // models
     LoadedModel loaded_models[64];
     LoadedModel laser_cylinder_model; // TODO: probably index everything into loaded models; figure out what order i want to put stuff in, if can't just take their id
@@ -599,7 +635,7 @@ const uint32 CUBE_INSTANCE_CAPACITY = 8192;
 const uint32 WATER_INSTANCE_CAPACITY = 8192;
 const uint32 LASER_INSTANCE_CAPACITY = 1024;
 
-const int32 REFLECTION_DOWNSCALE = 3;
+const int32 REFLECTION_DOWNSCALE = 1;
 
 const uint32 SHADOW_MAP_RESOLUTION = 2048;
 
@@ -2259,6 +2295,82 @@ void createSwapchainResources(void)
         vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.reflection_msaa_depth_image_view);
     }
 
+    // reflection distance resolve target
+    {
+        VkImageCreateInfo ci = {0};
+        ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        ci.imageType = VK_IMAGE_TYPE_2D;
+        ci.extent.width = reflection_width;
+        ci.extent.height = reflection_height;
+        ci.extent.depth = 1;
+        ci.mipLevels = 1;
+        ci.arrayLayers = 1;
+        ci.format = VK_FORMAT_R32_SFLOAT;
+        ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        ci.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        ci.samples = VK_SAMPLE_COUNT_1_BIT;
+        ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        vkCreateImage(vulkan_state.logical_device_handle, &ci, 0, &vulkan_state.reflection_distance_image);
+
+        VkMemoryRequirements mem_req = {0};
+        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.reflection_distance_image, &mem_req);
+        VkMemoryAllocateInfo alloc = {0};
+        alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc.allocationSize = mem_req.size;
+        alloc.memoryTypeIndex = findMemoryType(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        vkAllocateMemory(vulkan_state.logical_device_handle, &alloc, 0, &vulkan_state.reflection_distance_image_memory);
+        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.reflection_distance_image, vulkan_state.reflection_distance_image_memory, 0);
+
+        VkImageViewCreateInfo view_ci = {0};
+        view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_ci.image = vulkan_state.reflection_distance_image;
+        view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_ci.format = VK_FORMAT_R32_SFLOAT;
+        view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        view_ci.subresourceRange.levelCount = 1;
+        view_ci.subresourceRange.layerCount = 1;
+        vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.reflection_distance_image_view);
+    }
+
+    // reflection distance MSAA target
+    {
+        VkImageCreateInfo ci = {0};
+        ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+        ci.imageType = VK_IMAGE_TYPE_2D;
+        ci.extent.width = reflection_width;
+        ci.extent.height = reflection_height;
+        ci.extent.depth = 1;
+        ci.mipLevels = 1;
+        ci.arrayLayers = 1;
+        ci.format = VK_FORMAT_R32_SFLOAT;
+        ci.tiling = VK_IMAGE_TILING_OPTIMAL;
+        ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        ci.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        ci.samples = VK_SAMPLE_COUNT_4_BIT;
+        ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        vkCreateImage(vulkan_state.logical_device_handle, &ci, 0, &vulkan_state.reflection_distance_msaa_image);
+
+        VkMemoryRequirements mem_req = {0};
+        vkGetImageMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.reflection_distance_msaa_image, &mem_req);
+        VkMemoryAllocateInfo alloc = {0};
+        alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc.allocationSize = mem_req.size;
+        alloc.memoryTypeIndex = findMemoryType(mem_req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        vkAllocateMemory(vulkan_state.logical_device_handle, &alloc, 0, &vulkan_state.reflection_distance_msaa_image_memory);
+        vkBindImageMemory(vulkan_state.logical_device_handle, vulkan_state.reflection_distance_msaa_image, vulkan_state.reflection_distance_msaa_image_memory, 0);
+
+        VkImageViewCreateInfo view_ci = {0};
+        view_ci.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_ci.image = vulkan_state.reflection_distance_msaa_image;
+        view_ci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_ci.format = VK_FORMAT_R32_SFLOAT;
+        view_ci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        view_ci.subresourceRange.levelCount = 1;
+        view_ci.subresourceRange.layerCount = 1;
+        vkCreateImageView(vulkan_state.logical_device_handle, &view_ci, 0, &vulkan_state.reflection_distance_msaa_image_view);
+    }
+
     // command buffers
     vulkan_state.swapchain_command_buffers = realloc(vulkan_state.swapchain_command_buffers, sizeof(VkCommandBuffer) * vulkan_state.swapchain_image_count);
 
@@ -2407,6 +2519,20 @@ void createSwapchainResources(void)
 
     vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &reflection_desc_write, 0, 0);
 
+    VkDescriptorImageInfo reflection_distance_desc_info = {0};
+    reflection_distance_desc_info.sampler = vulkan_state.linear_clamp_sampler;
+    reflection_distance_desc_info.imageView = vulkan_state.reflection_distance_image_view;
+    reflection_distance_desc_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet reflection_distance_desc_write = {0};
+    reflection_distance_desc_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    reflection_distance_desc_write.dstSet = vulkan_state.reflection_distance_descriptor_set;
+    reflection_distance_desc_write.dstBinding = 0;
+    reflection_distance_desc_write.descriptorCount = 1;
+    reflection_distance_desc_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    reflection_distance_desc_write.pImageInfo = &reflection_distance_desc_info;
+    vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &reflection_distance_desc_write, 0, 0);
+
     // FRAMEBUFFERS
 
     // main scene framebuffers
@@ -2507,17 +2633,19 @@ void createSwapchainResources(void)
 
     // reflection framebuffer
     {
-        VkImageView reflection_attachments[3] =
+        VkImageView reflection_attachments[5] =
         {
             vulkan_state.reflection_msaa_color_image_view,
             vulkan_state.reflection_msaa_depth_image_view,
             vulkan_state.reflection_color_image_view,
+            vulkan_state.reflection_distance_msaa_image_view,
+            vulkan_state.reflection_distance_image_view,
         };
 
         VkFramebufferCreateInfo fb_ci = {0};
         fb_ci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
         fb_ci.renderPass = vulkan_state.reflection_render_pass;
-        fb_ci.attachmentCount = 3;
+        fb_ci.attachmentCount = 5;
         fb_ci.pAttachments = reflection_attachments;
         fb_ci.width = reflection_width;
         fb_ci.height = reflection_height;
@@ -3066,7 +3194,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     // reflected scene render pass
     {
-        VkAttachmentDescription reflection_attachments[3] = {0};
+        VkAttachmentDescription reflection_attachments[5] = {0};
 
         // MSAA color
         reflection_attachments[0].format = vulkan_state.swapchain_format;
@@ -3098,23 +3226,49 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         reflection_attachments[2].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         reflection_attachments[2].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-        VkAttachmentReference reflection_color_ref = {0};
-        reflection_color_ref.attachment = 0;
-        reflection_color_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        // [3] MSAA distance
+        reflection_attachments[3].format = VK_FORMAT_R32_SFLOAT;
+        reflection_attachments[3].samples = VK_SAMPLE_COUNT_4_BIT;
+        reflection_attachments[3].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        reflection_attachments[3].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        reflection_attachments[3].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        reflection_attachments[3].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        reflection_attachments[3].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        reflection_attachments[3].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        // [4] resolve distance
+        reflection_attachments[4].format = VK_FORMAT_R32_SFLOAT;
+        reflection_attachments[4].samples = VK_SAMPLE_COUNT_1_BIT;
+        reflection_attachments[4].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        reflection_attachments[4].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        reflection_attachments[4].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        reflection_attachments[4].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        reflection_attachments[4].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        reflection_attachments[4].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
         VkAttachmentReference reflection_depth_ref = {0};
         reflection_depth_ref.attachment = 1;
         reflection_depth_ref.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-        VkAttachmentReference reflection_resolve_ref = {0};
-        reflection_resolve_ref.attachment = 2;
-        reflection_resolve_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        VkAttachmentReference reflection_color_refs[3] =
+        {
+            { 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL },
+            { VK_ATTACHMENT_UNUSED, VK_IMAGE_LAYOUT_UNDEFINED },
+            { 3, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL },
+        };
+
+        VkAttachmentReference reflection_resolve_refs[3] =
+        {
+            { 2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL },
+            { VK_ATTACHMENT_UNUSED, VK_IMAGE_LAYOUT_UNDEFINED },
+            { 4, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL },
+        };
 
         VkSubpassDescription reflection_subpass = {0};
         reflection_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        reflection_subpass.colorAttachmentCount = 1;
-        reflection_subpass.pColorAttachments = &reflection_color_ref;
-        reflection_subpass.pResolveAttachments = &reflection_resolve_ref;
+        reflection_subpass.colorAttachmentCount = 3;
+        reflection_subpass.pColorAttachments = reflection_color_refs;
+        reflection_subpass.pResolveAttachments = reflection_resolve_refs;
         reflection_subpass.pDepthStencilAttachment = &reflection_depth_ref;
 
         VkSubpassDependency reflection_dependencies[2] = {0};
@@ -3135,7 +3289,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         VkRenderPassCreateInfo rp_ci = {0};
         rp_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        rp_ci.attachmentCount = 3;
+        rp_ci.attachmentCount = 5;
         rp_ci.pAttachments = reflection_attachments;
         rp_ci.subpassCount = 1;
         rp_ci.pSubpasses = &reflection_subpass;
@@ -3971,6 +4125,49 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         }
     }
 
+    // laser lights ssbo
+    for (int in_flight_index = 0; in_flight_index < 2; in_flight_index++)
+    {
+        VkBufferCreateInfo buffer_ci = {0};
+        buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        buffer_ci.size  = sizeof(LaserLightsBuffer);
+        buffer_ci.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+        buffer_ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+        vkCreateBuffer(vulkan_state.logical_device_handle, &buffer_ci, 0, &vulkan_state.laser_lights_buffers[in_flight_index]);
+
+        VkMemoryRequirements memory_requirements = {0};
+        vkGetBufferMemoryRequirements(vulkan_state.logical_device_handle, vulkan_state.laser_lights_buffers[in_flight_index], &memory_requirements);
+
+        VkMemoryAllocateInfo alloc_info = {0};
+        alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        alloc_info.allocationSize = memory_requirements.size;
+        alloc_info.memoryTypeIndex = findMemoryType(memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+        vkAllocateMemory(vulkan_state.logical_device_handle, &alloc_info, 0, &vulkan_state.laser_lights_memories[in_flight_index]);
+        vkBindBufferMemory(vulkan_state.logical_device_handle, vulkan_state.laser_lights_buffers[in_flight_index], vulkan_state.laser_lights_memories[in_flight_index], 0);
+        vkMapMemory(vulkan_state.logical_device_handle, vulkan_state.laser_lights_memories[in_flight_index], 0, sizeof(LaserLightsBuffer), 0, &vulkan_state.laser_lights_mappeds[in_flight_index]);
+
+        VkDescriptorSetAllocateInfo descriptor_set_alloc = {0};
+        descriptor_set_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        descriptor_set_alloc.descriptorPool = vulkan_state.descriptor_pool;
+        descriptor_set_alloc.descriptorSetCount = 1;
+        descriptor_set_alloc.pSetLayouts = &vulkan_state.ssbo_descriptor_set_layout;
+        vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &descriptor_set_alloc, &vulkan_state.laser_lights_descriptor_sets[in_flight_index]);
+
+        VkDescriptorBufferInfo buffer_info = {0};
+        buffer_info.buffer = vulkan_state.laser_lights_buffers[in_flight_index];
+        buffer_info.offset = 0;
+        buffer_info.range  = VK_WHOLE_SIZE;
+
+        VkWriteDescriptorSet descriptor_write = {0};
+        descriptor_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        descriptor_write.dstSet = vulkan_state.laser_lights_descriptor_sets[in_flight_index];
+        descriptor_write.dstBinding = 0;
+        descriptor_write.descriptorCount = 1;
+        descriptor_write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        descriptor_write.pBufferInfo = &buffer_info;
+        vkUpdateDescriptorSets(vulkan_state.logical_device_handle, 1, &descriptor_write, 0, 0);
+    }
+
     VkDescriptorSetAllocateInfo depth_descriptor_set_alloc = {0};
     depth_descriptor_set_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     depth_descriptor_set_alloc.descriptorPool = vulkan_state.descriptor_pool;
@@ -3999,6 +4196,14 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     reflection_descriptor_set_alloc.descriptorSetCount = 1;
     reflection_descriptor_set_alloc.pSetLayouts = &vulkan_state.descriptor_set_layout;
     vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &reflection_descriptor_set_alloc, &vulkan_state.reflection_descriptor_set);
+    
+    // reflection distance descriptor set
+    VkDescriptorSetAllocateInfo reflection_distance_descriptor_set_alloc = {0};
+    reflection_distance_descriptor_set_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    reflection_distance_descriptor_set_alloc.descriptorPool = vulkan_state.descriptor_pool;
+    reflection_distance_descriptor_set_alloc.descriptorSetCount = 1;
+    reflection_distance_descriptor_set_alloc.pSetLayouts = &vulkan_state.descriptor_set_layout;
+    vkAllocateDescriptorSets(vulkan_state.logical_device_handle, &reflection_distance_descriptor_set_alloc, &vulkan_state.reflection_distance_descriptor_set);
 
     // OIT head image descriptor set
     VkDescriptorSetAllocateInfo oit_head_alloc_info = {0};
@@ -4292,7 +4497,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     // WATER PIPELINE LAYOUT
     {
-        VkDescriptorSetLayout water_set_layouts[8] =
+        VkDescriptorSetLayout water_set_layouts[10] =
         {
             vulkan_state.view_constants_set_layout, // view constants
             vulkan_state.descriptor_set_layout,     // underwater scene copy
@@ -4302,11 +4507,13 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
             vulkan_state.descriptor_set_layout,     // reflection texture
             vulkan_state.descriptor_set_layout,     // water grid texture
             vulkan_state.descriptor_set_layout,     // water grid normals texture
+            vulkan_state.descriptor_set_layout,     // laser lights
+            vulkan_state.descriptor_set_layout,     // reflection distance
         };
 
         VkPipelineLayoutCreateInfo water_pipeline_layout_ci = {0};
         water_pipeline_layout_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        water_pipeline_layout_ci.setLayoutCount = 8;
+        water_pipeline_layout_ci.setLayoutCount = 10;
         water_pipeline_layout_ci.pSetLayouts = water_set_layouts;
         water_pipeline_layout_ci.pushConstantRangeCount = 0;
         water_pipeline_layout_ci.pPushConstantRanges = 0;
@@ -4552,10 +4759,16 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         color_blend_attachment_state.blendEnable = VK_FALSE;
 
+        VkPipelineColorBlendAttachmentState refl_blends[3] =
+        {
+            color_blend_attachment_state,
+            color_blend_attachment_state,
+            color_blend_attachment_state,
+        };
         VkPipelineColorBlendStateCreateInfo refl_blend_ci = {0};
         refl_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-        refl_blend_ci.attachmentCount = 1;
-        refl_blend_ci.pAttachments = &color_blend_attachment_state;
+        refl_blend_ci.attachmentCount = 3;
+        refl_blend_ci.pAttachments = refl_blends;
 
         VkGraphicsPipelineCreateInfo ci = base_graphics_pipeline_creation_info;
         ci.pVertexInputState = &vertex_input_instanced;
@@ -4592,10 +4805,16 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         color_blend_attachment_state.blendEnable = VK_FALSE;
 
+        VkPipelineColorBlendAttachmentState refl_blends[3] =
+        {
+            color_blend_attachment_state,
+            color_blend_attachment_state,
+            color_blend_attachment_state,
+        };
         VkPipelineColorBlendStateCreateInfo refl_blend_ci = {0};
         refl_blend_ci.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-        refl_blend_ci.attachmentCount = 1;
-        refl_blend_ci.pAttachments = &color_blend_attachment_state;
+        refl_blend_ci.attachmentCount = 3;
+        refl_blend_ci.pAttachments = refl_blends;
 
         VkGraphicsPipelineCreateInfo model_ci = base_graphics_pipeline_creation_info;
         model_ci.pStages = model_shader_stages;
@@ -5284,6 +5503,44 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Ren
         instance->start_clip_plane = laser->start_clip_plane;
         instance->end_clip_plane = laser->end_clip_plane;
     }
+
+    // fill laser lights buffer
+    LaserLightsBuffer* laser_lights = (LaserLightsBuffer*)vulkan_state.laser_lights_mappeds[vulkan_state.current_frame];
+    int32 light_count = (int32)laser_instance_count;
+    if (light_count > MAX_LASER_LIGHTS) light_count = MAX_LASER_LIGHTS;
+    laser_lights->count = light_count;
+
+    for (int32 laser_index = 0; laser_index < light_count; laser_index++)
+    {
+        Laser* laser = &laser_instances[laser_index];
+        Vec4 rotation = laser->rotation;
+
+        // world-space cylinder axis = rotation * local_axis (assumes cylinder runs along local +Z)
+        Vec3 local_axis = { 0.0f, 0.0f, 1.0f };
+        float scaled_cross_x = 2.0f * (rotation.y*local_axis.z - rotation.z*local_axis.y);
+        float scaled_cross_y = 2.0f * (rotation.z*local_axis.x - rotation.x*local_axis.z);
+        float scaled_cross_z = 2.0f * (rotation.x*local_axis.y - rotation.y*local_axis.x);
+        Vec3 world_axis =
+        {
+            local_axis.x + rotation.w*scaled_cross_x + (rotation.y*scaled_cross_z - rotation.z*scaled_cross_y),
+            local_axis.y + rotation.w*scaled_cross_y + (rotation.z*scaled_cross_x - rotation.x*scaled_cross_z),
+            local_axis.z + rotation.w*scaled_cross_z + (rotation.x*scaled_cross_y - rotation.y*scaled_cross_x),
+        };
+
+        float half_length = laser->length * 0.5f;
+        GpuLaserLight* gpu_light = &laser_lights->lights[laser_index];
+        gpu_light->point_0[0] = laser->center.x - world_axis.x*half_length;
+        gpu_light->point_0[1] = laser->center.y - world_axis.y*half_length;
+        gpu_light->point_0[2] = laser->center.z - world_axis.z*half_length;
+        gpu_light->radius = 0.5f;
+        gpu_light->point_1[0] = laser->center.x + world_axis.x*half_length;
+        gpu_light->point_1[1] = laser->center.y + world_axis.y*half_length;
+        gpu_light->point_1[2] = laser->center.z + world_axis.z*half_length;
+        gpu_light->intensity = 0.1f;
+        gpu_light->color[0] = laser->color.x;
+        gpu_light->color[1] = laser->color.y;
+        gpu_light->color[2] = laser->color.z;
+    }
 }
 
 void vulkanDraw(bool do_profiling_output)
@@ -5693,13 +5950,14 @@ void vulkanDraw(bool do_profiling_output)
         uint32 reflection_width  = reflectionExtent(vulkan_state.swapchain_extent.width);
         uint32 reflection_height = reflectionExtent(vulkan_state.swapchain_extent.height);
 
-        VkClearValue reflection_clears[2] = {0};
+        VkClearValue reflection_clears[4] = {0};
         reflection_clears[0].color.float32[0] = 0.0f; // empty, sky is produced in water shader
         reflection_clears[0].color.float32[1] = 0.0f;
         reflection_clears[0].color.float32[2] = 0.0f;
         reflection_clears[0].color.float32[3] = 0.0f;
         reflection_clears[1].depthStencil.depth = 1.0f;
         reflection_clears[1].depthStencil.stencil = 0;
+        reflection_clears[3].color.float32[0] = 1e9f; // MSAA distance
 
         VkRenderPassBeginInfo reflection_rp_begin = {0};
         reflection_rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -5707,7 +5965,7 @@ void vulkanDraw(bool do_profiling_output)
         reflection_rp_begin.framebuffer = vulkan_state.reflection_framebuffer;
         reflection_rp_begin.renderArea.offset = (VkOffset2D){ 0, 0 };
         reflection_rp_begin.renderArea.extent = (VkExtent2D){ reflection_width, reflection_height };
-        reflection_rp_begin.clearValueCount = 2;
+        reflection_rp_begin.clearValueCount = 4;
         reflection_rp_begin.pClearValues = reflection_clears;
 
         vkCmdBeginRenderPass(command_buffer, &reflection_rp_begin, VK_SUBPASS_CONTENTS_INLINE);
@@ -5991,7 +6249,7 @@ void vulkanDraw(bool do_profiling_output)
 
             vkCmdBindPipeline(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline);
 
-            VkDescriptorSet water_descriptor_sets[8] =
+            VkDescriptorSet water_descriptor_sets[10] =
             {
                 vulkan_state.view_constants_descriptor_sets[vulkan_state.current_frame],
                 vulkan_state.scene_copy_descriptor_set,
@@ -6001,9 +6259,11 @@ void vulkanDraw(bool do_profiling_output)
                 vulkan_state.reflection_descriptor_set,
                 vulkan_state.descriptor_sets[vulkan_state.water_grid_asset_index],
                 vulkan_state.descriptor_sets[vulkan_state.water_grid_normal_asset_index],
+                vulkan_state.laser_lights_descriptor_sets[vulkan_state.current_frame],
+                vulkan_state.reflection_distance_descriptor_set,
             };
             uint32 water_view_constants_offset = VIEW_MAIN * vulkan_state.view_constants_stride;
-            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_layout, 0, 8, water_descriptor_sets, 1, &water_view_constants_offset);
+            vkCmdBindDescriptorSets(command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vulkan_state.water_pipeline_layout, 0, 10, water_descriptor_sets, 1, &water_view_constants_offset);
 
             VkBuffer water_buffers[2] = { water_data->vertex_buffer, vulkan_state.water_instance_buffers[vulkan_state.current_frame] };
             VkDeviceSize water_offsets[2] = { 0, 0 };
@@ -6361,6 +6621,14 @@ void vulkanResize(uint32 width, uint32 height)
     vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.reflection_msaa_depth_image_view, 0);
     vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.reflection_msaa_depth_image, 0);
     vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.reflection_msaa_depth_image_memory, 0);
+
+    vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.reflection_distance_image_view, 0);
+    vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.reflection_distance_image, 0);
+    vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.reflection_distance_image_memory, 0);
+
+    vkDestroyImageView(vulkan_state.logical_device_handle, vulkan_state.reflection_distance_msaa_image_view, 0);
+    vkDestroyImage(vulkan_state.logical_device_handle, vulkan_state.reflection_distance_msaa_image, 0);
+    vkFreeMemory(vulkan_state.logical_device_handle, vulkan_state.reflection_distance_msaa_image_memory, 0);
 
     // old swapchain is destroyed inside createSwapchainResources
     createSwapchainResources();

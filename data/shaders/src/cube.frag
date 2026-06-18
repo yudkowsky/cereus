@@ -30,6 +30,7 @@ layout(location = 2) in vec3 frag_world_pos;
 
 layout(location = 0) out vec4 out_color;
 layout(location = 1) out vec4 out_normal;
+layout(location = 2) out vec4 out_reflection_distance;
 
 void main()
 {
@@ -48,4 +49,5 @@ void main()
 
     out_color  = vec4(tex.rgb * light, tex.a);
     out_normal = vec4(N, 0.0);
+    out_reflection_distance = vec4(length((view_constants.view * vec4(frag_world_pos, 1.0)).xyz), 0.0, 0.0, 0.0);
 }

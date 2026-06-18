@@ -3819,7 +3819,7 @@ GameResult gameFrame(double delta_time, Input* input)
 {   
     // TEMP: for profiling
     long long frequency;
-    long long t_start, t_after_game, t_after_submit, t_after_draw, t_after_reload, t_after_input, t_after_physics, t_after_saving;
+    long long t_start, t_after_reload, t_after_input, t_after_physics, t_after_saving, t_after_game, t_after_submit, t_after_draw;
     QueryPerformanceFrequency(&frequency);
     QueryPerformanceCounter(&t_start);
 
