@@ -2087,7 +2087,8 @@ void createSwapchainResources(void)
 
     // OIT fragment pool SSBO
     {
-        VkDeviceSize pool_size = (VkDeviceSize)vulkan_state.swapchain_extent.width * vulkan_state.swapchain_extent.height * 8 * 16; // 8 frags per pixel, 16 bytes each (uvec4)
+        const float max_screen_covered_in_laser = 1.0f/16.0f;
+        VkDeviceSize pool_size = (VkDeviceSize)vulkan_state.swapchain_extent.width * vulkan_state.swapchain_extent.height * 8 * 16 * max_screen_covered_in_laser; // 8 frags per pixel, 16 bytes each (uvec4)
 
         VkBufferCreateInfo buffer_ci = {0};
         buffer_ci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;

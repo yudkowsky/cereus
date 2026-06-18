@@ -31,6 +31,10 @@ layout(set = 1, binding = 0, r32ui) uniform coherent uimage2D head_image;
 layout(set = 2, binding = 0) buffer FragmentPool { uvec4 fragments[]; };
 layout(set = 3, binding = 0) buffer AtomicCounter { uint counter; };
 
+const float beam_radius = 0.5;
+const float falloff_exponent = 1.5;
+const float outline_intensity_boundary = 0.87;
+
 void main()
 {
     vec4 fragment_position_in_model_space = inverse_intersection * vec4(world_pos, 1.0);
@@ -52,10 +56,7 @@ void main()
     vec2 closest_point = ray_origin.xy + t_closest * ray_direction.xy;
     float closest_distance = length(closest_point);
 
-    float beam_radius = 0.4;
-    float falloff_exponent = 1.5;
     float intensity = pow(1.0 - clamp(closest_distance / beam_radius, 0.0, 1.0), falloff_exponent);
-    float outline_intensity_boundary = 0.8;
 
     float outline_distance = beam_radius * (1.0 - pow(outline_intensity_boundary, 1.0 / falloff_exponent));
     float distance_per_pixel = max(length(dFdx(closest_distance)), length(dFdy(closest_distance)));
