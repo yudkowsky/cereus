@@ -69,6 +69,14 @@ Direction;
 
 typedef enum
 {
+    MOVE_FORWARD = 0,
+    MOVE_TURN,
+    MOVE_BACK,
+}
+MoveType;
+
+typedef enum
+{
     COLOR_NONE = 0,
     COLOR_RED,
     COLOR_BLUE,
@@ -3034,6 +3042,74 @@ void revertHeadStackRotation()
     }
 }
 
+bool canPlayerMove(MoveType move_type, Direction input_direction)
+{
+    // general cases (for all move types)
+
+    if (temp_state.allow_movement_timer != 0) return false;
+    if (player->removed) return false;
+
+    // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
+    float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToRotation(player->direction, MIRROR_SIDE));
+    if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) return false; // TODO: expose this angle
+
+    // if able to fall then don't allow movement
+    bool player_immune_to_fall = false;
+    if (temp_state.player_hit_by_red) player_immune_to_fall = true;
+    if (player->moving_direction == UP || player->moving_direction == DOWN) player_immune_to_fall = true;
+    if (cheating) player_immune_to_fall = true;
+    if (canFall(player) && !player_immune_to_fall) return false;
+
+    switch (move_type)
+    {
+        case MOVE_FORWARD:
+        {
+            // allow movement if, given acceleration this frame along input direction, we would overshoot.
+            float sign = input_direction == NORTH || input_direction == WEST ? -1.0f : 1.0f;
+            float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(input_direction, sign);
+            float position_along_direction = getComponentAlongDirection(input_direction, player->position);
+            float coords_along_direction = getComponentAlongDirection(input_direction, vec3FromInt3(player->coords));
+            if (!wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign)) return false;
+
+            // disallow movement if also moving in some other direction currently - probably just guards against moving while falling
+            if (!vec3IsZero(vec3SetComponentAlongDirection(input_direction, player->velocity, 0))) return false;
+
+            // disallow movement forward if climbing UP. likely doesn't actually matter, would just be walking into a ladder
+            if (player->moving_direction == UP) return false;
+
+            return true;
+        }
+        case MOVE_TURN:
+        {
+            //if (player->falling) return false; TODO: don't think this was required?
+            if (player->moving_direction == UP || player->moving_direction == DOWN) return false;
+            
+            // get difference in position along axis of travel, and gate on some threshold to target
+            float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, vec3FromInt3(player->coords)));
+            if (fabs(difference_in_player_position_along_direction) > 0.3) return false; // TODO: expose this threshold
+
+            if (temp_state.pack_attached)
+            {
+                // check if would cause half-failed case, and if so check if we already had one of those, and if so disallow turn
+                // this defeats half the point of how i handle failed case later... but need to know now!
+                Int3 orthogonal_coords = getNextCoords(player->coords, oppositeDirection(input_direction));
+                TileType orthogonal_type = getTileType(orthogonal_coords);
+                bool pack_would_cause_failed_case_orthogonal = orthogonal_type != TILE_TYPE_NONE && (!isEntity(orthogonal_type) || canPush(orthogonal_coords, player->direction));
+                if (pack_would_cause_failed_case_orthogonal && temp_state.pack_turn_state.half_failed_turn_timer != 0) return false;
+
+                // NOTE: when adding full-failed turn animation, will need architecture for guarding that animation
+
+                return true;
+            }
+        }
+        case MOVE_BACK:
+        {
+        }
+    }
+
+    return true;
+}
+
 void doPhysicsTick()
 {
     // pack turn sequence
@@ -3813,6 +3889,12 @@ void doPhysicsTick()
         if (th->frames > 0) th->frames--;
         if (th->frames == 0) memset(&temp_state.trailing_hitboxes[th_index], 0, sizeof(TrailingHitbox));
     }
+
+    // decrement various timers
+    if (undo_press_timer > 0) undo_press_timer--;
+    if (temp_state.allow_movement_timer > 0) temp_state.allow_movement_timer--;
+    if (temp_state.pack_turn_state.half_failed_turn_timer > 0) temp_state.pack_turn_state.half_failed_turn_timer--;
+    if (temp_state.player_hit_by_blue_timer > 0) temp_state.player_hit_by_blue_timer--;
 }
 
 GameResult gameFrame(double delta_time, Input* input)
@@ -3831,10 +3913,6 @@ GameResult gameFrame(double delta_time, Input* input)
     physics_accumulator += delta_time;
 
     draw_command_count = 0;
-
-    // generate keys_pressed from prev_input and input
-    input->keys_pressed = input->keys_held & ~prev_input.keys_held;
-    prev_input = *input; // note that prev_input is almost always the same as input, it just persists over the frame
 
     //////////////////
     // CAMERA INPUT //
@@ -4475,6 +4553,10 @@ GameResult gameFrame(double delta_time, Input* input)
     {
         debug_text_count = 0;
 
+        // generate keys_pressed from prev_input and input
+        input->keys_pressed = input->keys_held & ~prev_input.keys_held;
+        prev_input = *input; // note that prev_input is almost always the same as input, it just persists over the frame
+
         if (editor_state.editor_mode == EDITOR_MODE_NONE)
         {
             // assuming gameplay undo and restart (still no undo in editor)
@@ -4541,22 +4623,11 @@ GameResult gameFrame(double delta_time, Input* input)
             }
 
             // HANDLE INPUT
-            bool allow_input = true;
-            if (temp_state.allow_movement_timer != 0) allow_input = false;
-            if (player->removed) allow_input = false;
 
-            // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
-            float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToRotation(player->direction, MIRROR_SIDE));
-            if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) allow_input = false;
+            //bool wasd_held = input->keys_held & KEY_W || input->keys_held & KEY_A || input->keys_held & KEY_S || input->keys_held & KEY_D;
+            bool wasd_pressed = input->keys_pressed & KEY_W || input->keys_pressed & KEY_A || input->keys_pressed & KEY_S || input->keys_pressed & KEY_D;
 
-            // if able to fall then don't allow movement
-            bool player_immune_to_fall = false;
-            if (temp_state.player_hit_by_red) player_immune_to_fall = true;
-            if (player->moving_direction == UP || player->moving_direction == DOWN) player_immune_to_fall = true;
-            if (cheating) player_immune_to_fall = true;
-            if (canFall(player) && !player_immune_to_fall) allow_input = false;
-
-            if (allow_input && (input->keys_held & KEY_W || input->keys_held & KEY_A || input->keys_held & KEY_S || input->keys_held & KEY_D))
+            if (wasd_pressed)
             {
                 Direction input_direction = NO_DIRECTION;
                 if      (input->keys_held & KEY_W) input_direction = NORTH; 
@@ -4564,31 +4635,24 @@ GameResult gameFrame(double delta_time, Input* input)
                 else if (input->keys_held & KEY_S) input_direction = SOUTH; 
                 else if (input->keys_held & KEY_D) input_direction = EAST; 
 
-                if (input_direction == player->direction)
+                MoveType move_type = 0;
+                if (input_direction == player->direction) move_type = MOVE_FORWARD;
+                else if (input_direction == oppositeDirection(player->direction)) move_type = MOVE_BACK;
+                else move_type = MOVE_TURN;
+
+                bool player_can_move = canPlayerMove(move_type, input_direction);
+
+                if (player_can_move && move_type == MOVE_FORWARD)
                 {
                     // FORWARD MOVEMENT
                     Int3 next_player_coords = getNextCoords(player->coords, input_direction);
 
-                    bool allow_movement = false;
-
-                    // allow movement if, given acceleration this frame along input direction, we would overshoot.
-                    float sign = input_direction == NORTH || input_direction == WEST ? -1.0f : 1.0f;
-                    float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(input_direction, sign);
-                    float position_along_direction = getComponentAlongDirection(input_direction, player->position);
-                    float coords_along_direction = getComponentAlongDirection(input_direction, vec3FromInt3(player->coords));
-                    if (wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign)) allow_movement = true;
-
-                    // disallow movement if also moving in some other direction currently - probably just guards against moving while falling
-                    if (!vec3IsZero(vec3SetComponentAlongDirection(input_direction, player->velocity, 0))) allow_movement = false;
-
-                    // disallow movement forward if climbing UP. likely doesn't actually matter, would just be walking into a ladder
-                    if (player->moving_direction == UP) allow_movement = false;
-
+                    // TODO: is this case still handled? it may not return true on the interior in canPlayerMove.
                     if (player->moving_direction == DOWN)
                     {
                         player->moving_direction = UP;
                     }
-                    else if (allow_movement)
+                    else
                     {
                         bool try_walk = false;
                         bool do_push = false;
@@ -4712,78 +4776,54 @@ GameResult gameFrame(double delta_time, Input* input)
                         }
                     }
                 }
-                else if (input_direction != oppositeDirection(player->direction))
+                else if (player_can_move && move_type == MOVE_TURN)
                 {
-                    // TURN MOVEMENT
-                    bool allow_turn = true;
-                    if (player->falling) allow_turn = false;
-                    if (player->moving_direction == UP || player->moving_direction == DOWN) allow_turn = false;
-                    
-                    // get difference in position along axis of travel, and gate on some threshold to target
-                    float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, vec3FromInt3(player->coords)));
-                    if (fabs(difference_in_player_position_along_direction) > 0.3) allow_turn = false;
+                    recordActionForUndo(&world_state);
+
+                    Direction initial_player_direction = player->direction;
+                    player->direction = input_direction;
+                    setTileDirection(player->direction, player->coords, 0);
 
                     if (temp_state.pack_attached)
-                   {
-                        // check if would cause half-failed case, and if so check if we already had one of those, and if so disallow turn
-                        // this defeats half the point of how i handle failed case later... but need to know now!
-                        Int3 orthogonal_coords = getNextCoords(player->coords, oppositeDirection(input_direction));
-                        TileType orthogonal_type = getTileType(orthogonal_coords);
-                        bool pack_would_cause_failed_case_orthogonal = orthogonal_type != TILE_TYPE_NONE && (!isEntity(orthogonal_type) || canPush(orthogonal_coords, player->direction));
-                        if (pack_would_cause_failed_case_orthogonal && temp_state.pack_turn_state.half_failed_turn_timer != 0) allow_turn = false;
-
-                        // NOTE: when adding full-failed turn animation, will need architecture for guarding that animation
+                    {
+                        float turn_angle = getAngleOfYAxisRotation(player->rotation, directionToRotation(player->direction, MIRROR_SIDE));
+                        int32 rotation_frames = (int32)ceilf((float)fabs(turn_angle) / MAX_ANGULAR_VELOCITY - 1e-3f);
+                        temp_state.pack_turn_state.pack_intermediate_states_timer = rotation_frames;
+                        temp_state.pack_turn_state.turn_total_frames = rotation_frames;
+                        temp_state.pack_turn_state.pack_intermediate_coords = getNextCoords(pack->coords, oppositeDirection(input_direction));
+                        temp_state.pack_turn_state.initial_player_direction = initial_player_direction;
                     }
 
-                    if (allow_turn)
+                    // if not blue, rotate objects stacked above the player
+                    if (temp_state.player_hit_by_blue_timer == 0)
                     {
-                        recordActionForUndo(&world_state);
+                        Int3 coords_above = getNextCoords(player->coords, UP);
+                        TileType type_above = getTileType(coords_above);
 
-                        Direction initial_player_direction = player->direction;
-                        player->direction = input_direction;
-                        setTileDirection(player->direction, player->coords, 0);
+                        int32 stack_size = 0;
+                        if (isPushable(type_above)) stack_size = getPushableStackSize(coords_above, UP);
 
-                        if (temp_state.pack_attached)
+                        // need to add either 1 or -1 to direction of entity being rotated
+                        if (stack_size > 0)
                         {
-                            float turn_angle = getAngleOfYAxisRotation(player->rotation, directionToRotation(player->direction, MIRROR_SIDE));
-                            int32 rotation_frames = (int32)ceilf((float)fabs(turn_angle) / MAX_ANGULAR_VELOCITY - 1e-3f);
-                            temp_state.pack_turn_state.pack_intermediate_states_timer = rotation_frames;
-                            temp_state.pack_turn_state.turn_total_frames = rotation_frames;
-                            temp_state.pack_turn_state.pack_intermediate_coords = getNextCoords(pack->coords, oppositeDirection(input_direction));
-                            temp_state.pack_turn_state.initial_player_direction = initial_player_direction;
-                        }
+                            int32 direction_add = (4 + player->direction - initial_player_direction) % 4;
+                            Int3 current_coords = coords_above;
 
-                        // if not blue, rotate objects stacked above the player
-                        if (temp_state.player_hit_by_blue_timer == 0)
-                        {
-                            Int3 coords_above = getNextCoords(player->coords, UP);
-                            TileType type_above = getTileType(coords_above);
-
-                            int32 stack_size = 0;
-                            if (isPushable(type_above)) stack_size = getPushableStackSize(coords_above, UP);
-
-                            // need to add either 1 or -1 to direction of entity being rotated
-                            if (stack_size > 0)
+                            FOR(stack_index, stack_size)
                             {
-                                int32 direction_add = (4 + player->direction - initial_player_direction) % 4;
-                                Int3 current_coords = coords_above;
+                                Entity* e = getEntityAtCoords(current_coords);
+                                e->direction = (e->direction + direction_add - NORTH) % 4 + NORTH;
+                                e->moving_direction = NO_DIRECTION;
+                                e->moving_on_head = true;
+                                e->root_entity_id = PLAYER_ID;
+                                e->tied_to_pack_and_decoupled = false;
 
-                                FOR(stack_index, stack_size)
-                                {
-                                    Entity* e = getEntityAtCoords(current_coords);
-                                    e->direction = (e->direction + direction_add - NORTH) % 4 + NORTH;
-                                    e->moving_direction = NO_DIRECTION;
-                                    e->moving_on_head = true;
-                                    e->root_entity_id = PLAYER_ID;
-                                    e->tied_to_pack_and_decoupled = false;
-
-                                    current_coords = getNextCoords(current_coords, UP);
-                                }
+                                current_coords = getNextCoords(current_coords, UP);
                             }
                         }
                     }
                 }
-                else if (input_direction == oppositeDirection(player->direction))
+                else if (player_can_move && move_type == MOVE_BACK)
                 {
                     // BACKWARDS MOVEMENT
                     Direction move_direction = oppositeDirection(player->direction);
@@ -4929,12 +4969,6 @@ GameResult gameFrame(double delta_time, Input* input)
 
         // reset undos performed if no longer holding z undos
         if (undos_performed > 0 && !(input->keys_held & KEY_Z)) undos_performed = 0;
-
-        // decrement various timers
-        if (undo_press_timer > 0) undo_press_timer--;
-        if (temp_state.allow_movement_timer > 0) temp_state.allow_movement_timer--;
-        if (temp_state.pack_turn_state.half_failed_turn_timer > 0) temp_state.pack_turn_state.half_failed_turn_timer--;
-        if (temp_state.player_hit_by_blue_timer > 0) temp_state.player_hit_by_blue_timer--;
 
         // update overworld player coords for camera offset if player not removed
         if (in_overworld)

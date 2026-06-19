@@ -179,6 +179,7 @@ int CALLBACK WinMain(
 	window_class.lpfnWndProc = windowMessageProcessor;
 	window_class.hInstance = module_handle;
 	window_class.hCursor = LoadCursor(0, IDC_ARROW);
+    //window_class.hbrBackground = GetSysColorBrush(COLOR_3DDKSHADOW);
 	window_class.lpszClassName = L"standard_window_class";
 
     RegisterClassExW(&window_class);
@@ -208,8 +209,6 @@ int CALLBACK WinMain(
 		0, 0, module_handle, 0);
 
     global_window_handle = window_handle;
-
-    ShowWindow(window_handle, initial_show_state);
 
     // lock cursor on startup
     cursor_locked = true;
@@ -249,6 +248,8 @@ int CALLBACK WinMain(
 	LARGE_INTEGER work_start, work_end;
 
     gameInitialize(file_path, display_info); 
+
+    ShowWindow(window_handle, initial_show_state);
 
     while (running)
     {

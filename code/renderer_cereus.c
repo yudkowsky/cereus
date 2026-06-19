@@ -5051,10 +5051,10 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         VkPipelineColorBlendAttachmentState resolve_blend = {0};
         resolve_blend.blendEnable = VK_TRUE;
         resolve_blend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
-        resolve_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        resolve_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         resolve_blend.colorBlendOp = VK_BLEND_OP_ADD;
         resolve_blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        resolve_blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        resolve_blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         resolve_blend.alphaBlendOp = VK_BLEND_OP_ADD;
         resolve_blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
