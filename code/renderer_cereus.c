@@ -635,7 +635,7 @@ const uint32 CUBE_INSTANCE_CAPACITY = 8192;
 const uint32 WATER_INSTANCE_CAPACITY = 8192;
 const uint32 LASER_INSTANCE_CAPACITY = 1024;
 
-const int32 REFLECTION_DOWNSCALE = 1;
+const int32 REFLECTION_DOWNSCALE = 3;
 
 const uint32 SHADOW_MAP_RESOLUTION = 2048;
 
@@ -5050,11 +5050,11 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         VkPipelineColorBlendAttachmentState resolve_blend = {0};
         resolve_blend.blendEnable = VK_TRUE;
-        resolve_blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-        resolve_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        resolve_blend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        resolve_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
         resolve_blend.colorBlendOp = VK_BLEND_OP_ADD;
         resolve_blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        resolve_blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        resolve_blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
         resolve_blend.alphaBlendOp = VK_BLEND_OP_ADD;
         resolve_blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
 
@@ -5504,7 +5504,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Ren
         instance->end_clip_plane = laser->end_clip_plane;
     }
 
-    // fill laser lights buffer
+    // fill laser lights buffer for reflection
     LaserLightsBuffer* laser_lights = (LaserLightsBuffer*)vulkan_state.laser_lights_mappeds[vulkan_state.current_frame];
     int32 light_count = (int32)laser_instance_count;
     if (light_count > MAX_LASER_LIGHTS) light_count = MAX_LASER_LIGHTS;
@@ -5532,14 +5532,14 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Ren
         gpu_light->point_0[0] = laser->center.x - world_axis.x*half_length;
         gpu_light->point_0[1] = laser->center.y - world_axis.y*half_length;
         gpu_light->point_0[2] = laser->center.z - world_axis.z*half_length;
-        gpu_light->radius = 0.5f;
+        gpu_light->radius = 0.75f;
         gpu_light->point_1[0] = laser->center.x + world_axis.x*half_length;
         gpu_light->point_1[1] = laser->center.y + world_axis.y*half_length;
         gpu_light->point_1[2] = laser->center.z + world_axis.z*half_length;
-        gpu_light->intensity = 0.1f;
-        gpu_light->color[0] = laser->color.x;
-        gpu_light->color[1] = laser->color.y;
-        gpu_light->color[2] = laser->color.z;
+        gpu_light->intensity = 0.15f;
+        gpu_light->color[0] = laser->color.x / 2.0f;
+        gpu_light->color[1] = laser->color.y / 2.0f;
+        gpu_light->color[2] = laser->color.z / 1.2f; // emphasise blue more
     }
 }
 

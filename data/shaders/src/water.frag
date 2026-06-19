@@ -53,7 +53,7 @@ const float WATER_PAINT_SIDE = 64 * 16;
 // depth tinting
 const float max_tint_depth = 2.0;
 const vec3 water_depth_tint = vec3(0.0, 0.01, 0.04);
-const float tint_min = 0.1;
+const float tint_min = 0.8;
 const float tint_max = 0.9;
 
 // grid
@@ -74,6 +74,9 @@ const vec3 sky_zenith  = vec3(0.06, 0.30, 0.40);
 
 const float refraction_fade_range = 0.5;
 const float refraction_strength = 0.0005;
+
+const float occlusion_band = 0.25;
+const float laser_falloff_exponent = 1.5;
 
 // specular
 const float glint_half_angle_deg = 0.7;
@@ -208,7 +211,7 @@ void main()
     float reflection_dampen_on_foam = mix(1.0, grid_reflection_scaling, clamp(grid * paint_value, 0.0, 1.0));
     float fresnel = (min_reflection + (1.0 - min_reflection) * pow(1.0 - cos_theta, fresnel_exponent)) * reflection_dampen_on_foam;
 
-    base_color = mix(base_color, reflection_color, fresnel); // * edge_mask);
+    base_color = mix(base_color, reflection_color, fresnel);
 
     // SPECULAR REFLECTION
 
@@ -225,9 +228,24 @@ void main()
     vec3 reflected_camera_pos = vec3(
         view_constants.camera_position.x,
         2.0 * view_constants.water_plane_y - view_constants.camera_position.y,
-        view_constants.camera_position.y);
+        view_constants.camera_position.z);
 
-    float reflected_distance = texture(reflection_distance_texture, reflection_uv).r;
+    // gather a small neighbourhood of reflected distances
+    ivec2 reflection_size  = textureSize(reflection_distance_texture, 0);
+    ivec2 reflection_texel = ivec2(reflection_uv * vec2(reflection_size));
+
+    const int PCF_RADIUS = 1;
+    float reflected_distances[(2 * PCF_RADIUS + 1) * (2 * PCF_RADIUS + 1)];
+    int tap_count = 0;
+    for (int y = -PCF_RADIUS; y <= PCF_RADIUS; y++)
+    {
+        for (int x = -PCF_RADIUS; x <= PCF_RADIUS; x++)
+        {
+            ivec2 c = clamp(reflection_texel + ivec2(x, y), ivec2(0), reflection_size - 1);
+            reflected_distances[tap_count++] = texelFetch(reflection_distance_texture, c, 0).r;
+        }
+    }
+    float inv_tap_count = 1.0 / float(tap_count);
 
     vec3 laser_glow = vec3(0.0);
     for (int laser_index = 0; laser_index < laser_data.laser_light_count; laser_index++)
@@ -237,13 +255,17 @@ void main()
         float distance_to_segment = rayToSegmentDistance(frag_world_pos, reflect_dir, laser.point_0.xyz, laser.point_1.xyz, segment_closest_point);
         if (segment_closest_point.y < view_constants.water_plane_y) continue;
 
-        float laser_distance = distance(reflected_camera_pos, segment_closest_point);
-        if (reflected_distance < laser_distance) continue;
-
         float laser_radius = laser.point_0.w;
-        float core_radius = laser_radius * 0.25;
-        float laser_reflection_amount = smoothstep(laser_radius, core_radius, distance_to_segment);
-        laser_glow += laser.color.rgb * laser_reflection_amount * laser.point_1.w;
+        float laser_reflection_amount = pow(1.0 - clamp(distance_to_segment / laser_radius, 0.0, 1.0), laser_falloff_exponent);
+        if (laser_reflection_amount <= 0.0) continue; // laser isn't on this pixel
+
+        // soft occlusion: fraction of taps whose reflected geometry sits behind the laser
+        float laser_distance = distance(reflected_camera_pos, segment_closest_point);
+        float visibility = 0.0;
+        for (int i = 0; i < tap_count; i++) visibility += smoothstep(laser_distance - occlusion_band, laser_distance + occlusion_band, reflected_distances[i]);
+        visibility *= inv_tap_count;
+
+        laser_glow += laser.color.rgb * laser_reflection_amount * laser.point_1.w * visibility;
     }
     base_color += laser_glow;
 

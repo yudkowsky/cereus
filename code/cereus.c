@@ -2041,7 +2041,7 @@ void updateLaserBuffer()
     temp_state.player_hit_by_red = false;
 
     // if a source is magenta, create entry in sources as primary of it as both red and blue
-    Entity sources_as_primary[MAX_SOURCE_COUNT * 2] = {0};
+    Entity sources_as_primary[256] = {0};
     int32 primary_index = 0;
     FOR(source_index, MAX_ENTITY_INSTANCE_COUNT)
     {

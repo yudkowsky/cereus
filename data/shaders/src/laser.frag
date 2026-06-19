@@ -31,47 +31,46 @@ layout(set = 1, binding = 0, r32ui) uniform coherent uimage2D head_image;
 layout(set = 2, binding = 0) buffer FragmentPool { uvec4 fragments[]; };
 layout(set = 3, binding = 0) buffer AtomicCounter { uint counter; };
 
-const float beam_radius = 0.5;
-const float falloff_exponent = 1.5;
-const float outline_intensity_boundary = 0.86;
+const float beam_radius = 0.40;
+const float core_radius = 0.05;
+const float glow_start = 1.2; // glow strength right at core edge
+const float falloff_exponent = 0.5; // shape only
+const float core_boost = 0.6; // rgb added inside core
 
 void main()
 {
-    vec4 fragment_position_in_model_space = inverse_intersection * vec4(world_pos, 1.0);
-    vec4 camera_origin_in_model_space = inverse_intersection * vec4(view_constants.camera_position.xyz, 1.0);
+    vec3 frag_model    = (inverse_intersection * vec4(world_pos, 1.0)).xyz;
+    vec3 ray_origin    = (inverse_intersection * vec4(view_constants.camera_position.xyz, 1.0)).xyz;
+    vec3 ray_direction = frag_model - ray_origin;
 
-    vec3 frag_model = fragment_position_in_model_space.xyz;
-    vec3 ray_direction = frag_model - camera_origin_in_model_space.xyz;
-    vec3 ray_origin = camera_origin_in_model_space.xyz;
+    float t_closest = -(ray_origin.x * ray_direction.x + ray_origin.y * ray_direction.y) /
+                       (ray_direction.x * ray_direction.x + ray_direction.y * ray_direction.y);
 
-    float t_closest = -(ray_origin.x * ray_direction.x + ray_origin.y * ray_direction.y) / (ray_direction.x * ray_direction.x + ray_direction.y * ray_direction.y);
     vec3 closest_3d = ray_origin + t_closest * ray_direction;
     if (closest_3d.z < -half_length) t_closest = (-half_length - ray_origin.z) / ray_direction.z;
     if (closest_3d.z >  half_length) t_closest = ( half_length - ray_origin.z) / ray_direction.z;
 
-	// handle clip plane logic for start and end planes
-	t_closest = clipPlane(start_clip_plane, ray_origin, ray_direction, frag_model, t_closest);
-	t_closest = clipPlane(end_clip_plane,   ray_origin, ray_direction, frag_model, t_closest);
+    t_closest = clipPlane(start_clip_plane, ray_origin, ray_direction, frag_model, t_closest);
+    t_closest = clipPlane(end_clip_plane,   ray_origin, ray_direction, frag_model, t_closest);
 
-    vec2 closest_point = ray_origin.xy + t_closest * ray_direction.xy;
-    float closest_distance = length(closest_point);
+    float closest_distance = length(ray_origin.xy + t_closest * ray_direction.xy);
 
-    float intensity = pow(1.0 - clamp(closest_distance / beam_radius, 0.0, 1.0), falloff_exponent);
+    float r = clamp((closest_distance - core_radius) / (beam_radius - core_radius), 0.0, 1.0);
+    float glow = glow_start * (1.0 - smoothstep(0.0, 1.0, pow(r, falloff_exponent)));
 
-    float outline_distance = beam_radius * (1.0 - pow(outline_intensity_boundary, 1.0 / falloff_exponent));
     float distance_per_pixel = max(length(dFdx(closest_distance)), length(dFdy(closest_distance)));
-    float outline_band = 2.0 * distance_per_pixel;
-
-    bool is_outline = closest_distance > outline_distance - 0.5 * distance_per_pixel && closest_distance < outline_distance + outline_band;
+    bool is_outline = closest_distance > core_radius - 0.5 * distance_per_pixel && closest_distance < core_radius + 2.0 * distance_per_pixel;
 
     vec4 laser_color;
-    if (intensity > outline_intensity_boundary)
+    if (closest_distance < core_radius)
     {
-        laser_color = vec4(instance_color.rgb + 0.6, 1.0);
-        is_outline = false;
+        laser_color = vec4(instance_color.rgb + core_boost, 1.0);
+        is_outline  = false;
     }
-    else if (is_outline) laser_color = vec4(instance_color.rgb, intensity / outline_intensity_boundary);
-    else laser_color = vec4(instance_color.rgb, intensity / outline_intensity_boundary);
+    else
+    {
+        laser_color = vec4(instance_color.rgb, glow);
+    }
 
     if (laser_color.a < 0.01) discard;
 
@@ -80,7 +79,7 @@ void main()
 
     uint packed = (uint(clamp(laser_color.r, 0.0, 1.0) * 255.0) << 24) |
                   (uint(clamp(laser_color.g, 0.0, 1.0) * 255.0) << 16) |
-                  (uint(clamp(laser_color.b, 0.0, 1.0) * 255.0) << 8)  |
+                  (uint(clamp(laser_color.b, 0.0, 1.0) * 255.0) <<  8) |
                    uint(clamp(laser_color.a, 0.0, 1.0) * 255.0);
 
     uint old_head = imageAtomicExchange(head_image, ivec2(gl_FragCoord.xy), index);

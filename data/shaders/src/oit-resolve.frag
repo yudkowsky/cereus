@@ -133,7 +133,7 @@ void main()
             group_color = min(group_color, vec3(1.0));
         }
 
-        result += (1.0 - alpha_accumulator) * group_alpha * group_color;
+        result            += (1.0 - alpha_accumulator) * group_color;
         alpha_accumulator += (1.0 - alpha_accumulator) * group_alpha;
 
         sorted_index = scan_for_same_group;
