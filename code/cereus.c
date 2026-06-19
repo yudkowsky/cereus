@@ -237,6 +237,7 @@ typedef struct TemporaryState
     PackTurnState pack_turn_state;
     LaserBuffer laser_buffer[512]; // 512 = 64 max sources * 16 max laser turns
     int32 allow_movement_timer; // if > 0, decrements every frame towards 0, and then able to move. if -1, movement is permanently stopped until some other action resets it.
+    int32 undo_press_timer;
     bool pack_attached;
     int32 player_hit_by_red;
     int32 player_hit_by_blue_timer;
@@ -361,6 +362,7 @@ const int32 FALL_TRAILING_HITBOX_TIME = 10;
 const int32 SIMULATE_FORWARD_TICK_COUNT = 8;
 const int32 HALF_FAILED_PACK_TURN_COOLDOWN = 6;
 const int32 HIT_BY_BLUE_TIME = 3;
+const int32 MAX_LOOKAHEAD_MOVEMENT_FRAMES = 16;
 
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
 const int32 MAX_ENTITIES_TIED_TO_MOVEMENT = 32;
@@ -493,7 +495,6 @@ int32 time_until_allow_undo_or_restart_input = 0;
 // handle undos
 UndoBuffer undo_buffer = {0};
 int32 undos_performed = 0;
-int32 undo_press_timer = 0;
 bool restart_last_turn = false;
 
 // debug state
@@ -3081,7 +3082,7 @@ bool canPlayerMove(MoveType move_type, Direction input_direction)
         }
         case MOVE_TURN:
         {
-            //if (player->falling) return false; TODO: don't think this was required?
+            if (player->falling) return false; //TODO: don't think this was required?
             if (player->moving_direction == UP || player->moving_direction == DOWN) return false;
             
             // get difference in position along axis of travel, and gate on some threshold to target
@@ -3273,7 +3274,7 @@ void doPhysicsTick()
                 // anything here wants to fall across a tile boundary NOTE: red / blue stopping fall relies on calculating landing to true every frame, ard resetting position/velocity/falling to 0.
                 bool landing = false;
                 if (!canFall(e_in_stack)) landing = true;
-                if (undo_press_timer > 0) landing = true;
+                if (temp_state.undo_press_timer > 0) landing = true;
                 if (cheating) landing = true;
 
                 if (e_in_stack->id == PLAYER_ID && temp_state.player_hit_by_red) landing = true;
@@ -3891,10 +3892,12 @@ void doPhysicsTick()
     }
 
     // decrement various timers
-    if (undo_press_timer > 0) undo_press_timer--;
+    if (temp_state.undo_press_timer > 0) temp_state.undo_press_timer--;
     if (temp_state.allow_movement_timer > 0) temp_state.allow_movement_timer--;
     if (temp_state.pack_turn_state.half_failed_turn_timer > 0) temp_state.pack_turn_state.half_failed_turn_timer--;
     if (temp_state.player_hit_by_blue_timer > 0) temp_state.player_hit_by_blue_timer--;
+
+    updateLaserBuffer();
 }
 
 GameResult gameFrame(double delta_time, Input* input)
@@ -4576,7 +4579,7 @@ GameResult gameFrame(double delta_time, Input* input)
 
                     undos_performed++;
                     silence_unlocks_due_to_restart_or_undo = true;
-                    undo_press_timer = time_until_allow_undo_or_restart_input;
+                    temp_state.undo_press_timer = time_until_allow_undo_or_restart_input;
                     temp_state.allow_movement_timer = time_until_allow_undo_or_restart_input;
                 }
                 else
@@ -4640,7 +4643,30 @@ GameResult gameFrame(double delta_time, Input* input)
                 else if (input_direction == oppositeDirection(player->direction)) move_type = MOVE_BACK;
                 else move_type = MOVE_TURN;
 
-                bool player_can_move = canPlayerMove(move_type, input_direction);
+                // forward prediction shenanigans
+                bool player_can_move = false;
+
+                memcpy(&leap_of_faith_world_state_snapshot, &world_state, sizeof(WorldState));
+                memcpy(&leap_of_faith_temp_state_snapshot,  &temp_state,  sizeof(TemporaryState));
+
+                FOR(tick_index, MAX_LOOKAHEAD_MOVEMENT_FRAMES)
+                {
+                    if (canPlayerMove(move_type, input_direction)) // TODO: canPlayerMove currently only checks if input is allowed. should also check if this input actually would do anything, maybe.
+                    {                                              // but in that case, i have to do that logic again, because i will need to switch on that case in the loop. maybe i just return
+                        player_can_move = true;                    // something like MoveType that i switch on? and have player_can_move be player_movement_type..?
+                        break;
+                    }
+                    if (tick_index == MAX_LOOKAHEAD_MOVEMENT_FRAMES - 1) break;
+                    doPhysicsTick();
+                }
+
+                if (!player_can_move)
+                {
+                    // undo memcpy
+                    memcpy(&world_state, &leap_of_faith_world_state_snapshot, sizeof(WorldState));
+                    memcpy(&temp_state,  &leap_of_faith_temp_state_snapshot,  sizeof(TemporaryState));
+                }
+                // TODO: add else, wrap all move_types in
 
                 if (player_can_move && move_type == MOVE_FORWARD)
                 {
