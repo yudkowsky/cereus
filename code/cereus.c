@@ -796,12 +796,39 @@ Direction getTileDirection(Int3 coords)
     return world_state.buffer[coordsToBufferIndexDirection(coords)]; 
 }
 
+TileType getTileTypeFromId(int32 id)
+{
+    if (id == PLAYER_ID) return TILE_TYPE_PLAYER;
+    if (id == PACK_ID) return TILE_TYPE_PACK;
+    int32 check = (id / 100 * 100);
+    if (check >= ID_OFFSET_SOURCE && check < ID_OFFSET_WIN_BLOCK)
+    {
+        Color source_color = (id - ID_OFFSET_SOURCE) / 100;
+        switch (source_color)
+        {
+            case COLOR_RED:     return TILE_TYPE_SOURCE_RED;
+            case COLOR_BLUE:    return TILE_TYPE_SOURCE_BLUE;
+            case COLOR_MAGENTA: return TILE_TYPE_SOURCE_MAGENTA;
+            default: return TILE_TYPE_NONE;
+        }
+    }
+    else if (check == ID_OFFSET_BOX)          return TILE_TYPE_BOX;
+    else if (check == ID_OFFSET_MIRROR)       return TILE_TYPE_MIRROR;
+    else if (check == ID_OFFSET_GLASS)        return TILE_TYPE_GLASS;
+    else if (check == ID_OFFSET_WIN_BLOCK)    return TILE_TYPE_WIN_BLOCK;
+    else if (check == ID_OFFSET_LOCKED_BLOCK) return TILE_TYPE_LOCKED_BLOCK;
+    else return TILE_TYPE_NONE;
+}
+
 // sets coords and position of an entity to some values, and updates the buffer accordingly 
 void moveEntityInBufferAndState(Entity* e, Int3 end_coords, Direction end_direction)
 {
-    TileType type = getTileType(e->coords); // could also get from id
-    setTileType(TILE_TYPE_NONE, e->coords);
-    setTileDirection(NO_DIRECTION, e->coords, e->mirror_orientation);
+    TileType type = getTileTypeFromId(e->id);
+    if (getTileType(e->coords) == type) 
+    {
+        setTileType(TILE_TYPE_NONE, e->coords);
+        setTileDirection(NO_DIRECTION, e->coords, e->mirror_orientation);
+    }
     e->coords = end_coords;
     e->direction = end_direction;
     setTileType(type, end_coords);
@@ -907,30 +934,6 @@ bool isPushable(TileType type)
 bool isEntity(TileType type)
 {
     return (type == TILE_TYPE_BOX || type == TILE_TYPE_MIRROR || type == TILE_TYPE_PACK || type == TILE_TYPE_PLAYER || type == TILE_TYPE_WIN_BLOCK || type == TILE_TYPE_LOCKED_BLOCK || isSource(type));
-}
-
-TileType getTileTypeFromId(int32 id)
-{
-    if (id == PLAYER_ID) return TILE_TYPE_PLAYER;
-    if (id == PACK_ID) return TILE_TYPE_PACK;
-    int32 check = (id / 100 * 100);
-    if (check >= ID_OFFSET_SOURCE && check < ID_OFFSET_WIN_BLOCK)
-    {
-        Color source_color = (id - ID_OFFSET_SOURCE) / 100;
-        switch (source_color)
-        {
-            case COLOR_RED:     return TILE_TYPE_SOURCE_RED;
-            case COLOR_BLUE:    return TILE_TYPE_SOURCE_BLUE;
-            case COLOR_MAGENTA: return TILE_TYPE_SOURCE_MAGENTA;
-            default: return TILE_TYPE_NONE;
-        }
-    }
-    else if (check == ID_OFFSET_BOX)          return TILE_TYPE_BOX;
-    else if (check == ID_OFFSET_MIRROR)       return TILE_TYPE_MIRROR;
-    else if (check == ID_OFFSET_GLASS)        return TILE_TYPE_GLASS;
-    else if (check == ID_OFFSET_WIN_BLOCK)    return TILE_TYPE_WIN_BLOCK;
-    else if (check == ID_OFFSET_LOCKED_BLOCK) return TILE_TYPE_LOCKED_BLOCK;
-    else return TILE_TYPE_NONE;
 }
 
 Color getEntityColor(Int3 coords)
@@ -2919,6 +2922,26 @@ void levelChangePrep(char next_level[64], bool write_solved_levels)
     else in_overworld = false;
 }
 
+void placePlayerOnWinBlock(char from_level[64])
+{
+    FOR(wb_index, MAX_ENTITY_INSTANCE_COUNT)
+    {
+        Entity* zero_wb = &overworld_zero_state.win_blocks[wb_index];
+        if (strcmp(from_level, zero_wb->next_level) == 0)
+        {
+            Int3 new_player_coords = getNextCoords(zero_wb->coords, UP);
+            Int3 new_pack_coords = getNextCoords(new_player_coords, oppositeDirection(player->direction));
+
+            moveEntityInBufferAndState(player, new_player_coords, player->direction);
+            moveEntityInBufferAndState(pack, new_pack_coords, pack->direction);
+
+            player->position = vec3FromInt3(new_player_coords);
+            pack->position = vec3FromInt3(new_pack_coords);
+            break;
+        }
+    }
+}
+
 // MOVEMENT
 
 void doStandardMovement(Direction direction, Int3 next_player_coords)
@@ -4457,10 +4480,15 @@ GameResult gameFrame(double delta_time, Input* input)
         else
         {
             // NOTE: used to persist solved levels over level change and game init, but appears unnecessary
+            char from_level[64];
+            strcpy(from_level, world_state.level_name);
             levelChangePrep("overworld", false);
             initializeLevel("overworld");
-            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+
+            placePlayerOnWinBlock(from_level);
+
             temp_state.allow_movement_timer = 0;
+            time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
         }
     }
 
@@ -4948,9 +4976,14 @@ GameResult gameFrame(double delta_time, Input* input)
                         }
                     }
 
-                    zeroAnimations();
+                    char from_level[64];
+                    strcpy(from_level, world_state.level_name);
                     levelChangePrep(wb->next_level, true);
                     initializeLevel(wb->next_level);
+                    zeroAnimations();
+
+                    if (in_overworld) placePlayerOnWinBlock(from_level);
+
                     time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 }
             }
