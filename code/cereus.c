@@ -69,14 +69,6 @@ Direction;
 
 typedef enum
 {
-    MOVE_FORWARD = 0,
-    MOVE_TURN,
-    MOVE_BACK,
-}
-MoveType;
-
-typedef enum
-{
     COLOR_NONE = 0,
     COLOR_RED,
     COLOR_BLUE,
@@ -3043,74 +3035,6 @@ void revertHeadStackRotation()
     }
 }
 
-bool canPlayerMove(MoveType move_type, Direction input_direction)
-{
-    // general cases (for all move types)
-
-    if (temp_state.allow_movement_timer != 0) return false;
-    if (player->removed) return false;
-
-    // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
-    float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToRotation(player->direction, MIRROR_SIDE));
-    if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) return false; // TODO: expose this angle
-
-    // if able to fall then don't allow movement
-    bool player_immune_to_fall = false;
-    if (temp_state.player_hit_by_red) player_immune_to_fall = true;
-    if (player->moving_direction == UP || player->moving_direction == DOWN) player_immune_to_fall = true;
-    if (cheating) player_immune_to_fall = true;
-    if (canFall(player) && !player_immune_to_fall) return false;
-
-    switch (move_type)
-    {
-        case MOVE_FORWARD:
-        {
-            // allow movement if, given acceleration this frame along input direction, we would overshoot.
-            float sign = input_direction == NORTH || input_direction == WEST ? -1.0f : 1.0f;
-            float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(input_direction, sign);
-            float position_along_direction = getComponentAlongDirection(input_direction, player->position);
-            float coords_along_direction = getComponentAlongDirection(input_direction, vec3FromInt3(player->coords));
-            if (!wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign)) return false;
-
-            // disallow movement if also moving in some other direction currently - probably just guards against moving while falling
-            if (!vec3IsZero(vec3SetComponentAlongDirection(input_direction, player->velocity, 0))) return false;
-
-            // disallow movement forward if climbing UP. likely doesn't actually matter, would just be walking into a ladder
-            if (player->moving_direction == UP) return false;
-
-            return true;
-        }
-        case MOVE_TURN:
-        {
-            if (player->falling) return false; //TODO: don't think this was required?
-            if (player->moving_direction == UP || player->moving_direction == DOWN) return false;
-            
-            // get difference in position along axis of travel, and gate on some threshold to target
-            float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, vec3FromInt3(player->coords)));
-            if (fabs(difference_in_player_position_along_direction) > 0.3) return false; // TODO: expose this threshold
-
-            if (temp_state.pack_attached)
-            {
-                // check if would cause half-failed case, and if so check if we already had one of those, and if so disallow turn
-                // this defeats half the point of how i handle failed case later... but need to know now!
-                Int3 orthogonal_coords = getNextCoords(player->coords, oppositeDirection(input_direction));
-                TileType orthogonal_type = getTileType(orthogonal_coords);
-                bool pack_would_cause_failed_case_orthogonal = orthogonal_type != TILE_TYPE_NONE && (!isEntity(orthogonal_type) || canPush(orthogonal_coords, player->direction));
-                if (pack_would_cause_failed_case_orthogonal && temp_state.pack_turn_state.half_failed_turn_timer != 0) return false;
-
-                // NOTE: when adding full-failed turn animation, will need architecture for guarding that animation
-
-                return true;
-            }
-        }
-        case MOVE_BACK:
-        {
-        }
-    }
-
-    return true;
-}
-
 void doPhysicsTick()
 {
     // pack turn sequence
@@ -4638,287 +4562,330 @@ GameResult gameFrame(double delta_time, Input* input)
                 else if (input->keys_held & KEY_S) input_direction = SOUTH; 
                 else if (input->keys_held & KEY_D) input_direction = EAST; 
 
-                MoveType move_type = 0;
-                if (input_direction == player->direction) move_type = MOVE_FORWARD;
-                else if (input_direction == oppositeDirection(player->direction)) move_type = MOVE_BACK;
-                else move_type = MOVE_TURN;
+                bool input_allowed = false;
 
-                // forward prediction shenanigans
-                bool player_can_move = false;
-
-                memcpy(&leap_of_faith_world_state_snapshot, &world_state, sizeof(WorldState));
+                memcpy(&leap_of_faith_world_state_snapshot, &world_state, sizeof(WorldState)); // TODO: rename
                 memcpy(&leap_of_faith_temp_state_snapshot,  &temp_state,  sizeof(TemporaryState));
 
                 FOR(tick_index, MAX_LOOKAHEAD_MOVEMENT_FRAMES)
                 {
-                    if (canPlayerMove(move_type, input_direction)) // TODO: canPlayerMove currently only checks if input is allowed. should also check if this input actually would do anything, maybe.
-                    {                                              // but in that case, i have to do that logic again, because i will need to switch on that case in the loop. maybe i just return
-                        player_can_move = true;                    // something like MoveType that i switch on? and have player_can_move be player_movement_type..?
-                        break;
-                    }
-                    if (tick_index == MAX_LOOKAHEAD_MOVEMENT_FRAMES - 1) break;
-                    doPhysicsTick();
-                }
+                    input_allowed = true; // set as true for this frame
 
-                if (!player_can_move)
-                {
-                    // undo memcpy
-                    memcpy(&world_state, &leap_of_faith_world_state_snapshot, sizeof(WorldState));
-                    memcpy(&temp_state,  &leap_of_faith_temp_state_snapshot,  sizeof(TemporaryState));
-                }
-                // TODO: add else, wrap all move_types in
+                    if (temp_state.allow_movement_timer != 0) input_allowed = false;
+                    if (player->removed) input_allowed = false;
 
-                if (player_can_move && move_type == MOVE_FORWARD)
-                {
-                    // FORWARD MOVEMENT
-                    Int3 next_player_coords = getNextCoords(player->coords, input_direction);
+                    // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
+                    float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToRotation(player->direction, MIRROR_SIDE));
+                    if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) input_allowed = false; // TODO: expose this angle
 
-                    // TODO: is this case still handled? it may not return true on the interior in canPlayerMove.
-                    if (player->moving_direction == DOWN)
+                    // if able to fall then don't allow movement
+                    bool player_immune_to_fall = false;
+                    if (temp_state.player_hit_by_red) player_immune_to_fall = true;
+                    if (player->moving_direction == UP || player->moving_direction == DOWN) player_immune_to_fall = true;
+                    if (cheating) player_immune_to_fall = true;
+                    if (canFall(player) && !player_immune_to_fall) input_allowed = false;
+
+                    if (input_direction == player->direction)
                     {
-                        player->moving_direction = UP;
-                    }
-                    else
-                    {
-                        bool try_walk = false;
-                        bool do_push = false;
-                        bool try_climb = false;
+                        // FORWARD MOVEMENT
+                        // allow movement if, given acceleration this frame along input direction, we would overshoot.
+                        float sign = input_direction == NORTH || input_direction == WEST ? -1.0f : 1.0f;
+                        float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(input_direction, sign);
+                        float position_along_direction = getComponentAlongDirection(input_direction, player->position);
+                        float coords_along_direction = getComponentAlongDirection(input_direction, vec3FromInt3(player->coords));
+                        if (!wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign)) input_allowed = false;
 
-                        TileType next_tile = getTileType(next_player_coords);
-                        switch (next_tile)
+                        // disallow movement if also moving in some other direction currently - probably just guards against moving while falling
+                        if (!vec3IsZero(vec3SetComponentAlongDirection(input_direction, player->velocity, 0))) input_allowed = false;
+
+                        // disallow movement forward if climbing UP. likely doesn't actually matter, would just be walking into a ladder
+                        if (player->moving_direction == UP) input_allowed = false;
+
+                        if (input_allowed)
                         {
-                            case TILE_TYPE_NONE:
+                            if (player->moving_direction == DOWN)
                             {
-                                // currently not allowing input if trailing hitbox occupies next tile. this check might be too strict sometimes
-                                TrailingHitbox th = {0};
-                                if (trailingHitboxAtCoords(next_player_coords, &th)) try_walk = false;
-                                else try_walk = true;
-                                break;
-                            }
-                            case TILE_TYPE_BOX:
-                            case TILE_TYPE_GLASS:
-                            case TILE_TYPE_PACK:
-                            case TILE_TYPE_MIRROR:
-                            case TILE_TYPE_SOURCE_RED:
-                            case TILE_TYPE_SOURCE_BLUE:
-                            case TILE_TYPE_SOURCE_MAGENTA:
-                            {
-                                // figure out if push, pause, or fail here.
-                                if (canPush(next_player_coords, input_direction))
-                                {
-                                    do_push = true;
-                                    try_walk = true;
-                                }
-                                break;
-                            }
-                            case TILE_TYPE_LADDER:
-                            {
-                                // currently will slow player down to correct location before allowing the climb (and not allow buffered climb input)
-                                bool ladder_facing_player = getTileDirection(next_player_coords) == oppositeDirection(player->direction);
-                                bool player_at_correct_location = vec3IsEqual(player->position, vec3FromInt3(player->coords));
-                                if (ladder_facing_player && player_at_correct_location) try_climb = true;
-                                break;
-                            }
-                            default:
-                            {
-                                break;
-                            }
-                        }
-
-                        if (try_walk)
-                        {
-                            // don't allow walking off edge
-                            Int3 coords_below_next_coords = getNextCoords(next_player_coords, DOWN);
-                            TileType tile_below_next_coords = getTileType(coords_below_next_coords);
-
-                            // basic check for if walk will be allowed
-                            bool allow_walk = true;
-                            if (tile_below_next_coords == TILE_TYPE_NONE && !temp_state.player_hit_by_red) allow_walk = false;
-                            if (isEntity(tile_below_next_coords) && !vec3IsZero(getEntityAtCoords(coords_below_next_coords)->velocity)) allow_walk = false;
-
-                            if (allow_walk || cheating)
-                            {
-                                recordActionForUndo(&world_state);
-                                if (do_push) pushAll(next_player_coords, input_direction, false, PLAYER_ID);
-                                doStandardMovement(input_direction, next_player_coords);
+                                player->moving_direction = UP;
                             }
                             else
                             {
-                                // leap of faith logic
+                                bool try_walk = false;
+                                bool do_push = false;
+                                bool try_climb = false;
 
-                                // create snapshot of current state
-                                memcpy(&leap_of_faith_world_state_snapshot, &world_state, sizeof(WorldState));
-                                memcpy(&leap_of_faith_temp_state_snapshot,  &temp_state,  sizeof(TemporaryState));
-                                Input input_snapshot = *input;
+                                Int3 next_player_coords = getNextCoords(player->coords, input_direction);
+                                TileType next_tile = getTileType(next_player_coords);
 
-                                // commit tentative move
-                                if (do_push) pushAll(next_player_coords, input_direction, false, PLAYER_ID);
-                                doStandardMovement(input_direction, next_player_coords);
-
-                                memset(input, 0, sizeof(Input));
-
-                                // simulate forward, and check if red
-                                bool would_be_red = false;
-                                FOR(_, SIMULATE_FORWARD_TICK_COUNT)
+                                switch (next_tile)
                                 {
-                                    doPhysicsTick();
-                                    updateLaserBuffer();
-                                    if (temp_state.player_hit_by_red)
+                                    case TILE_TYPE_NONE:
                                     {
-                                        would_be_red = true;
+                                        // NOTE: currently not allowing input if trailing hitbox occupies next tile. this check might be too strict sometimes
+                                        TrailingHitbox th = {0};
+                                        if (trailingHitboxAtCoords(next_player_coords, &th)) try_walk = false;
+                                        else try_walk = true;
+                                        break;
+                                    }
+                                    case TILE_TYPE_BOX:
+                                    case TILE_TYPE_GLASS:
+                                    case TILE_TYPE_PACK:
+                                    case TILE_TYPE_MIRROR:
+                                    case TILE_TYPE_SOURCE_RED:
+                                    case TILE_TYPE_SOURCE_BLUE:
+                                    case TILE_TYPE_SOURCE_MAGENTA:
+                                    {
+                                        // figure out if push, pause, or fail here.
+                                        if (canPush(next_player_coords, input_direction))
+                                        {
+                                            do_push = true;
+                                            try_walk = true;
+                                        }
+                                        break;
+                                    }
+                                    case TILE_TYPE_LADDER:
+                                    {
+                                        // currently will slow player down to correct location before allowing the climb (and not allow buffered climb input)
+                                        bool ladder_facing_player = getTileDirection(next_player_coords) == oppositeDirection(player->direction);
+                                        bool player_at_correct_location = vec3IsEqual(player->position, vec3FromInt3(player->coords));
+                                        if (ladder_facing_player && player_at_correct_location) try_climb = true;
+                                        break;
+                                    }
+                                    default:
+                                    {
                                         break;
                                     }
                                 }
 
-                                // restore state
-                                memcpy(&world_state, &leap_of_faith_world_state_snapshot, sizeof(WorldState));
-                                memcpy(&temp_state,  &leap_of_faith_temp_state_snapshot,  sizeof(TemporaryState));
-                                *input = input_snapshot;
-
-                                // if became red, perform move
-                                if (would_be_red)
+                                if (try_walk)
                                 {
-                                    recordActionForUndo(&world_state);
-                                    if (do_push) pushAll(next_player_coords, input_direction, false, PLAYER_ID);
-                                    doStandardMovement(input_direction, next_player_coords);
+                                    // don't allow walking off edge
+                                    Int3 coords_below_next_coords = getNextCoords(next_player_coords, DOWN);
+                                    TileType tile_below_next_coords = getTileType(coords_below_next_coords);
+
+                                    // basic check for if walk will be allowed
+                                    bool allow_walk = true;
+                                    if (tile_below_next_coords == TILE_TYPE_NONE && !temp_state.player_hit_by_red) allow_walk = false;
+                                    if (isEntity(tile_below_next_coords) && !vec3IsZero(getEntityAtCoords(coords_below_next_coords)->velocity)) allow_walk = false;
+
+                                    if (allow_walk || cheating)
+                                    {
+                                        recordActionForUndo(&world_state);
+                                        if (do_push) pushAll(next_player_coords, input_direction, false, PLAYER_ID);
+                                        doStandardMovement(input_direction, next_player_coords);
+                                    }
+                                    else
+                                    {
+                                        // leap of faith logic
+
+                                        // create snapshot of current state
+                                        memcpy(&leap_of_faith_world_state_snapshot, &world_state, sizeof(WorldState));
+                                        memcpy(&leap_of_faith_temp_state_snapshot,  &temp_state,  sizeof(TemporaryState));
+                                        Input input_snapshot = *input;
+
+                                        // commit tentative move
+                                        if (do_push) pushAll(next_player_coords, input_direction, false, PLAYER_ID);
+                                        doStandardMovement(input_direction, next_player_coords);
+
+                                        memset(input, 0, sizeof(Input));
+
+                                        // simulate forward, and check if red
+                                        bool would_be_red = false;
+                                        FOR(_, SIMULATE_FORWARD_TICK_COUNT)
+                                        {
+                                            doPhysicsTick();
+                                            updateLaserBuffer();
+                                            if (temp_state.player_hit_by_red)
+                                            {
+                                                would_be_red = true;
+                                                break;
+                                            }
+                                        }
+
+                                        // restore state
+                                        memcpy(&world_state, &leap_of_faith_world_state_snapshot, sizeof(WorldState));
+                                        memcpy(&temp_state,  &leap_of_faith_temp_state_snapshot,  sizeof(TemporaryState));
+                                        *input = input_snapshot;
+
+                                        // if became red, perform move
+                                        if (would_be_red)
+                                        {
+                                            recordActionForUndo(&world_state);
+                                            if (do_push) pushAll(next_player_coords, input_direction, false, PLAYER_ID);
+                                            doStandardMovement(input_direction, next_player_coords);
+                                        }
+                                    }
+                                }
+                                else if (try_climb)
+                                {
+                                    // only handles setting climbing direction to UP if player wants to climb up. everything else is handled later, 
+                                    // because i want to keep climbing sometimes, even if there's been no input for it.
+                                    Int3 coords_above_player = getNextCoords(player->coords, UP);
+                                    TileType type_above_player = getTileType(coords_above_player);
+
+                                    bool do_climb = false; 
+                                    if (type_above_player == TILE_TYPE_NONE) do_climb = true;
+                                    else if (isPushable(type_above_player) && canPushVertical(coords_above_player, UP)) do_climb = true;
+                                    if (do_climb)
+                                    {
+                                        recordActionForUndo(&world_state);
+                                        player->moving_direction = UP;
+                                    }
                                 }
                             }
+                            break;
                         }
-                        else if (try_climb)
+                    }
+                    else if (input_direction != oppositeDirection(player->direction))
+                    {
+                        // TURN MOVEMENT
+                        if (player->falling) input_allowed = false; // TODO: check if required
+                        if (player->moving_direction == UP || player->moving_direction == DOWN) input_allowed = false;
+                        
+                        // get difference in position along axis of travel, and gate on some threshold to target
+                        float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, vec3FromInt3(player->coords)));
+                        if (fabs(difference_in_player_position_along_direction) > 0.3) input_allowed = false; // TODO: expose this threshold
+
+                        if (temp_state.pack_attached)
                         {
-                            // only handles setting climbing direction to UP if player wants to climb up. everything else is handled later, 
-                            // because i want to keep climbing sometimes, even if there's been no input for it.
-                            Int3 coords_above_player = getNextCoords(player->coords, UP);
-                            TileType type_above_player = getTileType(coords_above_player);
-
-                            bool do_climb = false; 
-                            if (type_above_player == TILE_TYPE_NONE) do_climb = true;
-                            else if (isPushable(type_above_player) && canPushVertical(coords_above_player, UP)) do_climb = true;
-                            if (do_climb)
-                            {
-                                recordActionForUndo(&world_state);
-                                player->moving_direction = UP;
-                            }
-                        }
-                    }
-                }
-                else if (player_can_move && move_type == MOVE_TURN)
-                {
-                    recordActionForUndo(&world_state);
-
-                    Direction initial_player_direction = player->direction;
-                    player->direction = input_direction;
-                    setTileDirection(player->direction, player->coords, 0);
-
-                    if (temp_state.pack_attached)
-                    {
-                        float turn_angle = getAngleOfYAxisRotation(player->rotation, directionToRotation(player->direction, MIRROR_SIDE));
-                        int32 rotation_frames = (int32)ceilf((float)fabs(turn_angle) / MAX_ANGULAR_VELOCITY - 1e-3f);
-                        temp_state.pack_turn_state.pack_intermediate_states_timer = rotation_frames;
-                        temp_state.pack_turn_state.turn_total_frames = rotation_frames;
-                        temp_state.pack_turn_state.pack_intermediate_coords = getNextCoords(pack->coords, oppositeDirection(input_direction));
-                        temp_state.pack_turn_state.initial_player_direction = initial_player_direction;
-                    }
-
-                    // if not blue, rotate objects stacked above the player
-                    if (temp_state.player_hit_by_blue_timer == 0)
-                    {
-                        Int3 coords_above = getNextCoords(player->coords, UP);
-                        TileType type_above = getTileType(coords_above);
-
-                        int32 stack_size = 0;
-                        if (isPushable(type_above)) stack_size = getPushableStackSize(coords_above, UP);
-
-                        // need to add either 1 or -1 to direction of entity being rotated
-                        if (stack_size > 0)
-                        {
-                            int32 direction_add = (4 + player->direction - initial_player_direction) % 4;
-                            Int3 current_coords = coords_above;
-
-                            FOR(stack_index, stack_size)
-                            {
-                                Entity* e = getEntityAtCoords(current_coords);
-                                e->direction = (e->direction + direction_add - NORTH) % 4 + NORTH;
-                                e->moving_direction = NO_DIRECTION;
-                                e->moving_on_head = true;
-                                e->root_entity_id = PLAYER_ID;
-                                e->tied_to_pack_and_decoupled = false;
-
-                                current_coords = getNextCoords(current_coords, UP);
-                            }
-                        }
-                    }
-                }
-                else if (player_can_move && move_type == MOVE_BACK)
-                {
-                    // BACKWARDS MOVEMENT
-                    Direction move_direction = oppositeDirection(player->direction);
-
-                    Int3 coords_below = getNextCoords(player->coords, DOWN);
-                    TileType type_below = getTileType(coords_below);
-
-                    if (player->moving_direction == UP)
-                    {
-                        player->moving_direction = DOWN;
-                    }
-                    else if (type_below == TILE_TYPE_LADDER && getTileDirection(coords_below) == move_direction)
-                    {
-                        Int3 next_player_coords = getNextCoords(player->coords, move_direction);
-                        Int3 next_pack_coords = getNextCoords(pack->coords, move_direction);
-
-                        bool do_push = false;
-                        bool allow_down_climb = false;
-
-                        Int3 coords_below_next_player_coords = getNextCoords(next_player_coords, DOWN);
-                        if (getTileType(coords_below_next_player_coords) == TILE_TYPE_NONE)
-                        {
-                            Int3 pushing_coords = (Int3){0};
-                            if (temp_state.pack_attached) pushing_coords = next_pack_coords;
-                            else pushing_coords = next_player_coords;
-
-                            TileType type_to_push = getTileType(pushing_coords);
-                            if (type_to_push == TILE_TYPE_NONE)
-                            {
-                                allow_down_climb = true;
-                            }
-                            else if (isPushable(type_to_push) && canPush(pushing_coords, move_direction))
-                            {
-                                do_push = true;
-                                allow_down_climb = true;
-                            }
+                            // check if would cause half-failed case, and if so check if we already had one of those, and if so disallow turn
+                            // this defeats half the point of how i handle failed case later... but need to know now!
+                            Int3 orthogonal_coords = getNextCoords(player->coords, oppositeDirection(input_direction));
+                            TileType orthogonal_type = getTileType(orthogonal_coords);
+                            bool pack_would_cause_failed_case_orthogonal = orthogonal_type != TILE_TYPE_NONE && (!isEntity(orthogonal_type) || canPush(orthogonal_coords, player->direction));
+                            if (pack_would_cause_failed_case_orthogonal && temp_state.pack_turn_state.half_failed_turn_timer != 0) input_allowed = false;
                         }
 
-                        if (allow_down_climb)
+                        if (input_allowed)
                         {
                             recordActionForUndo(&world_state);
 
-                            // just move back. when move is done, player will start to fall for 0 frames. she will be 
-                            // caught by the ladder by a special case in the falling logic (set climbing direction to DOWN, etc.)
+                            Direction initial_player_direction = player->direction;
+                            player->direction = input_direction;
+                            setTileDirection(player->direction, player->coords, 0);
 
-                            // move pack first, because moving backwards.
                             if (temp_state.pack_attached)
                             {
-                                createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
-                                if (do_push) pushAll(next_pack_coords, move_direction, false, PACK_ID);
-                                moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
+                                float turn_angle = getAngleOfYAxisRotation(player->rotation, directionToRotation(player->direction, MIRROR_SIDE));
+                                int32 rotation_frames = (int32)ceilf((float)fabs(turn_angle) / MAX_ANGULAR_VELOCITY - 1e-3f);
+                                temp_state.pack_turn_state.pack_intermediate_states_timer = rotation_frames;
+                                temp_state.pack_turn_state.turn_total_frames = rotation_frames;
+                                temp_state.pack_turn_state.pack_intermediate_coords = getNextCoords(pack->coords, oppositeDirection(input_direction));
+                                temp_state.pack_turn_state.initial_player_direction = initial_player_direction;
                             }
-                            else
+
+                            // if not blue, rotate objects stacked above the player
+                            if (temp_state.player_hit_by_blue_timer == 0)
                             {
-                                if (do_push) pushAll(next_player_coords, move_direction, false, PLAYER_ID);
+                                Int3 coords_above = getNextCoords(player->coords, UP);
+                                TileType type_above = getTileType(coords_above);
+
+                                int32 stack_size = 0;
+                                if (isPushable(type_above)) stack_size = getPushableStackSize(coords_above, UP);
+
+                                // need to add either 1 or -1 to direction of entity being rotated
+                                if (stack_size > 0)
+                                {
+                                    int32 direction_add = (4 + player->direction - initial_player_direction) % 4;
+                                    Int3 current_coords = coords_above;
+
+                                    FOR(stack_index, stack_size)
+                                    {
+                                        Entity* e = getEntityAtCoords(current_coords);
+                                        e->direction = (e->direction + direction_add - NORTH) % 4 + NORTH;
+                                        e->moving_direction = NO_DIRECTION;
+                                        e->moving_on_head = true;
+                                        e->root_entity_id = PLAYER_ID;
+                                        e->tied_to_pack_and_decoupled = false;
+
+                                        current_coords = getNextCoords(current_coords, UP);
+                                    }
+                                }
                             }
-
-                            // move stuff on head
-                            Int3 coords_on_head = getNextCoords(player->coords, UP);
-                            TileType type_on_head = getTileType(coords_on_head);
-                            if (isPushable(type_on_head) && canPush(coords_on_head, move_direction)) pushAll(coords_on_head, move_direction, true, PLAYER_ID);
-
-                            createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
-                            moveEntityInBufferAndState(player, next_player_coords, player->direction);
-
-                            // set velocity to 0 for sharper movement
-                            player->velocity = (Vec3){0};
+                            break;
                         }
                     }
+                    else
+                    {
+                        // BACKWARDS MOVEMENT
+                        Direction move_direction = oppositeDirection(player->direction);
+
+                        Int3 coords_below = getNextCoords(player->coords, DOWN);
+                        TileType type_below = getTileType(coords_below);
+
+                        if (player->moving_direction == UP)
+                        {
+                            player->moving_direction = DOWN;
+                        }
+                        else if (type_below == TILE_TYPE_LADDER && getTileDirection(coords_below) == move_direction)
+                        {
+                            Int3 next_player_coords = getNextCoords(player->coords, move_direction);
+                            Int3 next_pack_coords = getNextCoords(pack->coords, move_direction);
+
+                            bool do_push = false;
+                            bool allow_down_climb = false;
+
+                            Int3 coords_below_next_player_coords = getNextCoords(next_player_coords, DOWN);
+                            if (getTileType(coords_below_next_player_coords) == TILE_TYPE_NONE)
+                            {
+                                Int3 pushing_coords = (Int3){0};
+                                if (temp_state.pack_attached) pushing_coords = next_pack_coords;
+                                else pushing_coords = next_player_coords;
+
+                                TileType type_to_push = getTileType(pushing_coords);
+                                if (type_to_push == TILE_TYPE_NONE)
+                                {
+                                    allow_down_climb = true;
+                                }
+                                else if (isPushable(type_to_push) && canPush(pushing_coords, move_direction))
+                                {
+                                    do_push = true;
+                                    allow_down_climb = true;
+                                }
+                            }
+
+                            if (allow_down_climb)
+                            {
+                                recordActionForUndo(&world_state);
+
+                                // just move back. when move is done, player will start to fall for 0 frames. she will be 
+                                // caught by the ladder by a special case in the falling logic (set climbing direction to DOWN, etc.)
+
+                                // move pack first, because moving backwards.
+                                if (temp_state.pack_attached)
+                                {
+                                    createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
+                                    if (do_push) pushAll(next_pack_coords, move_direction, false, PACK_ID);
+                                    moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
+                                }
+                                else
+                                {
+                                    if (do_push) pushAll(next_player_coords, move_direction, false, PLAYER_ID);
+                                }
+
+                                // move stuff on head
+                                Int3 coords_on_head = getNextCoords(player->coords, UP);
+                                TileType type_on_head = getTileType(coords_on_head);
+                                if (isPushable(type_on_head) && canPush(coords_on_head, move_direction)) pushAll(coords_on_head, move_direction, true, PLAYER_ID);
+
+                                createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
+                                moveEntityInBufferAndState(player, next_player_coords, player->direction);
+
+                                // set velocity to 0 for sharper movement
+                                player->velocity = (Vec3){0};
+                            }
+                        }
+                        break;
+                    }
+
+                    if (tick_index == MAX_LOOKAHEAD_MOVEMENT_FRAMES - 1) break;
+                    doPhysicsTick();
+                }
+
+                if (!input_allowed)
+                {
+                    // undo memcpy if still can't do this input after look-ahead
+                    memcpy(&world_state, &leap_of_faith_world_state_snapshot, sizeof(WorldState));
+                    memcpy(&temp_state,  &leap_of_faith_temp_state_snapshot,  sizeof(TemporaryState));
                 }
             }
         }
