@@ -338,12 +338,12 @@ const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
 const float LASER_WIDTH = 0.25;
 const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
 
-const float PLAYER_MAX_SPEED = 0.12f;
+const float PLAYER_MAX_SPEED = 0.10f;
 const float MIN_FALL_VELOCITY = -0.15f;
 const int32 TURN_TIME = 10;
 const float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f; // last number is number of frames for a full turn
 const float PLAYER_ACCELERATION = 0.04f;
-const float PLAYER_MAX_DECELERATION = 0.04f;
+const float PLAYER_MAX_DECELERATION = 0.06f;
 const float CLIMBING_SPEED = 0.12f;
 const float GRAVITY = -0.03f;
 const float MAX_POSITION_DIFFERENCE_ALLOWED_FOR_MOVEMENT = 0.5f;
@@ -4165,7 +4165,7 @@ GameResult gameFrame(double delta_time, Input* input)
                     brush_radius = erase_radius;
                 }
 
-                Vec3 point_on_plane = cameraLookingAtPointOnPlane(camera_with_ow_offset, water_plane_y); // TODO: have camera be correct, make camera -> camera_without_overworld_offset or something.
+                Vec3 point_on_plane = cameraLookingAtPointOnPlane(camera_with_ow_offset, water_plane_y);
                 Int2 center = {0};
                 center.x = (int32)((point_on_plane.x - level_origin.x + (0.5 / WATER_PAINT_RESOLUTION) + 0.5f) * WATER_PAINT_RESOLUTION);
                 center.y = (int32)((point_on_plane.z - level_origin.z + (0.5 / WATER_PAINT_RESOLUTION) + 0.5f) * WATER_PAINT_RESOLUTION);
