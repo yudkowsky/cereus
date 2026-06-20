@@ -346,6 +346,8 @@ const float PLAYER_ACCELERATION = 0.04f;
 const float PLAYER_MAX_DECELERATION = 0.04f;
 const float CLIMBING_SPEED = 0.12f;
 const float GRAVITY = -0.03f;
+const float MAX_POSITION_DIFFERENCE_ALLOWED_FOR_MOVEMENT = 0.5f;
+const float MAX_QUARTER_TURN_ANGLE_ALLOWED_FOR_MOVEMENT = 0.2f;
 
 const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
 const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
@@ -364,7 +366,7 @@ const int32 MAX_PUSHABLE_STACK_SIZE = 32;
 const int32 MAX_TRAILING_HITBOX_COUNT = 32;
 const int32 MAX_LEVEL_COUNT = 64;
 const int32 MAX_DEBUG_POPUP_TYPE_COUNT = 32;
-#define MAX_SOURCE_COUNT 32
+const int32 MAX_SOURCE_COUNT = 32;
 
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
@@ -478,6 +480,9 @@ Entity* lockable_entity_groups[4] = { world_state.boxes, world_state.mirrors, wo
 
 WorldState leap_of_faith_world_state_snapshot = {0};
 TemporaryState leap_of_faith_temp_state_snapshot = {0};
+WorldState lookahead_world_state_snapshot = {0};
+TemporaryState lookahead_temp_state_snapshot = {0};
+
 WorldState overworld_zero_state = {0};
 uint8 temp_buffer_array[sizeof(world_state.buffer)];
 
@@ -946,8 +951,8 @@ Entity* getEntityAtCoords(Int3 coords)
     if (isSource(tile)) entity_group = world_state.sources;
     else switch(tile)
     {
-        case TILE_TYPE_BOX:          entity_group = world_state.boxes;          break;
-        case TILE_TYPE_MIRROR:       entity_group = world_state.mirrors;        break;
+        case TILE_TYPE_BOX:          entity_group = world_state.boxes;         break;
+        case TILE_TYPE_MIRROR:       entity_group = world_state.mirrors;       break;
         case TILE_TYPE_GLASS:        entity_group = world_state.glass_blocks;  break;
         case TILE_TYPE_WIN_BLOCK:    entity_group = world_state.win_blocks;    break;
         case TILE_TYPE_LOCKED_BLOCK: entity_group = world_state.locked_blocks; break;
@@ -2446,7 +2451,7 @@ void initializeLevel(char* level_name)
         else if (buffer_contents == TILE_TYPE_GLASS)        entity_group = world_state.glass_blocks;
         else if (buffer_contents == TILE_TYPE_WIN_BLOCK)    entity_group = world_state.win_blocks;
         else if (buffer_contents == TILE_TYPE_LOCKED_BLOCK) entity_group = world_state.locked_blocks;
-        else if (isSource(buffer_contents))       entity_group = world_state.sources;
+        else if (isSource(buffer_contents))                 entity_group = world_state.sources;
 
         if (entity_group != 0)
         {
@@ -2658,7 +2663,6 @@ void evictOldestUndoAction()
     undo_buffer.header_count--;
 }
 
-// don't call if there was level change
 void popLastUndoAction()
 {
     if (undo_buffer.header_count == 0) return;
@@ -4551,23 +4555,40 @@ GameResult gameFrame(double delta_time, Input* input)
 
             // HANDLE INPUT
 
-            //bool wasd_held = input->keys_held & KEY_W || input->keys_held & KEY_A || input->keys_held & KEY_S || input->keys_held & KEY_D;
+            bool wasd_held = input->keys_held & KEY_W || input->keys_held & KEY_A || input->keys_held & KEY_S || input->keys_held & KEY_D;
             bool wasd_pressed = input->keys_pressed & KEY_W || input->keys_pressed & KEY_A || input->keys_pressed & KEY_S || input->keys_pressed & KEY_D;
 
-            if (wasd_pressed)
+            if (wasd_held)
             {
                 Direction input_direction = NO_DIRECTION;
-                if      (input->keys_held & KEY_W) input_direction = NORTH; 
-                else if (input->keys_held & KEY_A) input_direction = WEST; 
-                else if (input->keys_held & KEY_S) input_direction = SOUTH; 
-                else if (input->keys_held & KEY_D) input_direction = EAST; 
+                int32 maybe_max_lookahead_frames = 0;
+
+                if (wasd_pressed)
+                {
+                    if      (input->keys_pressed & KEY_W) input_direction = NORTH; 
+                    else if (input->keys_pressed & KEY_A) input_direction = WEST; 
+                    else if (input->keys_pressed & KEY_S) input_direction = SOUTH; 
+                    else if (input->keys_pressed & KEY_D) input_direction = EAST; 
+                    maybe_max_lookahead_frames = MAX_LOOKAHEAD_MOVEMENT_FRAMES;
+                }
+                else
+                {
+                    if      (input->keys_held & KEY_W) input_direction = NORTH; 
+                    else if (input->keys_held & KEY_A) input_direction = WEST; 
+                    else if (input->keys_held & KEY_S) input_direction = SOUTH; 
+                    else if (input->keys_held & KEY_D) input_direction = EAST; 
+                    maybe_max_lookahead_frames = 1;
+                }
 
                 bool input_allowed = false;
 
-                memcpy(&leap_of_faith_world_state_snapshot, &world_state, sizeof(WorldState)); // TODO: rename
-                memcpy(&leap_of_faith_temp_state_snapshot,  &temp_state,  sizeof(TemporaryState));
+                if (maybe_max_lookahead_frames > 1)
+                {
+                    memcpy(&lookahead_world_state_snapshot, &world_state, sizeof(WorldState));
+                    memcpy(&lookahead_temp_state_snapshot,  &temp_state,  sizeof(TemporaryState));
+                }
 
-                FOR(tick_index, MAX_LOOKAHEAD_MOVEMENT_FRAMES)
+                FOR(tick_index, maybe_max_lookahead_frames)
                 {
                     input_allowed = true; // set as true for this frame
 
@@ -4576,7 +4597,7 @@ GameResult gameFrame(double delta_time, Input* input)
 
                     // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
                     float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToRotation(player->direction, MIRROR_SIDE));
-                    if (fabs(difference_in_player_angle) > TAU * 0.25 * 0.2) input_allowed = false; // TODO: expose this angle
+                    if (fabs(difference_in_player_angle) > TAU * 0.25 * MAX_QUARTER_TURN_ANGLE_ALLOWED_FOR_MOVEMENT) input_allowed = false;
 
                     // if able to fall then don't allow movement
                     bool player_immune_to_fall = false;
@@ -4743,7 +4764,7 @@ GameResult gameFrame(double delta_time, Input* input)
                         
                         // get difference in position along axis of travel, and gate on some threshold to target
                         float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, vec3FromInt3(player->coords)));
-                        if (fabs(difference_in_player_position_along_direction) > 0.3) input_allowed = false; // TODO: expose this threshold
+                        if (fabs(difference_in_player_position_along_direction) > MAX_POSITION_DIFFERENCE_ALLOWED_FOR_MOVEMENT) input_allowed = false;
 
                         if (temp_state.pack_attached)
                         {
@@ -4877,15 +4898,15 @@ GameResult gameFrame(double delta_time, Input* input)
                         break;
                     }
 
-                    if (tick_index == MAX_LOOKAHEAD_MOVEMENT_FRAMES - 1) break;
+                    if (tick_index == maybe_max_lookahead_frames - 1) break;
                     doPhysicsTick();
                 }
 
-                if (!input_allowed)
+                if (!input_allowed && maybe_max_lookahead_frames > 1)
                 {
                     // undo memcpy if still can't do this input after look-ahead
-                    memcpy(&world_state, &leap_of_faith_world_state_snapshot, sizeof(WorldState));
-                    memcpy(&temp_state,  &leap_of_faith_temp_state_snapshot,  sizeof(TemporaryState));
+                    memcpy(&world_state, &lookahead_world_state_snapshot, sizeof(WorldState));
+                    memcpy(&temp_state,  &lookahead_temp_state_snapshot,  sizeof(TemporaryState));
                 }
             }
         }
