@@ -2394,9 +2394,7 @@ void updateLockedTiles(bool silence_unlocks) // TODO: do_unlocks, flip sign
             setTileDirection(NORTH, lb->coords, 0);
         }
     }
-
 }
-
 
 // TEXT INPUT
 
