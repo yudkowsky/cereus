@@ -2585,6 +2585,9 @@ void initializeLevel(char* level_name)
     camera_target_plane = player->coords.y;
     if (in_overworld) ow_player_coords_for_offset = player->coords;
 
+    if (getTileType(getNextCoords(player->coords, oppositeDirection(player->direction))) == TILE_TYPE_PACK) temp_state.pack_attached = true;
+    else temp_state.pack_attached = false;
+
     updateLaserBuffer();
 }
 
@@ -2601,8 +2604,8 @@ void gameInitialize(char* level_name, DisplayInfo display_from_platform)
 
     initUndoBuffer();
 
-    // read overworld-zero's world state from file on startup, so it's kept in memory. this is used on restart in the overworld.
-    initializeLevel("overworld-zero");
+    // read overworld zero's world state from file on startup, so it's kept in memory. this is used on restart in the overworld.
+    initializeLevel(OVERWORLD_ZERO_NAME);
     memcpy(&overworld_zero_state, &world_state, sizeof(WorldState));
 
     initializeLevel(level_name);
@@ -3863,7 +3866,7 @@ GameResult gameFrame(double delta_time, Input* input)
     QueryPerformanceCounter(&t_start);
 
     // reload all models changed on disk
-    vulkanReloadChangedModels();
+    //vulkanReloadChangedModels();
     QueryPerformanceCounter(&t_after_reload);
 
     if (delta_time > 0.1) delta_time = 0.1;
@@ -4588,7 +4591,7 @@ GameResult gameFrame(double delta_time, Input* input)
 
             // HANDLE WASD INPUT
 
-            bool wasd_held = input->keys_held & KEY_W || input->keys_held & KEY_A || input->keys_held & KEY_S || input->keys_held & KEY_D;
+            bool wasd_held    = input->keys_held    & KEY_W || input->keys_held    & KEY_A || input->keys_held    & KEY_S || input->keys_held    & KEY_D;
             bool wasd_pressed = input->keys_pressed & KEY_W || input->keys_pressed & KEY_A || input->keys_pressed & KEY_S || input->keys_pressed & KEY_D;
 
             if (wasd_held)
