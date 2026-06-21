@@ -2358,16 +2358,15 @@ void updateTextInput(Input *input)
     for (int32 chars_typed_index = 0; chars_typed_index < input->text.count; chars_typed_index++)
     {
         uint32 codepoint = input->text.codepoints[chars_typed_index];
-        char character = (char)codepoint;
         EditBuffer* buffer = &editor_state.edit_buffer;
-        if (character == '\b')
+        if (codepoint == '\b')
         {
             if (buffer->length > 0) buffer->length--;
             buffer->string[buffer->length] = 0;
         }
-        else 
+        else if ((int32)codepoint >= FONT_FIRST_ASCII && (int32)codepoint <= FONT_LAST_ASCII)
         {
-            if (buffer->length < 256) buffer->string[buffer->length++] = character;
+            if (buffer->length < 256) buffer->string[buffer->length++] = (char)codepoint;
         }
     }
 }
@@ -4581,7 +4580,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 updateLaserBuffer();
             }
 
-            // HANDLE INPUT
+            // HANDLE WASD INPUT
 
             bool wasd_held = input->keys_held & KEY_W || input->keys_held & KEY_A || input->keys_held & KEY_S || input->keys_held & KEY_D;
             bool wasd_pressed = input->keys_pressed & KEY_W || input->keys_pressed & KEY_A || input->keys_pressed & KEY_S || input->keys_pressed & KEY_D;
@@ -4609,6 +4608,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 }
 
                 bool input_allowed = false;
+                bool move_failed = false; // used to not skip ahead if move that is done is a fail. all turns are allowed for look-ahead even if fail.
 
                 if (maybe_max_lookahead_frames > 1)
                 {
@@ -4762,6 +4762,10 @@ GameResult gameFrame(double delta_time, Input* input)
                                             if (do_push) pushAll(next_player_coords, input_direction, false, PLAYER_ID);
                                             doStandardMovement(input_direction, next_player_coords);
                                         }
+                                        else
+                                        {
+                                            move_failed = true;
+                                        }
                                     }
                                 }
                                 else if (try_climb)
@@ -4779,6 +4783,14 @@ GameResult gameFrame(double delta_time, Input* input)
                                         recordActionForUndo(&world_state);
                                         player->moving_direction = UP;
                                     }
+                                    else
+                                    {
+                                        move_failed = true;
+                                    }
+                                }
+                                else
+                                {
+                                    move_failed = true;
                                 }
                             }
                             break;
@@ -4930,7 +4942,10 @@ GameResult gameFrame(double delta_time, Input* input)
                     doPhysicsTick();
                 }
 
-                if (!input_allowed && maybe_max_lookahead_frames > 1)
+                bool revert_to_previous = false;
+                if (!input_allowed && maybe_max_lookahead_frames > 1) revert_to_previous = true;
+                if (move_failed) revert_to_previous = true;
+                if (revert_to_previous)
                 {
                     // undo memcpy if still can't do this input after look-ahead
                     memcpy(&world_state, &lookahead_world_state_snapshot, sizeof(WorldState));
