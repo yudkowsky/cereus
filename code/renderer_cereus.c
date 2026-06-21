@@ -290,6 +290,7 @@ typedef struct VulkanState
 	uint32 current_frame;
     VkSemaphore* image_available_semaphores; // semaphore(s) that handle WSI -> graphics. wsi produces swapchain image, graphics queue renders into that image.
     VkSemaphore* render_finished_semaphores; // semaphore(s) that handle graphics -> present. once graphics finishes rendering, graphics sends renders to be presented.
+    uint32 render_finished_semaphore_count;
     VkFence* in_flight_fences; 
     VkFence* images_in_flight;
 
@@ -2124,7 +2125,7 @@ void createSwapchainResources(void)
 
     // OIT fragment pool SSBO
     {
-        const float max_screen_covered_in_laser = 1.0f; // TODO: optimisation here broke on leo pc
+        const float max_screen_covered_in_laser = 1.0f / 16.0f;
         VkDeviceSize pool_size = (VkDeviceSize)(vulkan_state.swapchain_extent.width * vulkan_state.swapchain_extent.height * 8 * 16 * max_screen_covered_in_laser); // 8 frags per pixel, 16 bytes each (uvec4)
 
         VkBufferCreateInfo buffer_ci = {0};
@@ -2385,6 +2386,20 @@ void createSwapchainResources(void)
     // per image fence tracking
     free(vulkan_state.images_in_flight);
     vulkan_state.images_in_flight = calloc(vulkan_state.swapchain_image_count, sizeof(VkFence));
+
+    // per image render-finished semaphores
+    for (uint32 semaphore_index = 0; semaphore_index < vulkan_state.render_finished_semaphore_count; semaphore_index++)
+    {
+        vkDestroySemaphore(vulkan_state.logical_device_handle, vulkan_state.render_finished_semaphores[semaphore_index], 0);
+    }
+
+    vulkan_state.render_finished_semaphores = realloc(vulkan_state.render_finished_semaphores, sizeof(VkSemaphore) * vulkan_state.swapchain_image_count);
+    {
+        VkSemaphoreCreateInfo semaphore_ci = {0};
+        semaphore_ci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        for (uint32 i = 0; i < vulkan_state.swapchain_image_count; i++) vkCreateSemaphore(vulkan_state.logical_device_handle, &semaphore_ci, 0, &vulkan_state.render_finished_semaphores[i]);
+    }
+    vulkan_state.render_finished_semaphore_count = vulkan_state.swapchain_image_count;
 
     // depth-only view for sampling
     VkImageViewCreateInfo depth_sampled_view_ci = {0};
@@ -2922,6 +2937,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     device_features.fragmentStoresAndAtomics = VK_TRUE;
     device_features.independentBlend = VK_TRUE;
     device_features.textureCompressionBC = VK_TRUE;
+    device_features.samplerAnisotropy = VK_TRUE;
 
     VkDeviceCreateInfo device_info = {0}; // struct that bundles everthing the driver needs to create the logical device
     device_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -3121,7 +3137,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         overlay_dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
         overlay_dependencies[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
         overlay_dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        overlay_dependencies[1].dependencyFlags = 0;
+        overlay_dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
 
         VkRenderPassCreateInfo overlay_rp_ci = {0};
         overlay_rp_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -3175,10 +3191,10 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
         water_dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
         water_dependencies[0].dstSubpass = 0;
-        water_dependencies[0].dstStageMask |= VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-        water_dependencies[0].dstAccessMask |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
-        water_dependencies[0].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        water_dependencies[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        water_dependencies[0].srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        water_dependencies[0].dstStageMask  = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        water_dependencies[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        water_dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_SHADER_READ_BIT;
 
         VkRenderPassCreateInfo water_rp_ci = {0};
         water_rp_ci.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -3359,7 +3375,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
     vulkan_state.frames_in_flight = 2;
 	vulkan_state.current_frame = 0;
-	vulkan_state.image_available_semaphores = malloc(sizeof(VkSemaphore) * vulkan_state.frames_in_flight);
     vulkan_state.render_finished_semaphores = malloc(sizeof(VkSemaphore) * vulkan_state.frames_in_flight);
     vulkan_state.in_flight_fences = malloc(sizeof(VkFence) * vulkan_state.frames_in_flight);
 											
@@ -3370,12 +3385,14 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
+    vulkan_state.image_available_semaphores = malloc(sizeof(VkSemaphore) * vulkan_state.frames_in_flight);
+    vulkan_state.in_flight_fences = malloc(sizeof(VkFence) * vulkan_state.frames_in_flight);
+
     for (uint32 frames_in_flight_increment = 0; frames_in_flight_increment < vulkan_state.frames_in_flight; frames_in_flight_increment++)
     {
         vkCreateSemaphore(vulkan_state.logical_device_handle, &semaphore_info, 0, &vulkan_state.image_available_semaphores[frames_in_flight_increment]);
-        vkCreateSemaphore(vulkan_state.logical_device_handle, &semaphore_info, 0, &vulkan_state.render_finished_semaphores[frames_in_flight_increment]);
         vkCreateFence(vulkan_state.logical_device_handle, &fence_info, 0, &vulkan_state.in_flight_fences[frames_in_flight_increment]);
-	}
+    }
 
     // used in the draw loop:
 
@@ -3391,8 +3408,6 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 	vulkan_state.cube_index_count = 36;
 	uploadBufferToLocalDevice(CUBE_VERTICES, sizeof(CUBE_VERTICES), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, &vulkan_state.cube_vertex_buffer, &vulkan_state.cube_vertex_memory);
 	uploadBufferToLocalDevice(CUBE_INDICES,  sizeof(CUBE_INDICES),  VK_BUFFER_USAGE_INDEX_BUFFER_BIT,  &vulkan_state.cube_index_buffer,  &vulkan_state.cube_index_memory);
-
-    //vulkan_state.images_in_flight = calloc(vulkan_state.swapchain_image_count, sizeof(VkFence)); // calloc because we want these to start at VK_NULL_HANDLE, i.e. 0.
 
     // TODO: this isnt in createSwapchainResources because it needs to exist before then... is this the best place for it, though?
     // shadow map image
@@ -4499,16 +4514,16 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     {
         VkDescriptorSetLayout water_set_layouts[10] =
         {
-            vulkan_state.view_constants_set_layout, // view constants
-            vulkan_state.descriptor_set_layout,     // underwater scene copy
-            vulkan_state.descriptor_set_layout,     // scene depth
-            vulkan_state.descriptor_set_layout,     // paint texture
-            vulkan_state.descriptor_set_layout,     // displacement texture
-            vulkan_state.descriptor_set_layout,     // reflection texture
-            vulkan_state.descriptor_set_layout,     // water grid texture
-            vulkan_state.descriptor_set_layout,     // water grid normals texture
-            vulkan_state.descriptor_set_layout,     // laser lights
-            vulkan_state.descriptor_set_layout,     // reflection distance
+            vulkan_state.view_constants_set_layout,     // view constants
+            vulkan_state.descriptor_set_layout,         // underwater scene copy
+            vulkan_state.descriptor_set_layout,         // scene depth
+            vulkan_state.descriptor_set_layout,         // paint texture
+            vulkan_state.descriptor_set_layout,         // displacement texture
+            vulkan_state.descriptor_set_layout,         // reflection texture
+            vulkan_state.descriptor_set_layout,         // water grid texture
+            vulkan_state.descriptor_set_layout,         // water grid normals texture
+            vulkan_state.ssbo_descriptor_set_layout,    // laser lights
+            vulkan_state.descriptor_set_layout,         // reflection distance
         };
 
         VkPipelineLayoutCreateInfo water_pipeline_layout_ci = {0};
@@ -6378,9 +6393,11 @@ void vulkanDraw(bool do_profiling_output)
         vkCmdDrawIndexed(command_buffer, laser_mesh->index_count, laser_instance_count, 0, 0, 0);
     }
 
-    memoryBarrier(command_buffer,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+    VkMemoryBarrier oit_barrier = {0};
+    oit_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+    oit_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+    oit_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, VK_DEPENDENCY_BY_REGION_BIT, 1, &oit_barrier, 0, 0, 0, 0);
 
     // OIT resolve pass
     {
@@ -6495,7 +6512,7 @@ void vulkanDraw(bool do_profiling_output)
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers = &vulkan_state.swapchain_command_buffers[swapchain_image_index];
     submit_info.signalSemaphoreCount = 1;
-    submit_info.pSignalSemaphores = &vulkan_state.render_finished_semaphores[vulkan_state.current_frame];
+    submit_info.pSignalSemaphores = &vulkan_state.render_finished_semaphores[swapchain_image_index];
 
     VkResult submit_result = vkQueueSubmit(vulkan_state.graphics_queue_handle, 1, &submit_info, vulkan_state.in_flight_fences[vulkan_state.current_frame]);
 
@@ -6510,7 +6527,7 @@ void vulkanDraw(bool do_profiling_output)
     VkPresentInfoKHR present_info = {0};
     present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     present_info.waitSemaphoreCount = 1;
-    present_info.pWaitSemaphores = &vulkan_state.render_finished_semaphores[vulkan_state.current_frame];
+    present_info.pWaitSemaphores = &vulkan_state.render_finished_semaphores[swapchain_image_index];
     present_info.swapchainCount = 1;
     present_info.pSwapchains = &vulkan_state.swapchain_handle;
     present_info.pImageIndices = &swapchain_image_index;
