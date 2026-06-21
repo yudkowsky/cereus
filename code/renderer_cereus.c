@@ -2125,7 +2125,7 @@ void createSwapchainResources(void)
 
     // OIT fragment pool SSBO
     {
-        const float max_screen_covered_in_laser = 1.0f;
+        const float max_screen_covered_in_laser = 1.0f / 16.0f;
         VkDeviceSize pool_size = (VkDeviceSize)(vulkan_state.swapchain_extent.width * vulkan_state.swapchain_extent.height * 8 * 16 * max_screen_covered_in_laser); // 8 frags per pixel, 16 bytes each (uvec4)
 
         VkBufferCreateInfo buffer_ci = {0};
@@ -3169,7 +3169,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         water_attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
         water_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         water_attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        water_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        water_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
         water_attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
         water_attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
@@ -3373,7 +3373,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
 	vkCreateCommandPool(vulkan_state.logical_device_handle, &command_pool_creation_info, 0, &vulkan_state.graphics_command_pool_handle);
 
-    vulkan_state.frames_in_flight = 2;
+    vulkan_state.frames_in_flight = 1;
 	vulkan_state.current_frame = 0;
     vulkan_state.render_finished_semaphores = malloc(sizeof(VkSemaphore) * vulkan_state.frames_in_flight);
     vulkan_state.in_flight_fences = malloc(sizeof(VkFence) * vulkan_state.frames_in_flight);
