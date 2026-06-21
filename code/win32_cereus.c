@@ -1,7 +1,7 @@
 #include <windows.h>
 #include "everything.h"
 
-// TODO: set up some more serious sleep code
+const double target_frame_seconds = 1.0 / 200.0;
 
 HWND global_window_handle = 0;
 Input input = {0};
@@ -245,7 +245,10 @@ int CALLBACK WinMain(
 	double frame_times[60] = {0};
 	int32 frame_time_index = 0;
     int32 title_update_counter = 0;
-	LARGE_INTEGER work_start, work_end;
+	LARGE_INTEGER work_start;
+
+    // fps cap
+    HANDLE frame_timer = CreateWaitableTimerExW(0, 0, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
 
     gameInitialize(file_path, display_info); 
 
@@ -306,12 +309,7 @@ int CALLBACK WinMain(
         input.text.count = 0;
 
         // profiling
-        QueryPerformanceCounter(&work_end);
-
-        LARGE_INTEGER frame_end;
-        QueryPerformanceCounter(&frame_end);
-        double total_ms = (frame_end.QuadPart - work_start.QuadPart) * seconds_per_tick * 1000.0;
-        frame_times[frame_time_index] = total_ms;
+        frame_times[frame_time_index] = delta_time * 1000.0;
         frame_time_index = (frame_time_index + 1) % 60;
         
         title_update_counter++;
@@ -327,6 +325,20 @@ int CALLBACK WinMain(
             swprintf(title_buffer, 256, L"fps: %.0f", fps);
             SetWindowTextW(window_handle, title_buffer);
             title_update_counter = 0;
+        }
+
+        // fps cap
+        LARGE_INTEGER frame_now;
+        QueryPerformanceCounter(&frame_now);
+        double frame_elapsed = (frame_now.QuadPart - work_start.QuadPart) * seconds_per_tick;
+        double sleep_seconds = target_frame_seconds - frame_elapsed;
+
+        if (frame_timer && sleep_seconds > 0.0)
+        {
+            LARGE_INTEGER due;
+            due.QuadPart = -(LONGLONG)(sleep_seconds * 1e7);
+            SetWaitableTimer(frame_timer, &due, 0, 0, 0, FALSE);
+            WaitForSingleObject(frame_timer, INFINITE);
         }
     }
 
