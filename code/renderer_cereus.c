@@ -2976,7 +2976,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; // start each frame by clearing the swapchain image to a solid color
         color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; // we want the image to be read by the present engine after the render pass
         color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
         color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; // don't care about previous layout of swapchain image
         color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         
@@ -2990,7 +2990,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; // store for second render pass
         depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
         depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; 
         depth_attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
@@ -3018,7 +3018,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         normal_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         normal_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         normal_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        normal_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        normal_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
         normal_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         normal_attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
@@ -3053,7 +3053,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         post_color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD; // keep scene contents
         post_color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         post_color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        post_color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        post_color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
         post_color_attachment.initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         post_color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
@@ -3095,16 +3095,16 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         overlay_attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
         overlay_attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         overlay_attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        overlay_attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        overlay_attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
         overlay_attachments[0].initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         overlay_attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
         overlay_attachments[1].format = vulkan_state.depth_format;
         overlay_attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
         overlay_attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        overlay_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        overlay_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         overlay_attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        overlay_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        overlay_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
         overlay_attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
         overlay_attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
@@ -3160,14 +3160,14 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         water_attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
         water_attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         water_attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        water_attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        water_attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
         water_attachments[0].initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
         water_attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
         water_attachments[1].format = vulkan_state.depth_format;
         water_attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
         water_attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        water_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        water_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         water_attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         water_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
         water_attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
@@ -3216,9 +3216,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         reflection_attachments[0].format = vulkan_state.swapchain_format;
         reflection_attachments[0].samples = VK_SAMPLE_COUNT_4_BIT;
         reflection_attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        reflection_attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        reflection_attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         reflection_attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        reflection_attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        reflection_attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
         reflection_attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         reflection_attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
@@ -3226,9 +3226,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         reflection_attachments[1].format = vulkan_state.depth_format;
         reflection_attachments[1].samples = VK_SAMPLE_COUNT_4_BIT;
         reflection_attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        reflection_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        reflection_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         reflection_attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        reflection_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        reflection_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
         reflection_attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         reflection_attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
@@ -3238,7 +3238,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         reflection_attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         reflection_attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         reflection_attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        reflection_attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        reflection_attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
         reflection_attachments[2].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         reflection_attachments[2].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
@@ -3246,9 +3246,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         reflection_attachments[3].format = VK_FORMAT_R32_SFLOAT;
         reflection_attachments[3].samples = VK_SAMPLE_COUNT_4_BIT;
         reflection_attachments[3].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        reflection_attachments[3].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        reflection_attachments[3].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         reflection_attachments[3].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        reflection_attachments[3].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        reflection_attachments[3].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
         reflection_attachments[3].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         reflection_attachments[3].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
@@ -3258,7 +3258,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         reflection_attachments[4].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         reflection_attachments[4].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         reflection_attachments[4].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        reflection_attachments[4].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        reflection_attachments[4].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
         reflection_attachments[4].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         reflection_attachments[4].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
@@ -3323,7 +3323,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         shadow_depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         shadow_depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         shadow_depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        shadow_depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        shadow_depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
         shadow_depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         shadow_depth_attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
 
