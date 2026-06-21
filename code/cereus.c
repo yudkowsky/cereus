@@ -2827,7 +2827,9 @@ void zeroAnimations()
     clearMovementState(player);
     clearMovementState(pack);
 
+    bool pack_attached = temp_state.pack_attached; // TODO: this is kind of ugly, but i do want to preserve this?
     memset(&temp_state, 0, sizeof(TemporaryState));
+    temp_state.pack_attached = pack_attached;
 }
 
 // returns false only if already at oldest action
@@ -4160,6 +4162,7 @@ GameResult gameFrame(double delta_time, Input* input)
                     if (wb->next_level[0] != 0)
                     {
                         levelChangePrep(wb->next_level, false);
+                        zeroAnimations();
                         initializeLevel(wb->next_level);
                         writeSolvedLevelsToFile();
                         updateLockedTiles(true);
