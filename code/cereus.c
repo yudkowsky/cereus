@@ -508,7 +508,7 @@ bool do_debug_text = false;
 
 // debug popups
 const float DEBUG_POPUP_TYPE_STEP_SIZE = 30.0f;
-const int32 DEFAULT_POPUP_TYPE_TIME = 100;
+const int32 DEFAULT_POPUP_TIME = 200;
 Vec2 debug_popup_start_coords = {0};
 DebugPopup debug_popups[32];
 
@@ -1684,7 +1684,7 @@ void createDebugPopup(char* string, PopupType popup_type)
                     debug_popups[popup_index].coords.x = debug_popup_start_coords.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
                     break;
                 }
-                debug_popups[popup_index].frames_left = DEFAULT_POPUP_TYPE_TIME;
+                debug_popups[popup_index].frames_left = DEFAULT_POPUP_TIME;
                 memcpy(debug_popups[popup_index].text, string, 256 * sizeof(char));
                 return;
             }
@@ -1705,7 +1705,7 @@ void createDebugPopup(char* string, PopupType popup_type)
         break;
     }
     debug_popups[next_free_in_popups].coords.y = debug_popup_start_coords.y + (next_free_in_popups * DEBUG_POPUP_TYPE_STEP_SIZE);
-    debug_popups[next_free_in_popups].frames_left = DEFAULT_POPUP_TYPE_TIME;
+    debug_popups[next_free_in_popups].frames_left = DEFAULT_POPUP_TIME;
     debug_popups[next_free_in_popups].type = popup_type;
     memcpy(debug_popups[next_free_in_popups].text, string, 256 * sizeof(char));
 }

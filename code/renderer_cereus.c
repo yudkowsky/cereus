@@ -638,7 +638,7 @@ const uint32 LASER_INSTANCE_CAPACITY = 1024;
 
 const int32 REFLECTION_DOWNSCALE = 3;
 
-const uint32 SHADOW_MAP_RESOLUTION = 2048;
+const uint32 SHADOW_MAP_RESOLUTION = 4096;
 
 // TODO: set these in loadAsset where stb_image gives me width / height. store in CachedAsset.
 const int32 ATLAS_2D_WIDTH = 128;
@@ -3218,7 +3218,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         reflection_attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         reflection_attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         reflection_attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        reflection_attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
+        reflection_attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         reflection_attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         reflection_attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
@@ -3228,7 +3228,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         reflection_attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         reflection_attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         reflection_attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        reflection_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
+        reflection_attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         reflection_attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         reflection_attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
@@ -3248,7 +3248,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         reflection_attachments[3].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         reflection_attachments[3].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         reflection_attachments[3].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        reflection_attachments[3].stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
+        reflection_attachments[3].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         reflection_attachments[3].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         reflection_attachments[3].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
