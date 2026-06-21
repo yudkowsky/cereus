@@ -424,7 +424,7 @@ Input prev_input = {0}; // copied from previous frame input to generate keys_pre
 DrawCommand draw_commands[8192] = {0};
 int32 draw_command_count = 0;
 
-const char DEBUG_LEVEL_NAME[64] = "testing";
+const char DEBUG_LEVEL_NAME[64] = "overworld";
 const char RELATIVE_LEVEL_FOLDER_PATH[64] = "data/levels/";
 const char SOURCE_LEVEL_FOLDER_PATH[64] = "../cereus/data/levels/";
 const char LEVEL_BASE_FILE_NAME[64] = "base.level";
