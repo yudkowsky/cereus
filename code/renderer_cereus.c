@@ -3,8 +3,8 @@
 #define CGLTF_IMPLEMENTATION
 
 #include <vulkan/vulkan.h>
-#include "stb_image.h"
-#include "cgltf.h"
+#include "external/stb_image.h"
+#include "external/cgltf.h"
 #include "everything.h"
 
 // TEMP: for profiling

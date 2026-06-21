@@ -3847,6 +3847,11 @@ void doPhysicsTick()
     if (temp_state.pack_turn_state.half_failed_turn_timer > 0) temp_state.pack_turn_state.half_failed_turn_timer--;
     if (temp_state.player_hit_by_blue_timer > 0) temp_state.player_hit_by_blue_timer--;
 
+    // disallow input if player above void / water
+    TileType tile_type_below_player = getTileType(getNextCoords(player->coords, DOWN));
+    if (tile_type_below_player == TILE_TYPE_VOID || tile_type_below_player == TILE_TYPE_WATER) temp_state.allow_movement_timer = -1;
+
+    // update lasers based on physics
     updateLaserBuffer();
 }
 
@@ -4742,7 +4747,6 @@ GameResult gameFrame(double delta_time, Input* input)
                                         FOR(_, SIMULATE_FORWARD_TICK_COUNT)
                                         {
                                             doPhysicsTick();
-                                            updateLaserBuffer();
                                             if (temp_state.player_hit_by_red)
                                             {
                                                 would_be_red = true;
@@ -4944,7 +4948,7 @@ GameResult gameFrame(double delta_time, Input* input)
 
                 bool revert_to_previous = false;
                 if (!input_allowed && maybe_max_lookahead_frames > 1) revert_to_previous = true;
-                if (move_failed) revert_to_previous = true;
+                //if (move_failed) revert_to_previous = true; TODO: this breaks walking towards water when holding button press
                 if (revert_to_previous)
                 {
                     // undo memcpy if still can't do this input after look-ahead
@@ -5025,10 +5029,6 @@ GameResult gameFrame(double delta_time, Input* input)
 
         // MISC STUFF
 
-        // disallow input if player above void / water
-        TileType tile_type_below_player = getTileType(getNextCoords(player->coords, DOWN));
-        if (tile_type_below_player == TILE_TYPE_VOID || tile_type_below_player == TILE_TYPE_WATER) temp_state.allow_movement_timer = -1;
-
         // reset undos performed if no longer holding z undos
         if (undos_performed > 0 && !(input->keys_held & KEY_Z)) undos_performed = 0;
 
@@ -5045,20 +5045,20 @@ GameResult gameFrame(double delta_time, Input* input)
         // update restart coords based on current coords of the player, and also update game progress if this is relevant
         if (player->coords.z > 204) 
         {
-            overworld_restart_coords = (Int3){ 37, 258, 225 };
+            overworld_restart_coords = (Int3){ 37, 258, 225 }; // gate 0
         }
         else if (player->coords.z > 189)
         {
-            overworld_restart_coords = (Int3){ 58, 258, 197 };
+            overworld_restart_coords = (Int3){ 58, 258, 194 }; // world 1
             if (game_progress < WORLD_1) game_progress = WORLD_1;
         }
         else if (player->coords.z > 174) 
         {
-            overworld_restart_coords = (Int3){ 58, 258, 188 };
+            overworld_restart_coords = (Int3){ 58, 258, 188 }; // gate 1
         }
         else
         {
-            overworld_restart_coords = (Int3){ 58, 258, 170 };
+            overworld_restart_coords = (Int3){ 58, 258, 170 }; // world 2
             if (game_progress < WORLD_2) game_progress = WORLD_2;
         }
 
