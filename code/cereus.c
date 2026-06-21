@@ -301,7 +301,6 @@ UndoActionHeader;
 typedef struct UndoLevelChange
 {
     char from_level[64];
-    bool remove_from_solved;
 }
 UndoLevelChange;
 
@@ -452,7 +451,6 @@ const Int3 OVERWORLD_CAMERA_CENTER_START = { 58, 2, 197 };
 Int3 camera_screen_offset = {0};
 bool draw_level_boundary = false;
 Int3 ow_player_coords_for_offset = {0};
-bool silence_unlocks_due_to_restart_or_undo = false;
 
 const float CAMERA_T_TIMESTEP = 0.05f;
 float camera_lerp_t = 0.0f;
@@ -1505,12 +1503,14 @@ void addToSolvedLevels(char level[64])
     strcpy(world_state.solved_levels[next_free], level);
 }
 
+/*
 void removeFromSolvedLevels(char level[64])
 {
     int32 index = findInSolvedLevels(level);
     if (index == -1 || index > MAX_LEVEL_COUNT) return; // not in solved levels, or null string passed
     memset(world_state.solved_levels[index], 0, sizeof(world_state.solved_levels[0]));
 }
+*/
 
 void loadSolvedLevelsFromFile()
 {
@@ -2349,7 +2349,54 @@ void updateLaserBuffer()
             break;
         }
     }
+
+    if (cheating)
+    {
+        temp_state.player_hit_by_blue_timer = HIT_BY_BLUE_TIME;
+        temp_state.player_hit_by_red = true;
+    }
 }
+
+// LOCKED TILES TODO: is there a better place for this
+
+void updateLockedTiles(bool silence_unlocks) // TODO: do_unlocks, flip sign
+{
+    FOR(group_index, 4)
+    {
+        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+        {
+            Entity* e = &lockable_entity_groups[group_index][entity_index];
+            if (findInSolvedLevels(e->unlocked_by) == -1) e->locked = true; 
+            else e->locked = false;
+        }
+    }
+    FOR(locked_block_index, MAX_ENTITY_INSTANCE_COUNT)
+    {
+        Entity* lb = &world_state.locked_blocks[locked_block_index];
+        if (!lb->in_use) continue;
+        int32 find_result = findInSolvedLevels(lb->unlocked_by);
+        if (find_result == INT32_MAX) continue;
+        if (find_result != -1 && !lb->removed)
+        {
+            // locked block to be unlocked
+            lb->removed = true;
+            if (getTileType(lb->coords) == TILE_TYPE_LOCKED_BLOCK)
+            {
+                setTileType(TILE_TYPE_NONE, lb->coords);
+                setTileDirection(NORTH, lb->coords, 0);
+            }
+            if (!silence_unlocks) createDebugPopup("something was unlocked!", POPUP_TYPE_NONE);
+        }
+        else if (find_result == -1 && lb->removed)
+        {
+            lb->removed = false;
+            setTileType(TILE_TYPE_LOCKED_BLOCK, lb->coords);
+            setTileDirection(NORTH, lb->coords, 0);
+        }
+    }
+
+}
+
 
 // TEXT INPUT
 
@@ -2561,6 +2608,8 @@ void gameInitialize(char* level_name, DisplayInfo display_from_platform)
     memcpy(&overworld_zero_state, &world_state, sizeof(WorldState));
 
     initializeLevel(level_name);
+
+    if (in_overworld) updateLockedTiles(true);
 }
 
 RendererInfo getRendererInfo()
@@ -2584,44 +2633,6 @@ void gameRedraw(DisplayInfo display_from_platform)
     recalculateTextStartCoords();
     vulkanSubmitFrame(draw_commands, draw_command_count, getRendererInfo());
     vulkanDraw(false);
-}
-
-void updateLockedTiles()
-{
-    FOR(group_index, 4)
-    {
-        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
-        {
-            Entity* e = &lockable_entity_groups[group_index][entity_index];
-            if (findInSolvedLevels(e->unlocked_by) == -1) e->locked = true; 
-            else e->locked = false;
-        }
-    }
-    FOR(locked_block_index, MAX_ENTITY_INSTANCE_COUNT)
-    {
-        Entity* lb = &world_state.locked_blocks[locked_block_index];
-        if (!lb->in_use) continue;
-        int32 find_result = findInSolvedLevels(lb->unlocked_by);
-        if (find_result == INT32_MAX) continue;
-        if (find_result != -1 && !lb->removed)
-        {
-            // locked block to be unlocked
-            lb->removed = true;
-            if (getTileType(lb->coords) == TILE_TYPE_LOCKED_BLOCK)
-            {
-                setTileType(TILE_TYPE_NONE, lb->coords);
-                setTileDirection(NORTH, lb->coords, 0);
-            }
-            if (!silence_unlocks_due_to_restart_or_undo) createDebugPopup("something was unlocked!", POPUP_TYPE_NONE);
-        }
-        else if (find_result == -1 && lb->removed)
-        {
-            lb->removed = false;
-            setTileType(TILE_TYPE_LOCKED_BLOCK, lb->coords);
-            setTileDirection(NORTH, lb->coords, 0);
-        }
-    }
-
 }
 
 // UNDO / RESTART
@@ -2718,7 +2729,7 @@ void recordActionForUndo(WorldState* old_state)
 }
 
 // call before transitioning to a new level. stores a delta for every entity in the current level, plus the level change metadata
-void recordLevelChangeForUndo(char* current_level_name, bool level_was_just_solved)
+void recordLevelChangeForUndo(char* current_level_name)
 {
     if (undo_buffer.header_count >= MAX_UNDO_ACTIONS) evictOldestUndoAction();
 
@@ -2773,7 +2784,6 @@ void recordLevelChangeForUndo(char* current_level_name, bool level_was_just_solv
     uint32 level_change_index = undo_buffer.level_change_write_pos;
     memset(undo_buffer.level_changes[level_change_index].from_level, 0, 64);
     strcpy(undo_buffer.level_changes[level_change_index].from_level, current_level_name);
-    undo_buffer.level_changes[level_change_index].remove_from_solved = level_was_just_solved;
     undo_buffer.level_change_write_pos = (level_change_index + 1) % MAX_LEVEL_CHANGES;
     undo_buffer.level_change_count++;
 
@@ -2839,14 +2849,6 @@ bool performUndo()
 
         // reinitialize previous
         initializeLevel(level_change->from_level);
-
-        // remove from solved levels if the level was just completed
-        if (level_change->remove_from_solved)
-        {
-            removeFromSolvedLevels(level_change->from_level);
-            writeSolvedLevelsToFile();
-            updateLockedTiles();
-        }
     }
 
     // pass 1: clear all current tiles
@@ -2901,21 +2903,21 @@ bool performUndo()
 
     //writeUndoBufferToFile();
 
+    updateLockedTiles(true);
+
     return true;
 }
 
 void levelChangePrep(char next_level[64], bool write_solved_levels)
 {
-    bool level_was_just_solved = false;
     if (!in_overworld && findInSolvedLevels(world_state.level_name) == -1 && write_solved_levels)
     {
         addToSolvedLevels(world_state.level_name);
         writeSolvedLevelsToFile();
-        updateLockedTiles();
-        level_was_just_solved = true;
+        updateLockedTiles(false);
     }
     
-    recordLevelChangeForUndo(world_state.level_name, level_was_just_solved);
+    recordLevelChangeForUndo(world_state.level_name);
 
     if (strcmp(next_level, "overworld") == 0) in_overworld = true;
     else in_overworld = false;
@@ -3225,7 +3227,6 @@ void doPhysicsTick()
                 bool landing = false;
                 if (!canFall(e_in_stack)) landing = true;
                 if (temp_state.undo_press_timer > 0) landing = true;
-                if (cheating) landing = true;
 
                 if (e_in_stack->id == PLAYER_ID && temp_state.player_hit_by_red) landing = true;
                 else if (temp_state.player_hit_by_blue_timer != 0) landing = true;
@@ -4160,6 +4161,7 @@ GameResult gameFrame(double delta_time, Input* input)
                         levelChangePrep(wb->next_level, false);
                         initializeLevel(wb->next_level);
                         writeSolvedLevelsToFile();
+                        updateLockedTiles(true);
                         time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                     }
                 }
@@ -4538,7 +4540,6 @@ GameResult gameFrame(double delta_time, Input* input)
                     else time_until_allow_undo_or_restart_input = 6;
 
                     undos_performed++;
-                    silence_unlocks_due_to_restart_or_undo = true;
                     temp_state.undo_press_timer = time_until_allow_undo_or_restart_input;
                     temp_state.allow_movement_timer = time_until_allow_undo_or_restart_input;
                 }
@@ -4547,6 +4548,7 @@ GameResult gameFrame(double delta_time, Input* input)
                     time_until_allow_undo_or_restart_input = 8;
                 }
             }
+
             if (time_until_allow_undo_or_restart_input == 0 && input->keys_held & KEY_R)
             {
                 // RESTART 
@@ -4575,10 +4577,11 @@ GameResult gameFrame(double delta_time, Input* input)
                     moveEntityInBufferAndState(pack, getNextCoords(player->coords, SOUTH), NORTH);
                     pack->rotation = directionToRotation(pack->direction, MIRROR_SIDE);
                     pack->position = vec3FromInt3(pack->coords);
+
+                    updateLockedTiles(true);
                 }
                 camera = save_camera; 
                 restart_last_turn = true;
-                silence_unlocks_due_to_restart_or_undo = true;
                 time_until_allow_undo_or_restart_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 temp_state.allow_movement_timer = 0;
 
@@ -4636,7 +4639,6 @@ GameResult gameFrame(double delta_time, Input* input)
                     bool player_immune_to_fall = false;
                     if (temp_state.player_hit_by_red) player_immune_to_fall = true;
                     if (player->moving_direction == UP || player->moving_direction == DOWN) player_immune_to_fall = true;
-                    if (cheating) player_immune_to_fall = true;
                     if (canFall(player) && !player_immune_to_fall) input_allowed = false;
 
                     if (input_direction == player->direction)
@@ -4721,7 +4723,7 @@ GameResult gameFrame(double delta_time, Input* input)
                                     if (tile_below_next_coords == TILE_TYPE_NONE && !temp_state.player_hit_by_red) allow_walk = false;
                                     if (isEntity(tile_below_next_coords) && !vec3IsZero(getEntityAtCoords(coords_below_next_coords)->velocity)) allow_walk = false;
 
-                                    if (allow_walk || cheating)
+                                    if (allow_walk)
                                     {
                                         recordActionForUndo(&world_state);
                                         if (do_push) pushAll(next_player_coords, input_direction, false, PLAYER_ID);
@@ -5001,16 +5003,20 @@ GameResult gameFrame(double delta_time, Input* input)
                     initializeLevel(wb->next_level);
                     zeroAnimations();
 
-                    if (in_overworld) placePlayerOnWinBlock(from_level);
+                    if (in_overworld)
+                    {
+                        placePlayerOnWinBlock(from_level);
+                        updateLockedTiles(false);
+                    }
 
                     time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 }
             }
             else if (input->keys_held & KEY_F && time_until_allow_meta_input == 0)
             {
-                // add win_block.next_level to solved_levels. this is a debug bind
                 bool solve_level = true;
                 if (editor_state.editor_mode != EDITOR_MODE_NONE) solve_level = false;
+                if (!in_overworld) solve_level = false;
 
                 if (solve_level)
                 {
@@ -5021,6 +5027,7 @@ GameResult gameFrame(double delta_time, Input* input)
                         strcpy(world_state.solved_levels[next_free], wb->next_level);
                     }
                     writeSolvedLevelsToFile();
+                    updateLockedTiles(false);
                     createDebugPopup("level solved!", POPUP_TYPE_NONE);
                     time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 }
@@ -5111,6 +5118,9 @@ GameResult gameFrame(double delta_time, Input* input)
             Entity box1 = world_state.boxes[0];
             Entity box2 = world_state.boxes[1];
             DEBUG_TEXT("box 1: moving dir: %i, on_head: %i; box 2: moving dir: %i, on_head: %i", box1.moving_direction, box1.moving_on_head, box2.moving_direction, box2.moving_on_head);
+
+            // is overworld in solved levels?
+            DEBUG_TEXT("ow in solved: %i", findInSolvedLevels("overworld"));
 
             // draw selected id info
             if (editor_state.editor_mode == EDITOR_MODE_SELECT || editor_state.editor_mode == EDITOR_MODE_SELECT_WRITE)
@@ -5271,7 +5281,6 @@ GameResult gameFrame(double delta_time, Input* input)
                 memcpy(&overworld_zero_state, &world_state, sizeof(WorldState));
             }
             createDebugPopup("level saved", POPUP_TYPE_LEVEL_SAVE);
-            writeSolvedLevelsToFile();
         }
     }
 
@@ -5336,19 +5345,33 @@ GameResult gameFrame(double delta_time, Input* input)
         if (isEntity(draw_tile))
         {
             Entity* e = getEntityAtCoords(bufferIndexToCoords(tile_index));
+
             if (e->locked) draw_tile = TILE_TYPE_LOCKED_BLOCK;
-            if (draw_tile == TILE_TYPE_LOCKED_BLOCK)
+
+            switch (draw_tile)
             {
-                drawAsset(CUBE_3D_LOCKED_BLOCK, CUBE_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToRotation(world_state.buffer[tile_index + 1], MIRROR_SIDE), (Vec4){0}, (Vec4){0}, (Vec4){0});
-            }
-            if (draw_tile == TILE_TYPE_PLAYER)
-            {
-                Vec4 player_color = { (float)temp_state.player_hit_by_red, 0.0f, (float)(temp_state.player_hit_by_blue_timer > 0) };
-                drawAsset(MODEL_3D_PLAYER, MODEL_3D, player->position, DEFAULT_SCALE, player->rotation, player_color, (Vec4){0}, (Vec4){0});
-            }
-            else
-            {
-                drawAsset(getModelId(draw_tile), MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                case TILE_TYPE_LOCKED_BLOCK:
+                {
+                    drawAsset(CUBE_3D_LOCKED_BLOCK, CUBE_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToRotation(world_state.buffer[tile_index + 1], MIRROR_SIDE), (Vec4){0}, (Vec4){0}, (Vec4){0});
+                    break;
+                }
+                case TILE_TYPE_PLAYER:
+                {
+                    Vec4 player_color = { (float)temp_state.player_hit_by_red, 0.0f, (float)(temp_state.player_hit_by_blue_timer > 0) };
+                    drawAsset(MODEL_3D_PLAYER, MODEL_3D, player->position, DEFAULT_SCALE, player->rotation, player_color, (Vec4){0}, (Vec4){0});
+                    break;
+                }
+                case TILE_TYPE_WIN_BLOCK:
+                {
+                    if (in_overworld && findInSolvedLevels(e->next_level) != -1) drawAsset(CUBE_3D_WON_BLOCK, CUBE_3D, e->position, DEFAULT_SCALE, e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                    else drawAsset(MODEL_3D_WIN_BLOCK, MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                    break;
+                }
+                default:
+                {
+                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                    break;
+                }
             }
         }
         else
