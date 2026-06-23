@@ -638,7 +638,7 @@ const uint32 LASER_INSTANCE_CAPACITY = 1024;
 
 const int32 REFLECTION_DOWNSCALE = 3;
 
-const uint32 SHADOW_MAP_RESOLUTION = 4096;
+const uint32 SHADOW_MAP_RESOLUTION = 2048;
 
 // TODO: set these in loadAsset where stb_image gives me width / height. store in CachedAsset.
 const int32 ATLAS_2D_WIDTH = 128;
@@ -3373,7 +3373,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
 
 	vkCreateCommandPool(vulkan_state.logical_device_handle, &command_pool_creation_info, 0, &vulkan_state.graphics_command_pool_handle);
 
-    vulkan_state.frames_in_flight = 1;
+    vulkan_state.frames_in_flight = 2;
 	vulkan_state.current_frame = 0;
     vulkan_state.render_finished_semaphores = malloc(sizeof(VkSemaphore) * vulkan_state.frames_in_flight);
     vulkan_state.in_flight_fences = malloc(sizeof(VkFence) * vulkan_state.frames_in_flight);

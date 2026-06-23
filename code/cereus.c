@@ -508,9 +508,12 @@ bool do_debug_text = false;
 
 // debug popups
 const float DEBUG_POPUP_TYPE_STEP_SIZE = 30.0f;
-const int32 DEFAULT_POPUP_TIME = 200;
+const int32 DEFAULT_POPUP_TIME = 100;
 Vec2 debug_popup_start_coords = {0};
 DebugPopup debug_popups[32];
+
+// profiling
+int32 profiling_frame_counter = 0;
 
 // water paint
 WaterPaintTexture water_paint_texture = {0};
@@ -2357,9 +2360,9 @@ void updateLaserBuffer()
     }
 }
 
-// LOCKED TILES TODO: is there a better place for this
+// LOCKED TILES
 
-void updateLockedTiles(bool silence_unlocks) // TODO: do_unlocks, flip sign
+void updateLockedTiles(bool do_unlocks)
 {
     FOR(group_index, 4)
     {
@@ -2385,7 +2388,7 @@ void updateLockedTiles(bool silence_unlocks) // TODO: do_unlocks, flip sign
                 setTileType(TILE_TYPE_NONE, lb->coords);
                 setTileDirection(NORTH, lb->coords, 0);
             }
-            if (!silence_unlocks) createDebugPopup("something was unlocked!", POPUP_TYPE_NONE);
+            if (!do_unlocks) createDebugPopup("something was unlocked!", POPUP_TYPE_NONE);
         }
         else if (find_result == -1 && lb->removed)
         {
@@ -2610,7 +2613,7 @@ void gameInitialize(char* level_name, DisplayInfo display_from_platform)
 
     initializeLevel(level_name);
 
-    if (in_overworld) updateLockedTiles(true);
+    if (in_overworld) updateLockedTiles(false);
 }
 
 RendererInfo getRendererInfo()
@@ -2906,7 +2909,7 @@ bool performUndo()
 
     //writeUndoBufferToFile();
 
-    updateLockedTiles(true);
+    updateLockedTiles(false);
 
     return true;
 }
@@ -2917,7 +2920,7 @@ void levelChangePrep(char next_level[64], bool write_solved_levels)
     {
         addToSolvedLevels(world_state.level_name);
         writeSolvedLevelsToFile();
-        updateLockedTiles(false);
+        updateLockedTiles(true);
     }
     
     recordLevelChangeForUndo(world_state.level_name);
@@ -3868,7 +3871,7 @@ GameResult gameFrame(double delta_time, Input* input)
     QueryPerformanceCounter(&t_start);
 
     // reload all models changed on disk
-    //vulkanReloadChangedModels();
+    vulkanReloadChangedModels();
     QueryPerformanceCounter(&t_after_reload);
 
     if (delta_time > 0.1) delta_time = 0.1;
@@ -4165,7 +4168,7 @@ GameResult gameFrame(double delta_time, Input* input)
                         zeroAnimations();
                         initializeLevel(wb->next_level);
                         writeSolvedLevelsToFile();
-                        updateLockedTiles(true);
+                        updateLockedTiles(false);
                         time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                     }
                 }
@@ -4582,7 +4585,7 @@ GameResult gameFrame(double delta_time, Input* input)
                     pack->rotation = directionToRotation(pack->direction, MIRROR_SIDE);
                     pack->position = vec3FromInt3(pack->coords);
 
-                    updateLockedTiles(true);
+                    updateLockedTiles(false);
                 }
                 camera = save_camera; 
                 restart_last_turn = true;
@@ -5010,7 +5013,7 @@ GameResult gameFrame(double delta_time, Input* input)
                     if (in_overworld)
                     {
                         placePlayerOnWinBlock(from_level);
-                        updateLockedTiles(false);
+                        updateLockedTiles(true);
                     }
 
                     time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
@@ -5031,7 +5034,7 @@ GameResult gameFrame(double delta_time, Input* input)
                         strcpy(world_state.solved_levels[next_free], wb->next_level);
                     }
                     writeSolvedLevelsToFile();
-                    updateLockedTiles(false);
+                    updateLockedTiles(true);
                     createDebugPopup("level solved!", POPUP_TYPE_NONE);
                     time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 }
@@ -5533,8 +5536,7 @@ GameResult gameFrame(double delta_time, Input* input)
     QueryPerformanceCounter(&t_after_game);
 
     // TEMP: profiling
-    static int frame_counter = 0; // TODO: local persist 
-    bool do_profiling_output = frame_counter++ >= 60;
+    bool do_profiling_output = profiling_frame_counter++ >= 60;
 
     if (do_profiling_output)
     {
@@ -5564,7 +5566,7 @@ GameResult gameFrame(double delta_time, Input* input)
         snprintf(overview, sizeof(overview), "OVERVIEW:\ngame: %.2f ms; submit: %.2f ms; draw: %.2f ms; total: %.2f ms\n\n", game_logic_ms, submit_ms, draw_ms, game_logic_ms + submit_ms + draw_ms);
         OutputDebugStringA(overview);
 
-        frame_counter = 0;
+        profiling_frame_counter = 0;
     }
 
     return editor_state.editor_mode == EDITOR_MODE_NONE ? GAME_GAMEPLAY : GAME_EDITOR;
