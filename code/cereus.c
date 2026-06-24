@@ -1072,7 +1072,7 @@ Vec4 composeRotation(Direction direction, MirrorOrientation orientation, float y
     }
 
     Vec4 yaw_encoding = quaternionMultiply(quaternionFromAxis(vec3FromInt3(AXIS_Y), yaw_offset), orientation_encoding);
-    Vec4 tilt_encoding = quaternionMultiply(yaw_encoding, visual_tilt);
+    Vec4 tilt_encoding = quaternionMultiply(visual_tilt, yaw_encoding);
 
     return tilt_encoding;
 }
