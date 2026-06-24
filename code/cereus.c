@@ -137,15 +137,18 @@ PopupType;
 typedef struct Entity
 {
     int32 id;
+
     Int3 coords;
     Vec3 position;
+
     Direction direction;
+    MirrorOrientation mirror_orientation;
+    float yaw_offset; // in progress turn
+    Vec4 visual_tilt;
     Vec4 rotation;
+
     bool removed;
     bool in_use;
-
-    // for mirrors
-    MirrorOrientation mirror_orientation;
 
     // movement state
     Vec3 velocity;
@@ -633,6 +636,20 @@ Vec3 vec3Normalize(Vec3 v)
     return vec3ScalarMultiply(v, inverse_length);
 }
 
+Vec3 directionToVector(Direction direction)
+{
+    switch (direction)
+    {
+        case NORTH: return (Vec3){  0,  0, -1 };
+        case WEST:  return (Vec3){ -1,  0,  0 };
+        case SOUTH: return (Vec3){  0,  0,  1 };
+        case EAST:  return (Vec3){  1,  0,  0 };
+        case UP:    return (Vec3){  0,  1,  0 };
+        case DOWN:  return (Vec3){  0, -1,  0 };
+        default: return (Vec3){0};
+    }
+}
+
 // QUATERNION MATH
 
 Vec4 quaternionConjugate(Vec4 q)
@@ -645,11 +662,11 @@ Vec4 quaternionNegate(Vec4 q)
     return (Vec4){ -q.x, -q.y, -q.z, -q.w };
 }
 
-// any 3D axis
-Vec4 quaternionFromAxis(Vec3 axis, float angle)
+// any 3D axis. assumes axis is normalized TODO: is there a good reason this doesnt take in a Direction instead?
+Vec4 quaternionFromAxis(Vec3 axis, float radians)
 {
-    float sin = sinf(angle * 0.5f);
-    float cos = cosf(angle * 0.5f);
+    float sin = sinf(radians* 0.5f);
+    float cos = cosf(radians* 0.5f);
     return (Vec4){ axis.x * sin, axis.y * sin, axis.z * sin, cos};
 }
 
@@ -677,13 +694,15 @@ Vec4 quaternionNormalize(Vec4 q)
     return (Vec4){ q.x * inverse_length, q.y * inverse_length, q.z * inverse_length, q.w * inverse_length };
 }
 
+/*
 float getAngleOfYAxisRotation(Vec4 a, Vec4 b)
 {
     Vec4 unwound_b = b;
     if (quaternionInnerProduct(a, b) < 0) unwound_b = quaternionNegate(b); // make sure quaternions on same hemisphere
     Vec4 from_a_to_b = quaternionMultiply(unwound_b, quaternionConjugate(a)); // transform * a = b, so transform = b * a^-1
-    return 2.0f * atan2f(from_a_to_b.y, from_a_to_b.w); // can do this because rotation is fully around the y axis
+    return 2.0f * atan2f(from_a_to_b.y, from_a_to_b.w);
 }
+*/
 
 // NOTE: could use the optimised version when i understand quaternions better. for now, this is more transparent
 Vec3 vec3RotateByQuaternion(Vec3 v, Vec4 q)
@@ -1029,58 +1048,65 @@ int32 entityIdOffset(Entity *entity, Color color)
     return 0;
 }
 
-Vec3 directionToVector(Direction direction)
+// NOTE: not performance optimal but more explicit. change later, maybe
+Vec4 composeRotation(Direction direction, MirrorOrientation orientation, float yaw_offset, Vec4 visual_tilt)
 {
+    Vec4 direction_encoding = IDENTITY_QUATERNION;
     switch (direction)
     {
-        case NORTH: return (Vec3){  0,  0, -1 };
-        case WEST:  return (Vec3){ -1,  0,  0 };
-        case SOUTH: return (Vec3){  0,  0,  1 };
-        case EAST:  return (Vec3){  1,  0,  0 };
-        case UP:    return (Vec3){  0,  1,  0 };
-        case DOWN:  return (Vec3){  0, -1,  0 };
-        default: return (Vec3){0};
+        case NORTH: direction_encoding = IDENTITY_QUATERNION;                                    break;
+        case WEST:  direction_encoding = quaternionFromAxis(vec3FromInt3(AXIS_Y),  0.25f * TAU); break;
+        case SOUTH: direction_encoding = quaternionFromAxis(vec3FromInt3(AXIS_Y),  0.50f * TAU); break;
+        case EAST:  direction_encoding = quaternionFromAxis(vec3FromInt3(AXIS_Y), -0.25f * TAU); break;
+        case UP:    direction_encoding = quaternionFromAxis(vec3FromInt3(AXIS_X),  0.25f * TAU); break;
+        case DOWN:  direction_encoding = quaternionFromAxis(vec3FromInt3(AXIS_X), -0.25f * TAU); break;
+        default:    direction_encoding = IDENTITY_QUATERNION;                                    break;
     }
-}
 
-Vec4 directionToRotation(Direction direction, MirrorOrientation orientation)
-{
-    // NOTE: these rotations could be hardcoded
-    Vec4 rotation = IDENTITY_QUATERNION;
-    switch (direction)
-    {
-        case NORTH: rotation = IDENTITY_QUATERNION;                                    break;
-        case WEST:  rotation = quaternionFromAxis(vec3FromInt3(AXIS_Y),  0.25f * TAU); break;
-        case SOUTH: rotation = quaternionFromAxis(vec3FromInt3(AXIS_Y),  0.50f * TAU); break;
-        case EAST:  rotation = quaternionFromAxis(vec3FromInt3(AXIS_Y), -0.25f * TAU); break;
-        case UP:    rotation = quaternionFromAxis(vec3FromInt3(AXIS_X),  0.25f * TAU); break;
-        case DOWN:  rotation = quaternionFromAxis(vec3FromInt3(AXIS_X), -0.25f * TAU); break;
-        default:    rotation = IDENTITY_QUATERNION;                                    break;
-    }
+    Vec4 orientation_encoding = direction_encoding;
     if (orientation > 0)
     {
-        if (orientation == MIRROR_UP) rotation = quaternionMultiply(rotation, quaternionFromAxis(vec3FromInt3(AXIS_X), -0.25f * TAU));
-        else                          rotation = quaternionMultiply(rotation, quaternionFromAxis(vec3FromInt3(AXIS_X),  0.25f * TAU));
+        if (orientation == MIRROR_UP) orientation_encoding = quaternionMultiply(direction_encoding, quaternionFromAxis(vec3FromInt3(AXIS_X), -0.25f * TAU));
+        else                          orientation_encoding = quaternionMultiply(direction_encoding, quaternionFromAxis(vec3FromInt3(AXIS_X),  0.25f * TAU));
     }
 
-    return rotation;
+    Vec4 yaw_encoding = quaternionMultiply(quaternionFromAxis(vec3FromInt3(AXIS_Y), yaw_offset), orientation_encoding);
+    Vec4 tilt_encoding = quaternionMultiply(yaw_encoding, visual_tilt);
+
+    return tilt_encoding;
+}
+
+float directionAngleY(Direction direction)
+{
+    switch (direction)
+    {
+        case NORTH: return  0.0f;
+        case WEST:  return  0.25f * TAU;
+        case SOUTH: return  0.50f * TAU;
+        case EAST:  return -0.25f * TAU;
+        default: return 0.0f;
+    }
 }
 
 int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction direction, MirrorOrientation orientation, Color color) 
 {
     for (int entity_index = 0; entity_index < MAX_ENTITY_INSTANCE_COUNT; entity_index++)
     {
-        if (entity_group[entity_index].in_use) continue;
-        entity_group[entity_index].coords = coords;
-        entity_group[entity_index].position= vec3FromInt3(coords); 
-        entity_group[entity_index].direction = direction;
-        entity_group[entity_index].rotation = directionToRotation(direction, orientation);
-        entity_group[entity_index].color = color;
-        entity_group[entity_index].id = entity_index + entityIdOffset(entity_group, color);
-        entity_group[entity_index].removed = false;
-        entity_group[entity_index].in_use = true;
-        entity_group[entity_index].unlocked_by[0] = '\0';
-        entity_group[entity_index].next_level[0] = '\0';
+        Entity* e = &entity_group[entity_index];
+        if (e->in_use) continue;
+        e->coords = coords;
+        e->position = vec3FromInt3(coords); 
+        e->direction = direction;
+        e->yaw_offset = 0;
+        e->visual_tilt = IDENTITY_QUATERNION;
+        e->rotation = composeRotation(direction, orientation, 0.0f, IDENTITY_QUATERNION);
+        e->velocity = (Vec3){0};
+        e->color = color;
+        e->id = entity_index + entityIdOffset(entity_group, color);
+        e->removed = false;
+        e->in_use = true;
+        e->unlocked_by[0] = '\0';
+        e->next_level[0] = '\0';
         return entity_group[entity_index].id;
     }
     return 0;
@@ -2511,17 +2537,19 @@ void initializeLevel(char* level_name)
             Entity* e = &entity_group[count];
             e->coords = bufferIndexToCoords(buffer_index);
             e->position = vec3FromInt3(e->coords);
+            e->yaw_offset = 0.0f;
+            e->visual_tilt = IDENTITY_QUATERNION;
             if (entity_group == world_state.mirrors)
             {
                 e->direction = world_state.buffer[buffer_index + 1] % 8;
                 e->mirror_orientation = world_state.buffer[buffer_index + 1] / 8;
-                e->rotation = directionToRotation(e->direction, e->mirror_orientation);
+                e->rotation = composeRotation(e->direction, e->mirror_orientation, 0.0f, IDENTITY_QUATERNION);
             }
             else
             {
                 e->direction = world_state.buffer[buffer_index + 1];
                 e->mirror_orientation = 0;
-                e->rotation = directionToRotation(e->direction, e->mirror_orientation);
+                e->rotation = composeRotation(e->direction, e->mirror_orientation, 0.0f, IDENTITY_QUATERNION);
             }
             e->moving_direction = NO_DIRECTION;
             e->color = getEntityColor(e->coords);
@@ -2535,7 +2563,9 @@ void initializeLevel(char* level_name)
             player->coords = bufferIndexToCoords(buffer_index);
             player->position = vec3FromInt3(player->coords);
             player->direction = world_state.buffer[buffer_index + 1];
-            player->rotation = directionToRotation(player->direction, MIRROR_SIDE);
+            player->yaw_offset = 0.0f;
+            player->visual_tilt = IDENTITY_QUATERNION;
+            player->rotation = composeRotation(player->direction, MIRROR_SIDE, 0.0f, IDENTITY_QUATERNION);
             player->moving_direction = NO_DIRECTION;
             player->id = PLAYER_ID;
             player->in_use = true;
@@ -2545,7 +2575,9 @@ void initializeLevel(char* level_name)
             pack->coords = bufferIndexToCoords(buffer_index);
             pack->position = vec3FromInt3(pack->coords);
             pack->direction = world_state.buffer[buffer_index + 1];
-            pack->rotation = directionToRotation(pack->direction, MIRROR_SIDE);
+            pack->yaw_offset = 0.0f;
+            pack->visual_tilt = IDENTITY_QUATERNION;
+            pack->rotation = composeRotation(pack->direction, MIRROR_SIDE, 0.0f, IDENTITY_QUATERNION);
             pack->moving_direction = NO_DIRECTION;
             pack->id = PACK_ID;
             pack->in_use = true;
@@ -2807,8 +2839,10 @@ void recordLevelChangeForUndo(char* current_level_name)
 void clearMovementState(Entity* e)
 {
     e->position = vec3FromInt3(e->coords);
-    e->rotation = directionToRotation(e->direction, e->mirror_orientation);
     e->velocity = (Vec3){0};
+    e->yaw_offset = 0;
+    e->visual_tilt = IDENTITY_QUATERNION;
+    e->rotation = composeRotation(e->direction, e->mirror_orientation, 0.0f, IDENTITY_QUATERNION);
     e->moving_direction = NO_DIRECTION;
     e->moving_on_head = false;
     e->root_entity_id = 0;
@@ -2885,8 +2919,7 @@ bool performUndo()
             e->position = vec3FromInt3(e->coords);
             e->direction = delta->old_direction;
             e->mirror_orientation = delta->old_mirror_orientation;
-            if (type == TILE_TYPE_MIRROR) e->rotation = directionToRotation(e->direction, e->mirror_orientation);
-            else e->rotation = directionToRotation(e->direction, e->mirror_orientation);
+            e->rotation = composeRotation(e->direction, e->mirror_orientation, 0.0f, IDENTITY_QUATERNION);
             e->removed = delta->was_removed;
 
             if (!delta->was_removed)
@@ -3026,18 +3059,6 @@ bool wouldOvershoot(float speculative_velocity_along_direction, float position_a
     return would_overshoot;
 }
 
-void mimicRotationalOffset(Entity* copied_e, Entity* e)
-{
-    float rotation_direction_delta = getAngleOfYAxisRotation(directionToRotation(copied_e->direction, copied_e->mirror_orientation), copied_e->rotation);
-    Vec4 transform = quaternionFromAxis(vec3FromInt3(AXIS_Y), rotation_direction_delta);
-
-    Vec4 base_rotation = IDENTITY_QUATERNION;
-    if (getTileTypeFromId(e->id) == TILE_TYPE_MIRROR) base_rotation = directionToRotation(e->direction, e->mirror_orientation);
-    else base_rotation = directionToRotation(e->direction, e->mirror_orientation);
-
-    e->rotation = quaternionMultiply(transform, base_rotation);
-}
-
 void interpolateDecoupledTowardsCoords(Entity* e)
 {
     float interpolation_distance_per_frame = 0.1f;
@@ -3069,6 +3090,7 @@ void revertHeadStackRotation()
     }
 }
 
+// TODO: some of this is purely animations. pass in a parameter for if this should be done (should not be done in any forward prediction loop)
 void doPhysicsTick()
 {
     // pack turn sequence
@@ -3574,7 +3596,7 @@ void doPhysicsTick()
         }
     }
 
-    // update pack attached if relevant
+    // update pack attached if relevant // TODO: i think i do this in other places, like on level start up, so make this a function?
     TileType tile_behind_player = getTileType(getNextCoords(world_state.player.coords, oppositeDirection(world_state.player.direction)));
     if (tile_behind_player == TILE_TYPE_PACK)
     {
@@ -3648,40 +3670,35 @@ void doPhysicsTick()
     if (vec3IsZero(player->velocity)) player->moving_direction = NO_DIRECTION;
 
     // player rotation
-    float total_angle = getAngleOfYAxisRotation(player->rotation, directionToRotation(player->direction, MIRROR_SIDE));
-    float frame_count = ceilf((float)fabs(total_angle) / MAX_ANGULAR_VELOCITY - 1e-3f);
-    if (frame_count <= 1)
-    {
-        player->rotation = directionToRotation(player->direction, MIRROR_SIDE);
-    }
-    else
-    {
-        float step_angle = total_angle / frame_count;
-        Vec4 rotation_this_frame = quaternionFromAxis(vec3FromInt3(AXIS_Y), step_angle);
-        player->rotation = quaternionMultiply(rotation_this_frame, player->rotation);
-    }
+    float frame_count = ceilf(fabsf(player->yaw_offset) / MAX_ANGULAR_VELOCITY - 1e-3f);
+    if (frame_count <= 1) player->yaw_offset = 0.0f;
+    else                  player->yaw_offset -= player->yaw_offset / frame_count;
+    player->rotation = composeRotation(player->direction, MIRROR_SIDE, player->yaw_offset, player->visual_tilt);
 
     // pack rotation and movement
     bool do_pack_swing = false;
     bool do_pack_swing_without_y = false;
-    bool pack_is_stationary = vec4IsEqual(pack->rotation, directionToRotation(pack->direction, MIRROR_SIDE));
 
     if (temp_state.pack_attached)
     {
-        if (temp_state.pack_turn_state.pack_intermediate_states_timer == 0 && pack_is_stationary)
+        if (temp_state.pack_turn_state.pack_intermediate_states_timer == 0 && player->yaw_offset == 0.0f)
         {
             pack->position = vec3AddFloatAlongDirection(player->direction, player->direction == NORTH || player->direction == WEST ? 1.0f : -1.0f, player->position);
+            pack->rotation = composeRotation(pack->direction, MIRROR_SIDE, 0.0f, IDENTITY_QUATERNION);
         }
         else
         {
             do_pack_swing = true;
         }
     }
-    else if (!pack_is_stationary && !pack->moving_on_head)
+    else
     {
-        // pack has detached, but should still be rotating: player is falling, and that has caused pack detach. keep rotation and movement, but stay at same y level
-        do_pack_swing = true;
-        do_pack_swing_without_y = true;
+        if (temp_state.pack_turn_state.pack_intermediate_states_timer != 0 && !pack->moving_on_head)
+        {
+            // pack has detached, but should still be rotating: player is falling, and that has caused pack detach. keep rotation and movement, but stay at same y level
+            do_pack_swing = true;
+            do_pack_swing_without_y = true;
+        }
     }
 
     if (do_pack_swing)
@@ -3711,10 +3728,12 @@ void doPhysicsTick()
 
             if (e->moving_direction == NO_DIRECTION || e->moving_direction == DOWN || e->moving_direction == UP)
             {
+                // some sort of rotation, or climb up / down on head
+
                 if (e->moving_direction == NO_DIRECTION && e->moving_on_head) 
                 {
-                    mimicRotationalOffset(player, e);
-                    if (vec4IsEqual(e->rotation, directionToRotation(e->direction, e->mirror_orientation)))
+                    e->yaw_offset = player->yaw_offset;
+                    if (e->yaw_offset == 0.0f)
                     {
                         clearMovementState(e);
                         continue;
@@ -3752,7 +3771,8 @@ void doPhysicsTick()
             }
             else
             {
-                // push
+                // this is a push
+
                 Vec3 difference_in_root_position = vec3Subtract(root_e->position, vec3FromInt3(root_e->coords));
                 float difference_in_root_position_along_direction = getComponentAlongDirection(e->moving_direction, difference_in_root_position);
 
@@ -3768,13 +3788,13 @@ void doPhysicsTick()
 
                     if (test_movement_towards_direction > 0.5f)
                     {
-                        // moving too quickly
+                        // wants to move too far
                         if (root_e == pack) entity_pack_decoupled = true; // half-failed turn causes push
                         else entity_on_head_hit_something = true;
                     }
                     else if (test_movement_towards_direction < 0.0f && test_movement_towards_direction >= -0.5f) 
                     {
-                        continue; // moving backwards, e.g. snap to player when push triggered, but player hasn't gotten there yet. but not super large diff
+                        continue; // wants to move backwards, e.g. snap to player when push triggered, but player hasn't gotten there yet.
                     }
                     else if (test_movement_towards_direction < -0.5f)
                     {
@@ -3811,10 +3831,12 @@ void doPhysicsTick()
                         e->position = test_position;
                         e->velocity = vec3AddFloatAlongDirection(e->moving_direction, getComponentAlongDirection(e->moving_direction, root_e->velocity), (Vec3){0});
 
+                        // TODO: here for rotations
+
                         if (e->moving_on_head)
                         {
                             // apply player rotation too, in case player isn't done rotating when this move happens.
-                            mimicRotationalOffset(player, e);
+                            e->yaw_offset = player->yaw_offset;
                         }
                     }
                 }
@@ -4092,7 +4114,7 @@ GameResult gameFrame(double delta_time, Input* input)
                             if (mirror->mirror_orientation > MIRROR_DOWN) mirror->mirror_orientation = MIRROR_SIDE;
                         }
                         setTileDirection(mirror->direction, raycast_output.hit_coords, mirror->mirror_orientation);
-                        mirror->rotation = directionToRotation(mirror->direction, mirror->mirror_orientation);
+                        mirror->rotation = composeRotation(mirror->direction, mirror->mirror_orientation, 0.0f, IDENTITY_QUATERNION);
                     }
                 }
                 else if (isEntity(type))
@@ -4105,7 +4127,7 @@ GameResult gameFrame(double delta_time, Input* input)
                     if (e != 0)
                     {
                         e->direction = direction;
-                        e->rotation = directionToRotation(direction, MIRROR_SIDE);
+                        e->rotation = composeRotation(direction, MIRROR_SIDE, 0.0f, IDENTITY_QUATERNION);
                     }
                 }
                 else if (type == TILE_TYPE_LADDER)
@@ -4579,10 +4601,10 @@ GameResult gameFrame(double delta_time, Input* input)
                     memcpy(&world_state.level_name, "overworld", sizeof(char) * 64);
 
                     moveEntityInBufferAndState(player, overworld_restart_coords, NORTH);
-                    player->rotation = directionToRotation(player->direction, MIRROR_SIDE);
+                    player->rotation = composeRotation(player->direction, MIRROR_SIDE, 0.0f, IDENTITY_QUATERNION);
                     player->position = vec3FromInt3(player->coords);
                     moveEntityInBufferAndState(pack, getNextCoords(player->coords, SOUTH), NORTH);
-                    pack->rotation = directionToRotation(pack->direction, MIRROR_SIDE);
+                    pack->rotation = composeRotation(pack->direction, MIRROR_SIDE, 0.0f, IDENTITY_QUATERNION);
                     pack->position = vec3FromInt3(pack->coords);
 
                     updateLockedTiles(false);
@@ -4638,9 +4660,8 @@ GameResult gameFrame(double delta_time, Input* input)
                     if (temp_state.allow_movement_timer != 0) input_allowed = false;
                     if (player->removed) input_allowed = false;
 
-                    // get abs(angle) of player current quat -> target quat, and gate on some angle threshold here.
-                    float difference_in_player_angle = getAngleOfYAxisRotation(player->rotation, directionToRotation(player->direction, MIRROR_SIDE));
-                    if (fabs(difference_in_player_angle) > TAU * 0.25 * MAX_QUARTER_TURN_ANGLE_ALLOWED_FOR_MOVEMENT) input_allowed = false;
+                    // gate on how close player is to completing rotation
+                    if (fabsf(player->yaw_offset) > TAU * 0.25 * MAX_QUARTER_TURN_ANGLE_ALLOWED_FOR_MOVEMENT) input_allowed = false;
 
                     // if able to fall then don't allow movement
                     bool player_immune_to_fall = false;
@@ -4837,10 +4858,13 @@ GameResult gameFrame(double delta_time, Input* input)
                             player->direction = input_direction;
                             setTileDirection(player->direction, player->coords, 0);
 
+                            player->yaw_offset += directionAngleY(initial_player_direction) - directionAngleY(input_direction);
+                            if (player->yaw_offset >  0.5 * TAU) player->yaw_offset -= TAU;
+                            if (player->yaw_offset < -0.5 * TAU) player->yaw_offset += TAU;
+
                             if (temp_state.pack_attached)
                             {
-                                float turn_angle = getAngleOfYAxisRotation(player->rotation, directionToRotation(player->direction, MIRROR_SIDE));
-                                int32 rotation_frames = (int32)ceilf((float)fabs(turn_angle) / MAX_ANGULAR_VELOCITY - 1e-3f);
+                                int32 rotation_frames = (int32)ceilf(fabsf(player->yaw_offset) / MAX_ANGULAR_VELOCITY - 1e-3f);
                                 temp_state.pack_turn_state.pack_intermediate_states_timer = rotation_frames;
                                 temp_state.pack_turn_state.turn_total_frames = rotation_frames;
                                 temp_state.pack_turn_state.pack_intermediate_coords = getNextCoords(pack->coords, oppositeDirection(input_direction));
@@ -5327,7 +5351,7 @@ GameResult gameFrame(double delta_time, Input* input)
 
         float length = vec3Length(diff);
         Vec3 scale = { LASER_WIDTH, LASER_WIDTH, length };
-        Vec4 rotation = directionToRotation(lb.direction, MIRROR_SIDE);
+        Vec4 rotation = composeRotation(lb.direction, MIRROR_SIDE, 0.0f, IDENTITY_QUATERNION);
 
         Vec3 color_without_alpha = {0};
         switch (lb.color)
@@ -5359,7 +5383,7 @@ GameResult gameFrame(double delta_time, Input* input)
             {
                 case TILE_TYPE_LOCKED_BLOCK:
                 {
-                    drawAsset(CUBE_3D_LOCKED_BLOCK, CUBE_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToRotation(world_state.buffer[tile_index + 1], MIRROR_SIDE), (Vec4){0}, (Vec4){0}, (Vec4){0});
+                    drawAsset(CUBE_3D_LOCKED_BLOCK, CUBE_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, composeRotation(world_state.buffer[tile_index + 1], MIRROR_SIDE, 0.0f, IDENTITY_QUATERNION), (Vec4){0}, (Vec4){0}, (Vec4){0});
                     break;
                 }
                 case TILE_TYPE_PLAYER:
@@ -5383,8 +5407,11 @@ GameResult gameFrame(double delta_time, Input* input)
         }
         else
         {
-            if (getCube3DId(draw_tile) == CUBE_3D_WATER) drawAsset(MODEL_3D_WATER, WATER_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToRotation(world_state.buffer[tile_index + 1], MIRROR_SIDE), (Vec4){0}, (Vec4){0}, (Vec4){0});
-            drawAsset(getCube3DId(draw_tile), CUBE_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, directionToRotation(world_state.buffer[tile_index + 1], MIRROR_SIDE), (Vec4){0}, (Vec4){0}, (Vec4){0});
+            if (getCube3DId(draw_tile) == CUBE_3D_WATER) 
+            {
+                drawAsset(MODEL_3D_WATER, WATER_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, composeRotation(world_state.buffer[tile_index + 1], MIRROR_SIDE, 0.0f, IDENTITY_QUATERNION), (Vec4){0}, (Vec4){0}, (Vec4){0});
+            }
+            drawAsset(getCube3DId(draw_tile), CUBE_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, composeRotation(world_state.buffer[tile_index + 1], MIRROR_SIDE, 0.0f, IDENTITY_QUATERNION), (Vec4){0}, (Vec4){0}, (Vec4){0});
         }
     }
 
