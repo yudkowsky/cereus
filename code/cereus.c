@@ -140,6 +140,7 @@ typedef struct Entity
 
     Int3 coords;
     Vec3 position;
+    Vec3 displacement;
 
     Direction direction;
     MirrorOrientation mirror_orientation;
@@ -1886,6 +1887,7 @@ bool trailingHitboxAtCoords(Int3 coords, TrailingHitbox* trailing_hitbox)
 
 // VECTOR POSITION HELPERS
 
+// TODO: rename all "component" to float
 float getComponentAlongDirection(Direction direction, Vec3 vector)
 {
     switch (direction)
@@ -1912,6 +1914,7 @@ float getSignedComponentAlongDirection(Direction direction, Vec3 vector)
     }
 }
 
+// TODO: vector should come after
 Vec3 vec3SetComponentAlongDirection(Direction direction, Vec3 vector, float f)
 {
     switch (direction)
@@ -2839,6 +2842,7 @@ void recordLevelChangeForUndo(char* current_level_name)
 void clearMovementState(Entity* e)
 {
     e->position = vec3FromInt3(e->coords);
+    e->displacement = (Vec3){0};
     e->velocity = (Vec3){0};
     e->yaw_offset = 0;
     e->visual_tilt = IDENTITY_QUATERNION;
@@ -3088,6 +3092,19 @@ void revertHeadStackRotation()
         e->direction = (e->direction + reverse_add - NORTH) % 4 + NORTH;
         current_coords = getNextCoords(current_coords, UP);
     }
+}
+
+void tiltOntoEdge(Entity* e, Direction lean_direction, float radians)
+{
+    // TODO: need to continue here
+    Vec3 lean_vector = directionToVector(lean_direction);
+    Vec3 tilt_axis = vec3OuterProduct(vec3FromInt3(AXIS_Y), lean_vector); // up x direction
+    e->visual_tilt = quaternionFromAxis(vec3Normalize(tilt_axis), radians);
+
+    /*
+    float sign = lean_direction == NORTH || lean_direction == WEST ? -1.0f : 1.0f;
+    e->displacement = vec3SetComponentAlongDirection(lean_direction, e->displacement, sign * radians);
+    */
 }
 
 // TODO: some of this is purely animations. pass in a parameter for if this should be done (should not be done in any forward prediction loop)
@@ -3738,6 +3755,7 @@ void doPhysicsTick()
                         clearMovementState(e);
                         continue;
                     }
+                    e->rotation = composeRotation(e->direction, e->mirror_orientation, e->yaw_offset, e->visual_tilt);
                 }
 
                 if (e->moving_direction == NO_DIRECTION)
@@ -3827,16 +3845,21 @@ void doPhysicsTick()
                     }
                     else
                     {
-                        // normal behavior
+                        // normal push behavior
                         e->position = test_position;
                         e->velocity = vec3AddFloatAlongDirection(e->moving_direction, getComponentAlongDirection(e->moving_direction, root_e->velocity), (Vec3){0});
-
-                        // TODO: here for rotations
 
                         if (e->moving_on_head)
                         {
                             // apply player rotation too, in case player isn't done rotating when this move happens.
                             e->yaw_offset = player->yaw_offset;
+                            e->rotation = composeRotation(e->direction, e->mirror_orientation, e->yaw_offset, e->visual_tilt);
+                        }
+                        else
+                        {
+                            // TODO: need to continue here
+                            tiltOntoEdge(e, e->moving_direction, 0.2f);
+                            e->rotation = composeRotation(e->direction, e->mirror_orientation, e->yaw_offset, e->visual_tilt);
                         }
                     }
                 }
@@ -5400,7 +5423,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 }
                 default:
                 {
-                    drawAsset(getModelId(draw_tile), MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                    drawAsset(getModelId(draw_tile), MODEL_3D, vec3Add(e->position, e->displacement), DEFAULT_SCALE, e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
                     break;
                 }
             }
