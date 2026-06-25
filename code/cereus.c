@@ -137,6 +137,8 @@ PopupType;
 typedef struct Entity
 {
     int32 id;
+    bool removed;
+    bool in_use;
 
     Int3 coords;
     Vec3 position;
@@ -146,11 +148,10 @@ typedef struct Entity
     MirrorOrientation mirror_orientation;
     float yaw_offset; // in progress turn
     float tilt_angle; // towards direction of movement
+    Vec3 settle_velocity; // final velocity at target
+    int32 settle_timer;
     Vec4 visual_tilt;
     Vec4 rotation;
-
-    bool removed;
-    bool in_use;
 
     // movement state
     Vec3 velocity;
@@ -238,7 +239,7 @@ typedef struct TemporaryState
     bool pack_attached;
     int32 player_hit_by_red;
     int32 blue_gameplay_timer;
-    int32 blue_visual_timer;
+    float blue_visual_timer;
 }
 TemporaryState;
 
@@ -352,13 +353,16 @@ const float MAX_POSITION_DIFFERENCE_ALLOWED_FOR_MOVEMENT = 0.5f;
 const float MAX_QUARTER_TURN_ANGLE_ALLOWED_FOR_MOVEMENT = 0.2f;
 
 const int32 MAX_BLUE_GAMEPLAY_TIME = 3;
-const int32 MAX_BLUE_VISUAL_TIME = 100;
+const float MAX_BLUE_VISUAL_TIME = 100.0f;
 const float BLUE_ROTATION_SPEED = 3.0f; // radians / sec
 const float BLUE_ROTATION_ANGLE = 0.05f;
-const int32 BLUE_SETTLE_MULTIPLIER = 4;
+const float BLUE_SETTLE_MULTIPLIER = 1.5f;
 
-const float VELOCITY_TO_TILT_RADIANS = 1.0f;
-const float MAX_TILT_PER_FRAME = 0.03f;
+const float VELOCITY_TO_TILT_RADIANS = 1.25f;
+const float MAX_TILT_PER_FRAME = 0.02f;
+const int32 SETTLE_TIME_FOR_EXTRA_PUSH = 15;
+const float SETTLE_EXTRA_PUSH_TILT_MULTIPLIER = 1.5f;
+const float SETTLE_MIN_SPEED = 0.02f;
 
 const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
 const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
@@ -419,7 +423,7 @@ bool draw_trailing_hitboxes = false;
 bool cheating = false;
 
 // file io
-const char DEBUG_LEVEL_NAME[64] = "overworld";
+const char DEBUG_LEVEL_NAME[64] = "testing";
 const char RELATIVE_LEVEL_FOLDER_PATH[64] = "data/levels/";
 const char SOURCE_LEVEL_FOLDER_PATH[64] = "../cereus/data/levels/";
 const char LEVEL_BASE_FILE_NAME[64] = "base.level";
@@ -2865,6 +2869,8 @@ void clearMovementState(Entity* e)
     e->velocity = (Vec3){0};
     e->yaw_offset = 0.0f;
     e->tilt_angle = 0.0f;
+    e->settle_timer = 0;
+    e->settle_velocity = (Vec3){0};
     e->visual_tilt = IDENTITY_QUATERNION;
     e->rotation = composeRotation(e->direction, e->mirror_orientation, 0.0f, IDENTITY_QUATERNION);
     e->moving_direction = NO_DIRECTION;
@@ -3114,24 +3120,31 @@ void revertHeadStackRotation()
     }
 }
 
-void tiltOntoEdge(Entity* e, Direction lean_direction, float target_radians)
+void applyTiltFromVector(Entity* e, Vec3 tilt_vector)
 {
-    float tilt_difference = target_radians - e->tilt_angle;
-    if (tilt_difference >  MAX_TILT_PER_FRAME) tilt_difference =  MAX_TILT_PER_FRAME;
-    if (tilt_difference < -MAX_TILT_PER_FRAME) tilt_difference = -MAX_TILT_PER_FRAME;
-    e->tilt_angle += tilt_difference;
-
-    Vec3 lean_vector = directionToVector(lean_direction);
-    Vec3 tilt_axis = vec3OuterProduct(vec3FromInt3(AXIS_Y), lean_vector); // up x direction
-    e->visual_tilt = quaternionFromAxis(vec3Normalize(tilt_axis), e->tilt_angle);
-
-    // find pivot location, rotate by tilt, and then add the difference to displacement
-    Vec3 pivot = vec3Add(vec3ScalarMultiply(lean_vector, 0.5f), vec3ScalarMultiply(vec3FromInt3(AXIS_Y), -0.5f));
+    float angle = vec3Length(tilt_vector);
+    Vec3 tilt_axis = vec3OuterProduct(vec3FromInt3(AXIS_Y), tilt_vector); // up x lean
+    e->visual_tilt = quaternionFromAxis(vec3Normalize(tilt_axis), angle);
+    Vec3 pivot = vec3Add(vec3ScalarMultiply(vec3Normalize(tilt_vector), 0.5f), vec3ScalarMultiply(vec3FromInt3(AXIS_Y), -0.5f));
     Vec3 rotated_pivot = vec3RotateByQuaternion(pivot, e->visual_tilt);
     e->displacement = vec3Subtract(pivot, rotated_pivot);
 }
 
-// TODO: some of this is purely animations. pass in a parameter for if this should be done (should not be done in any forward prediction loop)
+// returns 0 when not settling
+Vec3 advanceSettleTilt(Entity* e)
+{
+    if (e->settle_timer <= 0) return (Vec3){0};
+
+    float settle_start = -sqrtf(1.0f - VELOCITY_TO_TILT_RADIANS / SETTLE_EXTRA_PUSH_TILT_MULTIPLIER);
+    float settle_progress = (float)(SETTLE_TIME_FOR_EXTRA_PUSH - e->settle_timer) / (float)(SETTLE_TIME_FOR_EXTRA_PUSH - 1);
+    float settle_curve_position = settle_start + settle_progress * (1.0f - settle_start);
+    float settle_fraction = 1.0f - settle_curve_position * settle_curve_position;
+
+    e->settle_timer--;
+    return vec3ScalarMultiply(e->settle_velocity, SETTLE_EXTRA_PUSH_TILT_MULTIPLIER * settle_fraction);
+}
+
+// NOTE: some of this is purely animations. we could pass in a parameter for if this should be done (should not be done in any forward prediction loop)
 void doPhysicsTick()
 {
     // pack turn sequence
@@ -3769,7 +3782,17 @@ void doPhysicsTick()
             if (group_index == 3) e = pack;
             else e = &interactible_entity_groups[group_index][entity_index];
 
-            if (e->moving_direction == NO_DIRECTION && !e->moving_on_head) continue;
+            if (e->moving_direction == NO_DIRECTION && !e->moving_on_head)
+            {
+                if (e->settle_timer > 0)
+                {
+                    // handle settling if not actively being pushed
+                    applyTiltFromVector(e, advanceSettleTilt(e));
+                    e->rotation = composeRotation(e->direction, e->mirror_orientation, 0.0f, e->visual_tilt);
+                    if (e->settle_timer <= 0) clearMovementState(e);
+                }
+                continue;
+            }
 
             Entity* root_e = getEntityFromId(e->root_entity_id);
             if (!root_e) continue;
@@ -3877,8 +3900,14 @@ void doPhysicsTick()
                     else
                     {
                         // normal push behavior
+
+                        Vec3 old_position = e->position;
                         e->position = test_position;
-                        e->velocity = vec3AddFloatAlongDirection(e->moving_direction, getComponentAlongDirection(e->moving_direction, root_e->velocity), (Vec3){0});
+                        Vec3 frame_movement = vec3Subtract(e->position, old_position);
+                        e->velocity = vec3AddFloatAlongDirection(e->moving_direction, getComponentAlongDirection(e->moving_direction, frame_movement), (Vec3){0});
+                        if (vec3Length(e->velocity) > vec3Length(e->settle_velocity)) e->settle_velocity = e->velocity;
+
+                        //DEBUG_POPUP(POPUP_TYPE_NONE, "normal push branch. velocity of pushed: %f, %f, settle velocity: %f, %f", e->velocity.x, e->velocity.z, e->settle_velocity.x, e->settle_velocity.z);
 
                         if (e->moving_on_head)
                         {
@@ -3888,31 +3917,46 @@ void doPhysicsTick()
                         }
                         else
                         {
-                            float velocity_along_moving_direction = getSignedComponentAlongDirection(e->moving_direction, e->velocity);
+                            float target_angle = vec3Length(e->settle_velocity) * VELOCITY_TO_TILT_RADIANS;
+                            float tilt_difference = target_angle - e->tilt_angle;
+                            if (tilt_difference < 0.0f) tilt_difference = 0.0f; // never decrease tilt during push, let settle code handle it
+                            if (tilt_difference > MAX_TILT_PER_FRAME) tilt_difference =  MAX_TILT_PER_FRAME;
+                            e->tilt_angle += tilt_difference;
 
-                            tiltOntoEdge(e, e->moving_direction, velocity_along_moving_direction * VELOCITY_TO_TILT_RADIANS);
+                            Vec3 tilt = vec3ScalarMultiply(vec3Normalize(e->settle_velocity), e->tilt_angle);
+                            tilt = vec3Add(tilt, advanceSettleTilt(e));
+                            applyTiltFromVector(e, tilt);
                             e->rotation = composeRotation(e->direction, e->mirror_orientation, e->yaw_offset, e->visual_tilt);
                         }
                     }
                 }
                 else 
                 {
-                    if (!vec3IsEqual(e->position, vec3FromInt3(e->coords)) && root_e == pack)
+                    if (!vec3IsEqual(e->position, vec3FromInt3(e->coords)) && root_e == pack && temp_state.pack_turn_state.half_failed_turn_timer > 0)
                     {
                         // this is pack at rest but entity not, which means this is half-failed turn case: entity should interpolate towards target
                         e->tied_to_pack_and_decoupled = true;
                         interpolateDecoupledTowardsCoords(e);
+                    }
+                    else if (!e->moving_on_head && vec3Length(e->velocity) > SETTLE_MIN_SPEED && !canFall(e))
+                    {
+                        // push completed with speed: begin settle
+                        //e->settle_velocity = e->velocity;
+                        e->settle_timer = SETTLE_TIME_FOR_EXTRA_PUSH;
+
+                        e->position = vec3FromInt3(e->coords);
+                        e->velocity = (Vec3){0};
+                        e->moving_direction = NO_DIRECTION;
+                        e->moving_on_head = false;
+                        e->root_entity_id = 0;
+                        e->tied_to_pack_and_decoupled = false;
+                        e->falling = false;
                     }
                     else
                     {
                         clearMovementState(e);
                     }
                 }
-
-                bool clear_entity_from_moving = false;
-                if (vec3IsEqual(e->position, vec3FromInt3(e->coords))) clear_entity_from_moving = true;
-                //if (e->moving_on_head) clear_entity_from_moving = false; // case already handled above
-                if (clear_entity_from_moving) clearMovementState(e);
             }
         }
     }
