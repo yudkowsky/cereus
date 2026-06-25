@@ -357,7 +357,7 @@ const float BLUE_ROTATION_SPEED = 3.0f; // radians / sec
 const float BLUE_ROTATION_ANGLE = 0.05f;
 const int32 BLUE_SETTLE_MULTIPLIER = 4;
 
-const float VELOCITY_TO_TILT_RADIANS = 2.0f;
+const float VELOCITY_TO_TILT_RADIANS = 1.0f;
 const float MAX_TILT_PER_FRAME = 0.03f;
 
 const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
@@ -394,12 +394,39 @@ const int32 ID_OFFSET_SOURCE       = 100 * 4;
 const int32 ID_OFFSET_WIN_BLOCK    = 100 * 7;
 const int32 ID_OFFSET_LOCKED_BLOCK = 100 * 8;
 
+// debug stuff
 const int32 FONT_FIRST_ASCII = 32;
 const int32 FONT_LAST_ASCII = 126;
 const int32 FONT_CELL_WIDTH_PX = 6;
 const int32 FONT_CELL_HEIGHT_PX = 10;
 const float DEFAULT_TEXT_SCALE = 30.0f;
 
+const int32 MAX_DEBUG_TEXT_COUNT = 32;
+const float DEBUG_TEXT_Y_DIFF = 40.0f;
+Vec2 debug_text_start_coords = {0};
+char debug_text_buffer[32][256] = {0};
+int32 debug_text_count = 0;
+bool do_debug_text = false;
+
+const float DEBUG_POPUP_TYPE_STEP_SIZE = 30.0f;
+const int32 DEFAULT_POPUP_TIME = 100;
+Vec2 debug_popup_start_coords = {0};
+DebugPopup debug_popups[32];
+
+EditorState editor_state = {0};
+ShaderMode game_shader_mode = SHADER_MODE_DEFAULT;
+bool draw_trailing_hitboxes = false;
+bool cheating = false;
+
+// file io
+const char DEBUG_LEVEL_NAME[64] = "overworld";
+const char RELATIVE_LEVEL_FOLDER_PATH[64] = "data/levels/";
+const char SOURCE_LEVEL_FOLDER_PATH[64] = "../cereus/data/levels/";
+const char LEVEL_BASE_FILE_NAME[64] = "base.level";
+const char WATER_TEXTURE_FILE_NAME[64] = "water.texture";
+const char SOLVED_LEVELS_PATH[64] = "data/meta/solved-levels.meta";
+const char UNDO_DATA_PATH[64] = "data/meta/undo-buffer.meta";
+const char OVERWORLD_ZERO_NAME[64] = "overworld-zero";
 const char TILE_BUFFER_CHUNK_TAG[4] = "TILE";
 
 const char MAIN_CAMERA_CHUNK_TAG[4] = "CMRA";
@@ -423,6 +450,7 @@ const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
 
 const float NO_WATER_PLANE_LOW_VALUE = -999.0f;
 
+// physics
 const double DEFAULT_PHYSICS_TIMESTEP = 1.0/60.0;
 double physics_timestep_multiplier = 1.0;
 double physics_accumulator = 0; // time accumulator affected by physics timestep
@@ -437,19 +465,13 @@ Input prev_input = {0}; // copied from previous frame input to generate keys_pre
 DrawCommand draw_commands[8192] = {0};
 int32 draw_command_count = 0;
 
-const char DEBUG_LEVEL_NAME[64] = "overworld";
-const char RELATIVE_LEVEL_FOLDER_PATH[64] = "data/levels/";
-const char SOURCE_LEVEL_FOLDER_PATH[64] = "../cereus/data/levels/";
-const char LEVEL_BASE_FILE_NAME[64] = "base.level";
-const char WATER_TEXTURE_FILE_NAME[64] = "water.texture";
-const char SOLVED_LEVELS_PATH[64] = "data/meta/solved-levels.meta";
-const char UNDO_DATA_PATH[64] = "data/meta/undo-buffer.meta";
-const char OVERWORLD_ZERO_NAME[64] = "overworld-zero";
-
 // camera
 const float CAMERA_SENSITIVITY = 0.0005f;
 const float CAMERA_MOVE_STEP = 0.2f;
 const float CAMERA_FOV = 15.0f;
+
+const Int3 OVERWORLD_CAMERA_CENTER_START = { 58, 2, 197 };
+const float CAMERA_T_TIMESTEP = 0.05f;
 
 Camera camera = {0};
 Camera camera_with_ow_offset = {0};
@@ -460,12 +482,10 @@ Camera saved_alt_camera = {0};
 Camera saved_overworld_camera = {0};
 CameraMode saved_overworld_camera_mode = {0};
 
-const Int3 OVERWORLD_CAMERA_CENTER_START = { 58, 2, 197 };
 Int3 camera_screen_offset = {0};
 bool draw_level_boundary = false;
 Int3 ow_player_coords_for_offset = {0};
 
-const float CAMERA_T_TIMESTEP = 0.05f;
 float camera_lerp_t = 0.0f;
 int32 camera_target_plane = 0; // y level of xz plane which calculates targeted point during camera interpolation function
 
@@ -500,30 +520,10 @@ uint8 temp_buffer_array[sizeof(world_state.buffer)];
 int32 time_until_allow_meta_input = 0;
 int32 time_until_allow_undo_or_restart_input = 0;
 
-// handle undos
+// undos
 UndoBuffer undo_buffer = {0};
 int32 undos_performed = 0;
 bool restart_last_turn = false;
-
-// debug state
-EditorState editor_state = {0};
-ShaderMode game_shader_mode = SHADER_MODE_DEFAULT;
-bool draw_trailing_hitboxes = false;
-bool cheating = false;
-
-// debug text
-const int32 MAX_DEBUG_TEXT_COUNT = 32;
-const float DEBUG_TEXT_Y_DIFF = 40.0f;
-Vec2 debug_text_start_coords = {0};
-char debug_text_buffer[32][256] = {0};
-int32 debug_text_count = 0;
-bool do_debug_text = false;
-
-// debug popups
-const float DEBUG_POPUP_TYPE_STEP_SIZE = 30.0f;
-const int32 DEFAULT_POPUP_TIME = 100;
-Vec2 debug_popup_start_coords = {0};
-DebugPopup debug_popups[32];
 
 // profiling
 int32 profiling_frame_counter = 0;
@@ -1924,16 +1924,16 @@ float getSignedComponentAlongDirection(Direction direction, Vec3 vector)
 }
 
 // TODO: vector should come after
-Vec3 vec3SetComponentAlongDirection(Direction direction, Vec3 vector, float f)
+Vec3 vec3SetComponentAlongDirection(Direction direction, float f, Vec3 v)
 {
     switch (direction)
     {
         case NORTH:
-        case SOUTH: return (Vec3){ vector.x, vector.y, f };
+        case SOUTH: return (Vec3){ v.x, v.y, f };
         case WEST:
-        case EAST: return (Vec3){ f, vector.y, vector.z };
+        case EAST: return (Vec3){ f, v.y, v.z };
         case UP:
-        case DOWN: return (Vec3){ vector.x, f, vector.z };
+        case DOWN: return (Vec3){ v.x, f, v.z };
         default: return (Vec3){0};
     }
 }
@@ -2080,7 +2080,7 @@ void pushVertical(Int3 coords, int32 root_entity_id, Direction direction)
 
 Vec3 getNormCoordsWithEntityCoordAlongAxis(Direction direction, Vec3 current_norm_coords, Vec3 mirror_position)
 {
-    Vec3 norm_coords_not_along_axis = vec3SetComponentAlongDirection(direction, current_norm_coords, 0);
+    Vec3 norm_coords_not_along_axis = vec3SetComponentAlongDirection(direction, 0, current_norm_coords);
     Vec3 mirror_coords_along_axis = vec3ScalarMultiply(directionToVector(direction), getSignedComponentAlongDirection(direction, mirror_position));
     return vec3Add(norm_coords_not_along_axis, mirror_coords_along_axis);
 }
@@ -2316,7 +2316,7 @@ void updateLaserBuffer()
                         Vec3 norm_coord_difference = vec3Subtract(current_norm_coords, mirror->position);
                         float difference_along_next_laser_direction_axis = getSignedComponentAlongDirection(next_laser_direction, norm_coord_difference);
                         Vec3 corresponding_difference_along_current_direction_axis = vec3ScalarMultiply(directionToVector(current_direction), difference_along_next_laser_direction_axis);
-                        Vec3 norm_coord_difference_not_along_current_direction_axis = vec3SetComponentAlongDirection(current_direction, norm_coord_difference, 0);
+                        Vec3 norm_coord_difference_not_along_current_direction_axis = vec3SetComponentAlongDirection(current_direction, 0, norm_coord_difference);
                         current_norm_coords = vec3Add(mirror->position, vec3Add(norm_coord_difference_not_along_current_direction_axis, corresponding_difference_along_current_direction_axis));
 
                         lb->end_coords = current_norm_coords;
@@ -3200,8 +3200,15 @@ void doPhysicsTick()
                     moveEntityInBufferAndState(pack, start_pack_coords, player->direction);
                 }
                 if (this_is_diagonal || !temp_state.pack_turn_state.diagonal_push_happened_this_turn) popLastUndoAction();
-                player->direction = temp_state.pack_turn_state.initial_player_direction;
+
+                Direction reverting_from = player->direction;
+                Direction reverting_to = temp_state.pack_turn_state.initial_player_direction;
+                player->yaw_offset += directionAngleY(reverting_from) - directionAngleY(reverting_to);
+                if (player->yaw_offset >  0.5f * TAU) player->yaw_offset -= TAU;
+                if (player->yaw_offset < -0.5f * TAU) player->yaw_offset += TAU;
+                player->direction = reverting_to;
                 pack->direction = player->direction;
+
                 temp_state.pack_turn_state.half_failed_turn_timer = HALF_FAILED_PACK_TURN_COOLDOWN;
                 temp_state.pack_turn_state.pack_intermediate_states_timer = 0;
             }
@@ -3237,7 +3244,7 @@ void doPhysicsTick()
 
             bool want_to_fall = true;
             if (!canFall(e)) want_to_fall = false;
-            if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, vec3Subtract(e->position, vec3FromInt3(e->coords)), 0))) want_to_fall = false; // not horizontally stationary
+            if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, 0, vec3Subtract(e->position, vec3FromInt3(e->coords))))) want_to_fall = false; // not horizontally stationary
             if (!want_to_fall && !e->falling) continue;
 
             // find the real bottom of the stack (to then interate up from)
@@ -3298,7 +3305,7 @@ void doPhysicsTick()
                 if (temp_state.undo_press_timer > 0) landing = true;
 
                 if (e_in_stack->id == PLAYER_ID && temp_state.player_hit_by_red) landing = true;
-                else if (temp_state.blue_gameplay_timer != 0) landing = true;
+                else if (e_in_stack->id != PLAYER_ID && temp_state.blue_gameplay_timer != 0) landing = true;
 
                 if (landing)
                 {
@@ -3747,7 +3754,7 @@ void doPhysicsTick()
         Vec3 rotated_offset = vec3RotateByQuaternion(vec3FromInt3(AXIS_Z), player->rotation); // AXIS_Z because pack is 0, 0, 1 relative to player 0, 0, 0, when player has no rotation.
         Vec3 new_pack_position = vec3Add(player->position, rotated_offset);
         pack->rotation = player->rotation;
-        if (do_pack_swing_without_y) pack->position = vec3SetComponentAlongDirection(UP, new_pack_position, pack->position.y);
+        if (do_pack_swing_without_y) pack->position = vec3SetComponentAlongDirection(UP, pack->position.y, new_pack_position);
         else pack->position = new_pack_position;
     }
 
@@ -3787,7 +3794,7 @@ void doPhysicsTick()
                     // must be rotation. follow along with player coords still. this is for the case where player is still moving when this rotation happens.
                     // check that player isn't moving into a position where the object can't go before applying this movement
                     Int3 previous_player_coords = getNextCoords(player->coords, oppositeDirection(player->direction));
-                    Int3 previous_player_coords_with_moving_entity_y = int3FromVec3(vec3SetComponentAlongDirection(UP, vec3FromInt3(previous_player_coords), (float)e->coords.y));
+                    Int3 previous_player_coords_with_moving_entity_y = int3FromVec3(vec3SetComponentAlongDirection(UP, (float)e->coords.y, vec3FromInt3(previous_player_coords)));
                     Entity* e_exists_if_no_push = getEntityAtCoords(previous_player_coords_with_moving_entity_y); // if this entity exists, that means push hasn't been allowed to happen
                     if (!(e_exists_if_no_push && e_exists_if_no_push->id == e->id)) // probably don't need the second check, how would there be a different entity in this position?
                     {
@@ -4728,7 +4735,7 @@ GameResult gameFrame(double delta_time, Input* input)
                         if (!wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign)) input_allowed = false;
 
                         // disallow movement if also moving in some other direction currently - probably just guards against moving while falling
-                        if (!vec3IsZero(vec3SetComponentAlongDirection(input_direction, player->velocity, 0))) input_allowed = false;
+                        if (!vec3IsZero(vec3SetComponentAlongDirection(input_direction, 0, player->velocity))) input_allowed = false;
 
                         // disallow movement forward if climbing UP. likely doesn't actually matter, would just be walking into a ladder
                         if (player->moving_direction == UP) input_allowed = false;
