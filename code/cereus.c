@@ -145,6 +145,7 @@ typedef struct Entity
     Direction direction;
     MirrorOrientation mirror_orientation;
     float yaw_offset; // in progress turn
+    float tilt_angle; // towards direction of movement
     Vec4 visual_tilt;
     Vec4 rotation;
 
@@ -236,7 +237,8 @@ typedef struct TemporaryState
     int32 undo_press_timer;
     bool pack_attached;
     int32 player_hit_by_red;
-    int32 player_hit_by_blue_timer;
+    int32 blue_gameplay_timer;
+    int32 blue_visual_timer;
 }
 TemporaryState;
 
@@ -335,16 +337,13 @@ typedef struct UndoBuffer
 UndoBuffer;
 
 // CONSTS AND GLOBALS
-const Vec3 DEFAULT_SCALE = { 1.0f,  1.0f,  1.0f  };
-const Vec3 PLAYER_SCALE  = { 0.75f, 0.75f, 0.75f };
+const Vec3 DEFAULT_SCALE = { 1.0f, 1.0f, 1.0f };
 
-const float LASER_WIDTH = 0.25;
-const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
-
+// TODO: organize this stuff
 const float PLAYER_MAX_SPEED = 0.10f;
 const float MIN_FALL_VELOCITY = -0.15f;
 const int32 TURN_TIME = 10;
-const float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f; // last number is number of frames for a full turn
+const float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f; // last number is TURN_TIME
 const float PLAYER_ACCELERATION = 0.04f;
 const float PLAYER_MAX_DECELERATION = 0.06f;
 const float CLIMBING_SPEED = 0.12f;
@@ -352,17 +351,27 @@ const float GRAVITY = -0.03f;
 const float MAX_POSITION_DIFFERENCE_ALLOWED_FOR_MOVEMENT = 0.5f;
 const float MAX_QUARTER_TURN_ANGLE_ALLOWED_FOR_MOVEMENT = 0.2f;
 
+const int32 MAX_BLUE_GAMEPLAY_TIME = 3;
+const int32 MAX_BLUE_VISUAL_TIME = 100;
+const float BLUE_ROTATION_SPEED = 3.0f; // radians / sec
+const float BLUE_ROTATION_ANGLE = 0.05f;
+const int32 BLUE_SETTLE_MULTIPLIER = 4;
+
+const float VELOCITY_TO_TILT_RADIANS = 2.0f;
+const float MAX_TILT_PER_FRAME = 0.03f;
+
 const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
 const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
 const int32 TRAILING_HITBOX_TIME = 7;
 const int32 FALL_TRAILING_HITBOX_TIME = 10;
 const int32 SIMULATE_FORWARD_TICK_COUNT = 8;
 const int32 HALF_FAILED_PACK_TURN_COOLDOWN = 6;
-const int32 HIT_BY_BLUE_TIME = 3;
 const int32 MAX_LOOKAHEAD_MOVEMENT_FRAMES = 16;
 
 const int32 MAX_ENTITY_PUSH_COUNT = 32;
 const int32 MAX_ENTITIES_TIED_TO_MOVEMENT = 32;
+const float LASER_WIDTH = 0.25;
+const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
 const int32 MAX_LASER_TRAVEL_DISTANCE = 256;
 const int32 MAX_LASER_TURNS_ALLOWED = 16;
 const int32 MAX_PUSHABLE_STACK_SIZE = 32;
@@ -1973,7 +1982,7 @@ bool canPush(Int3 coords, Direction direction)
         // if will fall, don't allow push.
         Int3 coords_below = getNextCoords(current_coords, DOWN);
         TileType type_below = getTileType(coords_below);
-        if (type_below == TILE_TYPE_NONE && temp_state.player_hit_by_blue_timer == 0) return false;
+        if (type_below == TILE_TYPE_NONE && temp_state.blue_gameplay_timer == 0) return false;
 
         // check within bounds
         current_coords = getNextCoords(current_coords, direction);
@@ -2187,7 +2196,7 @@ void updateLaserBuffer()
 
                         // set player color
                         if (source->color == COLOR_RED)  temp_state.player_hit_by_red = true;
-                        if (source->color == COLOR_BLUE) temp_state.player_hit_by_blue_timer = HIT_BY_BLUE_TIME;
+                        if (source->color == COLOR_BLUE) temp_state.blue_gameplay_timer = MAX_BLUE_GAMEPLAY_TIME;
 
                         advance_tile = false;
                         break;
@@ -2384,8 +2393,18 @@ void updateLaserBuffer()
 
     if (cheating)
     {
-        temp_state.player_hit_by_blue_timer = HIT_BY_BLUE_TIME;
+        temp_state.blue_gameplay_timer = MAX_BLUE_GAMEPLAY_TIME;
         temp_state.player_hit_by_red = true;
+    }
+
+    if (temp_state.blue_gameplay_timer == MAX_BLUE_GAMEPLAY_TIME)
+    {
+        if (temp_state.blue_visual_timer < MAX_BLUE_VISUAL_TIME) temp_state.blue_visual_timer++;
+    }
+    else
+    {
+        if (temp_state.blue_visual_timer > 0) temp_state.blue_visual_timer -= BLUE_SETTLE_MULTIPLIER;
+        if (temp_state.blue_visual_timer < 0) temp_state.blue_visual_timer = 0;
     }
 }
 
@@ -2844,7 +2863,8 @@ void clearMovementState(Entity* e)
     e->position = vec3FromInt3(e->coords);
     e->displacement = (Vec3){0};
     e->velocity = (Vec3){0};
-    e->yaw_offset = 0;
+    e->yaw_offset = 0.0f;
+    e->tilt_angle = 0.0f;
     e->visual_tilt = IDENTITY_QUATERNION;
     e->rotation = composeRotation(e->direction, e->mirror_orientation, 0.0f, IDENTITY_QUATERNION);
     e->moving_direction = NO_DIRECTION;
@@ -2994,7 +3014,7 @@ void doStandardMovement(Direction direction, Int3 next_player_coords)
     Int3 coords_above_player = getNextCoords(player->coords, UP);
     bool do_on_head_movement = false;
     if (isPushable(getTileType(coords_above_player)) && canPush(coords_above_player, direction)) do_on_head_movement = true;
-    if (temp_state.player_hit_by_blue_timer > 0) do_on_head_movement = false;
+    if (temp_state.blue_gameplay_timer > 0) do_on_head_movement = false;
     if (do_on_head_movement) pushAll(coords_above_player, direction, true, PLAYER_ID);
 
     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
@@ -3094,17 +3114,21 @@ void revertHeadStackRotation()
     }
 }
 
-void tiltOntoEdge(Entity* e, Direction lean_direction, float radians)
+void tiltOntoEdge(Entity* e, Direction lean_direction, float target_radians)
 {
-    // TODO: need to continue here
+    float tilt_difference = target_radians - e->tilt_angle;
+    if (tilt_difference >  MAX_TILT_PER_FRAME) tilt_difference =  MAX_TILT_PER_FRAME;
+    if (tilt_difference < -MAX_TILT_PER_FRAME) tilt_difference = -MAX_TILT_PER_FRAME;
+    e->tilt_angle += tilt_difference;
+
     Vec3 lean_vector = directionToVector(lean_direction);
     Vec3 tilt_axis = vec3OuterProduct(vec3FromInt3(AXIS_Y), lean_vector); // up x direction
-    e->visual_tilt = quaternionFromAxis(vec3Normalize(tilt_axis), radians);
+    e->visual_tilt = quaternionFromAxis(vec3Normalize(tilt_axis), e->tilt_angle);
 
-    /*
-    float sign = lean_direction == NORTH || lean_direction == WEST ? -1.0f : 1.0f;
-    e->displacement = vec3SetComponentAlongDirection(lean_direction, e->displacement, sign * radians);
-    */
+    // find pivot location, rotate by tilt, and then add the difference to displacement
+    Vec3 pivot = vec3Add(vec3ScalarMultiply(lean_vector, 0.5f), vec3ScalarMultiply(vec3FromInt3(AXIS_Y), -0.5f));
+    Vec3 rotated_pivot = vec3RotateByQuaternion(pivot, e->visual_tilt);
+    e->displacement = vec3Subtract(pivot, rotated_pivot);
 }
 
 // TODO: some of this is purely animations. pass in a parameter for if this should be done (should not be done in any forward prediction loop)
@@ -3274,7 +3298,7 @@ void doPhysicsTick()
                 if (temp_state.undo_press_timer > 0) landing = true;
 
                 if (e_in_stack->id == PLAYER_ID && temp_state.player_hit_by_red) landing = true;
-                else if (temp_state.player_hit_by_blue_timer != 0) landing = true;
+                else if (temp_state.blue_gameplay_timer != 0) landing = true;
 
                 if (landing)
                 {
@@ -3368,7 +3392,7 @@ void doPhysicsTick()
                 }
                 else
                 {
-                    if (temp_state.player_hit_by_blue_timer == 0)
+                    if (temp_state.blue_gameplay_timer == 0)
                     {
                         createTrailingHitbox(e_in_stack->id, e_in_stack->coords, FALL_TRAILING_HITBOX_TIME);
                         Int3 coords_below = getNextCoords(e_in_stack->coords, DOWN);
@@ -3540,7 +3564,7 @@ void doPhysicsTick()
                     // capture head stack
                     Int3 head_stack_bottom = getNextCoords(player->coords, UP);
                     int32 head_stack_size = 0;
-                    if (isPushable(getTileType(head_stack_bottom)) && temp_state.player_hit_by_blue_timer == 0) head_stack_size = getPushableStackSize(head_stack_bottom, UP);
+                    if (isPushable(getTileType(head_stack_bottom)) && temp_state.blue_gameplay_timer == 0) head_stack_size = getPushableStackSize(head_stack_bottom, UP);
 
                     if (!temp_state.pack_attached)
                     {
@@ -3857,8 +3881,9 @@ void doPhysicsTick()
                         }
                         else
                         {
-                            // TODO: need to continue here
-                            tiltOntoEdge(e, e->moving_direction, 0.2f);
+                            float velocity_along_moving_direction = getSignedComponentAlongDirection(e->moving_direction, e->velocity);
+
+                            tiltOntoEdge(e, e->moving_direction, velocity_along_moving_direction * VELOCITY_TO_TILT_RADIANS);
                             e->rotation = composeRotation(e->direction, e->mirror_orientation, e->yaw_offset, e->visual_tilt);
                         }
                     }
@@ -3897,7 +3922,7 @@ void doPhysicsTick()
     if (temp_state.undo_press_timer > 0) temp_state.undo_press_timer--;
     if (temp_state.allow_movement_timer > 0) temp_state.allow_movement_timer--;
     if (temp_state.pack_turn_state.half_failed_turn_timer > 0) temp_state.pack_turn_state.half_failed_turn_timer--;
-    if (temp_state.player_hit_by_blue_timer > 0) temp_state.player_hit_by_blue_timer--;
+    if (temp_state.blue_gameplay_timer > 0) temp_state.blue_gameplay_timer--;
 
     // disallow input if player above void / water
     TileType tile_type_below_player = getTileType(getNextCoords(player->coords, DOWN));
@@ -4895,7 +4920,7 @@ GameResult gameFrame(double delta_time, Input* input)
                             }
 
                             // if not blue, rotate objects stacked above the player
-                            if (temp_state.player_hit_by_blue_timer == 0)
+                            if (temp_state.blue_gameplay_timer == 0)
                             {
                                 Int3 coords_above = getNextCoords(player->coords, UP);
                                 TileType type_above = getTileType(coords_above);
@@ -5411,7 +5436,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 }
                 case TILE_TYPE_PLAYER:
                 {
-                    Vec4 player_color = { (float)temp_state.player_hit_by_red, 0.0f, (float)(temp_state.player_hit_by_blue_timer > 0) };
+                    Vec4 player_color = { (float)temp_state.player_hit_by_red, 0.0f, (float)(temp_state.blue_gameplay_timer > 0) };
                     drawAsset(MODEL_3D_PLAYER, MODEL_3D, player->position, DEFAULT_SCALE, player->rotation, player_color, (Vec4){0}, (Vec4){0});
                     break;
                 }
@@ -5423,7 +5448,16 @@ GameResult gameFrame(double delta_time, Input* input)
                 }
                 default:
                 {
-                    drawAsset(getModelId(draw_tile), MODEL_3D, vec3Add(e->position, e->displacement), DEFAULT_SCALE, e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
+                    Vec4 draw_rotation = e->rotation;
+                    if (temp_state.blue_visual_timer > 0)
+                    {
+                        float t = (float)temp_state.blue_visual_timer / (float)MAX_BLUE_VISUAL_TIME;
+                        float smooth_t = t * t * (3.0f - 2.0f * t);
+                        float sweep = (float)global_time * BLUE_ROTATION_SPEED + (float)((e->id * 4) % 11);
+                        Vec3 tilt_axis = { cosf(sweep), 0.0f, sinf(sweep) };
+                        draw_rotation = quaternionMultiply(quaternionFromAxis(tilt_axis, BLUE_ROTATION_ANGLE * smooth_t), draw_rotation);
+                    }
+                    drawAsset(getModelId(draw_tile), MODEL_3D, vec3Add(e->position, e->displacement), DEFAULT_SCALE, draw_rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
                     break;
                 }
             }
