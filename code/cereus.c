@@ -150,6 +150,7 @@ typedef struct Entity
     float tilt_angle; // towards direction of movement
     Vec3 settle_velocity; // final velocity at target
     int32 settle_timer;
+    bool settle_do_extra_push;
     Vec4 visual_tilt;
     Vec4 rotation;
 
@@ -356,13 +357,14 @@ const int32 MAX_BLUE_GAMEPLAY_TIME = 3;
 const float MAX_BLUE_VISUAL_TIME = 100.0f;
 const float BLUE_ROTATION_SPEED = 3.0f; // radians / sec
 const float BLUE_ROTATION_ANGLE = 0.05f;
-const float BLUE_SETTLE_MULTIPLIER = 1.5f;
+const float BLUE_SETTLE_MULTIPLIER = 1.5f; // how much faster blue settles its rotation vs. goes into it
 
 const float VELOCITY_TO_TILT_RADIANS = 1.25f;
 const float MAX_TILT_PER_FRAME = 0.02f;
 const int32 SETTLE_TIME_FOR_EXTRA_PUSH = 15;
+const int32 SETTLE_TIME_NO_EXTRA_PUSH = 7;
 const float SETTLE_EXTRA_PUSH_TILT_MULTIPLIER = 1.5f;
-const float SETTLE_MIN_SPEED = 0.02f;
+const float SETTLE_EXTRA_PUSH_MIN_SPEED = 0.04f; // below this, no extra push occurs
 
 const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
 const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
@@ -2871,6 +2873,7 @@ void clearMovementState(Entity* e)
     e->tilt_angle = 0.0f;
     e->settle_timer = 0;
     e->settle_velocity = (Vec3){0};
+    e->settle_do_extra_push = false;
     e->visual_tilt = IDENTITY_QUATERNION;
     e->rotation = composeRotation(e->direction, e->mirror_orientation, 0.0f, IDENTITY_QUATERNION);
     e->moving_direction = NO_DIRECTION;
@@ -3135,8 +3138,11 @@ Vec3 advanceSettleTilt(Entity* e)
 {
     if (e->settle_timer <= 0) return (Vec3){0};
 
-    float settle_start = -sqrtf(1.0f - VELOCITY_TO_TILT_RADIANS / SETTLE_EXTRA_PUSH_TILT_MULTIPLIER);
-    float settle_progress = (float)(SETTLE_TIME_FOR_EXTRA_PUSH - e->settle_timer) / (float)(SETTLE_TIME_FOR_EXTRA_PUSH - 1);
+    int32 settle_time = e->settle_do_extra_push ? SETTLE_TIME_FOR_EXTRA_PUSH : SETTLE_TIME_NO_EXTRA_PUSH;
+    float settle_start = sqrtf(1.0f - VELOCITY_TO_TILT_RADIANS / SETTLE_EXTRA_PUSH_TILT_MULTIPLIER);
+    if (e->settle_do_extra_push) settle_start = -settle_start;
+
+    float settle_progress = (float)(settle_time - e->settle_timer) / (float)(settle_time - 1);
     float settle_curve_position = settle_start + settle_progress * (1.0f - settle_start);
     float settle_fraction = 1.0f - settle_curve_position * settle_curve_position;
 
@@ -3771,6 +3777,8 @@ void doPhysicsTick()
         else pack->position = new_pack_position;
     }
 
+
+
     // handle moving entities
     FOR(group_index, 4)
     {
@@ -3938,11 +3946,12 @@ void doPhysicsTick()
                         e->tied_to_pack_and_decoupled = true;
                         interpolateDecoupledTowardsCoords(e);
                     }
-                    else if (!e->moving_on_head && vec3Length(e->velocity) > SETTLE_MIN_SPEED && !canFall(e))
+                    else if (!e->moving_on_head && !canFall(e))
                     {
                         // push completed with speed: begin settle
-                        //e->settle_velocity = e->velocity;
-                        e->settle_timer = SETTLE_TIME_FOR_EXTRA_PUSH;
+                        float speed_in_dir = floatAbs(getComponentAlongDirection(e->moving_direction, e->velocity));
+                        e->settle_do_extra_push = speed_in_dir > SETTLE_EXTRA_PUSH_MIN_SPEED;
+                        e->settle_timer = e->settle_do_extra_push ? SETTLE_TIME_FOR_EXTRA_PUSH : SETTLE_TIME_NO_EXTRA_PUSH;
 
                         e->position = vec3FromInt3(e->coords);
                         e->velocity = (Vec3){0};
