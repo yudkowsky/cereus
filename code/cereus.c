@@ -69,6 +69,18 @@ Direction;
 
 typedef enum
 {
+    MOVE_TYPE_NONE = 0, // TODO: might be unnecessary? only here for clarity when looking into fields
+    MOVE_TYPE_PUSH_BY_PLAYER,
+
+    MOVE_TYPE_PUSH_BY_PACK,
+    MOVE_TYPE_PUSH_ON_HEAD,
+    MOVE_TYPE_ROTATE_ON_HEAD,
+    MOVE_TYPE_FOLLOW_DOWN,
+}
+MoveType;
+
+typedef enum
+{
     COLOR_NONE = 0,
     COLOR_RED,
     COLOR_BLUE,
@@ -159,9 +171,7 @@ typedef struct Entity
     Direction moving_direction; // deliberate movement: does not include falling.
     bool falling;
     bool fall_handled; // reset each frame
-    bool moving_on_head;
-    int32 root_entity_id;
-    bool tied_to_pack_and_decoupled;
+    MoveType move_type;
 
     // for sources/lasers
     Color color;
@@ -1128,6 +1138,7 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
     return 0;
 }
 
+// TODO: naming of two below. also maybe direction should be first?
 Int3 getNextCoords(Int3 coords, Direction direction)
 {
     switch (direction)
@@ -2019,7 +2030,7 @@ bool canPushVertical(Int3 coords, Direction direction)
 }
 
 // assumes at least the bottom of the stack is able to be pushed 
-void pushAll(Int3 coords, Direction direction, bool on_head, int32 root_entity_id)
+void pushAll(Int3 coords, Direction direction, MoveType move_type)
 {
     Int3 current_coords = coords;
     int32 push_count = 0;
@@ -2047,9 +2058,7 @@ void pushAll(Int3 coords, Direction direction, bool on_head, int32 root_entity_i
             moveEntityInBufferAndState(e, next_coords, e->direction);
 
             e->moving_direction = direction;
-            e->moving_on_head = on_head;
-            e->root_entity_id = root_entity_id;
-            e->tied_to_pack_and_decoupled = false;
+            e->move_type = move_type;
 
             current_stack_coords = getNextCoords(current_stack_coords, UP);
         }
@@ -2057,6 +2066,7 @@ void pushAll(Int3 coords, Direction direction, bool on_head, int32 root_entity_i
     }
 }
 
+/*
 // assumes able to be pushed
 void pushVertical(Int3 coords, int32 root_entity_id, Direction direction)
 {
@@ -2081,6 +2091,7 @@ void pushVertical(Int3 coords, int32 root_entity_id, Direction direction)
         current_coords = getNextCoords(current_coords, oppositeDirection(direction));
     }
 }
+*/
 
 // LASERS
 
@@ -2868,19 +2879,17 @@ void clearMovementState(Entity* e)
 {
     e->position = vec3FromInt3(e->coords);
     e->displacement = (Vec3){0};
-    e->velocity = (Vec3){0};
     e->yaw_offset = 0.0f;
     e->tilt_angle = 0.0f;
+    e->visual_tilt = IDENTITY_QUATERNION;
+    e->rotation = composeRotation(e->direction, e->mirror_orientation, 0.0f, IDENTITY_QUATERNION);
+    e->velocity = (Vec3){0};
     e->settle_timer = 0;
     e->settle_velocity = (Vec3){0};
     e->settle_do_extra_push = false;
-    e->visual_tilt = IDENTITY_QUATERNION;
-    e->rotation = composeRotation(e->direction, e->mirror_orientation, 0.0f, IDENTITY_QUATERNION);
     e->moving_direction = NO_DIRECTION;
-    e->moving_on_head = false;
-    e->root_entity_id = 0;
-    e->tied_to_pack_and_decoupled = false;
     e->falling = false;
+    e->move_type = MOVE_TYPE_NONE;
 }
 
 void zeroAnimations()
@@ -3024,7 +3033,7 @@ void doStandardMovement(Direction direction, Int3 next_player_coords)
     bool do_on_head_movement = false;
     if (isPushable(getTileType(coords_above_player)) && canPush(coords_above_player, direction)) do_on_head_movement = true;
     if (temp_state.blue_gameplay_timer > 0) do_on_head_movement = false;
-    if (do_on_head_movement) pushAll(coords_above_player, direction, true, PLAYER_ID);
+    if (do_on_head_movement) pushAll(coords_above_player, direction, MOVE_TYPE_PUSH_ON_HEAD);
 
     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
     moveEntityInBufferAndState(player, next_player_coords, player->direction);
@@ -3204,7 +3213,7 @@ void doPhysicsTick()
             {
                 if (do_push)
                 {
-                    pushAll(coords_at_turn, push_direction, false, PACK_ID);
+                    pushAll(coords_at_turn, push_direction, MOVE_TYPE_PUSH_BY_PACK);
                     if (this_is_diagonal) temp_state.pack_turn_state.diagonal_push_happened_this_turn = true;
                 }
                 createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
@@ -3350,7 +3359,7 @@ void doPhysicsTick()
                         player->position.y = test_y_position;
                         player->velocity.y = test_y_velocity;
                         Int3 coords_below = getNextCoords(player->coords, DOWN);
-                        Int3 coords_above = getNextCoords(player->coords, UP);
+                        //Int3 coords_above = getNextCoords(player->coords, UP);
 
                         if (getTileType(coords_below) == TILE_TYPE_VOID)
                         {
@@ -3375,6 +3384,11 @@ void doPhysicsTick()
                             player->falling = false;
                             player->moving_direction = DOWN;
 
+                            // TODO: set up some MOVE_TYPE_FOLLOW_PLAYER_DOWN_ON_CLIMB or something.
+                            // also, should probably be the same if some stack is on the pack, right?
+                            // so maybe MOVE_TYPE_FOLLOW_DOWN_ON_CLIMB, and apply to above player or pack
+
+                            /*
                             Int3 stack_coords = coords_above;
                             int32 stack_on_head_size = getPushableStackSize(coords_above, UP);
                             FOR(stack_on_head_index, stack_on_head_size)
@@ -3384,12 +3398,11 @@ void doPhysicsTick()
                                 e_on_head->position = vec3FromInt3(e_on_head->coords);
                                 e_on_head->velocity = (Vec3){0};
                                 e_on_head->moving_direction = DOWN;
-                                e_on_head->moving_on_head = true;
-                                e_on_head->root_entity_id = PLAYER_ID;
                                 moveEntityInBufferAndState(e_on_head, getNextCoords(stack_coords, DOWN), e_on_head->direction);
 
                                 stack_coords = getNextCoords(stack_coords, UP);
                             }
+                            */
                         }
                         else
                         {
@@ -3522,7 +3535,7 @@ void doPhysicsTick()
                             if (pack_stays_with_player)
                             {
                                 createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
-                                if (pack_push_up) pushVertical(coords_above_pack, PACK_ID, UP);
+                                //if (pack_push_up) pushVertical(coords_above_pack, PACK_ID, UP);
                                 moveEntityInBufferAndState(pack, coords_above_pack, player->direction);
                                 pack->position.y += CLIMBING_SPEED;
                                 pack->velocity.y = CLIMBING_SPEED;
@@ -3536,7 +3549,7 @@ void doPhysicsTick()
                         }
 
                         createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
-                        if (player_push_up) pushVertical(coords_above_player, PLAYER_ID, UP);
+                        //if (player_push_up) pushVertical(coords_above_player, PLAYER_ID, UP);
                         moveEntityInBufferAndState(player, coords_above_player, player->direction);
                         player->position.y += CLIMBING_SPEED;
                         player->velocity.y = CLIMBING_SPEED;
@@ -3571,7 +3584,7 @@ void doPhysicsTick()
                         player->position = vec3FromInt3(player->coords); // normalize y coord
                         player->velocity = (Vec3){0};
                         player->moving_direction = NO_DIRECTION;
-                        if (push_forwards) pushAll(coords_ahead, player->direction, false, PLAYER_ID);
+                        if (push_forwards) pushAll(coords_ahead, player->direction, MOVE_TYPE_PUSH_BY_PLAYER);
                         doStandardMovement(player->direction, coords_ahead);
                     }
                     else // something unpushable ahead
@@ -3633,6 +3646,11 @@ void doPhysicsTick()
                     player->velocity.y = -CLIMBING_SPEED;
 
                     // shift head stack down one tile into space player vacated
+
+                    // TODO: OK, considering previous todo: MOVE_TYPE_FOLLOW_DOWN should just apply to anything that wants to keep
+                    //       same y as player (even if is on top of pack). assign it here
+
+                    /*
                     Int3 current_coords = head_stack_bottom;
                     FOR(stack_index, head_stack_size)
                     {
@@ -3646,6 +3664,7 @@ void doPhysicsTick()
 
                         current_coords = getNextCoords(current_coords, UP);
                     }
+                    */
 
                     Int3 new_coords_ahead = getNextCoords(player->coords, player->direction);
                     if (getTileType(new_coords_ahead) != TILE_TYPE_LADDER)
@@ -3760,7 +3779,7 @@ void doPhysicsTick()
     }
     else
     {
-        if (temp_state.pack_turn_state.pack_intermediate_states_timer != 0 && !pack->moving_on_head)
+        if (temp_state.pack_turn_state.pack_intermediate_states_timer != 0);
         {
             // pack has detached, but should still be rotating: player is falling, and that has caused pack detach. keep rotation and movement, but stay at same y level
             do_pack_swing = true;
@@ -3777,8 +3796,6 @@ void doPhysicsTick()
         else pack->position = new_pack_position;
     }
 
-
-
     // handle moving entities
     FOR(group_index, 4)
     {
@@ -3790,21 +3807,64 @@ void doPhysicsTick()
             if (group_index == 3) e = pack;
             else e = &interactible_entity_groups[group_index][entity_index];
 
-            if (e->moving_direction == NO_DIRECTION && !e->moving_on_head)
+            // could handle settle_timer > 0 here, for objects that wont move. maybe.
+            // or could just do that in a different loop below, which handles everything do do with them, or something
+            // then would probably activate on the same frame that its set, which seems correct
+
+            switch (e->move_type)
             {
-                if (e->settle_timer > 0)
+                case MOVE_TYPE_PUSH_BY_PLAYER:
+                case MOVE_TYPE_PUSH_BY_PACK:
                 {
-                    // handle settling if not actively being pushed
-                    applyTiltFromVector(e, advanceSettleTilt(e));
-                    e->rotation = composeRotation(e->direction, e->mirror_orientation, 0.0f, e->visual_tilt);
-                    if (e->settle_timer <= 0) clearMovementState(e);
+                    Entity* root_e;
+                    if (e->move_type == MOVE_TYPE_PUSH_BY_PLAYER) root_e = player;
+                    else root_e = pack;
+
+                    float root_position_along_direction = getComponentAlongDirection(e->moving_direction, root_e->position);
+                    float entity_position_along_direction = getComponentAlongDirection(e->moving_direction, e->position);
+                    float root_coords_along_direction = getComponentAlongDirection(e->moving_direction, vec3FromInt3(root_e->coords));
+                    float entity_coords_along_direction = getComponentAlongDirection(e->moving_direction, vec3FromInt3(e->coords));
+                    float difference_in_position = entity_position_along_direction - root_position_along_direction;
+                    float difference_in_coords = entity_coords_along_direction - root_coords_along_direction;
+
+                    if (floatAbs(difference_in_position) > floatAbs(difference_in_coords)) continue; // root too far, will cause backwards snap
+
+                    // TODO: should be interpolate, not snap
+                    bool snap_to_end = false;
+                    if (e->move_type == MOVE_TYPE_PUSH_BY_PACK)
+                    {
+                        if (player->moving_direction != NO_DIRECTION) snap_to_end = true;
+                        if (temp_state.pack_turn_state.half_failed_turn_timer != 0) snap_to_end = true;
+                    }
+
+                    if (snap_to_end)
+                    {
+                        clearMovementState(e);
+                    }
+                    else
+                    {
+                        float entity_target = root_position_along_direction + difference_in_coords;
+                        e->position = vec3SetComponentAlongDirection(e->moving_direction, entity_target, e->position);
+
+                        if (vec3IsEqual(e->position, vec3FromInt3(e->coords))) clearMovementState(e); // TODO: some vec3IsAlmostEqual could be better
+                    }
                 }
-                continue;
+                break;
+                case MOVE_TYPE_PUSH_ON_HEAD:
+                {
+                }
+                break;
+                case MOVE_TYPE_ROTATE_ON_HEAD:
+                {
+                }
+                break;
+                case MOVE_TYPE_FOLLOW_DOWN: // vertical ?
+                {
+                }
+                break;
             }
 
-            Entity* root_e = getEntityFromId(e->root_entity_id);
-            if (!root_e) continue;
-
+            /*
             if (e->moving_direction == NO_DIRECTION || e->moving_direction == DOWN || e->moving_direction == UP)
             {
                 // some sort of rotation, or climb up / down on head
@@ -3849,6 +3909,9 @@ void doPhysicsTick()
                     }
                 }
             }
+            */
+
+            /*
             else
             {
                 // this is a push
@@ -3967,6 +4030,7 @@ void doPhysicsTick()
                     }
                 }
             }
+            */
         }
     }
 
@@ -4850,7 +4914,8 @@ GameResult gameFrame(double delta_time, Input* input)
 
                                 if (try_walk)
                                 {
-                                    // don't allow walking off edge
+                                    // NOTE: trying out allowing walking off edge
+                                    /*
                                     Int3 coords_below_next_coords = getNextCoords(next_player_coords, DOWN);
                                     TileType tile_below_next_coords = getTileType(coords_below_next_coords);
 
@@ -4858,13 +4923,15 @@ GameResult gameFrame(double delta_time, Input* input)
                                     bool allow_walk = true;
                                     if (tile_below_next_coords == TILE_TYPE_NONE && !temp_state.player_hit_by_red) allow_walk = false;
                                     if (isEntity(tile_below_next_coords) && !vec3IsZero(getEntityAtCoords(coords_below_next_coords)->velocity)) allow_walk = false;
+                                    */
 
-                                    if (allow_walk)
+                                    //if (allow_walk)
                                     {
                                         recordActionForUndo(&world_state);
-                                        if (do_push) pushAll(next_player_coords, input_direction, false, PLAYER_ID);
+                                        if (do_push) pushAll(next_player_coords, input_direction, MOVE_TYPE_PUSH_BY_PLAYER);
                                         doStandardMovement(input_direction, next_player_coords);
                                     }
+                                    /*
                                     else
                                     {
                                         // leap of faith logic
@@ -4875,7 +4942,7 @@ GameResult gameFrame(double delta_time, Input* input)
                                         Input input_snapshot = *input;
 
                                         // commit tentative move
-                                        if (do_push) pushAll(next_player_coords, input_direction, false, PLAYER_ID);
+                                        if (do_push) pushAll(next_player_coords, input_direction, MOVE_TYPE_PUSH_BY_PLAYER);
                                         doStandardMovement(input_direction, next_player_coords);
 
                                         memset(input, 0, sizeof(Input));
@@ -4909,6 +4976,7 @@ GameResult gameFrame(double delta_time, Input* input)
                                             move_failed = true;
                                         }
                                     }
+                                    */
                                 }
                                 else if (try_climb)
                                 {
@@ -4972,7 +5040,7 @@ GameResult gameFrame(double delta_time, Input* input)
 
                             if (temp_state.pack_attached)
                             {
-                                int32 rotation_frames = (int32)ceilf(fabsf(player->yaw_offset) / MAX_ANGULAR_VELOCITY - 1e-3f);
+                                int32 rotation_frames = (int32)ceilf(fabsf(player->yaw_offset) / MAX_ANGULAR_VELOCITY - 1e-3f); // TODO: replace fabsf with floatAbs
                                 temp_state.pack_turn_state.pack_intermediate_states_timer = rotation_frames;
                                 temp_state.pack_turn_state.turn_total_frames = rotation_frames;
                                 temp_state.pack_turn_state.pack_intermediate_coords = getNextCoords(pack->coords, oppositeDirection(input_direction));
@@ -4991,6 +5059,9 @@ GameResult gameFrame(double delta_time, Input* input)
                                 // need to add either 1 or -1 to direction of entity being rotated
                                 if (stack_size > 0)
                                 {
+                                    // TODO: assign and handle MOVE_TYPE_ROTATE_ON_HEAD
+
+                                    /*
                                     int32 direction_add = (4 + player->direction - initial_player_direction) % 4;
                                     Int3 current_coords = coords_above;
 
@@ -5005,6 +5076,7 @@ GameResult gameFrame(double delta_time, Input* input)
 
                                         current_coords = getNextCoords(current_coords, UP);
                                     }
+                                    */
                                 }
                             }
                             break;
@@ -5060,18 +5132,18 @@ GameResult gameFrame(double delta_time, Input* input)
                                 if (temp_state.pack_attached)
                                 {
                                     createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
-                                    if (do_push) pushAll(next_pack_coords, move_direction, false, PACK_ID);
+                                    if (do_push) pushAll(next_pack_coords, move_direction, MOVE_TYPE_PUSH_BY_PACK);
                                     moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
                                 }
                                 else
                                 {
-                                    if (do_push) pushAll(next_player_coords, move_direction, false, PLAYER_ID);
+                                    if (do_push) pushAll(next_player_coords, move_direction, MOVE_TYPE_PUSH_BY_PLAYER);
                                 }
 
                                 // move stuff on head
                                 Int3 coords_on_head = getNextCoords(player->coords, UP);
                                 TileType type_on_head = getTileType(coords_on_head);
-                                if (isPushable(type_on_head) && canPush(coords_on_head, move_direction)) pushAll(coords_on_head, move_direction, true, PLAYER_ID);
+                                if (isPushable(type_on_head) && canPush(coords_on_head, move_direction)) pushAll(coords_on_head, move_direction, MOVE_TYPE_PUSH_ON_HEAD); // TODO: is this not gated by blue?
 
                                 createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
                                 moveEntityInBufferAndState(player, next_player_coords, player->direction);
@@ -5256,7 +5328,7 @@ GameResult gameFrame(double delta_time, Input* input)
             // boxes
             Entity box1 = world_state.boxes[0];
             Entity box2 = world_state.boxes[1];
-            DEBUG_TEXT("box 1: moving dir: %i, on_head: %i; box 2: moving dir: %i, on_head: %i", box1.moving_direction, box1.moving_on_head, box2.moving_direction, box2.moving_on_head);
+            DEBUG_TEXT("box 1: moving dir: %i, move type: %i; box 2: moving dir: %i, move type: %i", box1.moving_direction, box1.move_type, box2.moving_direction, box2.move_type);
 
             // is overworld in solved levels?
             DEBUG_TEXT("ow in solved: %i", findInSolvedLevels("overworld"));
