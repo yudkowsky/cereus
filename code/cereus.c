@@ -72,7 +72,7 @@ typedef enum
     MOVE_TYPE_NONE = 0, // TODO: might be unnecessary? only here for clarity when looking into fields
     MOVE_TYPE_PUSH_BY_PLAYER,
     MOVE_TYPE_PUSH_BY_PACK,
-    //MOVE_TYPE_PUSH_ON_HEAD,
+    MOVE_TYPE_PUSH_ON_HEAD,
     MOVE_TYPE_ROTATE_ON_HEAD,
     MOVE_TYPE_FOLLOW_VERTICAL,
 }
@@ -3032,7 +3032,7 @@ void doStandardMovement(Direction direction, Int3 next_player_coords)
     bool do_on_head_movement = false;
     if (isPushable(getTileType(coords_above_player)) && canPush(coords_above_player, direction)) do_on_head_movement = true;
     if (temp_state.blue_gameplay_timer > 0) do_on_head_movement = false;
-    if (do_on_head_movement) pushAll(coords_above_player, direction, /*MOVE_TYPE_PUSH_ON_HEAD*/ MOVE_TYPE_PUSH_BY_PLAYER);
+    if (do_on_head_movement) pushAll(coords_above_player, direction, MOVE_TYPE_PUSH_ON_HEAD);
 
     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
     moveEntityInBufferAndState(player, next_player_coords, player->direction);
@@ -3213,6 +3213,7 @@ void doPhysicsTick()
                 if (do_push)
                 {
                     pushAll(coords_at_turn, push_direction, MOVE_TYPE_PUSH_BY_PACK);
+                    temp_state.pack_turn_state.half_failed_turn_timer = 0;
                     if (this_is_diagonal) temp_state.pack_turn_state.diagonal_push_happened_this_turn = true;
                 }
                 createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
@@ -3807,31 +3808,38 @@ void doPhysicsTick()
             else e = &interactible_entity_groups[group_index][entity_index];
 
             // could handle settle_timer > 0 here, for objects that wont move. maybe.
-            // or could just do that in a different loop below, which handles everything do do with them, or something
-            // then would probably activate on the same frame that its set, which seems correct
+            // or could just do that in a different loop below, which handles everything to do with settling.
+
+            // NOTE: there is some jankiness in new (and old) system, in that one move_type isn't enough info to get actual state of entity, because
+            //       an entity can be moving on head and rotating on head at the same time, for example. so i then need some code in those
+            //       cases to check for if the other thing is happening and deal with it.
+            //
+            //       a better system could be to have tags for each of the possible moves, because then can encode that info. then go through
+            //       them all, and what they handle is decoupled: move would only ever handle translation, and rotation would only ever handle rotations.
+            //       downside is needing to manage individual tags for each case, but this is probably fine?
 
             switch (e->move_type)
             {
                 case MOVE_TYPE_PUSH_BY_PLAYER:
                 case MOVE_TYPE_PUSH_BY_PACK:
-                //case MOVE_TYPE_PUSH_ON_HEAD:
+                case MOVE_TYPE_PUSH_ON_HEAD:
                 {
                     Entity* root_e;
-                    if (e->move_type == MOVE_TYPE_PUSH_BY_PLAYER) root_e = player;
-                    else root_e = pack;
+                    if (e->move_type == MOVE_TYPE_PUSH_BY_PACK) root_e = pack;
+                    else root_e = player;
 
                     float sign = e->moving_direction == NORTH || e->moving_direction == WEST ? -1.0f : 1.0f;
 
-                    float root_position_along_direction = getComponentAlongDirection(e->moving_direction, root_e->position);
+                    float root_coords_along_direction     = getComponentAlongDirection(e->moving_direction, vec3FromInt3(root_e->coords));
+                    float root_position_along_direction   = getComponentAlongDirection(e->moving_direction, root_e->position);
+                    float entity_coords_along_direction   = getComponentAlongDirection(e->moving_direction, vec3FromInt3(e->coords));
                     float entity_position_along_direction = getComponentAlongDirection(e->moving_direction, e->position);
-                    float root_coords_along_direction = getComponentAlongDirection(e->moving_direction, vec3FromInt3(root_e->coords));
-                    float entity_coords_along_direction = getComponentAlongDirection(e->moving_direction, vec3FromInt3(e->coords));
                     float difference_in_coords = entity_coords_along_direction - root_coords_along_direction;
 
                     if (e->move_type == MOVE_TYPE_PUSH_BY_PACK && temp_state.pack_turn_state.half_failed_turn_timer != 0)
                     {
-                        // half turn caused decoupling from pack. snap to end TODO: this should be interpolation to end
-                        clearMovementState(e);
+                        // half turn caused decoupling from pack
+                        interpolateDecoupledTowardsCoords(e);
                         continue;
                     }
 
@@ -3846,6 +3854,13 @@ void doPhysicsTick()
                         continue;
                     }
 
+                    if (e->move_type == MOVE_TYPE_PUSH_ON_HEAD)
+                    {
+                        // copy rotation of player if on head
+                        e->yaw_offset = player->yaw_offset;
+                        e->rotation = composeRotation(e->direction, e->mirror_orientation, e->yaw_offset, e->visual_tilt);
+                    }
+
                     e->position = vec3SetComponentAlongDirection(e->moving_direction, entity_target, e->position);
 
                     if (vec3IsEqual(e->position, vec3FromInt3(e->coords))) clearMovementState(e);
@@ -3853,6 +3868,23 @@ void doPhysicsTick()
                 break;
                 case MOVE_TYPE_ROTATE_ON_HEAD:
                 {
+                    if (player->yaw_offset == 0.0f)
+                    {
+                        clearMovementState(e);
+                        continue;
+                    }
+                    e->yaw_offset = player->yaw_offset;
+                    e->rotation = composeRotation(e->direction, e->mirror_orientation, e->yaw_offset, e->visual_tilt);
+
+                    // below is to see if should copy player coords. check coords behind player at same y as entity. if entity is there, then they weren't allow to come with, so dont mimic player coords.
+                    Int3 previous_player_coords = getNextCoords(player->coords, oppositeDirection(player->direction));
+                    Int3 previous_player_coords_with_moving_entity_y = int3FromVec3(vec3SetComponentAlongDirection(UP, (float)e->coords.y, vec3FromInt3(previous_player_coords)));
+                    Entity* e_exists_if_no_push = getEntityAtCoords(previous_player_coords_with_moving_entity_y);
+                    if (!(e_exists_if_no_push && e_exists_if_no_push->id == e->id))
+                    {
+                        e->position.x = player->position.x;
+                        e->position.z = player->position.z;
+                    }
                 }
                 break;
                 case MOVE_TYPE_FOLLOW_VERTICAL:
@@ -3860,174 +3892,6 @@ void doPhysicsTick()
                 }
                 break;
             }
-
-            /*
-            if (e->moving_direction == NO_DIRECTION || e->moving_direction == DOWN || e->moving_direction == UP)
-            {
-                // some sort of rotation, or climb up / down on head
-
-                if (e->moving_direction == NO_DIRECTION && e->moving_on_head) 
-                {
-                    e->yaw_offset = player->yaw_offset;
-                    if (e->yaw_offset == 0.0f)
-                    {
-                        clearMovementState(e);
-                        continue;
-                    }
-                    e->rotation = composeRotation(e->direction, e->mirror_orientation, e->yaw_offset, e->visual_tilt);
-                }
-
-                if (e->moving_direction == NO_DIRECTION)
-                {
-                    // must be rotation. follow along with player coords still. this is for the case where player is still moving when this rotation happens.
-                    // check that player isn't moving into a position where the object can't go before applying this movement
-                    Int3 previous_player_coords = getNextCoords(player->coords, oppositeDirection(player->direction));
-                    Int3 previous_player_coords_with_moving_entity_y = int3FromVec3(vec3SetComponentAlongDirection(UP, (float)e->coords.y, vec3FromInt3(previous_player_coords)));
-                    Entity* e_exists_if_no_push = getEntityAtCoords(previous_player_coords_with_moving_entity_y); // if this entity exists, that means push hasn't been allowed to happen
-                    if (!(e_exists_if_no_push && e_exists_if_no_push->id == e->id)) // probably don't need the second check, how would there be a different entity in this position?
-                    {
-                        e->position.x = player->position.x;
-                        e->position.z = player->position.z;
-                    }
-                }
-                else
-                {
-                    // climbing, this object is on head or on pack
-                    if (player->moving_direction == NO_DIRECTION)
-                    {
-                        // reset
-                        clearMovementState(e);
-                    }
-                    else
-                    {
-                        e->position.x = (float)e->coords.x;
-                        e->position.z = (float)e->coords.z;
-                        e->position.y = player->position.y + (float)(e->coords.y - player->coords.y);
-                    }
-                }
-            }
-            */
-
-            /*
-            else
-            {
-                // this is a push
-
-                Vec3 difference_in_root_position = vec3Subtract(root_e->position, vec3FromInt3(root_e->coords));
-                float difference_in_root_position_along_direction = getComponentAlongDirection(e->moving_direction, difference_in_root_position);
-
-                if (difference_in_root_position_along_direction != 0)
-                {
-                    // root entity is still moving
-
-                    Vec3 test_position = vec3AddFloatAlongDirection(e->moving_direction, difference_in_root_position_along_direction, vec3FromInt3(e->coords));
-                    float test_movement_towards_direction = getSignedComponentAlongDirection(e->moving_direction, vec3Subtract(test_position, e->position));
-
-                    bool entity_pack_decoupled = e->tied_to_pack_and_decoupled;
-                    bool entity_on_head_hit_something = false;
-
-                    if (test_movement_towards_direction > 0.5f)
-                    {
-                        // wants to move too far
-                        if (root_e == pack) entity_pack_decoupled = true; // half-failed turn causes push
-                        else entity_on_head_hit_something = true;
-                    }
-                    else if (test_movement_towards_direction < 0.0f && test_movement_towards_direction >= -0.5f) 
-                    {
-                        continue; // wants to move backwards, e.g. snap to player when push triggered, but player hasn't gotten there yet.
-                    }
-                    else if (test_movement_towards_direction < -0.5f)
-                    {
-                        if (e->moving_on_head) entity_on_head_hit_something = true;
-                    }
-
-                    if (entity_pack_decoupled)
-                    {
-                        // entity with root pack should disregard what pack is doing
-                        bool close_to_target = fabs(getComponentAlongDirection(e->moving_direction, vec3Subtract(e->position, vec3FromInt3(e->coords)))) < 0.1;
-                        if (test_movement_towards_direction > 0.0 || close_to_target)
-                        {
-                            e->tied_to_pack_and_decoupled = true;
-                            interpolateDecoupledTowardsCoords(e);
-                        }
-                    }
-                    else if (entity_on_head_hit_something)
-                    {
-                        // case where object should keep moving, but is offset by one unit because root entity has changed coords, but object on head / on stack will stop here, so isn't pushed by pushAll, but should still continue to end coords
-                        test_position = vec3AddFloatAlongDirection(e->moving_direction, 1.0f, test_position);
-                        if (getComponentAlongDirection(e->moving_direction, vec3Subtract(test_position, vec3FromInt3(e->coords))) < 0.0f)
-                        {
-                            e->position = test_position;
-                            e->velocity = vec3AddFloatAlongDirection(e->moving_direction, getComponentAlongDirection(e->moving_direction, root_e->velocity), (Vec3){0});
-                        }
-                        else
-                        {
-                            clearMovementState(e);
-                        }
-                    }
-                    else
-                    {
-                        // normal push behavior
-
-                        Vec3 old_position = e->position;
-                        e->position = test_position;
-                        Vec3 frame_movement = vec3Subtract(e->position, old_position);
-                        e->velocity = vec3AddFloatAlongDirection(e->moving_direction, getComponentAlongDirection(e->moving_direction, frame_movement), (Vec3){0});
-                        if (vec3Length(e->velocity) > vec3Length(e->settle_velocity)) e->settle_velocity = e->velocity;
-
-                        //DEBUG_POPUP(POPUP_TYPE_NONE, "normal push branch. velocity of pushed: %f, %f, settle velocity: %f, %f", e->velocity.x, e->velocity.z, e->settle_velocity.x, e->settle_velocity.z);
-
-                        if (e->moving_on_head)
-                        {
-                            // apply player rotation too, in case player isn't done rotating when this move happens.
-                            e->yaw_offset = player->yaw_offset;
-                            e->rotation = composeRotation(e->direction, e->mirror_orientation, e->yaw_offset, e->visual_tilt);
-                        }
-                        else
-                        {
-                            float target_angle = vec3Length(e->settle_velocity) * VELOCITY_TO_TILT_RADIANS;
-                            float tilt_difference = target_angle - e->tilt_angle;
-                            if (tilt_difference < 0.0f) tilt_difference = 0.0f; // never decrease tilt during push, let settle code handle it
-                            if (tilt_difference > MAX_TILT_PER_FRAME) tilt_difference =  MAX_TILT_PER_FRAME;
-                            e->tilt_angle += tilt_difference;
-
-                            Vec3 tilt = vec3ScalarMultiply(vec3Normalize(e->settle_velocity), e->tilt_angle);
-                            tilt = vec3Add(tilt, advanceSettleTilt(e));
-                            applyTiltFromVector(e, tilt);
-                            e->rotation = composeRotation(e->direction, e->mirror_orientation, e->yaw_offset, e->visual_tilt);
-                        }
-                    }
-                }
-                else 
-                {
-                    if (!vec3IsEqual(e->position, vec3FromInt3(e->coords)) && root_e == pack && temp_state.pack_turn_state.half_failed_turn_timer > 0)
-                    {
-                        // this is pack at rest but entity not, which means this is half-failed turn case: entity should interpolate towards target
-                        e->tied_to_pack_and_decoupled = true;
-                        interpolateDecoupledTowardsCoords(e);
-                    }
-                    else if (!e->moving_on_head && !canFall(e))
-                    {
-                        // push completed with speed: begin settle
-                        float speed_in_dir = floatAbs(getComponentAlongDirection(e->moving_direction, e->velocity));
-                        e->settle_do_extra_push = speed_in_dir > SETTLE_EXTRA_PUSH_MIN_SPEED;
-                        e->settle_timer = e->settle_do_extra_push ? SETTLE_TIME_FOR_EXTRA_PUSH : SETTLE_TIME_NO_EXTRA_PUSH;
-
-                        e->position = vec3FromInt3(e->coords);
-                        e->velocity = (Vec3){0};
-                        e->moving_direction = NO_DIRECTION;
-                        e->moving_on_head = false;
-                        e->root_entity_id = 0;
-                        e->tied_to_pack_and_decoupled = false;
-                        e->falling = false;
-                    }
-                    else
-                    {
-                        clearMovementState(e);
-                    }
-                }
-            }
-            */
         }
     }
 
@@ -5056,9 +4920,6 @@ GameResult gameFrame(double delta_time, Input* input)
                                 // need to add either 1 or -1 to direction of entity being rotated
                                 if (stack_size > 0)
                                 {
-                                    // TODO: assign and handle MOVE_TYPE_ROTATE_ON_HEAD
-
-                                    /*
                                     int32 direction_add = (4 + player->direction - initial_player_direction) % 4;
                                     Int3 current_coords = coords_above;
 
@@ -5067,13 +4928,10 @@ GameResult gameFrame(double delta_time, Input* input)
                                         Entity* e = getEntityAtCoords(current_coords);
                                         e->direction = (e->direction + direction_add - NORTH) % 4 + NORTH;
                                         e->moving_direction = NO_DIRECTION;
-                                        e->moving_on_head = true;
-                                        e->root_entity_id = PLAYER_ID;
-                                        e->tied_to_pack_and_decoupled = false;
+                                        e->move_type = MOVE_TYPE_ROTATE_ON_HEAD;
 
                                         current_coords = getNextCoords(current_coords, UP);
                                     }
-                                    */
                                 }
                             }
                             break;
@@ -5130,6 +4988,7 @@ GameResult gameFrame(double delta_time, Input* input)
                                 {
                                     createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
                                     if (do_push) pushAll(next_pack_coords, move_direction, MOVE_TYPE_PUSH_BY_PACK);
+                                    temp_state.pack_turn_state.half_failed_turn_timer = 0;
                                     moveEntityInBufferAndState(pack, next_pack_coords, pack->direction);
                                 }
                                 else
@@ -5140,7 +4999,7 @@ GameResult gameFrame(double delta_time, Input* input)
                                 // move stuff on head
                                 Int3 coords_on_head = getNextCoords(player->coords, UP);
                                 TileType type_on_head = getTileType(coords_on_head);
-                                if (isPushable(type_on_head) && canPush(coords_on_head, move_direction)) pushAll(coords_on_head, move_direction, /*MOVE_TYPE_PUSH_ON_HEAD*/ MOVE_TYPE_PUSH_BY_PLAYER); // TODO: is this not gated by blue?
+                                if (isPushable(type_on_head) && canPush(coords_on_head, move_direction)) pushAll(coords_on_head, move_direction, MOVE_TYPE_PUSH_ON_HEAD); // TODO: is this not gated by blue?
 
                                 createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
                                 moveEntityInBufferAndState(player, next_player_coords, player->direction);
@@ -5158,7 +5017,7 @@ GameResult gameFrame(double delta_time, Input* input)
 
                 bool revert_to_previous = false;
                 if (!input_allowed && maybe_max_lookahead_frames > 1) revert_to_previous = true;
-                //if (move_failed) revert_to_previous = true; TODO: this breaks walking towards water when holding button press
+                //if (move_failed) revert_to_previous = true; // TODO: this breaks walking towards water when holding button press
                 if (revert_to_previous)
                 {
                     // undo memcpy if still can't do this input after look-ahead
