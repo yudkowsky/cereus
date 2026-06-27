@@ -71,11 +71,10 @@ typedef enum
 {
     MOVE_TYPE_NONE = 0, // TODO: might be unnecessary? only here for clarity when looking into fields
     MOVE_TYPE_PUSH_BY_PLAYER,
-
     MOVE_TYPE_PUSH_BY_PACK,
-    MOVE_TYPE_PUSH_ON_HEAD,
+    //MOVE_TYPE_PUSH_ON_HEAD,
     MOVE_TYPE_ROTATE_ON_HEAD,
-    MOVE_TYPE_FOLLOW_DOWN,
+    MOVE_TYPE_FOLLOW_VERTICAL,
 }
 MoveType;
 
@@ -357,7 +356,7 @@ const float MIN_FALL_VELOCITY = -0.15f;
 const int32 TURN_TIME = 10;
 const float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f; // last number is TURN_TIME
 const float PLAYER_ACCELERATION = 0.04f;
-const float PLAYER_MAX_DECELERATION = 0.06f;
+const float PLAYER_MAX_DECELERATION = 0.05f; // this has to be >= max speed / 2, which it probably wants to be anyway
 const float CLIMBING_SPEED = 0.12f;
 const float GRAVITY = -0.03f;
 const float MAX_POSITION_DIFFERENCE_ALLOWED_FOR_MOVEMENT = 0.5f;
@@ -3033,7 +3032,7 @@ void doStandardMovement(Direction direction, Int3 next_player_coords)
     bool do_on_head_movement = false;
     if (isPushable(getTileType(coords_above_player)) && canPush(coords_above_player, direction)) do_on_head_movement = true;
     if (temp_state.blue_gameplay_timer > 0) do_on_head_movement = false;
-    if (do_on_head_movement) pushAll(coords_above_player, direction, MOVE_TYPE_PUSH_ON_HEAD);
+    if (do_on_head_movement) pushAll(coords_above_player, direction, /*MOVE_TYPE_PUSH_ON_HEAD*/ MOVE_TYPE_PUSH_BY_PLAYER);
 
     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
     moveEntityInBufferAndState(player, next_player_coords, player->direction);
@@ -3815,50 +3814,48 @@ void doPhysicsTick()
             {
                 case MOVE_TYPE_PUSH_BY_PLAYER:
                 case MOVE_TYPE_PUSH_BY_PACK:
+                //case MOVE_TYPE_PUSH_ON_HEAD:
                 {
                     Entity* root_e;
                     if (e->move_type == MOVE_TYPE_PUSH_BY_PLAYER) root_e = player;
                     else root_e = pack;
 
+                    float sign = e->moving_direction == NORTH || e->moving_direction == WEST ? -1.0f : 1.0f;
+
                     float root_position_along_direction = getComponentAlongDirection(e->moving_direction, root_e->position);
                     float entity_position_along_direction = getComponentAlongDirection(e->moving_direction, e->position);
                     float root_coords_along_direction = getComponentAlongDirection(e->moving_direction, vec3FromInt3(root_e->coords));
                     float entity_coords_along_direction = getComponentAlongDirection(e->moving_direction, vec3FromInt3(e->coords));
-                    float difference_in_position = entity_position_along_direction - root_position_along_direction;
                     float difference_in_coords = entity_coords_along_direction - root_coords_along_direction;
 
-                    if (floatAbs(difference_in_position) > floatAbs(difference_in_coords)) continue; // root too far, will cause backwards snap
-
-                    // TODO: should be interpolate, not snap
-                    bool snap_to_end = false;
-                    if (e->move_type == MOVE_TYPE_PUSH_BY_PACK)
+                    if (e->move_type == MOVE_TYPE_PUSH_BY_PACK && temp_state.pack_turn_state.half_failed_turn_timer != 0)
                     {
-                        if (player->moving_direction != NO_DIRECTION) snap_to_end = true;
-                        if (temp_state.pack_turn_state.half_failed_turn_timer != 0) snap_to_end = true;
-                    }
-
-                    if (snap_to_end)
-                    {
+                        // half turn caused decoupling from pack. snap to end TODO: this should be interpolation to end
                         clearMovementState(e);
+                        continue;
                     }
-                    else
-                    {
-                        float entity_target = root_position_along_direction + difference_in_coords;
-                        e->position = vec3SetComponentAlongDirection(e->moving_direction, entity_target, e->position);
 
-                        if (vec3IsEqual(e->position, vec3FromInt3(e->coords))) clearMovementState(e); // TODO: some vec3IsAlmostEqual could be better
+                    float entity_target = root_position_along_direction + difference_in_coords;
+
+                    bool moving_backwards = sign * entity_target < sign * entity_position_along_direction;
+                    bool moving_too_far   = sign * entity_target > sign * entity_position_along_direction + 0.5f;
+                    if (moving_backwards || moving_too_far)
+                    {
+                        // attempting to travel backwards. could be smarter here, but because of player deceleration being relatively high, clearing just works
+                        clearMovementState(e);
+                        continue;
                     }
-                }
-                break;
-                case MOVE_TYPE_PUSH_ON_HEAD:
-                {
+
+                    e->position = vec3SetComponentAlongDirection(e->moving_direction, entity_target, e->position);
+
+                    if (vec3IsEqual(e->position, vec3FromInt3(e->coords))) clearMovementState(e);
                 }
                 break;
                 case MOVE_TYPE_ROTATE_ON_HEAD:
                 {
                 }
                 break;
-                case MOVE_TYPE_FOLLOW_DOWN: // vertical ?
+                case MOVE_TYPE_FOLLOW_VERTICAL:
                 {
                 }
                 break;
@@ -5143,7 +5140,7 @@ GameResult gameFrame(double delta_time, Input* input)
                                 // move stuff on head
                                 Int3 coords_on_head = getNextCoords(player->coords, UP);
                                 TileType type_on_head = getTileType(coords_on_head);
-                                if (isPushable(type_on_head) && canPush(coords_on_head, move_direction)) pushAll(coords_on_head, move_direction, MOVE_TYPE_PUSH_ON_HEAD); // TODO: is this not gated by blue?
+                                if (isPushable(type_on_head) && canPush(coords_on_head, move_direction)) pushAll(coords_on_head, move_direction, /*MOVE_TYPE_PUSH_ON_HEAD*/ MOVE_TYPE_PUSH_BY_PLAYER); // TODO: is this not gated by blue?
 
                                 createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
                                 moveEntityInBufferAndState(player, next_player_coords, player->direction);
