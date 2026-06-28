@@ -362,7 +362,7 @@ const float GRAVITY = -0.03f;
 const float MAX_POSITION_DIFFERENCE_ALLOWED_FOR_MOVEMENT = 0.5f;
 const float MAX_QUARTER_TURN_ANGLE_ALLOWED_FOR_MOVEMENT = 0.2f;
 
-const int32 MAX_BLUE_GAMEPLAY_TIME = 3;
+const int32 MAX_BLUE_GAMEPLAY_TIME = 2;
 const float MAX_BLUE_VISUAL_TIME = 100.0f;
 const float BLUE_ROTATION_SPEED = 3.0f; // radians / sec
 const float BLUE_ROTATION_ANGLE = 0.05f;
@@ -435,6 +435,7 @@ bool cheating = false;
 
 // file io
 const char DEBUG_LEVEL_NAME[64] = "testing";
+const char COPY_BASE_LEVEL_PATH[64] = "../cereus/data/levels/basic-water/base.level";
 const char RELATIVE_LEVEL_FOLDER_PATH[64] = "data/levels/";
 const char SOURCE_LEVEL_FOLDER_PATH[64] = "../cereus/data/levels/";
 const char LEVEL_BASE_FILE_NAME[64] = "base.level";
@@ -460,8 +461,9 @@ const int32 SUN_DIRECTION_CHUNK_SIZE = 12;
 const char WATER_INFO_CHUNK_TAG[4] = "WATR";
 const int32 WATER_INFO_CHUNK_SIZE = 4;
 
-const int32 OVERWORLD_SCREEN_SIZE_X = 21;
-const int32 OVERWORLD_SCREEN_SIZE_Z = 15;
+// TODO: increase
+const int32 OVERWORLD_SCREEN_SIZE_X = 23;
+const int32 OVERWORLD_SCREEN_SIZE_Z = 17;
 
 const float NO_WATER_PLANE_LOW_VALUE = -999.0f;
 
@@ -718,16 +720,6 @@ Vec4 quaternionNormalize(Vec4 q)
     float inverse_length = 1.0f / sqrtf(length_squared);
     return (Vec4){ q.x * inverse_length, q.y * inverse_length, q.z * inverse_length, q.w * inverse_length };
 }
-
-/*
-float getAngleOfYAxisRotation(Vec4 a, Vec4 b)
-{
-    Vec4 unwound_b = b;
-    if (quaternionInnerProduct(a, b) < 0) unwound_b = quaternionNegate(b); // make sure quaternions on same hemisphere
-    Vec4 from_a_to_b = quaternionMultiply(unwound_b, quaternionConjugate(a)); // transform * a = b, so transform = b * a^-1
-    return 2.0f * atan2f(from_a_to_b.y, from_a_to_b.w);
-}
-*/
 
 // NOTE: could use the optimised version when i understand quaternions better. for now, this is more transparent
 Vec3 vec3RotateByQuaternion(Vec3 v, Vec4 q)
@@ -2065,9 +2057,8 @@ void pushAll(Int3 coords, Direction direction, MoveType move_type)
     }
 }
 
-/*
 // assumes able to be pushed
-void pushVertical(Int3 coords, int32 root_entity_id, Direction direction)
+void pushVertical(Int3 coords, Direction direction)
 {
     int32 stack_size = getPushableStackSize(coords, direction);
     Int3 current_coords = coords;
@@ -2083,14 +2074,11 @@ void pushVertical(Int3 coords, int32 root_entity_id, Direction direction)
         moveEntityInBufferAndState(e, next_coords, e->direction);
 
         e->moving_direction = direction;
-        e->moving_on_head = root_entity_id == PLAYER_ID ? true : false;
-        e->root_entity_id = root_entity_id;
-        e->tied_to_pack_and_decoupled = false;
+        e->move_type = MOVE_TYPE_FOLLOW_VERTICAL;
 
         current_coords = getNextCoords(current_coords, oppositeDirection(direction));
     }
 }
-*/
 
 // LASERS
 
@@ -2527,18 +2515,8 @@ void initializeLevel(char* level_name)
     if (level_name == 0) strcpy(world_state.level_name, DEBUG_LEVEL_NAME);
     else strcpy(world_state.level_name, level_name);
 
-    memset(temp_state.laser_buffer, 0, sizeof(temp_state.laser_buffer));
-
-    // memset worldstate to 0 (with persistant level_name, and solved levels)
-    char persist_level_name[256] = {0};
-    char persist_solved_levels[64][64] = {0};
-    strcpy(persist_level_name, world_state.level_name);
-    memcpy(persist_solved_levels, world_state.solved_levels, sizeof(persist_solved_levels));
-
-    memset(&world_state, 0, sizeof(WorldState));
-
-    strcpy(world_state.level_name, persist_level_name);
-    memcpy(world_state.solved_levels, persist_solved_levels, sizeof(persist_solved_levels));
+    memset(world_state.boxes, 0, sizeof(world_state.boxes) * ENTITY_TYPES + sizeof(world_state.buffer)); 
+    memset(&temp_state, 0, sizeof(TemporaryState));
 
     if (strcmp(world_state.level_name, "overworld") == 0) in_overworld = true;
     else in_overworld = false;
@@ -2549,11 +2527,30 @@ void initializeLevel(char* level_name)
     buildLevelFolderPath(&folder_path, world_state.level_name, false);
     snprintf(level_path, sizeof(level_path), "%s/%s", folder_path, LEVEL_BASE_FILE_NAME);
     FILE* file = fopen(level_path, "rb+");
+
+    if (file == NULL)
+    {
+        // create the new file
+        buildLevelFolderPath(&folder_path, world_state.level_name, true); // set to source folder path
+        snprintf(level_path, sizeof(level_path), "%s/%s", folder_path, LEVEL_BASE_FILE_NAME);
+        _mkdir(folder_path); // NOTE: windows only (hence the _...)
+
+        file = fopen(level_path, "wb+");
+        FILE* copy_from_file = fopen(COPY_BASE_LEVEL_PATH, "rb+");
+        char buffer[4096]; // arbitrary: is just size of one read / write
+        uint32 size_of_copy;
+        while (true)
+        {
+            size_of_copy = (uint32)fread(buffer, 1, sizeof(buffer), copy_from_file);
+            if (size_of_copy == 0) break;
+            fwrite(buffer, 1, size_of_copy, file);
+        }
+        fclose(copy_from_file);
+        fseek(file, 0, SEEK_SET);
+    }
+
     loadBufferInfo(file);
     fclose(file);
-
-    // clear entity data
-    memset(world_state.boxes, 0, sizeof(world_state.boxes) * ENTITY_TYPES); 
 
     // rebuild entity array
     Entity* entity_group = 0;
@@ -3535,7 +3532,7 @@ void doPhysicsTick()
                             if (pack_stays_with_player)
                             {
                                 createTrailingHitbox(PACK_ID, pack->coords, TRAILING_HITBOX_TIME);
-                                //if (pack_push_up) pushVertical(coords_above_pack, PACK_ID, UP);
+                                if (pack_push_up) pushVertical(coords_above_pack, UP);
                                 moveEntityInBufferAndState(pack, coords_above_pack, player->direction);
                                 pack->position.y += CLIMBING_SPEED;
                                 pack->velocity.y = CLIMBING_SPEED;
@@ -3549,7 +3546,7 @@ void doPhysicsTick()
                         }
 
                         createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
-                        //if (player_push_up) pushVertical(coords_above_player, PLAYER_ID, UP);
+                        if (player_push_up) pushVertical(coords_above_player, UP);
                         moveEntityInBufferAndState(player, coords_above_player, player->direction);
                         player->position.y += CLIMBING_SPEED;
                         player->velocity.y = CLIMBING_SPEED;
@@ -3813,6 +3810,7 @@ void doPhysicsTick()
             // NOTE: there is some jankiness in new (and old) system, in that one move_type isn't enough info to get actual state of entity, because
             //       an entity can be moving on head and rotating on head at the same time, for example. so i then need some code in those
             //       cases to check for if the other thing is happening and deal with it.
+            //       similarly, in follow_vertical, need to check if climbing up, and in that case mimic rotation.
             //
             //       a better system could be to have tags for each of the possible moves, because then can encode that info. then go through
             //       them all, and what they handle is decoupled: move would only ever handle translation, and rotation would only ever handle rotations.
@@ -3861,7 +3859,7 @@ void doPhysicsTick()
                         e->rotation = composeRotation(e->direction, e->mirror_orientation, e->yaw_offset, e->visual_tilt);
                     }
 
-                    e->position = vec3SetComponentAlongDirection(e->moving_direction, entity_target, e->position);
+                    e->position = vec3SetComponentAlongDirection(e->moving_direction, entity_target, vec3FromInt3(e->coords));
 
                     if (vec3IsEqual(e->position, vec3FromInt3(e->coords))) clearMovementState(e);
                 }
@@ -3887,8 +3885,16 @@ void doPhysicsTick()
                     }
                 }
                 break;
-                case MOVE_TYPE_FOLLOW_VERTICAL:
+                case MOVE_TYPE_FOLLOW_VERTICAL: // always follows players movement, even if it happens to be caused by the pack.
                 {
+                    float root_coords_along_y = getComponentAlongDirection(e->moving_direction, vec3FromInt3(player->coords));
+                    float root_position_along_y = getComponentAlongDirection(e->moving_direction, player->position);
+                    float entity_coords_along_y = getComponentAlongDirection(e->moving_direction, vec3FromInt3(e->coords));
+                    float difference_in_coords = entity_coords_along_y - root_coords_along_y;
+                    float entity_target = root_position_along_y + difference_in_coords;
+                    e->position = vec3SetComponentAlongDirection(UP, entity_target, e->position);
+
+                    if (vec3IsEqual(e->position, vec3FromInt3(e->coords))) clearMovementState(e);
                 }
                 break;
             }

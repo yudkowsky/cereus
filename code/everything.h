@@ -6,6 +6,7 @@
 #include <string.h>
 #include <math.h> 
 #include <assert.h>
+#include <direct.h>
 
 #define TAU 6.2831853071f
 
