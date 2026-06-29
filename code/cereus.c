@@ -2295,11 +2295,13 @@ void updateLaserBuffer()
                             break;
                         }
 
+                        /*
                         if (distance_from_mirror_along_axes > 0.35)
                         {
                             // between 0.5 and 0.35, so this hits the 'edge' of the mirror: break the laser; still want to do later calculations to calculate exact coords to end
                             end_here = true;
                         }
+                        */
 
                         // get difference along next_laser_direction of current_norm_coords vs mirror->position.
                         // this will be relevantly signed because getSignedComponentAlongDirection gives signed output.
@@ -2519,12 +2521,21 @@ void initializeLevel(char* level_name)
 
     if (file == NULL)
     {
-        // create the new file
+        // write empty file to main folder
         buildLevelFolderPath(&folder_path, world_state.level_name, true);
         snprintf(level_path, sizeof(level_path), "%s/%s", folder_path, LEVEL_BASE_FILE_NAME);
         _mkdir(folder_path); // NOTE: windows only (hence the _...)
 
         file = fopen(level_path, "wb+");
+        fclose(file);
+
+        // write copied file to build folder
+        buildLevelFolderPath(&folder_path, world_state.level_name, false);
+        snprintf(level_path, sizeof(level_path), "%s/%s", folder_path, LEVEL_BASE_FILE_NAME);
+        _mkdir(folder_path);
+
+        file = fopen(level_path, "wb+");
+
         FILE* copy_from_file = fopen(COPY_BASE_LEVEL_PATH, "rb+");
         char buffer[4096]; // arbitrary: is just size of one read / write
         uint32 size_of_copy;
