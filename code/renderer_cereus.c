@@ -665,7 +665,7 @@ const float water_amplitude = 1e-5f;
 const float depth_threshold = 1.5f;
 const float normal_threshold = 0.33f;
 
-Cube cube_instances[8192];
+Cube cube_instances[16384]; // TODO: water should be generalized across the game, since gotten rid of stuff that wouldn't allow this
 uint32 cube_instance_count = 0;
 
 Model model_instances[1024];

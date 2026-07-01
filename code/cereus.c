@@ -479,7 +479,7 @@ bool step_to_next_tick = false;
 DisplayInfo game_display = {0};
 Input prev_input = {0}; // copied from previous frame input to generate keys_pressed
 
-DrawCommand draw_commands[8192] = {0};
+DrawCommand draw_commands[16384] = {0};
 int32 draw_command_count = 0;
 
 // camera
@@ -823,7 +823,10 @@ void setTileDirection(Direction direction, Int3 coords, MirrorOrientation mirror
 
 TileType getTileType(Int3 coords) 
 {
-    if (!intCoordsWithinLevelBounds(coords)) return TILE_TYPE_WALL;
+    if (!intCoordsWithinLevelBounds(coords))
+    {
+        return TILE_TYPE_WALL;
+    }
     return world_state.buffer[coordsToBufferIndexType(coords)]; 
 }
 
@@ -5419,6 +5422,7 @@ GameResult gameFrame(double delta_time, Input* input)
     // draw camera boundary lines
     if (draw_level_boundary)
     {
+        // TODO: one draw call with larger area, shader to handle lighter lines near world coord .5s to get right effect
         if (in_overworld)
         {
             // draw camera screen lines NOTE: if/when levels want to have multiple screens, will want to do this for levels also
@@ -5432,6 +5436,7 @@ GameResult gameFrame(double delta_time, Input* input)
             float y = (float)(level_origin.y + level_dim.y / 2);
 
             // walls with internal constant x
+            /*
             Vec3 x_wall_scale = { 0, (float)level_dim.y, 1.0f };
             FOR(x_wall_x_index, z_wall_length / OVERWORLD_SCREEN_SIZE_X + 1)
             {
@@ -5442,6 +5447,7 @@ GameResult gameFrame(double delta_time, Input* input)
                     drawAsset(SPRITEID_ASSET_COUNT, OUTLINE_3D, (Vec3){ x, y, z }, x_wall_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
                 }
             }
+            */
 
             // walls with internal constant z
             Vec3 z_wall_scale = { 1.0f, (float)level_dim.y, 0 };
