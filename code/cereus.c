@@ -4542,6 +4542,15 @@ GameResult gameFrame(double delta_time, Input* input)
                 }
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
+
+            // TEMP: replace all void tiles in a level with water
+            if (input->keys_held & KEY_5)
+            {
+                for (int tile_index = 0; tile_index < level_dim.x*level_dim.y*level_dim.z * 2; tile_index += 2)
+                {
+                    if (world_state.buffer[tile_index] == TILE_TYPE_VOID) world_state.buffer[tile_index] = TILE_TYPE_WATER;
+                }
+            }
         }
     }
 
