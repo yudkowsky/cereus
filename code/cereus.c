@@ -2018,7 +2018,7 @@ bool canPushVertical(Int3 coords, Direction direction)
 }
 
 // assumes at least the bottom of the stack is able to be pushed 
-void pushAll(Int3 coords, Direction direction, MoveType move_type)
+void pushAll(Int3 coords, Direction direction, MoveType move_type, bool push_stacks)
 {
     Int3 current_coords = coords;
     int32 push_count = 0;
@@ -2032,7 +2032,8 @@ void pushAll(Int3 coords, Direction direction, MoveType move_type)
 
     for (int32 inverse_push_index = push_count; inverse_push_index != 0; inverse_push_index--)
     {
-        int32 stack_size = getPushableStackSize(current_coords, UP);
+        int32 stack_size = 1;
+        if (push_stacks) stack_size = getPushableStackSize(current_coords, UP);
         Int3 current_stack_coords = current_coords;
         FOR(stack_index, stack_size)
         {
@@ -3040,7 +3041,7 @@ void doStandardMovement(Direction direction, Int3 next_player_coords)
     bool do_on_head_movement = false;
     if (isPushable(getTileType(coords_above_player)) && canPush(coords_above_player, direction)) do_on_head_movement = true;
     if (temp_state.blue_gameplay_timer > 0) do_on_head_movement = false;
-    if (do_on_head_movement) pushAll(coords_above_player, direction, MOVE_TYPE_PUSH_ON_HEAD);
+    if (do_on_head_movement) pushAll(coords_above_player, direction, MOVE_TYPE_PUSH_ON_HEAD, true);
 
     createTrailingHitbox(PLAYER_ID, player->coords, TRAILING_HITBOX_TIME);
     moveEntityInBufferAndState(player, next_player_coords, player->direction);
@@ -3220,7 +3221,7 @@ void doPhysicsTick()
             {
                 if (do_push)
                 {
-                    pushAll(coords_at_turn, push_direction, MOVE_TYPE_PUSH_BY_PACK);
+                    pushAll(coords_at_turn, push_direction, MOVE_TYPE_PUSH_BY_PACK, temp_state.blue_gameplay_timer == 0);
                     temp_state.pack_turn_state.half_failed_turn_timer = 0;
                     if (this_is_diagonal) temp_state.pack_turn_state.diagonal_push_happened_this_turn = true;
                 }
@@ -3592,7 +3593,7 @@ void doPhysicsTick()
                         player->position = vec3FromInt3(player->coords); // normalize y coord
                         player->velocity = (Vec3){0};
                         player->moving_direction = NO_DIRECTION;
-                        if (push_forwards) pushAll(coords_ahead, player->direction, MOVE_TYPE_PUSH_BY_PLAYER);
+                        if (push_forwards) pushAll(coords_ahead, player->direction, MOVE_TYPE_PUSH_BY_PLAYER, temp_state.blue_gameplay_timer == 0);
                         doStandardMovement(player->direction, coords_ahead);
                     }
                     else // something unpushable ahead
@@ -4801,7 +4802,7 @@ GameResult gameFrame(double delta_time, Input* input)
                                 {
                                     // NOTE: trying out allowing walking off edge
                                     recordActionForUndo(&world_state);
-                                    if (do_push) pushAll(next_player_coords, input_direction, MOVE_TYPE_PUSH_BY_PLAYER);
+                                    if (do_push) pushAll(next_player_coords, input_direction, MOVE_TYPE_PUSH_BY_PLAYER, temp_state.blue_gameplay_timer == 0);
                                     doStandardMovement(input_direction, next_player_coords);
                                 }
                                 else if (try_climb)
@@ -4903,6 +4904,7 @@ GameResult gameFrame(double delta_time, Input* input)
                             break;
                         }
                     }
+                    /*
                     else
                     {
                         // BACKWARDS MOVEMENT
@@ -4976,6 +4978,7 @@ GameResult gameFrame(double delta_time, Input* input)
                         }
                         break;
                     }
+                    */
 
                     if (tick_index == maybe_max_lookahead_frames - 1) break;
                     doPhysicsTick();
