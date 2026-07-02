@@ -106,11 +106,16 @@ typedef enum
 }
 WritingField;
 
+// world_x means entered but not completed screen x
 typedef enum
 {
-    WORLD_0,
-    WORLD_1,
-    WORLD_2,
+    PROGRESS_START = 0,
+    PROGRESS_PACK,
+    PROGRESS_RED,
+    PROGRESS_BLUE,
+    PROGRESS_RED_BLUE,
+    PROGRESS_MAGENTA,
+    PROGRESS_BALANCE,
 }
 GameProgress;
 
@@ -509,7 +514,7 @@ int32 camera_target_plane = 0; // y level of xz plane which calculates targeted 
 // general state
 WorldState world_state = {0};
 TemporaryState temp_state = {0};
-GameProgress game_progress = WORLD_0;
+GameProgress game_progress = PROGRESS_START;
 Int3 level_dim = {0};
 Int3 level_origin = {0};
 Int3 overworld_restart_coords = {0};
@@ -2205,134 +2210,137 @@ void updateLaserBuffer()
                         if (this_is_th) mirror = getEntityFromId(th.id);
                         else mirror = getEntityAtCoords(current_tile_coords);
 
-                        // check if should skip this id, if so passthrough
-                        bool passthrough = false;
-                        bool end_here = false;
-                        if (mirror->id == id_to_skip) passthrough = true;
-
-                        float distance_from_mirror_along_axes = getDistanceAlongAxis(current_direction, current_norm_coords, mirror->position);
-                        if (distance_from_mirror_along_axes > 0.5) passthrough = true;
-
-                        if (passthrough)
+                        if (!mirror->locked)
                         {
-                            // passthrough
-                            continue;
-                        }
+                            // check if should skip this id, if so passthrough
+                            bool passthrough = false;
+                            bool end_here = false;
+                            if (mirror->id == id_to_skip) passthrough = true;
 
-                        // find next laser direction, and mirror normal direction. also decide how to clip: different when hitting the mirror side-on compared to hitting back of mirror
-                        Direction next_laser_direction = NO_DIRECTION;
-                        Vec3 mirror_normal = (Vec3){0};
-                        bool backside_clip_plane = false;
-                        switch (mirror->mirror_orientation)
-                        {
-                            case MIRROR_SIDE:
+                            float distance_from_mirror_along_axes = getDistanceAlongAxis(current_direction, current_norm_coords, mirror->position);
+                            if (distance_from_mirror_along_axes > 0.5) passthrough = true;
+
+                            if (passthrough)
                             {
-                                if (current_direction != UP && current_direction != DOWN) // check first because modulo arithmetic assumes 4-way dir
+                                // passthrough
+                                continue;
+                            }
+
+                            // find next laser direction, and mirror normal direction. also decide how to clip: different when hitting the mirror side-on compared to hitting back of mirror
+                            Direction next_laser_direction = NO_DIRECTION;
+                            Vec3 mirror_normal = (Vec3){0};
+                            bool backside_clip_plane = false;
+                            switch (mirror->mirror_orientation)
+                            {
+                                case MIRROR_SIDE:
                                 {
-                                    if (mirror->direction == current_direction) next_laser_direction = (current_direction - NORTH + 1) % 4 + NORTH;
-                                    else if (current_direction == (mirror->direction - NORTH + 3) % 4 + NORTH) next_laser_direction = (mirror->direction - NORTH + 2) % 4 + NORTH;
-                                    else backside_clip_plane = true;
+                                    if (current_direction != UP && current_direction != DOWN) // check first because modulo arithmetic assumes 4-way dir
+                                    {
+                                        if (mirror->direction == current_direction) next_laser_direction = (current_direction - NORTH + 1) % 4 + NORTH;
+                                        else if (current_direction == (mirror->direction - NORTH + 3) % 4 + NORTH) next_laser_direction = (mirror->direction - NORTH + 2) % 4 + NORTH;
+                                        else backside_clip_plane = true;
+                                    }
+
+                                    Direction front_axis = oppositeDirection(mirror->direction);
+                                    Direction side_axis = (mirror->direction - NORTH + 1) % 4 + NORTH;
+                                    mirror_normal = vec3Normalize(vec3Add(directionToVector(front_axis), directionToVector(side_axis)));
+                                    break;
                                 }
+                                case MIRROR_UP:
+                                {
+                                    if (current_direction == DOWN) next_laser_direction = (mirror->direction - NORTH + 1) % 4 + NORTH;
+                                    else if (current_direction == UP) backside_clip_plane = true;
+                                    else if (mirror->direction == (current_direction - NORTH + 1) % 4 + NORTH) next_laser_direction = UP;
+                                    else if (mirror->direction == (current_direction - NORTH + 3) % 4 + NORTH) backside_clip_plane = true;
 
-                                Direction front_axis = oppositeDirection(mirror->direction);
-                                Direction side_axis = (mirror->direction - NORTH + 1) % 4 + NORTH;
-                                mirror_normal = vec3Normalize(vec3Add(directionToVector(front_axis), directionToVector(side_axis)));
+                                    Direction horizontal_axis = (mirror->direction - NORTH + 1) % 4 + NORTH;
+                                    mirror_normal = vec3Normalize(vec3Add(directionToVector(horizontal_axis), directionToVector(UP)));
+                                    break;
+                                }
+                                case MIRROR_DOWN:
+                                {
+                                    if (current_direction == UP) next_laser_direction = (mirror->direction - NORTH + 1) % 4 + NORTH;
+                                    else if (current_direction == DOWN) backside_clip_plane = true;
+                                    else if (mirror->direction == (current_direction - NORTH + 1) % 4 + NORTH) next_laser_direction = DOWN;
+                                    else if (mirror->direction == (current_direction - NORTH + 3) % 4 + NORTH) backside_clip_plane = true;
+
+                                    Direction horizontal_axis = (mirror->direction - NORTH + 1) % 4 + NORTH;
+                                    mirror_normal = vec3Normalize(vec3Add(directionToVector(horizontal_axis), directionToVector(DOWN)));
+                                    break;
+                                }
+                                default: break;
+                            }
+
+                            if (next_laser_direction == NO_DIRECTION) 
+                            {
+                                Vec3 coords_without_offset = getNormCoordsWithEntityCoordAlongAxis(current_direction, current_norm_coords, mirror->position);
+                                if (backside_clip_plane)
+                                {
+                                    lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), 1.0f));
+
+                                    float origin_offset = -vec3Inner(mirror_normal, mirror->position);
+                                    lb->end_clip_plane = (Vec4){ -mirror_normal.x, -mirror_normal.y, -mirror_normal.z, -origin_offset };
+
+                                    advance_tile = false;
+                                }
+                                else
+                                {
+                                    lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), -0.38f));
+                                    advance_tile = false;
+                                }
                                 break;
                             }
-                            case MIRROR_UP:
+
+                            if (distance_from_mirror_along_axes == 0)
                             {
-                                if (current_direction == DOWN) next_laser_direction = (mirror->direction - NORTH + 1) % 4 + NORTH;
-                                else if (current_direction == UP) backside_clip_plane = true;
-                                else if (mirror->direction == (current_direction - NORTH + 1) % 4 + NORTH) next_laser_direction = UP;
-                                else if (mirror->direction == (current_direction - NORTH + 3) % 4 + NORTH) backside_clip_plane = true;
+                                lb->end_coords = mirror->position;
 
-                                Direction horizontal_axis = (mirror->direction - NORTH + 1) % 4 + NORTH;
-                                mirror_normal = vec3Normalize(vec3Add(directionToVector(horizontal_axis), directionToVector(UP)));
-                                break;
-                            }
-                            case MIRROR_DOWN:
-                            {
-                                if (current_direction == UP) next_laser_direction = (mirror->direction - NORTH + 1) % 4 + NORTH;
-                                else if (current_direction == DOWN) backside_clip_plane = true;
-                                else if (mirror->direction == (current_direction - NORTH + 1) % 4 + NORTH) next_laser_direction = DOWN;
-                                else if (mirror->direction == (current_direction - NORTH + 3) % 4 + NORTH) backside_clip_plane = true;
+                                float origin_offset = -vec3Inner(mirror_normal, lb->end_coords);
+                                lb->end_clip_plane = (Vec4){ mirror_normal.x, mirror_normal.y, mirror_normal.z, origin_offset };
 
-                                Direction horizontal_axis = (mirror->direction - NORTH + 1) % 4 + NORTH;
-                                mirror_normal = vec3Normalize(vec3Add(directionToVector(horizontal_axis), directionToVector(DOWN)));
-                                break;
-                            }
-                            default: break;
-                        }
-
-                        if (next_laser_direction == NO_DIRECTION) 
-                        {
-                            Vec3 coords_without_offset = getNormCoordsWithEntityCoordAlongAxis(current_direction, current_norm_coords, mirror->position);
-                            if (backside_clip_plane)
-                            {
-                                lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), 1.0f));
-
-                                float origin_offset = -vec3Inner(mirror_normal, mirror->position);
-                                lb->end_clip_plane = (Vec4){ -mirror_normal.x, -mirror_normal.y, -mirror_normal.z, -origin_offset };
-
+                                current_norm_coords = mirror->position;
+                                current_direction = next_laser_direction;
                                 advance_tile = false;
+                                no_more_turns = false;
+                                break;
                             }
-                            else
+
+                            /*
+                            if (distance_from_mirror_along_axes > 0.35)
                             {
-                                lb->end_coords = vec3Add(coords_without_offset, vec3ScalarMultiply(directionToVector(current_direction), -0.38f));
-                                advance_tile = false;
+                                // between 0.5 and 0.35, so this hits the 'edge' of the mirror: break the laser; still want to do later calculations to calculate exact coords to end
+                                end_here = true;
                             }
-                            break;
-                        }
+                            */
 
-                        if (distance_from_mirror_along_axes == 0)
-                        {
-                            lb->end_coords = mirror->position;
+                            // get difference along next_laser_direction of current_norm_coords vs mirror->position.
+                            // this will be relevantly signed because getSignedComponentAlongDirection gives signed output.
+                            // add that difference to norm_coords along current_direction. again signs are accounted for because directionToVector gives signed output.
+                            // differences along the other axis (the one orthogonal to both current dir and next dir) are ignored, because they don't change point of reflection
+                            // to get norm coords, add corresponding difference, plus norm_coord_difference along the axes that aren't current_direction axis
+                            Vec3 norm_coord_difference = vec3Subtract(current_norm_coords, mirror->position);
+                            float difference_along_next_laser_direction_axis = getSignedComponentAlongDirection(next_laser_direction, norm_coord_difference);
+                            Vec3 corresponding_difference_along_current_direction_axis = vec3ScalarMultiply(directionToVector(current_direction), difference_along_next_laser_direction_axis);
+                            Vec3 norm_coord_difference_not_along_current_direction_axis = vec3SetComponentAlongDirection(current_direction, 0, norm_coord_difference);
+                            current_norm_coords = vec3Add(mirror->position, vec3Add(norm_coord_difference_not_along_current_direction_axis, corresponding_difference_along_current_direction_axis));
 
-                            float origin_offset = -vec3Inner(mirror_normal, lb->end_coords);
-                            lb->end_clip_plane = (Vec4){ mirror_normal.x, mirror_normal.y, mirror_normal.z, origin_offset };
+                            lb->end_coords = current_norm_coords;
 
-                            current_norm_coords = mirror->position;
-                            current_direction = next_laser_direction;
+                            if (!end_here)
+                            {
+                                id_to_skip = mirror->id;
+                                id_to_skip_timer = 2;
+                                no_more_turns = false;
+                                current_direction = next_laser_direction;
+                            }
+
+                            // overwrite old clip plane calculation with new end coords
+                            float new_origin_offset = -vec3Inner(mirror_normal, lb->end_coords);
+                            lb->end_clip_plane = (Vec4){ mirror_normal.x, mirror_normal.y, mirror_normal.z, new_origin_offset };
+
                             advance_tile = false;
-                            no_more_turns = false;
                             break;
                         }
-
-                        /*
-                        if (distance_from_mirror_along_axes > 0.35)
-                        {
-                            // between 0.5 and 0.35, so this hits the 'edge' of the mirror: break the laser; still want to do later calculations to calculate exact coords to end
-                            end_here = true;
-                        }
-                        */
-
-                        // get difference along next_laser_direction of current_norm_coords vs mirror->position.
-                        // this will be relevantly signed because getSignedComponentAlongDirection gives signed output.
-                        // add that difference to norm_coords along current_direction. again signs are accounted for because directionToVector gives signed output.
-                        // differences along the other axis (the one orthogonal to both current dir and next dir) are ignored, because they don't change point of reflection
-                        // to get norm coords, add corresponding difference, plus norm_coord_difference along the axes that aren't current_direction axis
-                        Vec3 norm_coord_difference = vec3Subtract(current_norm_coords, mirror->position);
-                        float difference_along_next_laser_direction_axis = getSignedComponentAlongDirection(next_laser_direction, norm_coord_difference);
-                        Vec3 corresponding_difference_along_current_direction_axis = vec3ScalarMultiply(directionToVector(current_direction), difference_along_next_laser_direction_axis);
-                        Vec3 norm_coord_difference_not_along_current_direction_axis = vec3SetComponentAlongDirection(current_direction, 0, norm_coord_difference);
-                        current_norm_coords = vec3Add(mirror->position, vec3Add(norm_coord_difference_not_along_current_direction_axis, corresponding_difference_along_current_direction_axis));
-
-                        lb->end_coords = current_norm_coords;
-
-                        if (!end_here)
-                        {
-                            id_to_skip = mirror->id;
-                            id_to_skip_timer = 2;
-                            no_more_turns = false;
-                            current_direction = next_laser_direction;
-                        }
-
-                        // overwrite old clip plane calculation with new end coords
-                        float new_origin_offset = -vec3Inner(mirror_normal, lb->end_coords);
-                        lb->end_clip_plane = (Vec4){ mirror_normal.x, mirror_normal.y, mirror_normal.z, new_origin_offset };
-
-                        advance_tile = false;
-                        break;
                     }
 
                     // hit type is something that isn't NONE - do default behaviour
@@ -5074,25 +5082,41 @@ GameResult gameFrame(double delta_time, Input* input)
             ow_player_coords_for_offset = (Int3){0};
         }
 
-        // TODO: outdated
         // update restart coords based on current coords of the player, and also update game progress if this is relevant
-        if (player->coords.z > 204) 
+        if (player->coords.z > 222)
         {
-            overworld_restart_coords = (Int3){ 37, 258, 225 }; // gate 0
+            if (game_progress < PROGRESS_START) game_progress = PROGRESS_START;
+            overworld_restart_coords = (Int3){ 58, 258, 235 };
         }
-        else if (player->coords.z > 189)
+        else if (player->coords.z > 205)
         {
-            overworld_restart_coords = (Int3){ 58, 258, 194 }; // world 1
-            if (game_progress < WORLD_1) game_progress = WORLD_1;
+            if (game_progress < PROGRESS_PACK) game_progress = PROGRESS_PACK;
+            overworld_restart_coords = (Int3){ 58, 258, 222 };
         }
-        else if (player->coords.z > 174) 
+        else if (player->coords.z > 188)
         {
-            overworld_restart_coords = (Int3){ 58, 258, 188 }; // gate 1
+            if (game_progress < PROGRESS_RED) game_progress = PROGRESS_RED;
+            overworld_restart_coords = (Int3){ 58, 258, 205 };
+        }
+        else if (player->coords.z > 171)
+        {
+            if (game_progress < PROGRESS_BLUE) game_progress = PROGRESS_BLUE;
+            overworld_restart_coords = (Int3){ 58, 258, 188 };
+        }
+        else if (player->coords.z > 154)
+        {
+            if (game_progress < PROGRESS_RED_BLUE) game_progress = PROGRESS_RED_BLUE;
+            overworld_restart_coords = (Int3){ 58, 258, 171 };
+        }
+        else if (player->coords.z > 127)
+        {
+            if (game_progress < PROGRESS_MAGENTA) game_progress = PROGRESS_MAGENTA;
+            overworld_restart_coords = (Int3){ 58, 258, 154 };
         }
         else
         {
-            overworld_restart_coords = (Int3){ 58, 258, 170 }; // world 2
-            if (game_progress < WORLD_2) game_progress = WORLD_2;
+            if (game_progress < PROGRESS_BALANCE) game_progress = PROGRESS_BALANCE;
+            overworld_restart_coords = (Int3){ 58, 258, 127 };
         }
 
         // perform alt <-> main camera interpolation
@@ -5129,6 +5153,12 @@ GameResult gameFrame(double delta_time, Input* input)
             // display level name
             createDebugText(world_state.level_name);
 
+            // game progress
+            DEBUG_TEXT("game progress: %i", game_progress);
+
+            // restart coords
+            DEBUG_TEXT("ow restart coords: %i, %i, %i", overworld_restart_coords.x, overworld_restart_coords.y, overworld_restart_coords.z);
+
             // level origin and dim
             DEBUG_TEXT("level origin: %i, %i, %i; level dim: %i, %i, %i", level_origin.x, level_origin.y, level_origin.z, level_dim.x, level_dim.y, level_dim.z);
 
@@ -5144,9 +5174,6 @@ GameResult gameFrame(double delta_time, Input* input)
             Entity box1 = world_state.boxes[0];
             Entity box2 = world_state.boxes[1];
             DEBUG_TEXT("box 1: moving dir: %i, move type: %i; box 2: moving dir: %i, move type: %i", box1.moving_direction, box1.move_type, box2.moving_direction, box2.move_type);
-
-            // is overworld in solved levels?
-            DEBUG_TEXT("ow in solved: %i", findInSolvedLevels("overworld"));
 
             // draw selected id info
             if (editor_state.editor_mode == EDITOR_MODE_SELECT || editor_state.editor_mode == EDITOR_MODE_SELECT_WRITE)
