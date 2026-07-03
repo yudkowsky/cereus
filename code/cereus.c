@@ -3670,10 +3670,10 @@ void doPhysicsTick()
         // pack rotation and movement
 
         // TODO: update pack (and player) model so that it's more obvious which direction they're facing
-        // TODO: classic issue with checking moving_direction working on one overlap but not the other. 
-        //       probably first don't let turn happen so early, and then see if issue persists. can also gate on pack_intermediate_states_timer being somewhat low.
-        // TODO: fix that issue with pack turn happening too early causing cheats on at least blue_void_mirror_double, and maybe some others?
+        // TODO: classic issue with checking moving_direction working on one overlap but not the other. can gate on pack_intermediate_states_timer being somewhat low.
+
         // TODO: failed inputs shouldn't skip to next
+        // TODO: fix weird pack behavior on forward prediction snap thing
 
         bool pack_mimic_position = false;
         bool pack_mimic_position_without_y = false;
@@ -3682,22 +3682,26 @@ void doPhysicsTick()
 
         if (temp_state.pack_attached)
         {
+            float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, vec3FromInt3(player->coords)));
             if (vec4IsEqual(previous_player_rotation, pack->rotation) || temp_state.pack_turn_state.pack_intermediate_states_timer > 0)
             {
                 // if pack was right behind player on last rotation, mimic fully
+                // if pack is currently in a turn, also mimic fully; this handles cases with not-quite-full turns
                 pack_mimic_position = true;
                 pack_mimic_rotation = true;
             }
-            else if (player->moving_direction != NO_DIRECTION)
+            else if (player->moving_direction != NO_DIRECTION && difference_in_player_position_along_direction > 0.5f)
             {
+                // if player moving away but above didn't trigger (i.e. 'shouldn't really attach yet'), then just take pack with right behind, but keep rotation decoupled 
+                // will only happen if player is somewhat far away from target; without that gate, will cause trigger on move-into-turn, not just turn-into-move.
                 pack_mimic_position_in_travel_direction = true;
             }
         }
         else if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0)
         {
             // pack has detached, but should still be rotating: player is falling, and that has caused pack detach. keep rotation and movement, but stay at same y level
-            pack_mimic_rotation = true;
             pack_mimic_position_without_y = true;
+            pack_mimic_rotation = true;
         }
 
         Vec3 maybe_new_pack_position = getPositionBehindPlayer();
