@@ -3669,7 +3669,6 @@ void doPhysicsTick()
 
         // pack rotation and movement
 
-        // TODO: if attached but player rotation is making player look away, then snap pack to behind so don't have to wait.
         // TODO: update pack (and player) model so that it's more obvious which direction they're facing
         // TODO: classic issue with checking moving_direction working on one overlap but not the other. 
         //       probably first don't let turn happen so early, and then see if issue persists. can also gate on pack_intermediate_states_timer being somewhat low.
@@ -3683,8 +3682,9 @@ void doPhysicsTick()
 
         if (temp_state.pack_attached)
         {
-            if (vec4IsEqual(previous_player_rotation, pack->rotation))
+            if (vec4IsEqual(previous_player_rotation, pack->rotation) || temp_state.pack_turn_state.pack_intermediate_states_timer > 0)
             {
+                // if pack was right behind player on last rotation, mimic fully
                 pack_mimic_position = true;
                 pack_mimic_rotation = true;
             }
