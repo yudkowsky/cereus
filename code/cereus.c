@@ -69,7 +69,7 @@ Direction;
 
 typedef enum
 {
-    MOVE_TYPE_NONE = 0, // TODO: might be unnecessary? only here for clarity when looking into fields
+    MOVE_TYPE_NONE = 0,
     MOVE_TYPE_PUSH_BY_PLAYER,
     MOVE_TYPE_PUSH_BY_PACK,
     MOVE_TYPE_PUSH_ON_HEAD,
@@ -353,21 +353,41 @@ typedef struct UndoBuffer
 UndoBuffer;
 
 // CONSTS AND GLOBALS
-const Vec3 DEFAULT_SCALE = { 1.0f, 1.0f, 1.0f };
 
-// TODO: organize this stuff
+// continuous gameplay
 const float PLAYER_MAX_SPEED = 0.10f;
 const float MIN_FALL_VELOCITY = -0.15f;
-const int32 TURN_TIME = 10;
-const float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f; // last number is TURN_TIME
 const float PLAYER_ACCELERATION = 0.04f;
 const float PLAYER_MAX_DECELERATION = 0.05f; // this has to be >= max speed / 2, which it probably wants to be anyway
 const float CLIMBING_SPEED = 0.12f;
 const float GRAVITY = -0.03f;
+
+const float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f; // last number is TURN_TIME
 const float MAX_POSITION_DIFFERENCE_ALLOWED_FOR_MOVEMENT = 0.4f;
 const float MAX_QUARTER_TURN_ANGLE_ALLOWED_FOR_MOVEMENT = 0.2f;
 
+// discrete gameplay 
+const int32 TURN_TIME = 10;
 const int32 MAX_BLUE_GAMEPLAY_TIME = 2;
+const int32 TRAILING_HITBOX_TIME = 7;
+const int32 FALL_TRAILING_HITBOX_TIME = 10;
+const int32 HALF_FAILED_PACK_TURN_COOLDOWN = 6;
+const int32 MAX_LOOKAHEAD_MOVEMENT_FRAMES = 16;
+
+const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
+const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
+
+const int32 MAX_LASER_TRAVEL_DISTANCE = 256;
+const int32 MAX_LASER_TURNS_ALLOWED = 16;
+const int32 MAX_ENTITY_PUSH_COUNT = 32;
+const int32 MAX_ENTITIES_TIED_TO_MOVEMENT = 32;
+const int32 MAX_PUSHABLE_STACK_SIZE = 32;
+const int32 MAX_TRAILING_HITBOX_COUNT = 32;
+const int32 MAX_LEVEL_COUNT = 64;
+const int32 MAX_DEBUG_POPUP_TYPE_COUNT = 32;
+const int32 MAX_SOURCE_COUNT = 32;
+
+// handle visual rotations
 const float MAX_BLUE_VISUAL_TIME = 100.0f;
 const float BLUE_ROTATION_SPEED = 3.0f; // radians / sec
 const float BLUE_ROTATION_ANGLE = 0.05f;
@@ -380,30 +400,14 @@ const int32 SETTLE_TIME_NO_EXTRA_PUSH = 7;
 const float SETTLE_EXTRA_PUSH_TILT_MULTIPLIER = 1.5f;
 const float SETTLE_EXTRA_PUSH_MIN_SPEED = 0.04f; // below this, no extra push occurs
 
-const int32 STANDARD_TIME_UNTIL_ALLOW_INPUT = 9;
-const int32 PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT = 5;
-const int32 TRAILING_HITBOX_TIME = 7;
-const int32 FALL_TRAILING_HITBOX_TIME = 10;
-const int32 SIMULATE_FORWARD_TICK_COUNT = 8;
-const int32 HALF_FAILED_PACK_TURN_COOLDOWN = 6;
-const int32 MAX_LOOKAHEAD_MOVEMENT_FRAMES = 16;
-
-const int32 MAX_ENTITY_PUSH_COUNT = 32;
-const int32 MAX_ENTITIES_TIED_TO_MOVEMENT = 32;
-const float LASER_WIDTH = 0.25;
-const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
-const int32 MAX_LASER_TRAVEL_DISTANCE = 256;
-const int32 MAX_LASER_TURNS_ALLOWED = 16;
-const int32 MAX_PUSHABLE_STACK_SIZE = 32;
-const int32 MAX_TRAILING_HITBOX_COUNT = 32;
-const int32 MAX_LEVEL_COUNT = 64;
-const int32 MAX_DEBUG_POPUP_TYPE_COUNT = 32;
-const int32 MAX_SOURCE_COUNT = 32;
-
+// drawing
 const Int3 AXIS_X = { 1, 0, 0 };
 const Int3 AXIS_Y = { 0, 1, 0 };
 const Int3 AXIS_Z = { 0, 0, 1 };
 const Vec4 IDENTITY_QUATERNION  = { 0, 0, 0, 1 };
+const Vec3 DEFAULT_SCALE = { 1.0f, 1.0f, 1.0f };
+const float LASER_WIDTH = 0.25;
+const float MAX_RAYCAST_SEEK_LENGTH = 100.0f;
 
 const int32 PLAYER_ID = 1;
 const int32 PACK_ID   = 2;
@@ -413,30 +417,6 @@ const int32 ID_OFFSET_GLASS        = 100 * 3;
 const int32 ID_OFFSET_SOURCE       = 100 * 4;
 const int32 ID_OFFSET_WIN_BLOCK    = 100 * 7;
 const int32 ID_OFFSET_LOCKED_BLOCK = 100 * 8;
-
-// debug stuff
-const int32 FONT_FIRST_ASCII = 32;
-const int32 FONT_LAST_ASCII = 126;
-const int32 FONT_CELL_WIDTH_PX = 6;
-const int32 FONT_CELL_HEIGHT_PX = 10;
-const float DEFAULT_TEXT_SCALE = 30.0f;
-
-const int32 MAX_DEBUG_TEXT_COUNT = 32;
-const float DEBUG_TEXT_Y_DIFF = 40.0f;
-Vec2 debug_text_start_coords = {0};
-char debug_text_buffer[32][256] = {0};
-int32 debug_text_count = 0;
-bool do_debug_text = false;
-
-const float DEBUG_POPUP_TYPE_STEP_SIZE = 30.0f;
-const int32 DEFAULT_POPUP_TIME = 100;
-Vec2 debug_popup_start_coords = {0};
-DebugPopup debug_popups[32];
-
-EditorState editor_state = {0};
-ShaderMode game_shader_mode = SHADER_MODE_DEFAULT;
-bool draw_trailing_hitboxes = false;
-bool cheating = false;
 
 // file io
 const char DEBUG_LEVEL_NAME[64] = "testing";
@@ -466,7 +446,6 @@ const int32 SUN_DIRECTION_CHUNK_SIZE = 12;
 const char WATER_INFO_CHUNK_TAG[4] = "WATR";
 const int32 WATER_INFO_CHUNK_SIZE = 4;
 
-// TODO: increase
 const int32 OVERWORLD_SCREEN_SIZE_X = 23;
 const int32 OVERWORLD_SCREEN_SIZE_Z = 17;
 
@@ -486,6 +465,30 @@ Input prev_input = {0}; // copied from previous frame input to generate keys_pre
 
 DrawCommand draw_commands[16384] = {0};
 int32 draw_command_count = 0;
+
+// debug stuff
+const int32 FONT_FIRST_ASCII = 32;
+const int32 FONT_LAST_ASCII = 126;
+const int32 FONT_CELL_WIDTH_PX = 6;
+const int32 FONT_CELL_HEIGHT_PX = 10;
+const float DEFAULT_TEXT_SCALE = 30.0f;
+
+const int32 MAX_DEBUG_TEXT_COUNT = 32;
+const float DEBUG_TEXT_Y_DIFF = 40.0f;
+Vec2 debug_text_start_coords = {0};
+char debug_text_buffer[32][256] = {0};
+int32 debug_text_count = 0;
+bool do_debug_text = false;
+
+const float DEBUG_POPUP_TYPE_STEP_SIZE = 30.0f;
+const int32 DEFAULT_POPUP_TIME = 100;
+Vec2 debug_popup_start_coords = {0};
+DebugPopup debug_popups[32];
+
+EditorState editor_state = {0};
+ShaderMode game_shader_mode = SHADER_MODE_DEFAULT;
+bool draw_trailing_hitboxes = false;
+bool cheating = false;
 
 // camera
 const float CAMERA_SENSITIVITY = 0.0005f;
@@ -694,7 +697,7 @@ Vec4 quaternionNegate(Vec4 q)
     return (Vec4){ -q.x, -q.y, -q.z, -q.w };
 }
 
-// any 3D axis. assumes axis is normalized TODO: is there a good reason this doesnt take in a Direction instead?
+// any 3D axis. assumes axis is normalized
 Vec4 quaternionFromAxis(Vec3 axis, float radians)
 {
     float sin = sinf(radians* 0.5f);
@@ -734,6 +737,57 @@ Vec3 vec3RotateByQuaternion(Vec3 v, Vec4 q)
     Vec4 out_v = quaternionMultiply(quaternionMultiply(q, v_as_quaternion), q_conjugate);
     return (Vec3){ out_v.x, out_v.y, out_v.z };
 }
+
+// DEBUG POPUPS
+
+void createDebugText(char* string)
+{
+    if (debug_text_count >= MAX_DEBUG_TEXT_COUNT) return;
+    memcpy(debug_text_buffer[debug_text_count], string, 256);
+    debug_text_count++;
+}
+
+void createDebugPopup(char* string, PopupType popup_type)
+{
+    // check if such a type already exists, and if so just overwrite it with renewed timer. recalculate x coord but not y
+    if (popup_type != POPUP_TYPE_NONE)
+    {
+        FOR(popup_index, MAX_DEBUG_POPUP_TYPE_COUNT)
+        {
+            if (debug_popups[popup_index].frames_left == 0) continue;
+            if (debug_popups[popup_index].type == popup_type)
+            {
+                FOR(string_index, 256) if (string[string_index] == '\0') 
+                {
+                    debug_popups[popup_index].coords.x = debug_popup_start_coords.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
+                    break;
+                }
+                debug_popups[popup_index].frames_left = DEFAULT_POPUP_TIME;
+                memcpy(debug_popups[popup_index].text, string, 256 * sizeof(char));
+                return;
+            }
+        }
+    }
+
+    // no such type exists, or it has no type, so proceed with looking up into next free
+    int32 next_free_in_popups = 0;
+    FOR(popup_index, MAX_DEBUG_POPUP_TYPE_COUNT) if (debug_popups[popup_index].frames_left == 0)
+    {
+        next_free_in_popups = popup_index;
+        break;
+    }
+
+    FOR(string_index, 256) if (string[string_index] == '\0') 
+    {
+        debug_popups[next_free_in_popups].coords.x = debug_popup_start_coords.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
+        break;
+    }
+    debug_popups[next_free_in_popups].coords.y = debug_popup_start_coords.y + (next_free_in_popups * DEBUG_POPUP_TYPE_STEP_SIZE);
+    debug_popups[next_free_in_popups].frames_left = DEFAULT_POPUP_TIME;
+    debug_popups[next_free_in_popups].type = popup_type;
+    memcpy(debug_popups[next_free_in_popups].text, string, 256 * sizeof(char));
+}
+
 
 // CAMERA STUFF 
 
@@ -1126,7 +1180,7 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
     return 0;
 }
 
-// TODO: naming of two below. also maybe direction should be first?
+// TODO: maybe direction should be first here?
 Int3 getNextCoords(Int3 coords, Direction direction)
 {
     switch (direction)
@@ -1507,8 +1561,18 @@ void writeWaterTexture(char folder_path[64])
     char texture_path[64];
     snprintf(texture_path, sizeof(texture_path), "%s/%s", folder_path, WATER_TEXTURE_FILE_NAME);
 
-    // TODO: this should be based off of anything being present in the paint texture; some levels with water won't need a paint texture.
-    if (water_plane_y == NO_WATER_PLANE_LOW_VALUE)
+    bool water_texture_empty = true;
+    FOR(texture_index, WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE)
+    {
+        Rgba8 value = water_paint_texture.values[texture_index];
+        if (value.r != 0 || value.g != 0 || value.b != 0 || value.a != 0)
+        {
+            water_texture_empty = false;
+            break;
+        }
+    }
+
+    if (water_plane_y == NO_WATER_PLANE_LOW_VALUE || water_texture_empty)
     {
         remove(texture_path); // delete this file (if it exists)
         return;
@@ -1704,54 +1768,6 @@ void drawText(char* string, Vec2 coords, float scale, float alpha)
         drawAsset(id, SPRITE_2D, draw_coords, draw_scale, IDENTITY_QUATERNION, color, (Vec4){0}, (Vec4){0});
         pen_x += scale * aspect;
     }
-}
-
-void createDebugText(char* string)
-{
-    if (debug_text_count >= MAX_DEBUG_TEXT_COUNT) return;
-    memcpy(debug_text_buffer[debug_text_count], string, 256);
-    debug_text_count++;
-}
-
-void createDebugPopup(char* string, PopupType popup_type)
-{
-    // check if such a type already exists, and if so just overwrite it with renewed timer. recalculate x coord but not y
-    if (popup_type != POPUP_TYPE_NONE)
-    {
-        FOR(popup_index, MAX_DEBUG_POPUP_TYPE_COUNT)
-        {
-            if (debug_popups[popup_index].frames_left == 0) continue;
-            if (debug_popups[popup_index].type == popup_type)
-            {
-                FOR(string_index, 256) if (string[string_index] == '\0') 
-                {
-                    debug_popups[popup_index].coords.x = debug_popup_start_coords.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
-                    break;
-                }
-                debug_popups[popup_index].frames_left = DEFAULT_POPUP_TIME;
-                memcpy(debug_popups[popup_index].text, string, 256 * sizeof(char));
-                return;
-            }
-        }
-    }
-
-    // no such type exists, or it has no type, so proceed with looking up into next free
-    int32 next_free_in_popups = 0;
-    FOR(popup_index, MAX_DEBUG_POPUP_TYPE_COUNT) if (debug_popups[popup_index].frames_left == 0)
-    {
-        next_free_in_popups = popup_index;
-        break;
-    }
-
-    FOR(string_index, 256) if (string[string_index] == '\0') 
-    {
-        debug_popups[next_free_in_popups].coords.x = debug_popup_start_coords.x - (((float)string_index / 2) * DEFAULT_TEXT_SCALE * ((float)FONT_CELL_WIDTH_PX / (float)FONT_CELL_HEIGHT_PX));
-        break;
-    }
-    debug_popups[next_free_in_popups].coords.y = debug_popup_start_coords.y + (next_free_in_popups * DEBUG_POPUP_TYPE_STEP_SIZE);
-    debug_popups[next_free_in_popups].frames_left = DEFAULT_POPUP_TIME;
-    debug_popups[next_free_in_popups].type = popup_type;
-    memcpy(debug_popups[next_free_in_popups].text, string, 256 * sizeof(char));
 }
 
 void createTutorialPopup()
@@ -4216,7 +4232,7 @@ GameResult gameFrame(double delta_time, Input* input)
             if (input->keys_held & KEY_R)
             {
                 // reset
-                FOR(i, WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE) water_paint_texture.values[i] = (Rgba8){ 0, 0, 0, 255 };
+                FOR(i, WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE) water_paint_texture.values[i] = (Rgba8){ 0, 0, 0, 0 };
 
                 water_paint_texture.dirty = true;
                 createDebugPopup("reset water texture", POPUP_TYPE_NONE);
