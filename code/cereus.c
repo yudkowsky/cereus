@@ -3670,7 +3670,6 @@ void doPhysicsTick()
         // pack rotation and movement
 
         // TODO: update pack (and player) model so that it's more obvious which direction they're facing
-        // TODO: classic issue with checking moving_direction working on one overlap but not the other. can gate on pack_intermediate_states_timer being somewhat low.
 
         // TODO: failed inputs shouldn't skip to next
         // TODO: fix weird pack behavior on forward prediction snap thing
@@ -3682,7 +3681,6 @@ void doPhysicsTick()
 
         if (temp_state.pack_attached)
         {
-            float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, vec3FromInt3(player->coords)));
             if (vec4IsEqual(previous_player_rotation, pack->rotation) || temp_state.pack_turn_state.pack_intermediate_states_timer > 0)
             {
                 // if pack was right behind player on last rotation, mimic fully
@@ -3690,11 +3688,12 @@ void doPhysicsTick()
                 pack_mimic_position = true;
                 pack_mimic_rotation = true;
             }
-            else if (player->moving_direction != NO_DIRECTION && difference_in_player_position_along_direction > 0.5f)
+            else if (player->moving_direction != NO_DIRECTION)
             {
                 // if player moving away but above didn't trigger (i.e. 'shouldn't really attach yet'), then just take pack with right behind, but keep rotation decoupled 
                 // will only happen if player is somewhat far away from target; without that gate, will cause trigger on move-into-turn, not just turn-into-move.
-                pack_mimic_position_in_travel_direction = true;
+                float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, vec3FromInt3(player->coords)));
+                if (difference_in_player_position_along_direction > 0.5f) pack_mimic_position_in_travel_direction = true;
             }
         }
         else if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0)
@@ -4839,9 +4838,15 @@ GameResult gameFrame(double delta_time, Input* input)
                 Entity* wb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
                 bool do_win_block_usage = true;
                 if (editor_state.editor_mode != EDITOR_MODE_NONE) do_win_block_usage = false;
-                if (!temp_state.pack_attached) do_win_block_usage = false;
                 if (wb->locked) do_win_block_usage = false;
                 if (wb->next_level[0] == 0) do_win_block_usage = false; // don't go through if there is no next level here yet
+
+                if (!temp_state.pack_attached)
+                {
+                    // TODO: flash red or some other animation showing this don't fly
+                    DEBUG_POPUP(POPUP_TYPE_NONE, "backpack must be attached to finish a level!");
+                    do_win_block_usage = false;
+                }
 
                 if (do_win_block_usage)
                 {
@@ -4873,9 +4878,8 @@ GameResult gameFrame(double delta_time, Input* input)
                         placePlayerOnWinBlock(from_level);
                         updateLockedTiles(true);
                     }
-
-                    time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
                 }
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
             else if (input->keys_held & KEY_F && time_until_allow_meta_input == 0)
             {
@@ -4915,6 +4919,7 @@ GameResult gameFrame(double delta_time, Input* input)
         }
 
         // update restart coords based on current coords of the player, and also update game progress if this is relevant
+        
         if (player->coords.z > 222)
         {
             if (game_progress < PROGRESS_START) game_progress = PROGRESS_START;
@@ -4940,7 +4945,7 @@ GameResult gameFrame(double delta_time, Input* input)
             if (game_progress < PROGRESS_RED_BLUE) game_progress = PROGRESS_RED_BLUE;
             overworld_restart_coords = (Int3){ 58, 258, 171 };
         }
-        else if (player->coords.z > 127)
+        else if (player->coords.z > 137)
         {
             if (game_progress < PROGRESS_MAGENTA) game_progress = PROGRESS_MAGENTA;
             overworld_restart_coords = (Int3){ 58, 258, 154 };
@@ -4948,7 +4953,7 @@ GameResult gameFrame(double delta_time, Input* input)
         else
         {
             if (game_progress < PROGRESS_BALANCE) game_progress = PROGRESS_BALANCE;
-            overworld_restart_coords = (Int3){ 58, 258, 127 };
+            overworld_restart_coords = (Int3){ 58, 258, 137 };
         }
 
         // perform alt <-> main camera interpolation
