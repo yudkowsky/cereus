@@ -1917,8 +1917,7 @@ bool trailingHitboxAtCoords(Int3 coords, TrailingHitbox* trailing_hitbox)
 
 // VECTOR POSITION HELPERS
 
-// TODO: rename all "component" to float
-float getComponentAlongDirection(Direction direction, Vec3 vector)
+float getFloatAlongDirection(Direction direction, Vec3 vector)
 {
     switch (direction)
     {
@@ -1930,7 +1929,7 @@ float getComponentAlongDirection(Direction direction, Vec3 vector)
 }
 
 // will return negative of component along NORTH, WEST, and DOWN.
-float getSignedComponentAlongDirection(Direction direction, Vec3 vector)
+float getSignedFloatAlongDirection(Direction direction, Vec3 vector)
 {
     switch (direction)
     {
@@ -1944,8 +1943,7 @@ float getSignedComponentAlongDirection(Direction direction, Vec3 vector)
     }
 }
 
-// TODO: vector should come after
-Vec3 vec3SetComponentAlongDirection(Direction direction, float f, Vec3 v)
+Vec3 vec3SetFloatAlongDirection(Direction direction, float f, Vec3 v)
 {
     switch (direction)
     {
@@ -2094,12 +2092,44 @@ void pushVertical(Int3 coords, Direction direction)
     }
 }
 
+void updatePackAttached()
+{
+    TileType tile_behind_player = getTileType(getNextCoords(world_state.player.coords, oppositeDirection(world_state.player.direction)));
+    bool direction_agree = pack->direction == player->direction;
+
+    if (tile_behind_player == TILE_TYPE_PACK && direction_agree)
+    {
+        if (!temp_state.pack_attached && (player->moving_direction == UP || player->falling))
+        {
+            // vertical movement of player causing pack attach. in this case, will never have hit correct coords yet;
+            // instead, this is handled in the climbing case, where there is a clear "transition to next tile" block.
+            temp_state.pack_attached = false;
+        }
+        else if (pack->falling)
+        {
+            // if pack still falling, pack is still in air, so should not attach. 
+            // player is not moving vertically, so will be no problem with opposite movement causing miss.
+            temp_state.pack_attached = false;
+        }
+        else
+        {
+            // no vertical movement, so player turned such that pack is behind, or pack has fallen behind player and settled. 
+            // set attached to true and let later code handle correct pack movement
+            temp_state.pack_attached = true;
+        }
+    }
+    else if (temp_state.pack_turn_state.pack_intermediate_states_timer == 0)
+    {
+        temp_state.pack_attached = false;
+    }
+}
+
 // LASERS
 
 Vec3 getNormCoordsWithEntityCoordAlongAxis(Direction direction, Vec3 current_norm_coords, Vec3 mirror_position)
 {
-    Vec3 norm_coords_not_along_axis = vec3SetComponentAlongDirection(direction, 0, current_norm_coords);
-    Vec3 mirror_coords_along_axis = vec3ScalarMultiply(directionToVector(direction), getSignedComponentAlongDirection(direction, mirror_position));
+    Vec3 norm_coords_not_along_axis = vec3SetFloatAlongDirection(direction, 0, current_norm_coords);
+    Vec3 mirror_coords_along_axis = vec3ScalarMultiply(directionToVector(direction), getSignedFloatAlongDirection(direction, mirror_position));
     return vec3Add(norm_coords_not_along_axis, mirror_coords_along_axis);
 }
 
@@ -2331,14 +2361,14 @@ void updateLaserBuffer()
                             */
 
                             // get difference along next_laser_direction of current_norm_coords vs mirror->position.
-                            // this will be relevantly signed because getSignedComponentAlongDirection gives signed output.
+                            // this will be relevantly signed because getSignedFloatAlongDirection gives signed output.
                             // add that difference to norm_coords along current_direction. again signs are accounted for because directionToVector gives signed output.
                             // differences along the other axis (the one orthogonal to both current dir and next dir) are ignored, because they don't change point of reflection
                             // to get norm coords, add corresponding difference, plus norm_coord_difference along the axes that aren't current_direction axis
                             Vec3 norm_coord_difference = vec3Subtract(current_norm_coords, mirror->position);
-                            float difference_along_next_laser_direction_axis = getSignedComponentAlongDirection(next_laser_direction, norm_coord_difference);
+                            float difference_along_next_laser_direction_axis = getSignedFloatAlongDirection(next_laser_direction, norm_coord_difference);
                             Vec3 corresponding_difference_along_current_direction_axis = vec3ScalarMultiply(directionToVector(current_direction), difference_along_next_laser_direction_axis);
-                            Vec3 norm_coord_difference_not_along_current_direction_axis = vec3SetComponentAlongDirection(current_direction, 0, norm_coord_difference);
+                            Vec3 norm_coord_difference_not_along_current_direction_axis = vec3SetFloatAlongDirection(current_direction, 0, norm_coord_difference);
                             current_norm_coords = vec3Add(mirror->position, vec3Add(norm_coord_difference_not_along_current_direction_axis, corresponding_difference_along_current_direction_axis));
 
                             lb->end_coords = current_norm_coords;
@@ -2683,10 +2713,9 @@ void initializeLevel(char* level_name)
     camera_target_plane = player->coords.y;
     if (in_overworld) ow_player_coords_for_offset = player->coords;
 
-    if (getTileType(getNextCoords(player->coords, oppositeDirection(player->direction))) == TILE_TYPE_PACK) temp_state.pack_attached = true;
-    else temp_state.pack_attached = false;
-
     updateLaserBuffer();
+    updateLockedTiles(true);
+    updatePackAttached();
 }
 
 void recalculateTextStartCoords()
@@ -2930,9 +2959,7 @@ void zeroAnimations()
     clearMovementState(player);
     clearMovementState(pack);
 
-    bool pack_attached = temp_state.pack_attached; // TODO: this is kind of ugly, but i do want to preserve this?
     memset(&temp_state, 0, sizeof(TemporaryState));
-    temp_state.pack_attached = pack_attached;
 }
 
 // returns false only if already at oldest action
@@ -3007,8 +3034,6 @@ bool performUndo()
     restart_last_turn = false;
 
     //writeUndoBufferToFile();
-
-    updateLockedTiles(false);
 
     return true;
 }
@@ -3102,7 +3127,7 @@ float calculateSpeculativeVelocityAlongDirection(Direction direction, float sign
     // get velocity of case where we fully accelerate on this frame. clamp velocity to max speed
     Vec3 velocity_to_add = vec3ScalarMultiply(directionToVector(direction), PLAYER_ACCELERATION); // may be negative, if direction is N or W
     Vec3 unclamped_speculative_velocity = vec3Add(player->velocity, velocity_to_add);             // in that case, velocity is also negative, so add works correctly.
-    float unclamped_speculative_velocity_along_direction = getComponentAlongDirection(direction, unclamped_speculative_velocity); // may be negative
+    float unclamped_speculative_velocity_along_direction = getFloatAlongDirection(direction, unclamped_speculative_velocity); // may be negative
     float speculative_velocity_along_direction = unclamped_speculative_velocity_along_direction;
     if (sign == -1.0f) speculative_velocity_along_direction = speculative_velocity_along_direction < -PLAYER_MAX_SPEED ? -PLAYER_MAX_SPEED : speculative_velocity_along_direction;
     else               speculative_velocity_along_direction = speculative_velocity_along_direction >  PLAYER_MAX_SPEED ?  PLAYER_MAX_SPEED : speculative_velocity_along_direction;
@@ -3128,7 +3153,7 @@ bool wouldOvershoot(float speculative_velocity_along_direction, float position_a
 void interpolateDecoupledTowardsCoords(Entity* e)
 {
     float interpolation_distance_per_frame = 0.1f;
-    float difference = getSignedComponentAlongDirection(e->moving_direction, vec3Subtract(vec3FromInt3(e->coords), e->position));
+    float difference = getSignedFloatAlongDirection(e->moving_direction, vec3Subtract(vec3FromInt3(e->coords), e->position));
     if (difference < interpolation_distance_per_frame)
     {
         clearMovementState(e);
@@ -3153,38 +3178,6 @@ void revertHeadStackRotation()
         Entity* e = getEntityAtCoords(current_coords);
         e->direction = (e->direction + reverse_add - NORTH) % 4 + NORTH;
         current_coords = getNextCoords(current_coords, UP);
-    }
-}
-
-void updatePackAttached()
-{
-    TileType tile_behind_player = getTileType(getNextCoords(world_state.player.coords, oppositeDirection(world_state.player.direction)));
-    bool direction_agree = pack->direction == player->direction;
-
-    if (tile_behind_player == TILE_TYPE_PACK && direction_agree)
-    {
-        if (!temp_state.pack_attached && (player->moving_direction == UP || player->falling))
-        {
-            // vertical movement of player causing pack attach. in this case, will never have hit correct coords yet;
-            // instead, this is handled in the climbing case, where there is a clear "transition to next tile" block.
-            temp_state.pack_attached = false;
-        }
-        else if (pack->falling)
-        {
-            // if pack still falling, pack is still in air, so should not attach. 
-            // player is not moving vertically, so will be no problem with opposite movement causing miss.
-            temp_state.pack_attached = false;
-        }
-        else
-        {
-            // no vertical movement, so player turned such that pack is behind, or pack has fallen behind player and settled. 
-            // set attached to true and let later code handle correct pack movement
-            temp_state.pack_attached = true;
-        }
-    }
-    else if (temp_state.pack_turn_state.pack_intermediate_states_timer == 0)
-    {
-        temp_state.pack_attached = false;
     }
 }
 
@@ -3313,7 +3306,7 @@ void doPhysicsTick()
     // NOTE: no down climb anymore
     if (player->moving_direction == UP)
     {
-        float y_coord_difference = getSignedComponentAlongDirection(player->moving_direction, vec3Subtract(vec3FromInt3(player->coords), player->position));
+        float y_coord_difference = getSignedFloatAlongDirection(player->moving_direction, vec3Subtract(vec3FromInt3(player->coords), player->position));
         if (y_coord_difference > CLIMBING_SPEED)
         {
             // keep climbing, already commited to this movement.
@@ -3473,7 +3466,7 @@ void doPhysicsTick()
 
             bool want_to_fall = true;
             if (!canFall(e)) want_to_fall = false;
-            if (!vec3IsZero(vec3SetComponentAlongDirection(DOWN, 0, vec3Subtract(e->position, vec3FromInt3(e->coords))))) want_to_fall = false; // not horizontally stationary
+            if (!vec3IsZero(vec3SetFloatAlongDirection(DOWN, 0, vec3Subtract(e->position, vec3FromInt3(e->coords))))) want_to_fall = false; // not horizontally stationary
             if (!want_to_fall && !e->falling) continue;
 
             // find the real bottom of the stack (to then interate up from)
@@ -3507,7 +3500,7 @@ void doPhysicsTick()
                 float test_y_position = e_in_stack->position.y + test_y_velocity;
 
                 // if falling and will only fall within current block, just apply that fall and continue
-                if (test_y_position > getComponentAlongDirection(DOWN, vec3FromInt3(e_in_stack->coords)))
+                if (test_y_position > getFloatAlongDirection(DOWN, vec3FromInt3(e_in_stack->coords)))
                 {
                     // will only be here if e.falling, because otherwise would immediately be crossing a boundary
                     if (e_in_stack->id == PLAYER_ID)
@@ -3635,12 +3628,12 @@ void doPhysicsTick()
     {
         // only handle velocity / position if offset from the coords
         Vec3 difference_in_player_position = vec3Subtract(vec3FromInt3(player->coords), player->position);
-        float difference_in_position_along_direction = getComponentAlongDirection(direction_index, difference_in_player_position);
+        float difference_in_position_along_direction = getFloatAlongDirection(direction_index, difference_in_player_position);
         float sign = direction_index == NORTH || direction_index == WEST ? -1.0f : 1.0f;
         if (difference_in_position_along_direction * sign <= 0) continue; // will continue if west picks up a difference in the east direction (and north in south direction)
 
-        float position_along_direction = getComponentAlongDirection(direction_index, player->position);
-        float coords_along_direction = getComponentAlongDirection(direction_index, vec3FromInt3(player->coords));
+        float position_along_direction = getFloatAlongDirection(direction_index, player->position);
+        float coords_along_direction = getFloatAlongDirection(direction_index, vec3FromInt3(player->coords));
         float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(direction_index, sign);
         if (!wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign))
         {
@@ -3651,7 +3644,7 @@ void doPhysicsTick()
         }
         else
         {
-            float current_speed = sign * getComponentAlongDirection(direction_index, player->velocity);
+            float current_speed = sign * getFloatAlongDirection(direction_index, player->velocity);
             float remaining_distance = sign * difference_in_position_along_direction;
             float stopping_distance = oneDimensionalDecelerationSimulation(current_speed, PLAYER_MAX_DECELERATION);
             float distance_error = remaining_distance - stopping_distance;
@@ -3688,7 +3681,7 @@ void doPhysicsTick()
         // TODO: update pack (and player) model so that it's more obvious which direction they're facing
 
         // TODO: failed inputs shouldn't skip to next
-        // TODO: fix weird pack behavior on forward prediction snap thing
+        // TODO: fix weird pack behavior on forward prediction snap thing (one frame still spent moving in wrong direction before straight, or something?)
 
         bool pack_mimic_position = false;
         bool pack_mimic_position_without_y = false;
@@ -3708,7 +3701,7 @@ void doPhysicsTick()
             {
                 // if player moving away but above didn't trigger (i.e. 'shouldn't really attach yet'), then just take pack with right behind, but keep rotation decoupled 
                 // will only happen if player is somewhat far away from target; without that gate, will cause trigger on move-into-turn, not just turn-into-move.
-                float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, vec3FromInt3(player->coords)));
+                float difference_in_player_position_along_direction = getFloatAlongDirection(player->direction, vec3Subtract(player->position, vec3FromInt3(player->coords)));
                 if (difference_in_player_position_along_direction > 0.5f) pack_mimic_position_in_travel_direction = true;
             }
         }
@@ -3721,8 +3714,8 @@ void doPhysicsTick()
 
         Vec3 maybe_new_pack_position = getPositionBehindPlayer();
         if (pack_mimic_position) pack->position = maybe_new_pack_position;
-        else if (pack_mimic_position_without_y) pack->position = vec3SetComponentAlongDirection(UP, pack->position.y, maybe_new_pack_position);
-        else if (pack_mimic_position_in_travel_direction) pack->position = vec3SetComponentAlongDirection(player->moving_direction, getComponentAlongDirection(player->moving_direction, maybe_new_pack_position), vec3FromInt3(pack->coords));
+        else if (pack_mimic_position_without_y) pack->position = vec3SetFloatAlongDirection(UP, pack->position.y, maybe_new_pack_position);
+        else if (pack_mimic_position_in_travel_direction) pack->position = vec3SetFloatAlongDirection(player->moving_direction, getFloatAlongDirection(player->moving_direction, maybe_new_pack_position), vec3FromInt3(pack->coords));
 
         if (pack_mimic_rotation) pack->rotation = player->rotation;
 
@@ -3765,10 +3758,10 @@ void doPhysicsTick()
 
                     float sign = e->moving_direction == NORTH || e->moving_direction == WEST ? -1.0f : 1.0f;
 
-                    float root_coords_along_direction     = getComponentAlongDirection(e->moving_direction, vec3FromInt3(root_e->coords));
-                    float root_position_along_direction   = getComponentAlongDirection(e->moving_direction, root_e->position);
-                    float entity_coords_along_direction   = getComponentAlongDirection(e->moving_direction, vec3FromInt3(e->coords));
-                    float entity_position_along_direction = getComponentAlongDirection(e->moving_direction, e->position);
+                    float root_coords_along_direction     = getFloatAlongDirection(e->moving_direction, vec3FromInt3(root_e->coords));
+                    float root_position_along_direction   = getFloatAlongDirection(e->moving_direction, root_e->position);
+                    float entity_coords_along_direction   = getFloatAlongDirection(e->moving_direction, vec3FromInt3(e->coords));
+                    float entity_position_along_direction = getFloatAlongDirection(e->moving_direction, e->position);
                     float difference_in_coords = entity_coords_along_direction - root_coords_along_direction;
 
                     if (e->move_type == MOVE_TYPE_PUSH_BY_PACK && temp_state.pack_turn_state.half_failed_turn_timer != 0)
@@ -3796,7 +3789,7 @@ void doPhysicsTick()
                         e->rotation = composeRotation(e->direction, e->mirror_orientation, e->yaw_offset, e->visual_tilt);
                     }
 
-                    e->position = vec3SetComponentAlongDirection(e->moving_direction, entity_target, vec3FromInt3(e->coords));
+                    e->position = vec3SetFloatAlongDirection(e->moving_direction, entity_target, vec3FromInt3(e->coords));
 
                     if (vec3IsEqual(e->position, vec3FromInt3(e->coords))) clearMovementState(e);
                 }
@@ -3813,7 +3806,7 @@ void doPhysicsTick()
 
                     // below is to see if should copy player coords. check coords behind player at same y as entity. if entity is there, then they weren't allow to come with, so dont mimic player coords.
                     Int3 previous_player_coords = getNextCoords(player->coords, oppositeDirection(player->direction));
-                    Int3 previous_player_coords_with_moving_entity_y = int3FromVec3(vec3SetComponentAlongDirection(UP, (float)e->coords.y, vec3FromInt3(previous_player_coords)));
+                    Int3 previous_player_coords_with_moving_entity_y = int3FromVec3(vec3SetFloatAlongDirection(UP, (float)e->coords.y, vec3FromInt3(previous_player_coords)));
                     Entity* e_exists_if_no_push = getEntityAtCoords(previous_player_coords_with_moving_entity_y);
                     if (!(e_exists_if_no_push && e_exists_if_no_push->id == e->id))
                     {
@@ -3824,12 +3817,12 @@ void doPhysicsTick()
                 break;
                 case MOVE_TYPE_FOLLOW_VERTICAL: // always follows players movement, even if it happens to be caused by the pack.
                 {
-                    float root_coords_along_y = getComponentAlongDirection(e->moving_direction, vec3FromInt3(player->coords));
-                    float root_position_along_y = getComponentAlongDirection(e->moving_direction, player->position);
-                    float entity_coords_along_y = getComponentAlongDirection(e->moving_direction, vec3FromInt3(e->coords));
+                    float root_coords_along_y = getFloatAlongDirection(e->moving_direction, vec3FromInt3(player->coords));
+                    float root_position_along_y = getFloatAlongDirection(e->moving_direction, player->position);
+                    float entity_coords_along_y = getFloatAlongDirection(e->moving_direction, vec3FromInt3(e->coords));
                     float difference_in_coords = entity_coords_along_y - root_coords_along_y;
                     float entity_target = root_position_along_y + difference_in_coords;
-                    e->position = vec3SetComponentAlongDirection(UP, entity_target, e->position);
+                    e->position = vec3SetFloatAlongDirection(UP, entity_target, e->position);
 
                     if (vec3IsEqual(e->position, vec3FromInt3(e->coords))) clearMovementState(e);
                 }
@@ -3839,6 +3832,7 @@ void doPhysicsTick()
     }
 
     // decrement and clear trailing hitboxes 
+    // TODO: a bit unclear why the forward prediction fails to snap if trailing hitbox is ahead. not really a problem, but feels unexpected
     FOR(th_index, MAX_TRAILING_HITBOX_COUNT) 
     {
         TrailingHitbox* th = &temp_state.trailing_hitboxes[th_index];
@@ -4435,6 +4429,7 @@ GameResult gameFrame(double delta_time, Input* input)
             if (input->keys_held & KEY_M)
             {
                 clearSolvedLevels();
+                updateLockedTiles(false);
                 createDebugPopup("solved levels cleared", POPUP_TYPE_NONE);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
@@ -4556,6 +4551,9 @@ GameResult gameFrame(double delta_time, Input* input)
                     undos_performed++;
                     temp_state.undo_press_timer = time_until_allow_undo_or_restart_input;
                     temp_state.allow_movement_timer = time_until_allow_undo_or_restart_input;
+
+                    updateLockedTiles(false);
+                    updatePackAttached();
                 }
                 else
                 {
@@ -4660,12 +4658,12 @@ GameResult gameFrame(double delta_time, Input* input)
                         // allow movement if, given acceleration this frame along input direction, we would overshoot.
                         float sign = input_direction == NORTH || input_direction == WEST ? -1.0f : 1.0f;
                         float speculative_velocity_along_direction = calculateSpeculativeVelocityAlongDirection(input_direction, sign);
-                        float position_along_direction = getComponentAlongDirection(input_direction, player->position);
-                        float coords_along_direction = getComponentAlongDirection(input_direction, vec3FromInt3(player->coords));
+                        float position_along_direction = getFloatAlongDirection(input_direction, player->position);
+                        float coords_along_direction = getFloatAlongDirection(input_direction, vec3FromInt3(player->coords));
                         if (!wouldOvershoot(speculative_velocity_along_direction, position_along_direction, coords_along_direction, sign)) input_allowed = false;
 
                         // disallow movement if also moving in some other direction currently - probably just guards against moving while falling
-                        if (!vec3IsZero(vec3SetComponentAlongDirection(input_direction, 0, player->velocity))) input_allowed = false;
+                        if (!vec3IsZero(vec3SetFloatAlongDirection(input_direction, 0, player->velocity))) input_allowed = false;
 
                         // disallow movement forward if climbing UP. likely doesn't actually matter, would just be walking into a ladder
                         if (player->moving_direction == UP) input_allowed = false;
@@ -4760,7 +4758,7 @@ GameResult gameFrame(double delta_time, Input* input)
                         if (player->moving_direction == UP) input_allowed = false;
                         
                         // get difference in position along axis of travel, and gate on some threshold to target
-                        float difference_in_player_position_along_direction = getComponentAlongDirection(player->direction, vec3Subtract(player->position, vec3FromInt3(player->coords)));
+                        float difference_in_player_position_along_direction = getFloatAlongDirection(player->direction, vec3Subtract(player->position, vec3FromInt3(player->coords)));
                         if (fabs(difference_in_player_position_along_direction) > MAX_POSITION_DIFFERENCE_ALLOWED_FOR_MOVEMENT) input_allowed = false;
 
                         if (temp_state.pack_attached)
