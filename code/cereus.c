@@ -21,6 +21,24 @@ __declspec(dllimport) void __stdcall OutputDebugStringA(const char* lpOutputStri
 
 // GLOBAL STATE
 
+// TODO:
+// about tile_type_water: should get rid of this, and instead just have the entire bottom of the world be water.
+// then objects hit OOB when falling into water, which is fine because that's treated as WALL.
+// would need better system for defining level_dim: probably easiest is just 'always make larger' during editor, and then
+// bind 'snap to smallest possible size' to some key.
+//
+// - water could just be a single quad, instead of x*z quads
+// - wouldn't need to draw all those cubes at bottom of world (>90% of cubes in levels)
+// - level file sizes get even smaller
+// - level dim would get smaller too, meaning less gameplay time on looping through 3d array
+//
+// would also need to handle drawing the bottom of the water - currently done with many cubes. would eventually just be part
+// of the level .glb, but would require better temporary solution
+//
+// additionally need to think about water actually being larger than level_dim (that's a large part of the point) - but don't want
+// it to be laggy in editor. so maybe just extend water quad +10 on each side, or something. would need to also be able to paint
+// into area outside level dim.
+
 typedef enum
 {
     TILE_TYPE_NONE = 0,
