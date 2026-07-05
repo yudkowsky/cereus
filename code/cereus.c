@@ -1558,7 +1558,7 @@ void loadWaterTexture(char* folder_path)
     water_paint_texture.dirty = true;
 
     // default empty so a level with no texture file doesn't inherit from previous... shouldn't actually matter, i guess
-    FOR(pixel, WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE) water_paint_texture.values[pixel] = (Rgba8){ 0, 0, 0, 255 };
+    FOR(pixel, WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE) water_paint_texture.values[pixel] = (Rgba8){ 0, 0, 0, 0};
 
     char texture_path[64];
     snprintf(texture_path, sizeof(texture_path), "%s/%s", folder_path, WATER_TEXTURE_FILE_NAME);
