@@ -982,7 +982,7 @@ bool reindexBuffer(Int3 new_origin, Int3 new_dim)
         int32 new_x = coords.x - new_origin.x;
         int32 new_y = coords.y - new_origin.y;
         int32 new_z = coords.z - new_origin.z;
-        if (new_x < 0 || new_y < 0 || new_z < 0 || new_x >= new_dim.x || new_y >= new_dim.y || new_z >= new_dim.z) continue; // guard in case something goes wrong
+        if (new_x < 0 || new_y < 0 || new_z < 0 || new_x >= new_dim.x || new_y >= new_dim.y || new_z >= new_dim.z) continue;
         int32 new_index = 2 * (new_dim.x*new_dim.z*new_y + new_dim.x*new_z + new_x);
         temp_buffer_array[new_index] = world_state.buffer[tile_index];
         temp_buffer_array[new_index + 1] = world_state.buffer[tile_index + 1];
@@ -990,7 +990,7 @@ bool reindexBuffer(Int3 new_origin, Int3 new_dim)
     memcpy(world_state.buffer, temp_buffer_array, new_total_tiles * 2);
     memset(temp_buffer_array, 0, new_total_tiles*2);
 
-    // reindex water texture
+    // reindex water texture TODO: should be done wherever water is now handled; level_dim now not same as water texture size
     int32 old_width  = level_dim.x * WATER_PAINT_RESOLUTION;
     int32 old_height = level_dim.z * WATER_PAINT_RESOLUTION;
     if (old_width  > WATER_PAINT_MAX_SIDE) old_width  = WATER_PAINT_MAX_SIDE;
@@ -1003,7 +1003,7 @@ bool reindexBuffer(Int3 new_origin, Int3 new_dim)
     int32 shift_x = (new_origin.x - level_origin.x) * WATER_PAINT_RESOLUTION;
     int32 shift_z = (new_origin.z - level_origin.z) * WATER_PAINT_RESOLUTION;
 
-    FOR(scratch_index, new_width * new_height) water_texture_scratch[scratch_index] = (Rgba8){ 0, 0, 0, 255 };
+    FOR(scratch_index, new_width * new_height) water_texture_scratch[scratch_index] = (Rgba8){ 0, 0, 0, 0 };
 
     FOR(new_z, new_height)
     {
@@ -1024,7 +1024,12 @@ bool reindexBuffer(Int3 new_origin, Int3 new_dim)
     return true;
 }
 
-// sets water plane to just above lowest water
+// sets water plane to lowest water
+// TODO: should just set this to the lowest y level in the level. right now can't do that because I still have
+//       the tile_type_water cube around, which is there because i want the underwater grid lines.
+//
+// NOTE: currently no support for multiple water planes. non-trivial, because two planes of reflection -> two extra cameras.
+//       unsure if I even want this yet, so will wait
 void recalculateWaterPlane()
 {
     for (int32 buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
@@ -4003,20 +4008,6 @@ GameResult gameFrame(double delta_time, Input* input)
                 setTileType(TILE_TYPE_NONE, raycast_output.hit_coords);
                 setTileDirection(NORTH, raycast_output.hit_coords, 0);
 
-                Int3 level_min, level_max;
-                getLevelMinAndMax(&level_min, &level_max);
-                if (level_min.x <= level_max.x)
-                {
-                    // not an empty level
-                    Int3 actual_level_dim = {0};
-                    actual_level_dim.x = level_max.x - level_min.x + 1;
-                    actual_level_dim.z = level_max.z - level_min.z + 1;
-                    int32 content_height = level_max.y - level_min.y + 1;
-                    actual_level_dim.y = level_dim.y > content_height ? level_dim.y : content_height;
-                    reindexBuffer(level_min, actual_level_dim);
-                    recalculateWaterPlane();
-                }
-
                 time_until_allow_meta_input = PLACE_BREAK_TIME_UNTIL_ALLOW_INPUT;
             }
             else if ((input->keys_held & KEY_RIGHT_MOUSE || input->keys_held & KEY_H) && raycast_output.hit) 
@@ -4462,41 +4453,14 @@ GameResult gameFrame(double delta_time, Input* input)
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
 
-            // change y max
-            if (input->keys_held & KEY_DOT)
-            {
-                Int3 new_dim = (Int3){ level_dim.x, level_dim.y + 1, level_dim.z };
-                if (reindexBuffer(level_origin, new_dim)) DEBUG_POPUP(POPUP_TYPE_NONE, "level y dim: %i", level_dim.y);
-                else DEBUG_POPUP(POPUP_TYPE_LEVEL_Y_CHANGE, "level too large to grow");
-                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            }
-            else if (input->keys_held & KEY_COMMA)
+            // reindex level to smallest possible size
+            if (input->keys_held & KEY_P)
             {
                 Int3 level_min, level_max;
                 getLevelMinAndMax(&level_min, &level_max);
-                bool empty_level = level_min.x > level_max.x;
-                int32 current_top = level_origin.y + level_dim.y - 1;
-                bool top_row_empty = empty_level || current_top > level_max.y;
-                if (level_dim.y > 1 && top_row_empty)
-                {
-                    Int3 new_dim = (Int3){ level_dim.x, level_dim.y - 1, level_dim.z };
-                    reindexBuffer(level_origin, new_dim);
-                    DEBUG_POPUP(POPUP_TYPE_LEVEL_Y_CHANGE, "level y dim: %i", level_dim.y);
-                }
-                else
-                {
-                    DEBUG_POPUP(POPUP_TYPE_LEVEL_Y_CHANGE, "can't shrink: there is tile on top row");
-                }
+                Int3 new_level_dim = int3Add(int3Subtract(level_max, level_min), (Int3){ 1,1,1 });
+                reindexBuffer(level_min, new_level_dim);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
-            }
-
-            // TEMP: replace all void tiles in a level with water
-            if (input->keys_held & KEY_5)
-            {
-                for (int tile_index = 0; tile_index < level_dim.x*level_dim.y*level_dim.z * 2; tile_index += 2)
-                {
-                    if (world_state.buffer[tile_index] == TILE_TYPE_VOID) world_state.buffer[tile_index] = TILE_TYPE_WATER;
-                }
             }
         }
     }
@@ -5309,13 +5273,21 @@ GameResult gameFrame(double delta_time, Input* input)
         }
         else
         {
+            /*
             if (getCube3DId(draw_tile) == CUBE_3D_WATER) 
             {
                 drawAsset(MODEL_3D_WATER, WATER_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, composeRotation(world_state.buffer[tile_index + 1], MIRROR_SIDE, 0.0f, IDENTITY_QUATERNION), (Vec4){0}, (Vec4){0}, (Vec4){0});
             }
+            */
             drawAsset(getCube3DId(draw_tile), CUBE_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, composeRotation(world_state.buffer[tile_index + 1], MIRROR_SIDE, 0.0f, IDENTITY_QUATERNION), (Vec4){0}, (Vec4){0}, (Vec4){0});
         }
     }
+
+    // draw water plane as scaled single quad. drawing at water_plane_y, with dims level_dim.x * level_dim.z, +10 in all directions
+    Vec3 center_point = vec3Add(vec3FromInt3(level_origin), vec3ScalarMultiply(vec3FromInt3(level_dim), 0.5));
+    Vec3 center_point_on_plane = vec3SetFloatAlongDirection(UP, water_plane_y, center_point); // TODO: need to change water mesh to be centered along y
+    Vec3 water_scale = { (float)level_dim.x, 1.0f, (float)level_dim.z }; // TODO: + 20
+    drawAsset(MODEL_3D_WATER, WATER_3D, center_point_on_plane, water_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
 
     // draw selected entity
     if (editor_state.selected_id >= 0 && (editor_state.editor_mode == EDITOR_MODE_SELECT || editor_state.editor_mode == EDITOR_MODE_SELECT_WRITE))

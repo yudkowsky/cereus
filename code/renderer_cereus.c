@@ -55,6 +55,7 @@ Model;
 typedef struct
 {
     Vec3 coords;
+    Vec3 scale;
 }
 Water;
 
@@ -512,6 +513,7 @@ typedef struct VulkanState
     void* cube_instance_mappeds[2];
     uint32 cube_instance_capacity;
 
+    // TODO: no longer need to be instanced, because only one water quad
     VkBuffer water_instance_buffers[2];
     VkDeviceMemory water_instance_memories[2];
     void* water_instance_mappeds[2];
@@ -5439,6 +5441,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Ren
 		{
             Water* water = &water_instances[water_instance_count++];
             water->coords = command->coords;
+            water->scale  = command->scale;
         }
         else if (type == LASER)
         {
@@ -5501,7 +5504,7 @@ void vulkanSubmitFrame(DrawCommand* draw_commands, int32 draw_command_count, Ren
     for (uint32 instance_index = 0; instance_index < water_instance_count; instance_index++)
     {
         Water* water = &water_instances[instance_index];
-        mat4BuildBasicTRS(water_gpu_instances[instance_index].model, water->coords);
+        mat4BuildTRS(water_gpu_instances[instance_index].model, water->coords, (Vec4){ 0, 0, 0, 1 }, water->scale);
     }
 
     // fill laser instance buffer
