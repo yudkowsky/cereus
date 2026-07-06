@@ -4442,6 +4442,20 @@ GameResult gameFrame(double delta_time, Input* input)
                 createDebugPopup("solved levels cleared", POPUP_TYPE_NONE);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
+
+            // add all of ow zero's win blocks' levels to solved levels
+            if (input->keys_held & KEY_E)
+            {
+                clearSolvedLevels();
+                FOR(wb_index, MAX_ENTITY_INSTANCE_COUNT)
+                {
+                    Entity wb = overworld_zero_state.win_blocks[wb_index];
+                    if (wb.next_level[0] != 0) addToSolvedLevels(wb.next_level);
+                }
+                updateLockedTiles(false);
+                createDebugPopup("all ow levels solved", POPUP_TYPE_NONE);
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            }
         }
         else if (editor_state.editor_mode == EDITOR_MODE_ENVIRONMENT)
         {
