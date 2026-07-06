@@ -3869,9 +3869,9 @@ void doPhysicsTick()
     if (temp_state.pack_turn_state.half_failed_turn_timer > 0) temp_state.pack_turn_state.half_failed_turn_timer--;
     if (temp_state.blue_gameplay_timer > 0) temp_state.blue_gameplay_timer--;
 
-    // disallow input if player above void / water
-    TileType tile_type_below_player = getTileType(getNextCoords(player->coords, DOWN));
-    if (tile_type_below_player == TILE_TYPE_VOID || tile_type_below_player == TILE_TYPE_WATER) temp_state.allow_movement_timer = -1;
+    // disallow input if player at bottom of world
+    Int3 coords_below_player = getNextCoords(player->coords, DOWN);
+    if (!intCoordsWithinLevelBounds(coords_below_player)) temp_state.allow_movement_timer = -1;
 
     // update lasers based on physics
     updateLaserBuffer();
@@ -4462,6 +4462,21 @@ GameResult gameFrame(double delta_time, Input* input)
                 reindexBuffer(level_min, new_level_dim);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
             }
+
+            // TEMP: get rid of all water tiles
+            if (input->keys_held & KEY_5)
+            {
+                for (int tile_index = 0; tile_index < 2 * level_dim.x*level_dim.y*level_dim.z; tile_index += 2)
+                {
+                    Int3 coords = bufferIndexToCoords(tile_index);
+                    TileType type = getTileType(coords);
+                    if (type != TILE_TYPE_WATER) continue;
+                    setTileType(TILE_TYPE_NONE, coords);
+                    setTileDirection(NO_DIRECTION, coords, 0);
+                }
+                DEBUG_POPUP(POPUP_TYPE_NONE, "cleared water tiles");
+                time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
+            }
         }
     }
 
@@ -4819,8 +4834,6 @@ GameResult gameFrame(double delta_time, Input* input)
                 }
             }
         }
-
-        updateLaserBuffer();
 
         // handle all physics that doesn't have to do with player input on this frame
         doPhysicsTick();
@@ -5192,9 +5205,6 @@ GameResult gameFrame(double delta_time, Input* input)
     // DRAW 3D //
     /////////////
 
-    // final update laser buffer call
-    updateLaserBuffer();
-
     // draw lasers
     FOR(laser_buffer_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED)
     {
@@ -5273,12 +5283,6 @@ GameResult gameFrame(double delta_time, Input* input)
         }
         else
         {
-            /*
-            if (getCube3DId(draw_tile) == CUBE_3D_WATER) 
-            {
-                drawAsset(MODEL_3D_WATER, WATER_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, composeRotation(world_state.buffer[tile_index + 1], MIRROR_SIDE, 0.0f, IDENTITY_QUATERNION), (Vec4){0}, (Vec4){0}, (Vec4){0});
-            }
-            */
             drawAsset(getCube3DId(draw_tile), CUBE_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, composeRotation(world_state.buffer[tile_index + 1], MIRROR_SIDE, 0.0f, IDENTITY_QUATERNION), (Vec4){0}, (Vec4){0}, (Vec4){0});
         }
     }
@@ -5286,7 +5290,7 @@ GameResult gameFrame(double delta_time, Input* input)
     // draw water plane as scaled single quad. drawing at water_plane_y, with dims level_dim.x * level_dim.z, +10 in all directions
     Vec3 center_point = vec3Add(vec3FromInt3(level_origin), vec3ScalarMultiply(vec3FromInt3(level_dim), 0.5));
     Vec3 center_point_on_plane = vec3SetFloatAlongDirection(UP, water_plane_y, center_point); // TODO: need to change water mesh to be centered along y
-    Vec3 water_scale = { (float)level_dim.x, 1.0f, (float)level_dim.z }; // TODO: + 20
+    Vec3 water_scale = { (float)level_dim.x + 10.0f, 1.0f, (float)level_dim.z + 10.0f};
     drawAsset(MODEL_3D_WATER, WATER_3D, center_point_on_plane, water_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
 
     // draw selected entity

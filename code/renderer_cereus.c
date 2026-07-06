@@ -4758,6 +4758,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     {
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
+        rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
         color_blend_attachment_state.blendEnable = VK_FALSE;
 
         blend_attachments[0] = color_blend_attachment_state;
@@ -4773,6 +4776,9 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
     // define cube pipeline for reflection
     {
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
+
+        rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
+        rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
         color_blend_attachment_state.blendEnable = VK_FALSE;
 
@@ -4797,7 +4803,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         vkCreateGraphicsPipelines(vulkan_state.logical_device_handle, VK_NULL_HANDLE, 1, &ci, 0, &vulkan_state.cube_reflection_pipeline);
     }
 
-    // define model pipeline: depth on, write to stencil 2.
+    // define model pipeline
     {
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
