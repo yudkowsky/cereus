@@ -382,7 +382,7 @@ const float GRAVITY = -0.03f;
 
 const float MAX_ANGULAR_VELOCITY = (TAU * 0.25f) / 10.0f; // last number is TURN_TIME
 const float MAX_POSITION_DIFFERENCE_ALLOWED_FOR_MOVEMENT = 0.4f;
-const float MAX_QUARTER_TURN_ANGLE_ALLOWED_FOR_MOVEMENT = 0.2f;
+const float MAX_QUARTER_TURN_ANGLE_ALLOWED_FOR_MOVEMENT = 0.15f;
 
 // discrete gameplay 
 const int32 TURN_TIME = 10;
@@ -408,9 +408,12 @@ const int32 MAX_SOURCE_COUNT = 32;
 // handle visual rotations
 const float MAX_BLUE_VISUAL_TIME = 100.0f;
 const float BLUE_ROTATION_SPEED = 3.0f; // radians / sec
-const float BLUE_ROTATION_ANGLE = 0.05f;
-const float BLUE_SETTLE_MULTIPLIER = 1.5f; // how much faster blue settles its rotation vs. goes into it
+const float BLUE_ROTATION_ANGLE = 0.12f;
+const float BLUE_ROTATION_ANGLE_MIRROR_SOURCE = 0.04f;
+const float BLUE_SETTLE_MULTIPLIER = 1.5f; // how much faster blue settles its rotation vs. enters it
 
+// handle visual tilt on push
+// TODO: unused at the moment
 const float VELOCITY_TO_TILT_RADIANS = 1.25f;
 const float MAX_TILT_PER_FRAME = 0.02f;
 const int32 SETTLE_TIME_FOR_EXTRA_PUSH = 15;
@@ -5290,7 +5293,8 @@ GameResult gameFrame(double delta_time, Input* input)
                         float smooth_t = t * t * (3.0f - 2.0f * t);
                         float sweep = (float)global_time * BLUE_ROTATION_SPEED + (float)((e->id * 4) % 11);
                         Vec3 tilt_axis = { cosf(sweep), 0.0f, sinf(sweep) };
-                        draw_rotation = quaternionMultiply(quaternionFromAxis(tilt_axis, BLUE_ROTATION_ANGLE * smooth_t), draw_rotation);
+                        float rotation_angle = (draw_tile == TILE_TYPE_MIRROR || isSource(draw_tile)) ? BLUE_ROTATION_ANGLE_MIRROR_SOURCE : BLUE_ROTATION_ANGLE;
+                        draw_rotation = quaternionMultiply(quaternionFromAxis(tilt_axis, rotation_angle * smooth_t), draw_rotation);
                     }
                     drawAsset(getModelId(draw_tile), MODEL_3D, vec3Add(e->position, e->displacement), DEFAULT_SCALE, draw_rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
                     break;
