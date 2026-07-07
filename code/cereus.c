@@ -3462,6 +3462,8 @@ void doPhysicsTick()
         }
     }
 
+    updateLaserBuffer();
+
     // reset fall_handled for all falling_entities 
     FOR(group_index, 3) FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT) interactible_entity_groups[group_index][entity_index].fall_handled = false;
     player->fall_handled = false;
