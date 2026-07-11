@@ -48,7 +48,7 @@ typedef enum
     TILE_TYPE_BOX,
     TILE_TYPE_PLAYER,
     TILE_TYPE_MIRROR,
-    TILE_TYPE_GLASS,
+    TILE_TYPE_GLASS, // unused
     TILE_TYPE_PACK,
     TILE_TYPE_WATER,
     TILE_TYPE_WIN_BLOCK,
@@ -134,6 +134,7 @@ typedef enum
     PROGRESS_RED_BLUE,
     PROGRESS_MAGENTA,
     PROGRESS_BALANCE,
+    PROGRESS_BALANCE_2,
 }
 GameProgress;
 
@@ -208,7 +209,7 @@ typedef struct Entity
 Entity;
 
 #define MAX_ENTITY_INSTANCE_COUNT 64
-#define ENTITY_TYPES 6
+#define ENTITY_TYPES 5
 
 // the approx. 2MB buffer is dense representation of the level encoded by coords
 typedef struct WorldState
@@ -218,7 +219,6 @@ typedef struct WorldState
     Entity boxes[MAX_ENTITY_INSTANCE_COUNT];
     Entity mirrors[MAX_ENTITY_INSTANCE_COUNT];
     Entity sources[MAX_ENTITY_INSTANCE_COUNT];
-    Entity glass_blocks[MAX_ENTITY_INSTANCE_COUNT];
     Entity win_blocks[MAX_ENTITY_INSTANCE_COUNT];
     Entity locked_blocks[MAX_ENTITY_INSTANCE_COUNT];
 
@@ -272,7 +272,12 @@ typedef struct TemporaryState
     bool pack_attached;
     int32 player_hit_by_red;
     int32 blue_gameplay_timer;
+
+    // TODO: should probably not be reset every time temp state is reset, e.g. on undo, because should still settle. maybe keep a VisualEffects?
+    // will probably be the same with some particle effects / water peturbations, probably.
+    // this would then get get reset on level transitions, but not on undos. probably some on restarts, but not others?
     float blue_visual_timer;
+    float flash_on_detached_exit_timer;
 }
 TemporaryState;
 
@@ -412,6 +417,9 @@ const float BLUE_ROTATION_ANGLE = 0.12f;
 const float BLUE_ROTATION_ANGLE_MIRROR_SOURCE = 0.04f;
 const float BLUE_SETTLE_MULTIPLIER = 1.5f; // how much faster blue settles its rotation vs. enters it
 
+// some animation when trying to exit with pack detached
+const float FLASH_ON_DETACHED_EXIT_TIME = 40;
+
 // handle visual tilt on push
 // TODO: unused at the moment
 const float VELOCITY_TO_TILT_RADIANS = 1.25f;
@@ -434,7 +442,6 @@ const int32 PLAYER_ID = 1;
 const int32 PACK_ID   = 2;
 const int32 ID_OFFSET_BOX          = 100 * 1;
 const int32 ID_OFFSET_MIRROR       = 100 * 2;
-const int32 ID_OFFSET_GLASS        = 100 * 3;
 const int32 ID_OFFSET_SOURCE       = 100 * 4;
 const int32 ID_OFFSET_WIN_BLOCK    = 100 * 7;
 const int32 ID_OFFSET_LOCKED_BLOCK = 100 * 8;
@@ -551,7 +558,7 @@ Rgba8 water_texture_scratch[WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE] = {0};
 
 Entity* player = &world_state.player;
 Entity* pack = &world_state.pack;
-Entity* all_entity_groups[6] = { world_state.boxes, world_state.mirrors, world_state.locked_blocks, world_state.glass_blocks, world_state.sources, world_state.win_blocks };
+Entity* all_entity_groups[5] = { world_state.boxes, world_state.mirrors, world_state.locked_blocks, world_state.sources, world_state.win_blocks };
 Entity* interactible_entity_groups[3] = { world_state.boxes, world_state.mirrors, world_state.sources };
 Entity* lockable_entity_groups[4] = { world_state.boxes, world_state.mirrors, world_state.win_blocks, world_state.sources };
 
@@ -934,7 +941,6 @@ TileType getTileTypeFromId(int32 id)
     }
     else if (check == ID_OFFSET_BOX)          return TILE_TYPE_BOX;
     else if (check == ID_OFFSET_MIRROR)       return TILE_TYPE_MIRROR;
-    else if (check == ID_OFFSET_GLASS)        return TILE_TYPE_GLASS;
     else if (check == ID_OFFSET_WIN_BLOCK)    return TILE_TYPE_WIN_BLOCK;
     else if (check == ID_OFFSET_LOCKED_BLOCK) return TILE_TYPE_LOCKED_BLOCK;
     else return TILE_TYPE_NONE;
@@ -1081,7 +1087,6 @@ Entity* getEntityAtCoords(Int3 coords)
     {
         case TILE_TYPE_BOX:          entity_group = world_state.boxes;         break;
         case TILE_TYPE_MIRROR:       entity_group = world_state.mirrors;       break;
-        case TILE_TYPE_GLASS:        entity_group = world_state.glass_blocks;  break;
         case TILE_TYPE_WIN_BLOCK:    entity_group = world_state.win_blocks;    break;
         case TILE_TYPE_LOCKED_BLOCK: entity_group = world_state.locked_blocks; break;
         case TILE_TYPE_PLAYER: return &world_state.player;
@@ -1107,7 +1112,6 @@ Entity* getEntityFromId(int32 id)
         int32 switch_value =  ((id / 100) * 100);
         if      (switch_value == ID_OFFSET_BOX)          entity_group = world_state.boxes; 
         else if (switch_value == ID_OFFSET_MIRROR)       entity_group = world_state.mirrors;
-        else if (switch_value == ID_OFFSET_GLASS)        entity_group = world_state.glass_blocks;
         else if (switch_value >= ID_OFFSET_SOURCE && switch_value < ID_OFFSET_WIN_BLOCK) entity_group = world_state.sources;
         else if (switch_value == ID_OFFSET_WIN_BLOCK)    entity_group = world_state.win_blocks;
         else if (switch_value == ID_OFFSET_LOCKED_BLOCK) entity_group = world_state.locked_blocks;
@@ -1135,7 +1139,6 @@ int32 entityIdOffset(Entity *entity, Color color)
 {
     if      (entity == world_state.boxes)         return ID_OFFSET_BOX;
     else if (entity == world_state.mirrors)       return ID_OFFSET_MIRROR;
-    else if (entity == world_state.glass_blocks)  return ID_OFFSET_GLASS;
     else if (entity == world_state.win_blocks)    return ID_OFFSET_WIN_BLOCK;
     else if (entity == world_state.locked_blocks) return ID_OFFSET_LOCKED_BLOCK;
     else if (entity == world_state.sources)       return ID_OFFSET_SOURCE + ((color - 1) * 100);
@@ -1394,7 +1397,7 @@ void loadLockedInfoPaths(FILE* file)
         if (fread(&path, 1, 64, file) != 64) return;
         path[63] = '\0';
 
-        FOR(group_index, 6)
+        FOR(group_index, 5)
         {
             FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
             {
@@ -1546,7 +1549,7 @@ void writeBaseLevelInfo(char* folder_path)
         writeWinBlockToFile(file, wb);
     }
 
-    FOR(group_index, 6)
+    FOR(group_index, 5)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
@@ -1690,7 +1693,6 @@ SpriteId getSprite2DId(TileType tile)
         case TILE_TYPE_BOX:          return SPRITE_2D_BOX;
         case TILE_TYPE_PLAYER:       return SPRITE_2D_PLAYER;
         case TILE_TYPE_MIRROR:       return SPRITE_2D_MIRROR;
-        case TILE_TYPE_GLASS:        return SPRITE_2D_GLASS;
         case TILE_TYPE_PACK:         return SPRITE_2D_PACK;
         case TILE_TYPE_WATER:        return SPRITE_2D_WATER;
         case TILE_TYPE_WIN_BLOCK:    return SPRITE_2D_WIN_BLOCK;
@@ -1715,7 +1717,6 @@ SpriteId getCube3DId(TileType tile)
         case TILE_TYPE_BOX:          return CUBE_3D_BOX;
         case TILE_TYPE_PLAYER:       return CUBE_3D_PLAYER;
         case TILE_TYPE_MIRROR:       return CUBE_3D_MIRROR;
-        case TILE_TYPE_GLASS:        return CUBE_3D_GLASS;
         case TILE_TYPE_PACK:         return CUBE_3D_PACK;
         case TILE_TYPE_WATER:        return CUBE_3D_WATER;
         case TILE_TYPE_WIN_BLOCK:    return CUBE_3D_WIN_BLOCK;
@@ -1741,7 +1742,6 @@ SpriteId getModelId(TileType tile)
         case TILE_TYPE_BOX:          return MODEL_3D_BOX;
         case TILE_TYPE_PLAYER:       return MODEL_3D_PLAYER;
         case TILE_TYPE_MIRROR:       return MODEL_3D_MIRROR;
-        case TILE_TYPE_GLASS:        return MODEL_3D_GLASS;
         case TILE_TYPE_PACK:         return MODEL_3D_PACK;
         case TILE_TYPE_WATER:        return MODEL_3D_WATER;
         case TILE_TYPE_WIN_BLOCK:    return MODEL_3D_WIN_BLOCK;
@@ -2475,16 +2475,6 @@ void updateLaserBuffer()
         temp_state.blue_gameplay_timer = MAX_BLUE_GAMEPLAY_TIME;
         temp_state.player_hit_by_red = true;
     }
-
-    if (temp_state.blue_gameplay_timer == MAX_BLUE_GAMEPLAY_TIME)
-    {
-        if (temp_state.blue_visual_timer < MAX_BLUE_VISUAL_TIME) temp_state.blue_visual_timer++;
-    }
-    else
-    {
-        if (temp_state.blue_visual_timer > 0) temp_state.blue_visual_timer -= BLUE_SETTLE_MULTIPLIER;
-        if (temp_state.blue_visual_timer < 0) temp_state.blue_visual_timer = 0;
-    }
 }
 
 // LOCKED TILES
@@ -2643,7 +2633,6 @@ void initializeLevel(char* level_name)
         TileType buffer_contents = world_state.buffer[buffer_index];
         if      (buffer_contents == TILE_TYPE_BOX)          entity_group = world_state.boxes;
         else if (buffer_contents == TILE_TYPE_MIRROR)       entity_group = world_state.mirrors;
-        else if (buffer_contents == TILE_TYPE_GLASS)        entity_group = world_state.glass_blocks;
         else if (buffer_contents == TILE_TYPE_WIN_BLOCK)    entity_group = world_state.win_blocks;
         else if (buffer_contents == TILE_TYPE_LOCKED_BLOCK) entity_group = world_state.locked_blocks;
         else if (isSource(buffer_contents))                 entity_group = world_state.sources;
@@ -2922,12 +2911,11 @@ void recordLevelChangeForUndo(char* current_level_name)
     recordEntityDelta(&world_state.pack);
     entity_count += 2;
 
-    Entity* groups[5] = { world_state.boxes, world_state.mirrors, world_state.sources, world_state.win_blocks, world_state.locked_blocks };
     FOR(group_index, 5)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
         {
-            Entity* e = &groups[group_index][entity_index];
+            Entity* e = &all_entity_groups[group_index][entity_index];
             if (!e->in_use) continue;
             recordEntityDelta(e);
             entity_count++;
@@ -3211,6 +3199,17 @@ Vec3 getPositionBehindPlayer()
 {
     Vec3 rotated_offset = vec3RotateByQuaternion(vec3FromInt3(AXIS_Z), player->rotation); // AXIS_Z because pack is 0, 0, 1 relative to player 0, 0, 0, when player has no rotation.
     return vec3Add(player->position, rotated_offset);
+}
+
+Vec4 getBlueTilt(Entity* e)
+{
+    float t = (float)temp_state.blue_visual_timer / (float)MAX_BLUE_VISUAL_TIME;
+    float smooth_t = t * t * (3.0f - 2.0f * t);
+    float sweep = (float)global_time * BLUE_ROTATION_SPEED + (float)((e->id * 4) % 11);
+    Vec3 tilt_axis = { cosf(sweep), 0.0f, sinf(sweep) };
+    TileType type = getTileTypeFromId(e->id);
+    float rotation_angle = (type == TILE_TYPE_MIRROR || isSource(type)) ? BLUE_ROTATION_ANGLE_MIRROR_SOURCE : BLUE_ROTATION_ANGLE;
+    return quaternionMultiply(quaternionFromAxis(tilt_axis, rotation_angle * smooth_t), e->rotation);
 }
 
 void applyTiltFromVector(Entity* e, Vec3 tilt_vector)
@@ -4058,7 +4057,6 @@ GameResult gameFrame(double delta_time, Input* input)
                         {
                             case TILE_TYPE_BOX:          entity_group = world_state.boxes;         break;
                             case TILE_TYPE_MIRROR:       entity_group = world_state.mirrors;       break;
-                            case TILE_TYPE_GLASS:        entity_group = world_state.glass_blocks;  break;
                             case TILE_TYPE_WIN_BLOCK:    entity_group = world_state.win_blocks;    break;
                             case TILE_TYPE_LOCKED_BLOCK: entity_group = world_state.locked_blocks; break;
                             default: entity_group = 0;
@@ -4704,7 +4702,6 @@ GameResult gameFrame(double delta_time, Input* input)
                                 }
                                 break;
                                 case TILE_TYPE_BOX:
-                                case TILE_TYPE_GLASS:
                                 case TILE_TYPE_PACK:
                                 case TILE_TYPE_MIRROR:
                                 case TILE_TYPE_SOURCE_RED:
@@ -4868,11 +4865,10 @@ GameResult gameFrame(double delta_time, Input* input)
                 if (editor_state.editor_mode != EDITOR_MODE_NONE) do_win_block_usage = false;
                 if (wb->locked) do_win_block_usage = false;
                 if (wb->next_level[0] == 0) do_win_block_usage = false; // don't go through if there is no next level here yet
-
                 if (!temp_state.pack_attached)
                 {
-                    // TODO: flash red or some other animation showing this don't fly
-                    DEBUG_POPUP(POPUP_TYPE_NONE, "backpack must be attached to finish a level!");
+                    temp_state.flash_on_detached_exit_timer = FLASH_ON_DETACHED_EXIT_TIME;
+                    //DEBUG_POPUP(POPUP_TYPE_NONE, "backpack must be attached to finish a level!");
                     do_win_block_usage = false;
                 }
 
@@ -4931,7 +4927,7 @@ GameResult gameFrame(double delta_time, Input* input)
             }
         }
 
-        // MISC STUFF
+        // MISC STUFF AFTER PHYSICS LOOP
 
         // reset undos performed if no longer holding z undos
         if (undos_performed > 0 && !(input->keys_held & KEY_Z)) undos_performed = 0;
@@ -4944,6 +4940,23 @@ GameResult gameFrame(double delta_time, Input* input)
         else 
         {
             ow_player_coords_for_offset = (Int3){0};
+        }
+
+        // handle visual timers (ones that should only be affected once per frame, i.e. not touched by doPhysicsTick)
+        {
+            // blue visual timer
+            if (temp_state.blue_gameplay_timer == MAX_BLUE_GAMEPLAY_TIME)
+            {
+                if (temp_state.blue_visual_timer < MAX_BLUE_VISUAL_TIME) temp_state.blue_visual_timer++;
+            }
+            else
+            {
+                if (temp_state.blue_visual_timer > 0) temp_state.blue_visual_timer -= BLUE_SETTLE_MULTIPLIER;
+                if (temp_state.blue_visual_timer < 0) temp_state.blue_visual_timer = 0;
+            }
+
+            // flash on detach exit
+            if (temp_state.flash_on_detached_exit_timer > 0) temp_state.flash_on_detached_exit_timer--;
         }
 
         // update restart coords based on current coords of the player, and also update game progress if this is relevant
@@ -4978,10 +4991,15 @@ GameResult gameFrame(double delta_time, Input* input)
             if (game_progress < PROGRESS_MAGENTA) game_progress = PROGRESS_MAGENTA;
             overworld_restart_coords = (Int3){ 58, 258, 154 };
         }
-        else
+        else if (player->coords.z > 120)
         {
             if (game_progress < PROGRESS_BALANCE) game_progress = PROGRESS_BALANCE;
             overworld_restart_coords = (Int3){ 58, 258, 137 };
+        }
+        else
+        {
+            if (game_progress < PROGRESS_BALANCE_2) game_progress = PROGRESS_BALANCE_2;
+            overworld_restart_coords = (Int3){ 58, 258, 120 };
         }
 
         // perform alt <-> main camera interpolation
@@ -5268,37 +5286,38 @@ GameResult gameFrame(double delta_time, Input* input)
                 case TILE_TYPE_LOCKED_BLOCK:
                 {
                     drawAsset(CUBE_3D_LOCKED_BLOCK, CUBE_3D, vec3FromInt3(bufferIndexToCoords(tile_index)), DEFAULT_SCALE, composeRotation(world_state.buffer[tile_index + 1], MIRROR_SIDE, 0.0f, IDENTITY_QUATERNION), (Vec4){0}, (Vec4){0}, (Vec4){0});
-                    break;
                 }
+                break;
                 case TILE_TYPE_PLAYER:
                 {
-                    Vec4 player_color = { (float)temp_state.player_hit_by_red, 0.0f, (float)(temp_state.blue_gameplay_timer > 0) };
+                    Vec4 player_color = { (float)temp_state.player_hit_by_red, 0.0f, (float)(temp_state.blue_gameplay_timer > 0), 0.0f };
                     drawAsset(MODEL_3D_PLAYER, MODEL_3D, player->position, DEFAULT_SCALE, player->rotation, player_color, (Vec4){0}, (Vec4){0});
-                    break;
                 }
+                break;
+                case TILE_TYPE_PACK:
+                {
+                    Vec4 draw_rotation = pack->rotation;
+                    if (temp_state.blue_visual_timer > 0 && !temp_state.pack_attached) draw_rotation = getBlueTilt(e);
+
+                    Vec4 pack_color = { temp_state.flash_on_detached_exit_timer / FLASH_ON_DETACHED_EXIT_TIME, 0.0f, 0.0f, 0.0f };
+
+                    drawAsset(MODEL_3D_PACK, MODEL_3D, pack->position, DEFAULT_SCALE, draw_rotation, pack_color, (Vec4){0}, (Vec4){0});
+                }
+                break;
                 case TILE_TYPE_WIN_BLOCK:
                 {
                     if (in_overworld && findInSolvedLevels(e->next_level) != -1) drawAsset(CUBE_3D_WON_BLOCK, CUBE_3D, e->position, DEFAULT_SCALE, e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
                     else drawAsset(MODEL_3D_WIN_BLOCK, MODEL_3D, e->position, DEFAULT_SCALE, e->rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
-                    break;
                 }
+                break;
                 default:
                 {
                     Vec4 draw_rotation = e->rotation;
-                    bool do_blue_tilt = temp_state.blue_visual_timer > 0;
-                    if (draw_tile == TILE_TYPE_PACK && temp_state.pack_attached) do_blue_tilt = false;
-                    if (do_blue_tilt)
-                    {
-                        float t = (float)temp_state.blue_visual_timer / (float)MAX_BLUE_VISUAL_TIME;
-                        float smooth_t = t * t * (3.0f - 2.0f * t);
-                        float sweep = (float)global_time * BLUE_ROTATION_SPEED + (float)((e->id * 4) % 11);
-                        Vec3 tilt_axis = { cosf(sweep), 0.0f, sinf(sweep) };
-                        float rotation_angle = (draw_tile == TILE_TYPE_MIRROR || isSource(draw_tile)) ? BLUE_ROTATION_ANGLE_MIRROR_SOURCE : BLUE_ROTATION_ANGLE;
-                        draw_rotation = quaternionMultiply(quaternionFromAxis(tilt_axis, rotation_angle * smooth_t), draw_rotation);
-                    }
+                    if (temp_state.blue_visual_timer > 0) draw_rotation = getBlueTilt(e);
+
                     drawAsset(getModelId(draw_tile), MODEL_3D, vec3Add(e->position, e->displacement), DEFAULT_SCALE, draw_rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
-                    break;
                 }
+                break;
             }
         }
         else
@@ -5307,10 +5326,10 @@ GameResult gameFrame(double delta_time, Input* input)
         }
     }
 
-    // draw water plane as scaled single quad. drawing at water_plane_y, with dims level_dim.x * level_dim.z, +10 in all directions
+    // draw water plane as scaled single quad. drawing at water_plane_y, with dims level_dim.x * level_dim.z, +20 in all directions
     Vec3 center_point = vec3Add(vec3FromInt3(level_origin), vec3ScalarMultiply(vec3FromInt3(level_dim), 0.5));
     Vec3 center_point_on_plane = vec3SetFloatAlongDirection(UP, water_plane_y, center_point); // TODO: need to change water mesh to be centered along y
-    Vec3 water_scale = { (float)level_dim.x + 10.0f, 1.0f, (float)level_dim.z + 10.0f};
+    Vec3 water_scale = { (float)level_dim.x + 40.0f, 1.0f, (float)level_dim.z + 40.0f};
     drawAsset(MODEL_3D_WATER, WATER_3D, center_point_on_plane, water_scale, IDENTITY_QUATERNION, (Vec4){0}, (Vec4){0}, (Vec4){0});
 
     // draw selected entity

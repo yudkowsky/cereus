@@ -4778,7 +4778,7 @@ void vulkanInitialize(RendererPlatformHandles platform_handles, DisplayInfo disp
         resetPipelineStates(&color_blend_attachment_state, &depth_stencil_state_creation_info, &rasterization_state_creation_info);
 
         rasterization_state_creation_info.cullMode = VK_CULL_MODE_BACK_BIT;
-        rasterization_state_creation_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        rasterization_state_creation_info.frontFace = VK_FRONT_FACE_CLOCKWISE;
 
         color_blend_attachment_state.blendEnable = VK_FALSE;
 
