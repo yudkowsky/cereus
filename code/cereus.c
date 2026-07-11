@@ -4951,7 +4951,7 @@ GameResult gameFrame(double delta_time, Input* input)
         else if (player->coords.z > 120) overworldPositionState(PROGRESS_BALANCE,   (Int3){ 58, 258, 137 }, 0.0f);
         else if (player->coords.z > 103) overworldPositionState(PROGRESS_BALANCE_2, (Int3){ 58, 258, 120 }, 0.0f);
         else if (player->coords.z > 86)  overworldPositionState(PROGRESS_LADDER,    (Int3){ 58, 258, 103 }, 3.0f);
-        else                             overworldPositionState(PROGRESS_BLUE_VOID, (Int3){ 58, 258, 86  }, 3.0f);
+        else                             overworldPositionState(PROGRESS_BLUE_VOID, (Int3){ 58, 261, 86  }, 3.0f);
 
         // perform alt <-> main camera interpolation
         if (camera_mode == MAIN_TO_ALT)
