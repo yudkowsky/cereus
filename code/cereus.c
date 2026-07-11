@@ -21,24 +21,6 @@ __declspec(dllimport) void __stdcall OutputDebugStringA(const char* lpOutputStri
 
 // GLOBAL STATE
 
-// TODO:
-// about tile_type_water: should get rid of this, and instead just have the entire bottom of the world be water.
-// then objects hit OOB when falling into water, which is fine because that's treated as WALL.
-// would need better system for defining level_dim: probably easiest is just 'always make larger' during editor, and then
-// bind 'snap to smallest possible size' to some key.
-//
-// - water could just be a single quad, instead of x*z quads
-// - wouldn't need to draw all those cubes at bottom of world (>90% of cubes in levels)
-// - level file sizes get even smaller
-// - level dim would get smaller too, meaning less gameplay time on looping through 3d array
-//
-// would also need to handle drawing the bottom of the water - currently done with many cubes. would eventually just be part
-// of the level .glb, but would require better temporary solution
-//
-// additionally need to think about water actually being larger than level_dim (that's a large part of the point) - but don't want
-// it to be laggy in editor. so maybe just extend water quad +10 on each side, or something. would need to also be able to paint
-// into area outside level dim.
-
 typedef enum
 {
     TILE_TYPE_NONE = 0,
@@ -200,7 +182,7 @@ typedef struct Entity
     Color color;
 
     // for win blocks
-    char next_level[64]; // NOTE: make level names an enum so don't need to carry around 64 * char * 2 per entity
+    char next_level[64]; // TODO: make level names an enum so don't need to carry around 64 * char * 2 per entity
 
     // for locked blocks (and other entities that are locked)
     bool locked;
@@ -222,11 +204,11 @@ typedef struct WorldState
     Entity win_blocks[MAX_ENTITY_INSTANCE_COUNT];
     Entity locked_blocks[MAX_ENTITY_INSTANCE_COUNT];
 
-    uint8 buffer[2000000]; // 2 bytes info per tile 
+    uint8 buffer[2000000]; // 2 bytes info per tile TODO: can maybe decrease this somewhat with new level dim system
 
     char level_name[64];
 
-    char solved_levels[64][64];
+    char solved_levels[64][64]; // TODO: should this really be part of WorldState? will never get rid of stuff from this array
 }
 WorldState;
 
@@ -272,14 +254,17 @@ typedef struct TemporaryState
     bool pack_attached;
     int32 player_hit_by_red;
     int32 blue_gameplay_timer;
+}
+TemporaryState;
 
-    // TODO: should probably not be reset every time temp state is reset, e.g. on undo, because should still settle. maybe keep a VisualEffects?
-    // will probably be the same with some particle effects / water peturbations, probably.
-    // this would then get get reset on level transitions, but not on undos. probably some on restarts, but not others?
+// doesn't want to get reset every time temp state is reset, e.g. on undo
+// this gets reset on level transitions, but not on undos or restarts
+typedef struct VisualEffects
+{
     float blue_visual_timer;
     float flash_on_detached_exit_timer;
 }
-TemporaryState;
+VisualEffects;
 
 // EDITOR STRUCTS
 
@@ -545,13 +530,14 @@ int32 camera_target_plane = 0; // y level of xz plane which calculates targeted 
 // general state
 WorldState world_state = {0};
 TemporaryState temp_state = {0};
+VisualEffects visual_effects = {0};
 GameProgress game_progress = PROGRESS_START;
 Int3 level_dim = {0};
 Int3 level_origin = {0};
 Int3 overworld_restart_coords = {0};
 bool in_overworld = true;
 
-float water_plane_y = 0.0f;
+float water_plane_y = 0.0f; // NOTE: currently is never unset from 0. which is fine, probably
 Vec3 sun_direction = {0};
 
 Rgba8 water_texture_scratch[WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE] = {0};
@@ -999,7 +985,7 @@ bool reindexBuffer(Int3 new_origin, Int3 new_dim)
     memcpy(world_state.buffer, temp_buffer_array, new_total_tiles * 2);
     memset(temp_buffer_array, 0, new_total_tiles*2);
 
-    // reindex water texture TODO: should be done wherever water is now handled; level_dim now not same as water texture size
+    // reindex water texture
     int32 old_width  = level_dim.x * WATER_PAINT_RESOLUTION;
     int32 old_height = level_dim.z * WATER_PAINT_RESOLUTION;
     if (old_width  > WATER_PAINT_MAX_SIDE) old_width  = WATER_PAINT_MAX_SIDE;
@@ -1031,22 +1017,6 @@ bool reindexBuffer(Int3 new_origin, Int3 new_dim)
     level_origin = new_origin;
     level_dim = new_dim;
     return true;
-}
-
-// sets water plane to lowest water
-// TODO: should just set this to the lowest y level in the level. right now can't do that because I still have
-//       the tile_type_water cube around, which is there because i want the underwater grid lines.
-//
-// NOTE: currently no support for multiple water planes. non-trivial, because two planes of reflection -> two extra cameras.
-//       unsure if I even want this yet, so will wait
-void recalculateWaterPlane()
-{
-    for (int32 buffer_index = 0; buffer_index < 2 * level_dim.x*level_dim.y*level_dim.z; buffer_index += 2)
-    {
-        if (world_state.buffer[buffer_index] != TILE_TYPE_WATER) continue;
-        water_plane_y = bufferIndexToCoords(buffer_index).y + 1.4f;
-        return;
-    }
 }
 
 // ENTITY STUFF
@@ -1209,7 +1179,6 @@ int32 setEntityInstanceInGroup(Entity* entity_group, Int3 coords, Direction dire
     return 0;
 }
 
-// TODO: maybe direction should be first here?
 Int3 getNextCoords(Int3 coords, Direction direction)
 {
     switch (direction)
@@ -1431,7 +1400,6 @@ void loadWaterInfo(FILE* file)
     int32 positions[64] = {0};
     if (getCountAndPositionOfChunk(file, WATER_INFO_CHUNK_TAG, positions) != 1)
     {
-        recalculateWaterPlane();
         return;
     }
     fseek(file, positions[0] + 8, SEEK_SET);
@@ -2516,6 +2484,39 @@ void updateLockedTiles(bool do_unlocks)
     }
 }
 
+// MOVEMENT STATE
+
+void clearMovementState(Entity* e)
+{
+    e->position = vec3FromInt3(e->coords);
+    e->displacement = (Vec3){0};
+    e->yaw_offset = 0.0f;
+    e->tilt_angle = 0.0f;
+    e->visual_tilt = IDENTITY_QUATERNION;
+    e->rotation = composeRotation(e->direction, e->mirror_orientation, 0.0f, IDENTITY_QUATERNION);
+    e->velocity = (Vec3){0};
+    e->settle_timer = 0;
+    e->settle_velocity = (Vec3){0};
+    e->settle_do_extra_push = false;
+    e->moving_direction = NO_DIRECTION;
+    e->falling = false;
+    e->move_type = MOVE_TYPE_NONE;
+}
+
+void clearAllMovementState()
+{
+    FOR(group_index, 3)
+    {
+        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
+        {
+            Entity* e = &interactible_entity_groups[group_index][entity_index];
+            clearMovementState(e);
+        }
+    }
+    clearMovementState(player);
+    clearMovementState(pack);
+}
+
 // TEXT INPUT
 
 void updateTextInput(Input *input)
@@ -2582,6 +2583,9 @@ void initializeLevel(char* level_name)
 
     memset(world_state.boxes, 0, sizeof(world_state.boxes) * ENTITY_TYPES + sizeof(world_state.buffer)); 
     memset(&temp_state, 0, sizeof(TemporaryState));
+    memset(&visual_effects, 0, sizeof(VisualEffects));
+    clearMovementState(player);
+    clearMovementState(pack);
 
     if (strcmp(world_state.level_name, "overworld") == 0) in_overworld = true;
     else in_overworld = false;
@@ -2942,48 +2946,13 @@ void recordLevelChangeForUndo(char* current_level_name)
     //writeUndoBufferToFile();
 }
 
-void clearMovementState(Entity* e)
-{
-    e->position = vec3FromInt3(e->coords);
-    e->displacement = (Vec3){0};
-    e->yaw_offset = 0.0f;
-    e->tilt_angle = 0.0f;
-    e->visual_tilt = IDENTITY_QUATERNION;
-    e->rotation = composeRotation(e->direction, e->mirror_orientation, 0.0f, IDENTITY_QUATERNION);
-    e->velocity = (Vec3){0};
-    e->settle_timer = 0;
-    e->settle_velocity = (Vec3){0};
-    e->settle_do_extra_push = false;
-    e->moving_direction = NO_DIRECTION;
-    e->falling = false;
-    e->move_type = MOVE_TYPE_NONE;
-}
-
-void zeroAnimations()
-{
-    // set all entities velocity to zero, and rotation to equal their direction
-    FOR(group_index, 3)
-    {
-        FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
-        {
-            Entity* e = &interactible_entity_groups[group_index][entity_index];
-            clearMovementState(e);
-        }
-    }
-    clearMovementState(player);
-    clearMovementState(pack);
-
-    memset(&temp_state, 0, sizeof(TemporaryState));
-}
-
 // returns false only if already at oldest action
 bool performUndo()
 {
     if (undo_buffer.header_count == 0) return false;
 
-    // clear animations + trailing hitboxes
-    memset(temp_state.trailing_hitboxes, 0, sizeof(temp_state.trailing_hitboxes));
-    zeroAnimations();
+    clearAllMovementState();
+    memset(&temp_state, 0, sizeof(TemporaryState));
 
     // get most recent action header
     uint32 header_index = (undo_buffer.header_write_pos + MAX_UNDO_ACTIONS - 1) % MAX_UNDO_ACTIONS;
@@ -3203,7 +3172,7 @@ Vec3 getPositionBehindPlayer()
 
 Vec4 getBlueTilt(Entity* e)
 {
-    float t = (float)temp_state.blue_visual_timer / (float)MAX_BLUE_VISUAL_TIME;
+    float t = (float)visual_effects.blue_visual_timer / (float)MAX_BLUE_VISUAL_TIME;
     float smooth_t = t * t * (3.0f - 2.0f * t);
     float sweep = (float)global_time * BLUE_ROTATION_SPEED + (float)((e->id * 4) % 11);
     Vec3 tilt_axis = { cosf(sweep), 0.0f, sinf(sweep) };
@@ -4071,7 +4040,6 @@ GameResult gameFrame(double delta_time, Input* input)
                             setTileDirection(NORTH, raycast_output.place_coords, 0);
                         }
                     }
-                    recalculateWaterPlane();
                 }
                 else
                 {
@@ -4169,7 +4137,6 @@ GameResult gameFrame(double delta_time, Input* input)
                     if (wb->next_level[0] != 0)
                     {
                         levelChangePrep(wb->next_level, false);
-                        zeroAnimations();
                         initializeLevel(wb->next_level);
                         writeSolvedLevelsToFile();
                         updateLockedTiles(false);
@@ -4583,13 +4550,16 @@ GameResult gameFrame(double delta_time, Input* input)
                     recordActionForUndo(&world_state);
                 }
                 createDebugPopup("level restarted", POPUP_TYPE_NONE);
-                zeroAnimations();
                 Camera save_camera = camera;
 
+                // init level, persist visual effects
+                VisualEffects persist_visual_effects = visual_effects;
                 initializeLevel(world_state.level_name);
+                visual_effects = persist_visual_effects;
 
                 if (in_overworld)
                 {
+                    // TODO: reset only part of the overworld
                     // copy world state from overworld_zero, but save the solved levels and overwrite the level name
                     char persist_solved_levels[64][64];
                     memcpy(&persist_solved_levels, &world_state.solved_levels, sizeof(char) * 64 * 64);
@@ -4867,7 +4837,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 if (wb->next_level[0] == 0) do_win_block_usage = false; // don't go through if there is no next level here yet
                 if (!temp_state.pack_attached)
                 {
-                    temp_state.flash_on_detached_exit_timer = FLASH_ON_DETACHED_EXIT_TIME;
+                    visual_effects.flash_on_detached_exit_timer = FLASH_ON_DETACHED_EXIT_TIME;
                     //DEBUG_POPUP(POPUP_TYPE_NONE, "backpack must be attached to finish a level!");
                     do_win_block_usage = false;
                 }
@@ -4895,7 +4865,7 @@ GameResult gameFrame(double delta_time, Input* input)
                     strcpy(from_level, world_state.level_name);
                     levelChangePrep(wb->next_level, true);
                     initializeLevel(wb->next_level);
-                    zeroAnimations();
+                    memset(&temp_state, 0, sizeof(TemporaryState));
 
                     if (in_overworld)
                     {
@@ -4947,16 +4917,16 @@ GameResult gameFrame(double delta_time, Input* input)
             // blue visual timer
             if (temp_state.blue_gameplay_timer == MAX_BLUE_GAMEPLAY_TIME)
             {
-                if (temp_state.blue_visual_timer < MAX_BLUE_VISUAL_TIME) temp_state.blue_visual_timer++;
+                if (visual_effects.blue_visual_timer < MAX_BLUE_VISUAL_TIME) visual_effects.blue_visual_timer++;
             }
             else
             {
-                if (temp_state.blue_visual_timer > 0) temp_state.blue_visual_timer -= BLUE_SETTLE_MULTIPLIER;
-                if (temp_state.blue_visual_timer < 0) temp_state.blue_visual_timer = 0;
+                if (visual_effects.blue_visual_timer > 0) visual_effects.blue_visual_timer -= BLUE_SETTLE_MULTIPLIER;
+                if (visual_effects.blue_visual_timer < 0) visual_effects.blue_visual_timer = 0;
             }
 
             // flash on detach exit
-            if (temp_state.flash_on_detached_exit_timer > 0) temp_state.flash_on_detached_exit_timer--;
+            if (visual_effects.flash_on_detached_exit_timer > 0) visual_effects.flash_on_detached_exit_timer--;
         }
 
         // update restart coords based on current coords of the player, and also update game progress if this is relevant
@@ -5297,9 +5267,9 @@ GameResult gameFrame(double delta_time, Input* input)
                 case TILE_TYPE_PACK:
                 {
                     Vec4 draw_rotation = pack->rotation;
-                    if (temp_state.blue_visual_timer > 0 && !temp_state.pack_attached) draw_rotation = getBlueTilt(e);
+                    if (visual_effects.blue_visual_timer > 0 && !temp_state.pack_attached) draw_rotation = getBlueTilt(e);
 
-                    Vec4 pack_color = { temp_state.flash_on_detached_exit_timer / FLASH_ON_DETACHED_EXIT_TIME, 0.0f, 0.0f, 0.0f };
+                    Vec4 pack_color = { visual_effects.flash_on_detached_exit_timer / FLASH_ON_DETACHED_EXIT_TIME, 0.0f, 0.0f, 0.0f };
 
                     drawAsset(MODEL_3D_PACK, MODEL_3D, pack->position, DEFAULT_SCALE, draw_rotation, pack_color, (Vec4){0}, (Vec4){0});
                 }
@@ -5313,7 +5283,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 default:
                 {
                     Vec4 draw_rotation = e->rotation;
-                    if (temp_state.blue_visual_timer > 0) draw_rotation = getBlueTilt(e);
+                    if (visual_effects.blue_visual_timer > 0) draw_rotation = getBlueTilt(e);
 
                     drawAsset(getModelId(draw_tile), MODEL_3D, vec3Add(e->position, e->displacement), DEFAULT_SCALE, draw_rotation, (Vec4){0}, (Vec4){0}, (Vec4){0});
                 }
