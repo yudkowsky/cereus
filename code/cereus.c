@@ -117,6 +117,8 @@ typedef enum
     PROGRESS_MAGENTA,
     PROGRESS_BALANCE,
     PROGRESS_BALANCE_2,
+    PROGRESS_LADDER,
+    PROGRESS_BLUE_VOID,
 }
 GameProgress;
 
@@ -513,6 +515,7 @@ const float CAMERA_T_TIMESTEP = 0.05f;
 
 Camera camera = {0};
 Camera camera_with_ow_offset = {0};
+float camera_overworld_y_offset = 0.0f;
 CameraMode camera_mode = MAIN_WAITING;
 
 Camera saved_main_camera = {0};
@@ -3850,6 +3853,13 @@ void doPhysicsTick()
     updateLaserBuffer();
 }
 
+void overworldPositionState(GameProgress progress, Int3 coords, float y_offset)
+{
+    if (game_progress < progress) game_progress = progress;
+    overworld_restart_coords = coords;
+    camera_overworld_y_offset = y_offset;
+}
+
 GameResult gameFrame(double delta_time, Input* input)
 {   
     // TEMP: for profiling
@@ -4930,47 +4940,18 @@ GameResult gameFrame(double delta_time, Input* input)
         }
 
         // update restart coords based on current coords of the player, and also update game progress if this is relevant
-        
-        if (player->coords.z > 222)
-        {
-            if (game_progress < PROGRESS_START) game_progress = PROGRESS_START;
-            overworld_restart_coords = (Int3){ 58, 258, 235 };
-        }
-        else if (player->coords.z > 205)
-        {
-            if (game_progress < PROGRESS_PACK) game_progress = PROGRESS_PACK;
-            overworld_restart_coords = (Int3){ 58, 258, 222 };
-        }
-        else if (player->coords.z > 188)
-        {
-            if (game_progress < PROGRESS_RED) game_progress = PROGRESS_RED;
-            overworld_restart_coords = (Int3){ 58, 258, 205 };
-        }
-        else if (player->coords.z > 171)
-        {
-            if (game_progress < PROGRESS_BLUE) game_progress = PROGRESS_BLUE;
-            overworld_restart_coords = (Int3){ 58, 258, 188 };
-        }
-        else if (player->coords.z > 154)
-        {
-            if (game_progress < PROGRESS_RED_BLUE) game_progress = PROGRESS_RED_BLUE;
-            overworld_restart_coords = (Int3){ 58, 258, 171 };
-        }
-        else if (player->coords.z > 137)
-        {
-            if (game_progress < PROGRESS_MAGENTA) game_progress = PROGRESS_MAGENTA;
-            overworld_restart_coords = (Int3){ 58, 258, 154 };
-        }
-        else if (player->coords.z > 120)
-        {
-            if (game_progress < PROGRESS_BALANCE) game_progress = PROGRESS_BALANCE;
-            overworld_restart_coords = (Int3){ 58, 258, 137 };
-        }
-        else
-        {
-            if (game_progress < PROGRESS_BALANCE_2) game_progress = PROGRESS_BALANCE_2;
-            overworld_restart_coords = (Int3){ 58, 258, 120 };
-        }
+
+
+        if      (player->coords.z > 222) overworldPositionState(PROGRESS_START,     (Int3){ 58, 258, 235 }, 0.0f);
+        else if (player->coords.z > 205) overworldPositionState(PROGRESS_PACK,      (Int3){ 58, 258, 222 }, 0.0f);
+        else if (player->coords.z > 188) overworldPositionState(PROGRESS_RED,       (Int3){ 58, 258, 205 }, 0.0f);
+        else if (player->coords.z > 171) overworldPositionState(PROGRESS_BLUE,      (Int3){ 58, 258, 188 }, 0.0f);
+        else if (player->coords.z > 154) overworldPositionState(PROGRESS_RED_BLUE,  (Int3){ 58, 258, 171 }, 0.0f);
+        else if (player->coords.z > 137) overworldPositionState(PROGRESS_MAGENTA,   (Int3){ 58, 258, 154 }, 0.0f);
+        else if (player->coords.z > 120) overworldPositionState(PROGRESS_BALANCE,   (Int3){ 58, 258, 137 }, 0.0f);
+        else if (player->coords.z > 103) overworldPositionState(PROGRESS_BALANCE_2, (Int3){ 58, 258, 120 }, 0.0f);
+        else if (player->coords.z > 86)  overworldPositionState(PROGRESS_LADDER,    (Int3){ 58, 258, 103 }, 3.0f);
+        else                             overworldPositionState(PROGRESS_BLUE_VOID, (Int3){ 58, 258, 86  }, 3.0f);
 
         // perform alt <-> main camera interpolation
         if (camera_mode == MAIN_TO_ALT)
@@ -5206,6 +5187,8 @@ GameResult gameFrame(double delta_time, Input* input)
 
         camera_with_ow_offset.coords.x = camera.coords.x + (screen_offset_x * OVERWORLD_SCREEN_SIZE_X);
         camera_with_ow_offset.coords.z = camera.coords.z + (screen_offset_z * OVERWORLD_SCREEN_SIZE_Z);
+
+        camera_with_ow_offset.coords.y = camera.coords.y + camera_overworld_y_offset;
     }
 
     /////////////
@@ -5216,7 +5199,7 @@ GameResult gameFrame(double delta_time, Input* input)
     FOR(laser_buffer_index, MAX_SOURCE_COUNT * MAX_LASER_TURNS_ALLOWED)
     {
         LaserBuffer lb = temp_state.laser_buffer[laser_buffer_index];
-        if (lb.color == COLOR_NONE) continue; // laser buffer is not dense - this is check that there is actually something here
+        if (lb.color == COLOR_NONE) continue;
 
         Vec3 diff = vec3Subtract(lb.end_coords, lb.start_coords);
         Vec3 center = vec3Add(lb.start_coords, vec3ScalarMultiply(diff, 0.5));
