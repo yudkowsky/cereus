@@ -167,7 +167,7 @@ typedef struct Entity
     MirrorOrientation mirror_orientation;
     float yaw_offset; // in progress turn
     float tilt_angle; // towards direction of movement
-    Vec3 settle_velocity; // final velocity at target
+    Vec3 settle_velocity; // max velocity along push
     int32 settle_timer;
     bool settle_do_extra_push;
     Vec4 visual_tilt;
@@ -3722,7 +3722,7 @@ void doPhysicsTick()
         if (temp_state.pack_turn_state.pack_intermediate_states_timer > 0) temp_state.pack_turn_state.pack_intermediate_states_timer--;
     }
 
-    // handle moving entities
+    // handle moving entities and some visual effects
     FOR(group_index, 4)
     {
         FOR(entity_index, MAX_ENTITY_INSTANCE_COUNT)
@@ -3733,17 +3733,17 @@ void doPhysicsTick()
             if (group_index == 3) e = pack;
             else e = &interactible_entity_groups[group_index][entity_index];
 
-            // TODO: could handle settle_timer > 0 here, for objects that wont move. maybe.
-            //       or could just do that in a different loop below, which handles everything to do with settling. <- do this
-
-            // NOTE: there is some jankiness in new (and old) system, in that one move_type isn't enough info to get actual state of entity, because
-            //       an entity can be moving on head and rotating on head at the same time, for example. so i then need some code in those
-            //       cases to check for if the other thing is happening and deal with it.
+            // NOTE: there is some jankiness in new (and old) system, in that one move_type isn't enough info to get actual state 
+            //       of entity, because an entity can be moving on head and rotating on head at the same time, for example. 
+            //       so i then need some code in those cases to check for if the other thing is happening and deal with it.
             //       similarly, in follow_vertical, need to check if climbing up, and in that case mimic rotation.
             //
-            //       a better system could be to have tags for each of the possible moves, because then can encode that info. then go through
-            //       them all, and what they handle is decoupled: move would only ever handle translation, and rotation would only ever handle rotations.
-            //       downside is needing to manage individual tags for each case, but this is probably fine?
+            //       a better system could be to have tags for each of the possible moves, because then can encode that info.
+            //       then go through them all, and what they handle is decoupled: move would only ever handle translation, 
+            //       and rotation would only ever handle rotations. downside is needing to manage individual tags for 
+            //       each case, but this is probably fine?
+
+            // TODO: velocity doesn't seem to be updated consistently. will probably just find out about this as i do visual effects.
 
             switch (e->move_type)
             {
@@ -3788,9 +3788,31 @@ void doPhysicsTick()
                         e->rotation = composeRotation(e->direction, e->mirror_orientation, e->yaw_offset, e->visual_tilt);
                     }
 
+                    Vec3 old_position = e->position;
                     e->position = vec3SetFloatAlongDirection(e->moving_direction, entity_target, vec3FromInt3(e->coords));
+                    e->velocity = vec3Subtract(e->position, old_position);
+                    if (vec3Length(e->velocity) > vec3Length(e->settle_velocity)) e->settle_velocity = e->velocity;
 
-                    if (vec3IsEqual(e->position, vec3FromInt3(e->coords))) clearMovementState(e);
+                    // handle visual tilt
+                    bool do_visual_tilt = true;
+                    if (e->move_type != MOVE_TYPE_PUSH_BY_PLAYER && e->move_type != MOVE_TYPE_PUSH_BY_PACK) do_visual_tilt = false;
+                    if (visual_effects.blue_visual_timer <= 0) do_visual_tilt = false;
+                    if (do_visual_tilt)
+                    {
+                        float target_angle = vec3Length(e->settle_velocity) * VELOCITY_TO_TILT_RADIANS;
+                        float tilt_difference = target_angle - e->tilt_angle;
+                        /*
+                        if (tilt_difference < 0.0f) tilt_difference = 0.0f; // tilt wants to decrease; don't allow
+                        if (tilt_difference > MAX_TILT_PER_FRAME) tilt_difference = MAX_TILT_PER_FRAME;
+                        */
+                        e->tilt_angle += tilt_difference;
+                    }
+
+                    if (vec3IsEqual(e->position, vec3FromInt3(e->coords)))
+                    {
+                        // TODO: settle handling
+                        clearMovementState(e);
+                    }
                 }
                 break;
                 case MOVE_TYPE_ROTATE_ON_HEAD:
@@ -4941,7 +4963,6 @@ GameResult gameFrame(double delta_time, Input* input)
 
         // update restart coords based on current coords of the player, and also update game progress if this is relevant
 
-
         if      (player->coords.z > 222) overworldPositionState(PROGRESS_START,     (Int3){ 58, 258, 235 }, 0.0f);
         else if (player->coords.z > 205) overworldPositionState(PROGRESS_PACK,      (Int3){ 58, 258, 222 }, 0.0f);
         else if (player->coords.z > 188) overworldPositionState(PROGRESS_RED,       (Int3){ 58, 258, 205 }, 0.0f);
@@ -5007,7 +5028,8 @@ GameResult gameFrame(double delta_time, Input* input)
             // boxes
             Entity box1 = world_state.boxes[0];
             Entity box2 = world_state.boxes[1];
-            DEBUG_TEXT("box 1: moving dir: %i, move type: %i; box 2: moving dir: %i, move type: %i", box1.moving_direction, box1.move_type, box2.moving_direction, box2.move_type);
+            DEBUG_TEXT("box 1: velocity: %.2f, %.2f, %.2f, moving dir: %i, move type: %i; box 2: velocity: %.2f, %.2f, %.2f, moving dir: %i, move type: %i", 
+                box1.velocity.x, box1.velocity.y, box1.velocity.z, box1.moving_direction, box1.move_type, box2.velocity.x, box2.velocity.y, box2.velocity.z, box2.moving_direction, box2.move_type);
 
             // draw selected id info
             if (editor_state.editor_mode == EDITOR_MODE_SELECT || editor_state.editor_mode == EDITOR_MODE_SELECT_WRITE)
