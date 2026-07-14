@@ -206,11 +206,9 @@ typedef struct WorldState
     Entity win_blocks[MAX_ENTITY_INSTANCE_COUNT];
     Entity locked_blocks[MAX_ENTITY_INSTANCE_COUNT];
 
-    uint8 buffer[2000000]; // 2 bytes info per tile TODO: can maybe decrease this somewhat with new level dim system
+    uint8 buffer[100000]; // 2 bytes info per tile
 
     char level_name[64];
-
-    char solved_levels[64][64]; // TODO: should this really be part of WorldState? will never get rid of stuff from this array
 }
 WorldState;
 
@@ -539,11 +537,11 @@ Int3 level_dim = {0};
 Int3 level_origin = {0};
 Int3 overworld_restart_coords = {0};
 bool in_overworld = true;
+char solved_levels[64][64];
 
-float water_plane_y = 0.0f; // NOTE: currently is never unset from 0. which is fine, probably
-Vec3 sun_direction = {0};
-
+float water_plane_y = 0.0f; // NOTE: currently is never unset from 0. which is fine, probably.
 Rgba8 water_texture_scratch[WATER_PAINT_MAX_SIDE * WATER_PAINT_MAX_SIDE] = {0};
+Vec3 sun_direction = {0};
 
 Entity* player = &world_state.player;
 Entity* pack = &world_state.pack;
@@ -1594,40 +1592,31 @@ void writeWaterTexture(char folder_path[64])
 int32 findInSolvedLevels(char level[64])
 {
     if (level[0] == '\0') return INT32_MAX; // if NULL string passed, return large number
-    FOR(level_index, MAX_LEVEL_COUNT) if (strcmp(world_state.solved_levels[level_index], level) == 0) return level_index;
+    FOR(level_index, MAX_LEVEL_COUNT) if (strcmp(solved_levels[level_index], level) == 0) return level_index;
     return -1;
 }
 
-int32 nextFreeInSolvedLevels(char (*solved_levels)[64][64])
+int32 nextFreeInSolvedLevels()
 {
-    FOR(solved_level_index, MAX_LEVEL_COUNT) if ((*solved_levels)[solved_level_index][0] == 0) return solved_level_index;
+    FOR(solved_level_index, MAX_LEVEL_COUNT) if (solved_levels[solved_level_index][0] == 0) return solved_level_index;
     return -1;
 }
 
 void addToSolvedLevels(char level[64])
 {
-    int32 next_free = nextFreeInSolvedLevels(&world_state.solved_levels);
+    int32 next_free = nextFreeInSolvedLevels();
     if (next_free == -1) return; // no free space (should not happen)
-    strcpy(world_state.solved_levels[next_free], level);
+    strcpy(solved_levels[next_free], level);
 }
-
-/*
-void removeFromSolvedLevels(char level[64])
-{
-    int32 index = findInSolvedLevels(level);
-    if (index == -1 || index > MAX_LEVEL_COUNT) return; // not in solved levels, or null string passed
-    memset(world_state.solved_levels[index], 0, sizeof(world_state.solved_levels[0]));
-}
-*/
 
 void loadSolvedLevelsFromFile()
 {
-    memset(world_state.solved_levels, 0, sizeof(world_state.solved_levels));
+    memset(solved_levels, 0, sizeof(solved_levels));
     FILE* file = fopen(SOLVED_LEVELS_PATH, "rb+");
     FOR(level_index, MAX_LEVEL_COUNT)
     {
-        if (fread(world_state.solved_levels[level_index], 64, 1, file) != 1) break;
-        if (world_state.solved_levels[level_index][0] == 0) break;
+        if (fread(solved_levels[level_index], 64, 1, file) != 1) break;
+        if (solved_levels[level_index][0] == 0) break;
     }
     fclose(file);
 }
@@ -1638,17 +1627,10 @@ void writeSolvedLevelsToFile()
     if (!file) return;
     FOR(level_index, MAX_LEVEL_COUNT)
     {
-        if (world_state.solved_levels[level_index][0] == 0) break;
-        fwrite(&world_state.solved_levels[level_index], 64, 1, file);
+        if (solved_levels[level_index][0] == 0) break;
+        fwrite(&solved_levels[level_index], 64, 1, file);
     }
     fclose(file);
-}
-
-void clearSolvedLevels()
-{
-    FILE* file = fopen(SOLVED_LEVELS_PATH, "wb");
-    fclose(file);
-    memset(world_state.solved_levels, 0, sizeof(world_state.solved_levels));
 }
 
 // DRAW ASSET
@@ -4439,7 +4421,7 @@ GameResult gameFrame(double delta_time, Input* input)
             // clear solved levels
             if (input->keys_held & KEY_M)
             {
-                clearSolvedLevels();
+                memset(solved_levels, 0, sizeof(solved_levels));
                 updateLockedTiles(false);
                 createDebugPopup("solved levels cleared", POPUP_TYPE_NONE);
                 time_until_allow_meta_input = STANDARD_TIME_UNTIL_ALLOW_INPUT;
@@ -4448,7 +4430,7 @@ GameResult gameFrame(double delta_time, Input* input)
             // add all of ow zero's win blocks' levels to solved levels
             if (input->keys_held & KEY_E)
             {
-                clearSolvedLevels();
+                memset(solved_levels, 0, sizeof(solved_levels));
                 FOR(wb_index, MAX_ENTITY_INSTANCE_COUNT)
                 {
                     Entity wb = overworld_zero_state.win_blocks[wb_index];
@@ -4592,11 +4574,7 @@ GameResult gameFrame(double delta_time, Input* input)
                 if (in_overworld)
                 {
                     // TODO: reset only part of the overworld
-                    // copy world state from overworld_zero, but save the solved levels and overwrite the level name
-                    char persist_solved_levels[64][64];
-                    memcpy(&persist_solved_levels, &world_state.solved_levels, sizeof(char) * 64 * 64);
                     memcpy(&world_state, &overworld_zero_state, sizeof(WorldState));
-                    memcpy(&world_state.solved_levels, &persist_solved_levels, sizeof(char) * 64 * 64);
                     memcpy(&world_state.level_name, "overworld", sizeof(char) * 64);
 
                     moveEntityInBufferAndState(player, overworld_restart_coords, NORTH);
@@ -4918,8 +4896,8 @@ GameResult gameFrame(double delta_time, Input* input)
                     Entity* wb = getEntityAtCoords(getNextCoords(player->coords, DOWN));
                     if (findInSolvedLevels(wb->next_level) == -1)
                     {
-                        int32 next_free = nextFreeInSolvedLevels(&world_state.solved_levels);
-                        strcpy(world_state.solved_levels[next_free], wb->next_level);
+                        int32 next_free = nextFreeInSolvedLevels();
+                        strcpy(solved_levels[next_free], wb->next_level);
                     }
                     writeSolvedLevelsToFile();
                     updateLockedTiles(true);
