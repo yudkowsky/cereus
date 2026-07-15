@@ -3675,8 +3675,8 @@ void doPhysicsTick()
             {
                 // if pack was right behind player on last rotation, mimic fully
                 // if pack is currently in a turn, also mimic fully; this handles cases with not-quite-full turns
-                pack_mimic_position = true;
                 pack_mimic_rotation = true;
+                pack_mimic_position = true;
             }
             else if (player->moving_direction != NO_DIRECTION)
             {
